@@ -460,6 +460,14 @@ struct CVRUploadComponentRecord: Identifiable, Codable, Equatable {
     var lastAttemptAt: Date?
     var serverVerificationAt: Date?
     var serverReceiptID: String?
+    var errorCode: String? = nil
+    var retryable: Bool? = nil
+    var userActionRequired: Bool? = nil
+    var requestID: String? = nil
+    var reconciliationRequired: Bool? = nil
+    var authoritativePayloadSHA256: String? = nil
+    var canonicalIdentifiers: [String: String]? = nil
+    var requestPayloadSnapshot: Data? = nil
 }
 
 struct CVRDiscrepancyRecord: Identifiable, Codable, Equatable {

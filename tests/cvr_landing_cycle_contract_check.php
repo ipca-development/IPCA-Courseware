@@ -28,7 +28,8 @@ $checks = array(
         && str_contains($views, 'LandingCycleKind.fullStop.rawValue'),
     'shutdown verification stores pilot-confirmed counts' =>
         str_contains($store, 'verifiedTakeoffCount')
-        && str_contains($views, 'TAKEOFFS / LANDINGS'),
+        && str_contains($views, 'verifiedTakeoffCount: verifiedTakeoffs')
+        && str_contains($views, 'workflow.operationCounts(for: flightRecord.id).displayTakeoffs'),
     'simulation mode supports demo flow without uploads' =>
         str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/SettingsStore.swift'), 'isSimulationModeEnabled')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'SIMULATION MODE')

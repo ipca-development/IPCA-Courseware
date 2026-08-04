@@ -1,14 +1,24 @@
 import CryptoKit
 import Foundation
 
+enum CVRWorkflowFailureOutcome: Equatable {
+    case queued
+    case authenticationPaused
+    case userCorrectionRequired
+    case technicalReviewRequired
+}
+
 @MainActor
 final class CVRWorkflowStore: ObservableObject {
+    static let maximumRequestPayloadSnapshotBytes = 256 * 1024
+
     @Published private(set) var state: CVRWorkflowState = .empty
     @Published private(set) var archives: [CVRWorkflowArchiveRecord] = []
     @Published private(set) var lastError = ""
 
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private var archiveRewriteSafe = true
 
     init() {
         encoder = JSONEncoder()
@@ -20,8 +30,16 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     func load() async {
+        var diagnostics: [String] = []
         do {
-            try loadArchives()
+            diagnostics.append(contentsOf: try loadArchives())
+        } catch {
+            archives = []
+            archiveRewriteSafe = false
+            diagnostics.append("Historical workflow archive recovery failed: \(error.localizedDescription)")
+        }
+
+        do {
             let url = try storeURL()
             if FileManager.default.fileExists(atPath: url.path) {
                 let data = try Data(contentsOf: url)
@@ -32,6 +50,7 @@ final class CVRWorkflowStore: ObservableObject {
                     changed = true
                 }
                 changed = recoverInterruptedActiveUploads() || changed
+                changed = recoverIncompleteActiveVerificationMetadata() || changed
                 changed = Self.repairStaleDispatchConsents(in: &state) || changed
                 changed = Self.requeueLegacyAdvisoryDispatchFailure(in: &state) || changed
                 changed = ensureDispatchUploadComponent() || changed
@@ -48,10 +67,10 @@ final class CVRWorkflowStore: ObservableObject {
                     save()
                 }
             }
-            lastError = ""
         } catch {
-            lastError = "Workflow recovery failed: \(error.localizedDescription)"
+            diagnostics.append("Active workflow recovery failed: \(error.localizedDescription)")
         }
+        lastError = diagnostics.joined(separator: "\n")
     }
 
     func selectTab(_ tab: CVROperationalTab) {
@@ -583,9 +602,6 @@ final class CVRWorkflowStore: ObservableObject {
     func recordShutdownVerification(
         endingHobbs: Double?,
         endingTacho: Double?,
-        fuelRemaining: String,
-        endingOilQuantity: Double?,
-        endingOilUnit: String?,
         verifiedTakeoffCount: Int,
         verifiedLandingCount: Int,
         maintenanceRemark: String,
@@ -600,9 +616,6 @@ final class CVRWorkflowStore: ObservableObject {
         return saveFlightClosureValues(
             endingHobbs: endingHobbs,
             endingTacho: endingTacho,
-            fuelRemaining: fuelRemaining,
-            endingOilQuantity: endingOilQuantity,
-            endingOilUnit: endingOilUnit,
             verifiedTakeoffCount: verifiedTakeoffCount,
             verifiedLandingCount: verifiedLandingCount,
             maintenanceRemark: maintenanceRemark,
@@ -611,21 +624,18 @@ final class CVRWorkflowStore: ObservableObject {
         )
     }
 
-    func flightClosureIsComplete(_ flightRecord: CVRIncompleteFlightRecord) -> Bool {
+    func flightClosureIsComplete(
+        _ flightRecord: CVRIncompleteFlightRecord,
+        dispatch explicitDispatch: CVRDispatchRecord? = nil
+    ) -> Bool {
         guard let endingHobbs = flightRecord.endingHobbs,
-              let endingTacho = flightRecord.endingTacho,
-              let verifiedTakeoffCount = flightRecord.verifiedTakeoffCount,
-              let verifiedLandingCount = flightRecord.verifiedLandingCount else {
+              let endingTacho = flightRecord.endingTacho else {
             return false
         }
-        let fuel = (flightRecord.fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Double(fuel) != nil,
-              flightRecord.effectiveEndingOilQuantity != nil,
-              verifiedTakeoffCount >= 0,
-              verifiedLandingCount >= 0 else {
-            return false
-        }
-        guard let dispatch = state.activeDispatch else { return endingHobbs >= 0 && endingTacho >= 0 }
+        let dispatch = explicitDispatch ?? (
+            state.activeFlightRecord?.id == flightRecord.id ? state.activeDispatch : nil
+        )
+        guard let dispatch else { return endingHobbs >= 0 && endingTacho >= 0 }
         if let startingHobbs = dispatch.startingHobbs, endingHobbs < startingHobbs { return false }
         if let startingTacho = dispatch.startingTacho, endingTacho < startingTacho { return false }
         return true
@@ -633,7 +643,9 @@ final class CVRWorkflowStore: ObservableObject {
 
     func closureUploadFailure() -> CVRUploadComponentRecord? {
         state.uploadComponents.first {
-            $0.componentType == "flight_record_closure" && ($0.state == .failed || $0.state == .needsUserAction)
+            $0.componentType == "flight_record_closure"
+                && $0.errorCode != "IMMUTABLE_CONFLICT"
+                && ($0.state == .failed || $0.state == .needsUserAction)
         }
     }
 
@@ -681,9 +693,6 @@ final class CVRWorkflowStore: ObservableObject {
     func saveFlightClosureValues(
         endingHobbs: Double?,
         endingTacho: Double?,
-        fuelRemaining: String,
-        endingOilQuantity: Double?,
-        endingOilUnit: String?,
         verifiedTakeoffCount: Int,
         verifiedLandingCount: Int,
         maintenanceRemark: String,
@@ -698,17 +707,6 @@ final class CVRWorkflowStore: ObservableObject {
         }
         guard let endingTacho, endingTacho >= (dispatch.startingTacho ?? 0) else {
             lastError = "Ending Tacho must be present and cannot be lower than Starting Tacho."
-            return false
-        }
-        let normalizedFuel = fuelRemaining.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Double(normalizedFuel) != nil else {
-            lastError = "Fuel remaining must be a valid quantity."
-            return false
-        }
-        guard let endingOilQuantity, endingOilQuantity >= 0,
-              let endingOilUnit,
-              !endingOilUnit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            lastError = "Ending oil quantity and unit are required."
             return false
         }
         guard verifiedTakeoffCount >= 0, verifiedLandingCount >= 0 else {
@@ -734,10 +732,6 @@ final class CVRWorkflowStore: ObservableObject {
         let persisted = mutate {
             flightRecord.endingHobbs = endingHobbs
             flightRecord.endingTacho = endingTacho
-            flightRecord.fuelRemaining = normalizedFuel
-            flightRecord.endingOilQuantity = endingOilQuantity
-            flightRecord.endingOilUnit = endingOilUnit
-            flightRecord.endingOilPercentage = endingOilUnit == "%" ? Int(endingOilQuantity.rounded()) : nil
             flightRecord.verifiedTakeoffCount = verifiedTakeoffCount
             flightRecord.verifiedLandingCount = verifiedLandingCount
             flightRecord.autoDetectedTakeoffCount = counts.displayTakeoffs
@@ -860,11 +854,31 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
-    func updateUploadComponent(id: String, state: CVRUploadComponentState, progress: Double, lastError: String = "", serverReceiptID: String? = nil) {
+    func updateUploadComponent(
+        id: String,
+        state: CVRUploadComponentState,
+        progress: Double,
+        lastError: String = "",
+        serverReceiptID: String? = nil,
+        errorCode: String? = nil,
+        retryable: Bool? = nil,
+        userActionRequired: Bool? = nil,
+        requestID: String? = nil
+    ) {
         if self.state.uploadComponents.contains(where: { $0.id == id }) {
             mutate {
                 guard let index = $0.uploadComponents.firstIndex(where: { $0.id == id }) else { return }
-                updateComponent(&$0.uploadComponents[index], state: state, progress: progress, lastError: lastError, serverReceiptID: serverReceiptID)
+                updateComponent(
+                    &$0.uploadComponents[index],
+                    state: state,
+                    progress: progress,
+                    lastError: lastError,
+                    serverReceiptID: serverReceiptID,
+                    errorCode: errorCode,
+                    retryable: retryable,
+                    userActionRequired: userActionRequired,
+                    requestID: requestID
+                )
             }
             return
         }
@@ -874,7 +888,17 @@ final class CVRWorkflowStore: ObservableObject {
             return
         }
         var updated = archives
-        updateComponent(&updated[archiveIndex].uploadComponents[componentIndex], state: state, progress: progress, lastError: lastError, serverReceiptID: serverReceiptID)
+        updateComponent(
+            &updated[archiveIndex].uploadComponents[componentIndex],
+            state: state,
+            progress: progress,
+            lastError: lastError,
+            serverReceiptID: serverReceiptID,
+            errorCode: errorCode,
+            retryable: retryable,
+            userActionRequired: userActionRequired,
+            requestID: requestID
+        )
         updated[archiveIndex].status = updated[archiveIndex].uploadComponents.allSatisfy { $0.state == .serverVerified } ? .serverVerified : .uploadPending
         do {
             try saveArchives(updated)
@@ -884,23 +908,319 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
-    func markDispatchStoredOnServer(serverDispatchID: String, flightRecordID: String? = nil) {
-        if flightRecordID == nil || state.activeFlightRecord?.id == flightRecordID {
-            mutate {
-                guard var dispatch = $0.activeDispatch else { return }
+    func workflowComponentsRequiringReconciliation(explicitRetry: Bool = false) -> [CVRUploadComponentRecord] {
+        let requiresReconciliation: (CVRUploadComponentRecord) -> Bool = { component in
+            guard component.componentType != "garmin_csv",
+                  component.state == .queued || component.state == .serverVerified else {
+                return false
+            }
+            if explicitRetry && component.state != .serverVerified {
+                return true
+            }
+            if component.reconciliationRequired == true {
+                return true
+            }
+            if component.state == .serverVerified {
+                return !Self.hasCompleteVerificationMetadata(component)
+            }
+            if component.reconciliationRequired == false {
+                return false
+            }
+            return component.attemptCount > 0 && !Self.hasCompleteVerificationMetadata(component)
+        }
+        return state.uploadComponents.filter(requiresReconciliation)
+            + archives.flatMap(\.uploadComponents).filter(requiresReconciliation)
+    }
+
+    @discardableResult
+    func persistRequestPayloadSnapshot(
+        componentID: String,
+        payload: Data,
+        reconciliationRequired: Bool? = nil
+    ) -> Bool {
+        guard payload.count <= Self.maximumRequestPayloadSnapshotBytes else {
+            lastError = "Workflow request payload snapshot exceeds the \(Self.maximumRequestPayloadSnapshotBytes)-byte limit; operational evidence was preserved without the oversized snapshot."
+            return false
+        }
+        if state.uploadComponents.contains(where: { $0.id == componentID }) {
+            return mutate {
+                guard let index = $0.uploadComponents.firstIndex(where: { $0.id == componentID }) else { return }
+                $0.uploadComponents[index].requestPayloadSnapshot = payload
+                if let reconciliationRequired {
+                    $0.uploadComponents[index].reconciliationRequired = reconciliationRequired
+                }
+            }
+        }
+        guard let archiveIndex = archives.firstIndex(where: {
+            $0.uploadComponents.contains(where: { $0.id == componentID })
+        }), let componentIndex = archives[archiveIndex].uploadComponents.firstIndex(where: { $0.id == componentID }) else {
+            return false
+        }
+        var updated = archives
+        updated[archiveIndex].uploadComponents[componentIndex].requestPayloadSnapshot = payload
+        if let reconciliationRequired {
+            updated[archiveIndex].uploadComponents[componentIndex].reconciliationRequired = reconciliationRequired
+        }
+        do {
+            try saveArchives(updated)
+            archives = updated
+            lastError = ""
+            return true
+        } catch {
+            lastError = "Could not durably preserve the workflow request payload: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    @discardableResult
+    func markReconciliationRequired(id: String, message: String) -> Bool {
+        updateComponentAtomically(id: id) { component in
+            component.state = .queued
+            component.progress = 0
+            component.lastError = message
+            component.reconciliationRequired = true
+            component.retryable = true
+            component.userActionRequired = false
+        }
+    }
+
+    @discardableResult
+    func persistVerifiedWorkflowComponent(
+        componentID: String,
+        serverReceiptID: String,
+        authoritativePayloadSHA256: String,
+        serverVerificationAt: Date,
+        canonicalIdentifiers: [String: String]
+    ) -> Bool {
+        guard !serverReceiptID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !authoritativePayloadSHA256.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            lastError = "Server verification metadata is incomplete."
+            return false
+        }
+        return updateComponentAtomically(id: componentID) { component in
+            component.serverReceiptID = serverReceiptID
+            component.authoritativePayloadSHA256 = authoritativePayloadSHA256
+            component.serverVerificationAt = serverVerificationAt
+            component.canonicalIdentifiers = canonicalIdentifiers
+            component.serverID = Self.primaryServerIdentifier(
+                componentType: component.componentType,
+                canonicalIdentifiers: canonicalIdentifiers
+            )
+            component.reconciliationRequired = false
+            component.state = .serverVerified
+            component.progress = 1
+            component.lastError = ""
+            component.errorCode = nil
+            component.retryable = false
+            component.userActionRequired = false
+            component.lastAttemptAt = Date()
+        } validation: {
+            Self.hasCompleteVerificationMetadata($0)
+        }
+    }
+
+    @discardableResult
+    func persistReconciliationMatch(
+        componentID: String,
+        serverReceiptID: String,
+        authoritativePayloadSHA256: String,
+        serverVerificationAt: Date,
+        canonicalIdentifiers: [String: String]
+    ) -> Bool {
+        guard let serverDispatchID = canonicalIdentifiers["server_dispatch_id"] else {
+            return persistVerifiedWorkflowComponent(
+                componentID: componentID,
+                serverReceiptID: serverReceiptID,
+                authoritativePayloadSHA256: authoritativePayloadSHA256,
+                serverVerificationAt: serverVerificationAt,
+                canonicalIdentifiers: canonicalIdentifiers
+            )
+        }
+        guard !serverReceiptID.isEmpty, !authoritativePayloadSHA256.isEmpty else {
+            return false
+        }
+        if let currentIndex = state.uploadComponents.firstIndex(where: { $0.id == componentID }) {
+            var verifiedComponent = state.uploadComponents[currentIndex]
+            Self.applyVerifiedMetadata(
+                to: &verifiedComponent,
+                receiptID: serverReceiptID,
+                payloadSHA256: authoritativePayloadSHA256,
+                verificationAt: serverVerificationAt,
+                canonicalIdentifiers: canonicalIdentifiers
+            )
+            guard Self.hasCompleteVerificationMetadata(verifiedComponent) else { return false }
+            return mutate {
+                guard var dispatch = $0.activeDispatch,
+                      let index = $0.uploadComponents.firstIndex(where: { $0.id == componentID }) else { return }
                 dispatch.serverDispatchID = serverDispatchID
                 $0.activeDispatch = dispatch
+                $0.uploadComponents[index] = verifiedComponent
             }
-            return
         }
-        guard let index = archives.firstIndex(where: { $0.flightRecordID == flightRecordID }) else { return }
+        guard let archiveIndex = archives.firstIndex(where: {
+            $0.uploadComponents.contains(where: { $0.id == componentID })
+        }), let componentIndex = archives[archiveIndex].uploadComponents.firstIndex(where: { $0.id == componentID }) else {
+            return false
+        }
         var updated = archives
-        updated[index].dispatch.serverDispatchID = serverDispatchID
+        updated[archiveIndex].dispatch.serverDispatchID = serverDispatchID
+        Self.applyVerifiedMetadata(
+            to: &updated[archiveIndex].uploadComponents[componentIndex],
+            receiptID: serverReceiptID,
+            payloadSHA256: authoritativePayloadSHA256,
+            verificationAt: serverVerificationAt,
+            canonicalIdentifiers: canonicalIdentifiers
+        )
+        guard Self.hasCompleteVerificationMetadata(updated[archiveIndex].uploadComponents[componentIndex]) else {
+            return false
+        }
+        updated[archiveIndex].status = updated[archiveIndex].uploadComponents.allSatisfy {
+            $0.state == .serverVerified
+        } ? .serverVerified : .uploadPending
+        do {
+            try saveArchives(updated)
+            archives = updated
+            lastError = ""
+            return true
+        } catch {
+            lastError = "Could not durably persist reconciled Dispatch metadata: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func applyReconciliationDisposition(
+        componentID: String,
+        state: CVRUploadComponentState,
+        message: String,
+        errorCode: String,
+        retryable: Bool,
+        reconciliationRequired: Bool
+    ) {
+        _ = updateComponentAtomically(id: componentID) { component in
+            component.state = state
+            component.progress = 0
+            component.lastError = message
+            component.errorCode = errorCode
+            component.retryable = retryable
+            component.userActionRequired = errorCode == "USER_CORRECTION_REQUIRED"
+            component.reconciliationRequired = reconciliationRequired
+            component.lastAttemptAt = Date()
+        }
+    }
+
+    @discardableResult
+    func recordWorkflowUploadFailure(id: String, progress: Double, error: Error) -> CVRWorkflowFailureOutcome {
+        let classification = Self.classifyWorkflowUploadFailure(error)
+        updateUploadComponent(
+            id: id,
+            state: classification.state,
+            progress: progress,
+            lastError: classification.message,
+            errorCode: classification.errorCode,
+            retryable: classification.retryable,
+            userActionRequired: classification.userActionRequired,
+            requestID: classification.requestID
+        )
+        return classification.outcome
+    }
+
+    @discardableResult
+    func persistVerifiedDispatch(
+        componentID: String,
+        serverDispatchID: String,
+        serverReceiptID: String,
+        flightRecordID: String
+    ) -> Bool {
+        if state.activeFlightRecord?.id == flightRecordID {
+            guard state.activeDispatch != nil,
+                  state.uploadComponents.contains(where: { $0.id == componentID }) else {
+                lastError = "Could not durably link the verified Dispatch to its active local flight."
+                return false
+            }
+            return mutate {
+                guard var dispatch = $0.activeDispatch,
+                      let componentIndex = $0.uploadComponents.firstIndex(where: { $0.id == componentID }) else { return }
+                dispatch.serverDispatchID = serverDispatchID
+                $0.activeDispatch = dispatch
+                updateComponent(
+                    &$0.uploadComponents[componentIndex],
+                    state: .serverVerified,
+                    progress: 1,
+                    lastError: "",
+                    serverReceiptID: serverReceiptID
+                )
+            }
+        }
+        guard let archiveIndex = archives.firstIndex(where: { $0.flightRecordID == flightRecordID }),
+              let componentIndex = archives[archiveIndex].uploadComponents.firstIndex(where: { $0.id == componentID }) else {
+            lastError = "Could not durably link the verified Dispatch to its local flight."
+            return false
+        }
+        var updated = archives
+        updated[archiveIndex].dispatch.serverDispatchID = serverDispatchID
+        updateComponent(
+            &updated[archiveIndex].uploadComponents[componentIndex],
+            state: .serverVerified,
+            progress: 1,
+            lastError: "",
+            serverReceiptID: serverReceiptID
+        )
+        updated[archiveIndex].status = updated[archiveIndex].uploadComponents.allSatisfy {
+            $0.state == .serverVerified
+        } ? .serverVerified : .uploadPending
+        do {
+            try saveArchives(updated)
+            archives = updated
+            lastError = ""
+            return true
+        } catch {
+            lastError = "Could not durably persist the verified Dispatch: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func recoverOrphanedUploads(activeComponentIDs: Set<String>) {
+        mutate {
+            for index in $0.uploadComponents.indices {
+                guard $0.uploadComponents[index].state == .uploading,
+                      !activeComponentIDs.contains($0.uploadComponents[index].id) else {
+                    continue
+                }
+                $0.uploadComponents[index].state = .queued
+                if $0.uploadComponents[index].componentType != "garmin_csv" {
+                    $0.uploadComponents[index].reconciliationRequired = true
+                }
+                $0.uploadComponents[index].progress = 0
+                $0.uploadComponents[index].lastError = "Upload task ended before local completion; queued for recovery."
+            }
+        }
+
+        var updated = archives
+        var changed = false
+        for archiveIndex in updated.indices {
+            for componentIndex in updated[archiveIndex].uploadComponents.indices {
+                let component = updated[archiveIndex].uploadComponents[componentIndex]
+                guard component.state == .uploading,
+                      !activeComponentIDs.contains(component.id) else {
+                    continue
+                }
+                updated[archiveIndex].uploadComponents[componentIndex].state = .queued
+                if component.componentType != "garmin_csv" {
+                    updated[archiveIndex].uploadComponents[componentIndex].reconciliationRequired = true
+                }
+                updated[archiveIndex].uploadComponents[componentIndex].progress = 0
+                updated[archiveIndex].uploadComponents[componentIndex].lastError =
+                    "Upload task ended before local completion; queued for recovery."
+                updated[archiveIndex].status = .uploadPending
+                changed = true
+            }
+        }
+        guard changed else { return }
         do {
             try saveArchives(updated)
             archives = updated
         } catch {
-            lastError = "Could not update archived Dispatch receipt: \(error.localizedDescription)"
+            lastError = "Could not persist orphaned archive upload recovery: \(error.localizedDescription)"
         }
     }
 
@@ -947,7 +1267,9 @@ final class CVRWorkflowStore: ObservableObject {
         mutate {
             for index in $0.uploadComponents.indices {
                 guard $0.uploadComponents[index].state == .failed,
-                      Self.isConnectivityFailure($0.uploadComponents[index].lastError) else {
+                      $0.uploadComponents[index].retryable == true
+                        || ($0.uploadComponents[index].errorCode == nil
+                            && Self.isConnectivityFailure($0.uploadComponents[index].lastError)) else {
                     continue
                 }
                 $0.uploadComponents[index].state = .queued
@@ -962,7 +1284,9 @@ final class CVRWorkflowStore: ObservableObject {
             for componentIndex in updated[archiveIndex].uploadComponents.indices {
                 let component = updated[archiveIndex].uploadComponents[componentIndex]
                 guard component.state == .failed,
-                      Self.isConnectivityFailure(component.lastError) else {
+                      component.retryable == true
+                        || (component.errorCode == nil
+                            && Self.isConnectivityFailure(component.lastError)) else {
                     continue
                 }
                 updated[archiveIndex].uploadComponents[componentIndex].state = .queued
@@ -1110,6 +1434,119 @@ final class CVRWorkflowStore: ObservableObject {
             || normalized.contains("timed out")
     }
 
+    private struct WorkflowFailureClassification {
+        var outcome: CVRWorkflowFailureOutcome
+        var state: CVRUploadComponentState
+        var message: String
+        var errorCode: String?
+        var retryable: Bool?
+        var userActionRequired: Bool?
+        var requestID: String?
+    }
+
+    private static func classifyWorkflowUploadFailure(_ error: Error) -> WorkflowFailureClassification {
+        if case APIClientError.synchronization(let failure) = error {
+            let outcome: CVRWorkflowFailureOutcome
+            let state: CVRUploadComponentState
+            switch failure.errorCode {
+            case "TEMPORARY_TECHNICAL_FAILURE", "DEPENDENCY_NOT_READY":
+                outcome = .queued
+                state = .queued
+            case "AUTHENTICATION_REQUIRED":
+                outcome = .authenticationPaused
+                state = .queued
+            case "USER_CORRECTION_REQUIRED":
+                outcome = failure.userActionRequired ? .userCorrectionRequired : .technicalReviewRequired
+                state = failure.userActionRequired ? .needsUserAction : .failed
+            case "TECHNICAL_REVIEW_REQUIRED":
+                outcome = .technicalReviewRequired
+                state = .failed
+            default:
+                if failure.retryable {
+                    outcome = .queued
+                    state = .queued
+                } else if failure.userActionRequired {
+                    outcome = .userCorrectionRequired
+                    state = .needsUserAction
+                } else {
+                    outcome = .technicalReviewRequired
+                    state = .failed
+                }
+            }
+            return WorkflowFailureClassification(
+                outcome: outcome,
+                state: state,
+                message: failure.error,
+                errorCode: failure.errorCode,
+                retryable: failure.retryable,
+                userActionRequired: failure.userActionRequired,
+                requestID: failure.requestID
+            )
+        }
+
+        // Compatibility only for older endpoints that return text instead of error_code.
+        let message = error.localizedDescription
+        let normalized = message.lowercased()
+        let outcome: CVRWorkflowFailureOutcome
+        let state: CVRUploadComponentState
+        if normalized.contains("device token")
+            || normalized.contains("credential")
+            || normalized.contains("not enrolled")
+            || normalized.contains("authentication") {
+            outcome = .authenticationPaused
+            state = .queued
+        } else if normalized.contains("http 5")
+            || isConnectivityFailure(message)
+            || normalized.contains("payload snapshot")
+            || normalized.contains("authoritative verification metadata") {
+            outcome = .queued
+            state = .queued
+        } else if normalized.contains("dispatch metadata must be verified")
+            || normalized.contains("dispatch meter baseline is unavailable")
+            || normalized.contains("dispatch is not owned") {
+            outcome = .queued
+            state = .queued
+        } else if normalized.contains("ending hobbs")
+            || normalized.contains("ending tacho")
+            || normalized.contains("fuel_remaining")
+            || normalized.contains("oil")
+            || normalized.contains("consent")
+            || normalized.contains("tail number")
+            || normalized.contains("scheduled session") {
+            outcome = .userCorrectionRequired
+            state = .needsUserAction
+        } else {
+            outcome = .technicalReviewRequired
+            state = .failed
+        }
+        return WorkflowFailureClassification(
+            outcome: outcome,
+            state: state,
+            message: message,
+            errorCode: nil,
+            retryable: state == .queued,
+            userActionRequired: state == .needsUserAction,
+            requestID: nil
+        )
+    }
+
+    static func classifyReconciliationEndpointFailure(
+        _ error: Error
+    ) -> (authenticationRequired: Bool, errorCode: String, message: String) {
+        if case APIClientError.synchronization(let failure) = error {
+            return (
+                failure.errorCode == "AUTHENTICATION_REQUIRED",
+                failure.errorCode,
+                failure.error
+            )
+        }
+        return (
+            false,
+            "TEMPORARY_TECHNICAL_FAILURE",
+            "Workflow reconciliation is temporarily unavailable: \(error.localizedDescription)"
+        )
+    }
+
     func dispatchTailMismatch(enrolledRegistration: String?) -> Bool {
         guard let dispatch = state.activeDispatch else { return false }
         let enrolled = Self.normalizedTail(enrolledRegistration ?? "")
@@ -1224,11 +1661,10 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     func resetForNextFlightIfComplete(archiveCompletedWorkflow: Bool = true) {
-        guard let flightRecord = state.activeFlightRecord else { return }
-        let components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
-        guard !components.isEmpty else { return }
-        guard components.allSatisfy({ $0.state == .serverVerified && !($0.serverReceiptID ?? "").isEmpty }) else {
-            lastError = "NEXT FLIGHT is blocked until every Dispatch, event, closure, and Garmin component has a server verification receipt."
+        guard let flightRecord = state.activeFlightRecord,
+              flightRecord.endingHobbs != nil,
+              flightRecord.endingTacho != nil else {
+            lastError = "Check-In must be saved locally before opening the next flight."
             return
         }
         if archiveCompletedWorkflow {
@@ -1391,12 +1827,132 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    private func updateComponentAtomically(
+        id: String,
+        update: (inout CVRUploadComponentRecord) -> Void,
+        validation: (CVRUploadComponentRecord) -> Bool = { _ in true }
+    ) -> Bool {
+        if let index = state.uploadComponents.firstIndex(where: { $0.id == id }) {
+            var component = state.uploadComponents[index]
+            update(&component)
+            guard validation(component) else { return false }
+            return mutate {
+                guard let currentIndex = $0.uploadComponents.firstIndex(where: { $0.id == id }) else { return }
+                $0.uploadComponents[currentIndex] = component
+            }
+        }
+        guard let archiveIndex = archives.firstIndex(where: {
+            $0.uploadComponents.contains(where: { $0.id == id })
+        }), let componentIndex = archives[archiveIndex].uploadComponents.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+        var updated = archives
+        update(&updated[archiveIndex].uploadComponents[componentIndex])
+        guard validation(updated[archiveIndex].uploadComponents[componentIndex]) else { return false }
+        updated[archiveIndex].status = updated[archiveIndex].uploadComponents.allSatisfy {
+            $0.state == .serverVerified
+        } ? .serverVerified : .uploadPending
+        do {
+            try saveArchives(updated)
+            archives = updated
+            lastError = ""
+            return true
+        } catch {
+            lastError = "Could not durably persist workflow upload metadata: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private static func applyVerifiedMetadata(
+        to component: inout CVRUploadComponentRecord,
+        receiptID: String,
+        payloadSHA256: String,
+        verificationAt: Date,
+        canonicalIdentifiers: [String: String]
+    ) {
+        component.serverReceiptID = receiptID
+        component.authoritativePayloadSHA256 = payloadSHA256
+        component.serverVerificationAt = verificationAt
+        component.canonicalIdentifiers = canonicalIdentifiers
+        component.serverID = primaryServerIdentifier(
+            componentType: component.componentType,
+            canonicalIdentifiers: canonicalIdentifiers
+        )
+        component.reconciliationRequired = false
+        component.state = .serverVerified
+        component.progress = 1
+        component.lastError = ""
+        component.errorCode = nil
+        component.retryable = false
+        component.userActionRequired = false
+        component.lastAttemptAt = Date()
+    }
+
+    private static func primaryServerIdentifier(
+        componentType: String,
+        canonicalIdentifiers: [String: String]
+    ) -> String? {
+        switch componentType {
+        case "dispatch_metadata":
+            canonicalIdentifiers["server_dispatch_id"]
+        case "flight_events":
+            canonicalIdentifiers["server_event_id"] ?? canonicalIdentifiers["event_server_id"]
+        case "recorder_verification":
+            canonicalIdentifiers["server_verification_id"] ?? canonicalIdentifiers["verification_server_id"]
+        case "flight_record_closure":
+            canonicalIdentifiers["server_closure_id"] ?? canonicalIdentifiers["closure_server_id"]
+        default:
+            nil
+        }
+    }
+
+    private static func hasCompleteVerificationMetadata(_ component: CVRUploadComponentRecord) -> Bool {
+        guard component.serverReceiptID?.isEmpty == false,
+              component.authoritativePayloadSHA256?.isEmpty == false,
+              component.serverVerificationAt != nil,
+              let identifiers = component.canonicalIdentifiers else {
+            return false
+        }
+        let common = ["dispatch_uuid", "flight_record_uuid"]
+        guard common.allSatisfy({ identifiers[$0]?.isEmpty == false }) else { return false }
+        switch component.componentType {
+        case "dispatch_metadata":
+            return ["server_dispatch_id", "dispatch_version"].allSatisfy {
+                identifiers[$0]?.isEmpty == false
+            }
+        case "flight_events":
+            return ["server_evidence_batch_id", "server_batch_uuid", "component_uuid",
+                    "component_type", "event_uuid"].allSatisfy {
+                identifiers[$0]?.isEmpty == false
+            } && (identifiers["server_event_id"]?.isEmpty == false
+                || identifiers["event_server_id"]?.isEmpty == false)
+        case "recorder_verification":
+            return ["server_evidence_batch_id", "server_batch_uuid", "component_uuid",
+                    "component_type", "verification_uuid"].allSatisfy {
+                identifiers[$0]?.isEmpty == false
+            } && (identifiers["server_verification_id"]?.isEmpty == false
+                || identifiers["verification_server_id"]?.isEmpty == false)
+        case "flight_record_closure":
+            return ["server_evidence_batch_id", "server_batch_uuid", "component_uuid",
+                    "component_type", "closure_uuid"].allSatisfy {
+                identifiers[$0]?.isEmpty == false
+            } && (identifiers["server_closure_id"]?.isEmpty == false
+                || identifiers["closure_server_id"]?.isEmpty == false)
+        default:
+            return true
+        }
+    }
+
     private func updateComponent(
         _ component: inout CVRUploadComponentRecord,
         state: CVRUploadComponentState,
         progress: Double,
         lastError: String,
-        serverReceiptID: String?
+        serverReceiptID: String?,
+        errorCode: String? = nil,
+        retryable: Bool? = nil,
+        userActionRequired: Bool? = nil,
+        requestID: String? = nil
     ) {
         let previousState = component.state
         if state == .serverVerified {
@@ -1417,6 +1973,10 @@ final class CVRWorkflowStore: ObservableObject {
         component.progress = min(max(progress, 0), 1)
         component.lastError = lastError
         component.lastAttemptAt = Date()
+        component.errorCode = errorCode
+        component.retryable = retryable
+        component.userActionRequired = userActionRequired
+        component.requestID = requestID
     }
 
     private func archiveActiveWorkflow() -> Bool {
@@ -1534,8 +2094,32 @@ final class CVRWorkflowStore: ObservableObject {
         var changed = false
         for index in state.uploadComponents.indices where state.uploadComponents[index].state == .uploading {
             state.uploadComponents[index].state = .queued
+            if state.uploadComponents[index].componentType != "garmin_csv" {
+                state.uploadComponents[index].reconciliationRequired = true
+            }
             state.uploadComponents[index].lastError = "Upload was interrupted and has been queued for recovery."
             changed = true
+        }
+        return changed
+    }
+
+    private func recoverIncompleteActiveVerificationMetadata() -> Bool {
+        var changed = false
+        for index in state.uploadComponents.indices {
+            let component = state.uploadComponents[index]
+            guard component.componentType != "garmin_csv" else { continue }
+            if component.state == .serverVerified && !Self.hasCompleteVerificationMetadata(component) {
+                state.uploadComponents[index].state = .queued
+                state.uploadComponents[index].reconciliationRequired = true
+                state.uploadComponents[index].lastError =
+                    "Server verification metadata is incomplete; queued for authoritative reconciliation."
+                changed = true
+            } else if component.state == .queued,
+                      component.attemptCount > 0,
+                      !Self.hasCompleteVerificationMetadata(component) {
+                state.uploadComponents[index].reconciliationRequired = true
+                changed = true
+            }
         }
         return changed
     }
@@ -1589,7 +2173,7 @@ final class CVRWorkflowStore: ObservableObject {
             }
             if state.uploadComponents[index].state == .queued || state.uploadComponents[index].state == .uploading {
                 state.uploadComponents[index].state = .needsUserAction
-                state.uploadComponents[index].lastError = "Ending Hobbs, Ending Tacho, fuel remaining, and oil remaining are required before closure upload."
+                state.uploadComponents[index].lastError = "Ending Hobbs and Ending Tacho are required before closure upload."
                 changed = true
             }
         }
@@ -1691,13 +2275,40 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
-    private func loadArchives() throws {
+    private func loadArchives() throws -> [String] {
         let url = try archivesURL()
         guard FileManager.default.fileExists(atPath: url.path) else {
             archives = []
-            return
+            archiveRewriteSafe = true
+            return []
         }
-        var recovered = try decoder.decode([CVRWorkflowArchiveRecord].self, from: Data(contentsOf: url))
+        let sourceData = try Data(contentsOf: url)
+        let rawRecords = try CVRArchiveRecordRecovery.records(in: sourceData)
+        var recovered: [CVRWorkflowArchiveRecord] = []
+        var diagnostics: [String] = []
+        var allDamagedRecordsQuarantined = true
+        for (recordIndex, rawRecord) in rawRecords.enumerated() {
+            do {
+                recovered.append(try decoder.decode(CVRWorkflowArchiveRecord.self, from: rawRecord))
+            } catch {
+                do {
+                    let quarantineURL = try quarantineArchiveRecord(
+                        rawRecord,
+                        recordIndex: recordIndex,
+                        decodingError: error
+                    )
+                    diagnostics.append(
+                        "Historical archive record \(recordIndex + 1) was quarantined at \(quarantineURL.lastPathComponent): \(error.localizedDescription)"
+                    )
+                } catch {
+                    allDamagedRecordsQuarantined = false
+                    diagnostics.append(
+                        "Historical archive record \(recordIndex + 1) is incompatible and could not be quarantined: \(error.localizedDescription)"
+                    )
+                }
+            }
+        }
+        archiveRewriteSafe = allDamagedRecordsQuarantined
         var changed = false
         for archiveIndex in recovered.indices {
             let closureIsComplete = Self.archivedClosureIsComplete(
@@ -1710,7 +2321,26 @@ final class CVRWorkflowStore: ObservableObject {
                 let componentState = component.state
                 if componentState == .uploading {
                     recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
+                    if component.componentType != "garmin_csv" {
+                        recovered[archiveIndex].uploadComponents[componentIndex].reconciliationRequired = true
+                    }
                     recovered[archiveIndex].uploadComponents[componentIndex].lastError = "Upload was interrupted and has been queued for recovery."
+                    recovered[archiveIndex].status = .uploadPending
+                    changed = true
+                } else if component.componentType != "garmin_csv",
+                          componentState == .serverVerified,
+                          !Self.hasCompleteVerificationMetadata(component) {
+                    recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
+                    recovered[archiveIndex].uploadComponents[componentIndex].reconciliationRequired = true
+                    recovered[archiveIndex].uploadComponents[componentIndex].lastError =
+                        "Server verification metadata is incomplete; queued for authoritative reconciliation."
+                    recovered[archiveIndex].status = .uploadPending
+                    changed = true
+                } else if component.componentType != "garmin_csv",
+                          componentState == .queued,
+                          component.attemptCount > 0,
+                          !Self.hasCompleteVerificationMetadata(component) {
+                    recovered[archiveIndex].uploadComponents[componentIndex].reconciliationRequired = true
                     recovered[archiveIndex].status = .uploadPending
                     changed = true
                 } else if Self.isLegacyAdvisoryDispatchFailure(component) {
@@ -1720,7 +2350,9 @@ final class CVRWorkflowStore: ObservableObject {
                     recovered[archiveIndex].status = .uploadPending
                     changed = true
                 } else if component.componentType == "flight_record_closure",
-                          componentState == .needsUserAction,
+                          (componentState == .needsUserAction
+                            || (componentState == .failed
+                                && component.lastError.localizedCaseInsensitiveContains("fuel_remaining"))),
                           closureIsComplete {
                     recovered[archiveIndex].uploadComponents[componentIndex].state = .queued
                     recovered[archiveIndex].uploadComponents[componentIndex].lastError = ""
@@ -1730,10 +2362,36 @@ final class CVRWorkflowStore: ObservableObject {
                 }
             }
         }
-        if changed {
+        let damagedRecordCount = rawRecords.count - recovered.count
+        if (changed || damagedRecordCount > 0) && allDamagedRecordsQuarantined {
             try saveArchives(recovered)
         }
         archives = recovered
+        return diagnostics
+    }
+
+    private func quarantineArchiveRecord(
+        _ rawRecord: Data,
+        recordIndex: Int,
+        decodingError: Error
+    ) throws -> URL {
+        let directory = try archiveQuarantineDirectory()
+        let digest = SHA256.hash(data: rawRecord).map { String(format: "%02x", $0) }.joined()
+        let evidenceURL = directory.appendingPathComponent("archive-record-\(digest).json")
+        if !FileManager.default.fileExists(atPath: evidenceURL.path) {
+            try rawRecord.write(to: evidenceURL, options: [.atomic])
+        }
+        let diagnosticURL = directory.appendingPathComponent("archive-record-\(digest).diagnostic.txt")
+        if !FileManager.default.fileExists(atPath: diagnosticURL.path) {
+            let diagnostic = """
+            record_index=\(recordIndex)
+            quarantined_at_utc=\(ISO8601DateFormatter().string(from: Date()))
+            sha256=\(digest)
+            decoding_error=\(decodingError.localizedDescription)
+            """
+            try Data(diagnostic.utf8).write(to: diagnosticURL, options: [.atomic])
+        }
+        return evidenceURL
     }
 
     private static func archivedClosureIsComplete(
@@ -1743,12 +2401,7 @@ final class CVRWorkflowStore: ObservableObject {
         guard let endingHobbs = flightRecord.endingHobbs,
               let endingTacho = flightRecord.endingTacho,
               endingHobbs >= (dispatch.startingHobbs ?? 0),
-              endingTacho >= (dispatch.startingTacho ?? 0),
-              let fuel = flightRecord.fuelRemaining,
-              Double(fuel.trimmingCharacters(in: .whitespacesAndNewlines)) != nil,
-              flightRecord.effectiveEndingOilQuantity != nil,
-              (flightRecord.verifiedTakeoffCount ?? 0) >= 0,
-              (flightRecord.verifiedLandingCount ?? 0) >= 0 else {
+              endingTacho >= (dispatch.startingTacho ?? 0) else {
             return false
         }
         return true
@@ -1780,12 +2433,36 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     private func saveArchives(_ records: [CVRWorkflowArchiveRecord]) throws {
+        guard archiveRewriteSafe else {
+            throw CocoaError(.fileWriteNoPermission, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Archive updates are paused because damaged evidence could not be quarantined safely."
+            ])
+        }
         let url = try archivesURL()
         try encoder.encode(records).write(to: url, options: [.atomic])
         let verification = try decoder.decode([CVRWorkflowArchiveRecord].self, from: Data(contentsOf: url))
         guard verification.map(\.id) == records.map(\.id) else {
             throw CocoaError(.fileWriteUnknown)
         }
+    }
+
+    private func archiveQuarantineDirectory() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = base.appendingPathComponent(
+            "IPCACVRUnit/ArchiveQuarantine",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
     }
 
     private func storeURL() throws -> URL {

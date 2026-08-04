@@ -75,7 +75,8 @@ $checks = array(
         str_contains($workflowStore, 'archivedClosureIsComplete')
         && str_contains($workflowStore, 'component.componentType == "flight_record_closure"')
         && str_contains($workflowStore, 'componentState == .needsUserAction')
-        && str_contains($workflowStore, 'recovered[archiveIndex].uploadComponents[componentIndex].state = .queued'),
+        && str_contains($workflowStore, 'recovered[archiveIndex].uploadComponents[componentIndex].state = .queued')
+        && str_contains($uploads, 'flightClosureIsComplete(context.flightRecord, dispatch: context.dispatch)'),
     'arrival time is engine start plus elapsed Hobbs with shutdown fallback' =>
         str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
         && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")

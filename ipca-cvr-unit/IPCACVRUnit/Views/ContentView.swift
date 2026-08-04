@@ -285,9 +285,12 @@ private struct AdminSettingsView: View {
                         .autocorrectionDisabled()
                     Button("Enroll CVR Unit") {
                         Task {
-                            await settings.enrollDevice()
-                            if settings.deviceCredential != nil {
-                                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                            if await settings.enrollDevice() {
+                                uploadManager.uploadQueuedWorkflowComponents(
+                                    workflow: workflow,
+                                    settings: settings,
+                                    trigger: .enrollmentSucceeded
+                                )
                             }
                         }
                     }

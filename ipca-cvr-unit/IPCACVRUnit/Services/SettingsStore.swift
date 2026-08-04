@@ -278,15 +278,15 @@ final class SettingsStore: ObservableObject {
         Self.keychainValue(for: Keys.deviceCredential)
     }
 
-    func enrollDevice() async {
+    func enrollDevice() async -> Bool {
         let code = enrollmentCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !code.isEmpty else {
             deviceEnrollmentError = "Enter the enrollment code generated in IPCA.training."
-            return
+            return false
         }
         guard let url = normalizedServerURL else {
             deviceEnrollmentError = "Server URL is invalid."
-            return
+            return false
         }
 
         deviceEnrollmentStatus = "Enrolling..."
@@ -307,9 +307,11 @@ final class SettingsStore: ObservableObject {
             enrollmentCode = ""
             deviceEnrollmentStatus = "Enrolled"
             deviceEnrollmentError = ""
+            return true
         } catch {
             deviceEnrollmentStatus = deviceCredential == nil ? "Not enrolled" : "Enrolled"
             deviceEnrollmentError = error.localizedDescription
+            return false
         }
     }
 

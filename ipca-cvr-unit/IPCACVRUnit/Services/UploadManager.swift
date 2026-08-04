@@ -1,13 +1,44 @@
 import Combine
 import Foundation
 
+enum CVRWorkflowUploadTrigger: Equatable {
+    case routine
+    case appForeground
+    case networkRestored
+    case explicitRetry
+    case enrollmentSucceeded
+
+    var permitsAuthenticationProbe: Bool {
+        switch self {
+        case .appForeground, .networkRestored, .explicitRetry:
+            true
+        case .routine, .enrollmentSucceeded:
+            false
+        }
+    }
+}
+
 @MainActor
 final class UploadManager: ObservableObject {
     @Published private(set) var activeUploads: Set<String> = []
+    private(set) var activeWorkflowUploadIDs: Set<String> = []
     private let chunkSize = 512 * 1024
     private let maxChunkAttempts = 8
     private var retryTasks: [String: Task<Void, Never>] = [:]
     private weak var networkMonitor: NetworkMonitor?
+    private var workflowAuthenticationPausedCredential: String?
+    private var workflowAuthenticationProbeInFlight = false
+    private var activeWorkflowAuthenticationRequestIDs: Set<String> = []
+    private var workflowReconciliationScanInFlight = false
+    private var reconcilingWorkflowComponentIDs: Set<String> = []
+    private var deferredWorkflowReconciliationIDs: Set<String> = []
+
+    private struct WorkflowAcceptedMetadata {
+        var receiptID: String
+        var payloadSHA256: String
+        var verifiedAt: Date
+        var canonicalIdentifiers: [String: String]
+    }
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -102,8 +133,22 @@ final class UploadManager: ObservableObject {
         }
     }
 
-    func uploadQueuedWorkflowComponents(workflow: CVRWorkflowStore, settings: SettingsStore) {
+    func uploadQueuedWorkflowComponents(
+        workflow: CVRWorkflowStore,
+        settings: SettingsStore,
+        trigger: CVRWorkflowUploadTrigger = .routine
+    ) {
         guard !settings.isSimulationModeEnabled else { return }
+        let currentCredential = settings.deviceCredential ?? ""
+        if trigger == .enrollmentSucceeded
+            || (workflowAuthenticationPausedCredential != nil
+                && workflowAuthenticationPausedCredential != currentCredential) {
+            clearWorkflowAuthenticationPause()
+        }
+        if trigger != .routine {
+            deferredWorkflowReconciliationIDs = []
+        }
+        let workflowSyncAuthenticationPaused = workflowAuthenticationPausedCredential == currentCredential
         if let networkMonitor,
            !networkMonitor.canUpload(allowCellular: settings.allowCellularUpload) {
             return
@@ -128,15 +173,76 @@ final class UploadManager: ObservableObject {
             return
         }
 
+        let allReconciliationComponents = workflow.workflowComponentsRequiringReconciliation(
+            explicitRetry: trigger == .explicitRetry
+        )
+        let reconciliationBlockedIDs = Set(allReconciliationComponents.map(\.id))
+        let reconciliationComponents = allReconciliationComponents.filter {
+            !deferredWorkflowReconciliationIDs.contains($0.id)
+        }
+        let reconciliationIsAuthenticationProbe = workflowSyncAuthenticationPaused
+            && trigger.permitsAuthenticationProbe
+            && !workflowAuthenticationProbeInFlight
+            && activeWorkflowAuthenticationRequestIDs.isEmpty
+        let mayStartReconciliation = !workflowSyncAuthenticationPaused
+            || reconciliationIsAuthenticationProbe
+        if !reconciliationComponents.isEmpty,
+           !workflowReconciliationScanInFlight,
+           mayStartReconciliation {
+            workflowReconciliationScanInFlight = true
+            reconcilingWorkflowComponentIDs = Set(reconciliationComponents.map(\.id))
+            if reconciliationIsAuthenticationProbe {
+                workflowAuthenticationProbeInFlight = true
+            }
+            Task {
+                defer {
+                    Task { @MainActor in
+                        self.workflowReconciliationScanInFlight = false
+                        self.reconcilingWorkflowComponentIDs = []
+                        if reconciliationIsAuthenticationProbe {
+                            self.workflowAuthenticationProbeInFlight = false
+                        }
+                        self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    }
+                }
+                await self.reconcileWorkflowComponents(
+                    reconciliationComponents,
+                    workflow: workflow,
+                    settings: settings,
+                    baseURL: baseURL,
+                    currentCredential: currentCredential
+                )
+            }
+        }
+
         for component in components {
+            let usesWorkflowAuthentication = component.componentType != "garmin_csv"
+            // Reconciliation-first: uncertain or reconciliation-required components never
+            // take the normal POST path until NOT_FOUND clears that requirement.
+            if reconciliationBlockedIDs.contains(component.id) {
+                continue
+            }
+            if reconcilingWorkflowComponentIDs.contains(component.id)
+                || (workflowReconciliationScanInFlight
+                    && workflowSyncAuthenticationPaused
+                    && usesWorkflowAuthentication) {
+                continue
+            }
+            if workflowSyncAuthenticationPaused && usesWorkflowAuthentication {
+                guard trigger.permitsAuthenticationProbe,
+                      !workflowAuthenticationProbeInFlight,
+                      activeWorkflowAuthenticationRequestIDs.isEmpty else {
+                    continue
+                }
+            }
             guard let context = workflow.workflowUploadContext(componentID: component.id) else { continue }
             if component.componentType == "flight_record_closure",
-               !workflow.flightClosureIsComplete(context.flightRecord) {
+               !workflow.flightClosureIsComplete(context.flightRecord, dispatch: context.dispatch) {
                 workflow.updateUploadComponent(
                     id: component.id,
                     state: .needsUserAction,
                     progress: component.progress ?? 0,
-                    lastError: "Ending Hobbs, Ending Tacho, fuel remaining, and oil remaining are required before closure upload."
+                    lastError: "Ending Hobbs and Ending Tacho are required before closure upload."
                 )
                 continue
             }
@@ -146,7 +252,15 @@ final class UploadManager: ObservableObject {
                 continue
             }
             guard !activeUploads.contains(component.id) else { continue }
+            let isAuthenticationProbe = workflowSyncAuthenticationPaused && usesWorkflowAuthentication
+            if isAuthenticationProbe {
+                workflowAuthenticationProbeInFlight = true
+            }
             activeUploads.insert(component.id)
+            activeWorkflowUploadIDs.insert(component.id)
+            if usesWorkflowAuthentication {
+                activeWorkflowAuthenticationRequestIDs.insert(component.id)
+            }
             let componentLabel: String = switch component.componentType {
             case "dispatch_metadata": "Dispatch"
             case "garmin_csv": "Garmin CSV"
@@ -162,13 +276,24 @@ final class UploadManager: ObservableObject {
             )
 
             Task {
+                var triggerReconciliationAfterCompletion = false
                 defer {
                     Task { @MainActor in
+                        self.activeWorkflowUploadIDs.remove(component.id)
                         self.activeUploads.remove(component.id)
+                        self.activeWorkflowAuthenticationRequestIDs.remove(component.id)
+                        if isAuthenticationProbe {
+                            self.workflowAuthenticationProbeInFlight = false
+                        }
+                        if triggerReconciliationAfterCompletion {
+                            workflow.recoverOrphanedUploads(
+                                activeComponentIDs: self.activeWorkflowUploadIDs
+                            )
+                            self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                        }
                     }
                 }
                 do {
-                    let serverReceiptID: String
                     if component.componentType == "dispatch_metadata" {
                         let result = try await uploadWorkflowDispatchComponent(
                             component: component,
@@ -177,46 +302,426 @@ final class UploadManager: ObservableObject {
                             baseURL: baseURL,
                             workflow: workflow
                         )
-                        serverReceiptID = result.receiptID
                         await MainActor.run {
-                            workflow.markDispatchStoredOnServer(
-                                serverDispatchID: result.serverDispatchID,
-                                flightRecordID: context.flightRecord.id
+                            self.clearWorkflowAuthenticationPause()
+                        }
+                        let persisted = await MainActor.run {
+                            workflow.persistReconciliationMatch(
+                                componentID: component.id,
+                                serverReceiptID: result.receiptID,
+                                authoritativePayloadSHA256: result.payloadSHA256,
+                                serverVerificationAt: result.verifiedAt,
+                                canonicalIdentifiers: result.canonicalIdentifiers
                             )
+                        }
+                        guard persisted else {
+                            triggerReconciliationAfterCompletion = true
+                            await MainActor.run {
+                                _ = workflow.markReconciliationRequired(
+                                    id: component.id,
+                                    message: "Server accepted Dispatch; local receipt persistence will reconcile automatically."
+                                )
+                            }
+                            return
+                        }
+                        await MainActor.run {
                             self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         }
+                        return
                     } else if component.componentType == "garmin_csv" {
-                        serverReceiptID = try await uploadWorkflowGarminComponent(
+                        let serverReceiptID = try await uploadWorkflowGarminComponent(
                             component: component,
                             flightRecordID: context.flightRecord.id,
                             baseURL: baseURL,
                             workflow: workflow
                         )
+                        await MainActor.run {
+                            workflow.updateUploadComponent(
+                                id: component.id,
+                                state: .serverVerified,
+                                progress: 1,
+                                lastError: "",
+                                serverReceiptID: serverReceiptID
+                            )
+                        }
                     } else {
-                        serverReceiptID = try await uploadWorkflowEvidenceComponent(
+                        let result = try await uploadWorkflowEvidenceComponent(
                             component: component,
                             context: context,
                             settings: settings,
                             baseURL: baseURL,
                             workflow: workflow
                         )
-                    }
-                    await MainActor.run {
-                        workflow.updateUploadComponent(
-                            id: component.id,
-                            state: .serverVerified,
-                            progress: 1,
-                            lastError: "",
-                            serverReceiptID: serverReceiptID
-                        )
+                        let persisted = await MainActor.run {
+                            self.clearWorkflowAuthenticationPause()
+                            return workflow.persistVerifiedWorkflowComponent(
+                                componentID: component.id,
+                                serverReceiptID: result.receiptID,
+                                authoritativePayloadSHA256: result.payloadSHA256,
+                                serverVerificationAt: result.verifiedAt,
+                                canonicalIdentifiers: result.canonicalIdentifiers
+                            )
+                        }
+                        if !persisted {
+                            triggerReconciliationAfterCompletion = true
+                            await MainActor.run {
+                                _ = workflow.markReconciliationRequired(
+                                    id: component.id,
+                                    message: "Server accepted workflow evidence; local metadata persistence will reconcile automatically."
+                                )
+                            }
+                        }
                     }
                 } catch {
-                    await MainActor.run {
-                        workflow.updateUploadComponent(id: component.id, state: .failed, progress: component.progress ?? 0, lastError: error.localizedDescription)
+                    if component.componentType == "garmin_csv" {
+                        await MainActor.run {
+                            workflow.updateUploadComponent(
+                                id: component.id,
+                                state: .failed,
+                                progress: component.progress ?? 0,
+                                lastError: error.localizedDescription
+                            )
+                        }
+                        return
+                    }
+                    if case APIClientError.synchronization(let failure) = error,
+                       failure.errorCode == "DUPLICATE_ALREADY_VERIFIED" {
+                        triggerReconciliationAfterCompletion = true
+                        await MainActor.run {
+                            self.clearWorkflowAuthenticationPause()
+                            _ = workflow.markReconciliationRequired(
+                                id: component.id,
+                                message: "Server reports an existing immutable item; authoritative metadata reconciliation is required."
+                            )
+                        }
+                        return
+                    }
+                    if Self.isUncertainTransportFailure(error)
+                        || error.localizedDescription.contains("authoritative verification metadata") {
+                        triggerReconciliationAfterCompletion = true
+                        await MainActor.run {
+                            _ = workflow.markReconciliationRequired(
+                                id: component.id,
+                                message: "The request outcome is uncertain; reconciliation will run before another upload."
+                            )
+                        }
+                    }
+                    let outcome = await MainActor.run {
+                        workflow.recordWorkflowUploadFailure(
+                            id: component.id,
+                            progress: component.progress ?? 0,
+                            error: error
+                        )
+                    }
+                    if outcome == .authenticationPaused {
+                        await MainActor.run {
+                            self.workflowAuthenticationPausedCredential = currentCredential
+                        }
                     }
                 }
             }
         }
+    }
+
+    func retryWorkflowSynchronization(workflow: CVRWorkflowStore, settings: SettingsStore) {
+        uploadQueuedWorkflowComponents(workflow: workflow, settings: settings, trigger: .explicitRetry)
+    }
+
+    private func clearWorkflowAuthenticationPause() {
+        workflowAuthenticationPausedCredential = nil
+        workflowAuthenticationProbeInFlight = false
+    }
+
+    private func reconcileWorkflowComponents(
+        _ components: [CVRUploadComponentRecord],
+        workflow: CVRWorkflowStore,
+        settings: SettingsStore,
+        baseURL: URL,
+        currentCredential: String
+    ) async {
+        guard !currentCredential.isEmpty else {
+            workflowAuthenticationPausedCredential = currentCredential
+            for component in components {
+                workflow.applyReconciliationDisposition(
+                    componentID: component.id,
+                    state: .queued,
+                    message: "CVR Unit enrollment is required before workflow reconciliation.",
+                    errorCode: "AUTHENTICATION_REQUIRED",
+                    retryable: true,
+                    reconciliationRequired: true
+                )
+            }
+            return
+        }
+
+        var requestItems: [WorkflowReconciliationRequestItem] = []
+        for component in components {
+            guard let context = workflow.workflowUploadContext(componentID: component.id) else {
+                deferredWorkflowReconciliationIDs.insert(component.id)
+                workflow.applyReconciliationDisposition(
+                    componentID: component.id,
+                    state: .queued,
+                    message: "Local workflow evidence is temporarily unavailable for reconciliation.",
+                    errorCode: "TEMPORARY_TECHNICAL_FAILURE",
+                    retryable: true,
+                    reconciliationRequired: true
+                )
+                continue
+            }
+            do {
+                let snapshot: Data
+                if let preserved = component.requestPayloadSnapshot {
+                    snapshot = preserved
+                } else {
+                    let payload = component.componentType == "dispatch_metadata"
+                        ? workflowDispatchPayload(
+                            dispatch: context.dispatch,
+                            flightRecord: context.flightRecord,
+                            consents: context.consents.filter {
+                                $0.dispatchID == context.dispatch.id
+                                    && $0.dispatchVersion == context.dispatch.version
+                            },
+                            settings: settings
+                        )
+                        : try workflowEvidencePayload(component: component, context: context, settings: settings)
+                    snapshot = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+                    guard snapshot.count <= CVRWorkflowStore.maximumRequestPayloadSnapshotBytes else {
+                        throw APIClientError.badResponse(
+                            "Workflow request payload snapshot exceeds the \(CVRWorkflowStore.maximumRequestPayloadSnapshotBytes)-byte limit."
+                        )
+                    }
+                    guard workflow.persistRequestPayloadSnapshot(
+                        componentID: component.id,
+                        payload: snapshot,
+                        reconciliationRequired: true
+                    ) else {
+                        throw APIClientError.badResponse("Workflow request payload snapshot could not be persisted.")
+                    }
+                }
+                let payload = try JSONDecoder().decode([String: APIJSONValue].self, from: snapshot)
+                requestItems.append(WorkflowReconciliationRequestItem(
+                    itemID: component.id,
+                    componentType: component.componentType,
+                    dispatchUUID: context.dispatch.id.lowercased(),
+                    dispatchVersion: component.componentType == "dispatch_metadata"
+                        ? context.dispatch.version : nil,
+                    flightRecordUUID: context.flightRecord.id.lowercased(),
+                    componentUUID: component.componentType == "dispatch_metadata"
+                        ? nil : component.id.lowercased(),
+                    payload: payload
+                ))
+            } catch {
+                deferredWorkflowReconciliationIDs.insert(component.id)
+                workflow.applyReconciliationDisposition(
+                    componentID: component.id,
+                    state: .queued,
+                    message: "Could not prepare preserved workflow evidence for reconciliation: \(error.localizedDescription)",
+                    errorCode: "TEMPORARY_TECHNICAL_FAILURE",
+                    retryable: true,
+                    reconciliationRequired: true
+                )
+            }
+        }
+
+        let client = APIClient(serverURL: baseURL)
+        for start in stride(from: 0, to: requestItems.count, by: 25) {
+            let end = min(start + 25, requestItems.count)
+            let batch = Array(requestItems[start..<end])
+            do {
+                let response = try await client.reconcileWorkflowSync(
+                    request: WorkflowReconciliationRequest(items: batch),
+                    credential: currentCredential
+                )
+                if !response.ok {
+                    if response.errorCode == "AUTHENTICATION_REQUIRED" {
+                        workflowAuthenticationPausedCredential = currentCredential
+                    }
+                    for item in batch {
+                        deferredWorkflowReconciliationIDs.insert(item.itemID)
+                        workflow.applyReconciliationDisposition(
+                            componentID: item.itemID,
+                            state: .queued,
+                            message: response.error ?? "Workflow reconciliation is temporarily unavailable.",
+                            errorCode: response.errorCode ?? "TEMPORARY_TECHNICAL_FAILURE",
+                            retryable: true,
+                            reconciliationRequired: true
+                        )
+                    }
+                    if response.errorCode == "AUTHENTICATION_REQUIRED" { return }
+                    continue
+                }
+                clearWorkflowAuthenticationPause()
+
+                for item in batch {
+                    guard let result = response.results.first(where: { $0.itemID == item.itemID }) else {
+                        deferredWorkflowReconciliationIDs.insert(item.itemID)
+                        workflow.applyReconciliationDisposition(
+                            componentID: item.itemID,
+                            state: .queued,
+                            message: "The reconciliation response omitted this item; it will retry automatically.",
+                            errorCode: "TEMPORARY_TECHNICAL_FAILURE",
+                            retryable: true,
+                            reconciliationRequired: true
+                        )
+                        continue
+                    }
+                    applyReconciliationResult(result, workflow: workflow)
+                    if result.status == .authenticationRequired {
+                        workflowAuthenticationPausedCredential = currentCredential
+                    }
+                }
+                if response.results.contains(where: { $0.status == .authenticationRequired }) {
+                    return
+                }
+            } catch {
+                let outcome = CVRWorkflowStore.classifyReconciliationEndpointFailure(error)
+                if outcome.authenticationRequired {
+                    workflowAuthenticationPausedCredential = currentCredential
+                }
+                for item in batch {
+                    deferredWorkflowReconciliationIDs.insert(item.itemID)
+                    workflow.applyReconciliationDisposition(
+                        componentID: item.itemID,
+                        state: .queued,
+                        message: outcome.message,
+                        errorCode: outcome.errorCode,
+                        retryable: true,
+                        reconciliationRequired: true
+                    )
+                }
+                if outcome.authenticationRequired { return }
+            }
+        }
+    }
+
+    private func applyReconciliationResult(
+        _ result: WorkflowReconciliationResult,
+        workflow: CVRWorkflowStore
+    ) {
+        switch result.status {
+        case .verifiedMatch:
+            guard let receiptID = result.receiptID,
+                  let payloadSHA256 = result.payloadSHA256,
+                  let receivedAt = Self.parseServerDate(result.receivedAt),
+                  let canonicalValues = result.canonicalIdentifiers else {
+                deferredWorkflowReconciliationIDs.insert(result.itemID)
+                workflow.applyReconciliationDisposition(
+                    componentID: result.itemID,
+                    state: .queued,
+                    message: "Verified reconciliation result omitted required authoritative metadata.",
+                    errorCode: "TEMPORARY_TECHNICAL_FAILURE",
+                    retryable: true,
+                    reconciliationRequired: true
+                )
+                return
+            }
+            let persisted = workflow.persistReconciliationMatch(
+                componentID: result.itemID,
+                serverReceiptID: receiptID,
+                authoritativePayloadSHA256: payloadSHA256,
+                serverVerificationAt: receivedAt,
+                canonicalIdentifiers: canonicalValues.compactMapValues(\.stringValue)
+            )
+            if !persisted {
+                deferredWorkflowReconciliationIDs.insert(result.itemID)
+                _ = workflow.markReconciliationRequired(
+                    id: result.itemID,
+                    message: "Authoritative reconciliation matched, but local persistence will retry automatically."
+                )
+            }
+        case .notFound:
+            workflow.applyReconciliationDisposition(
+                componentID: result.itemID,
+                state: .queued,
+                message: "",
+                errorCode: "NOT_FOUND",
+                retryable: true,
+                reconciliationRequired: false
+            )
+        case .immutableConflict:
+            workflow.applyReconciliationDisposition(
+                componentID: result.itemID,
+                state: .failed,
+                message: result.error ?? "Immutable server evidence conflicts with the preserved local payload. Technical review is required.",
+                errorCode: "IMMUTABLE_CONFLICT",
+                retryable: false,
+                reconciliationRequired: false
+            )
+        case .userCorrectionRequired:
+            workflow.applyReconciliationDisposition(
+                componentID: result.itemID,
+                state: .needsUserAction,
+                message: result.error ?? "Operational values must be corrected before this component can synchronize.",
+                errorCode: "USER_CORRECTION_REQUIRED",
+                retryable: false,
+                reconciliationRequired: false
+            )
+        case .dependencyNotReady, .temporaryTechnicalFailure:
+            deferredWorkflowReconciliationIDs.insert(result.itemID)
+            workflow.applyReconciliationDisposition(
+                componentID: result.itemID,
+                state: .queued,
+                message: result.error ?? "Workflow reconciliation will retry automatically.",
+                errorCode: result.status.rawValue,
+                retryable: true,
+                reconciliationRequired: true
+            )
+        case .authenticationRequired:
+            deferredWorkflowReconciliationIDs.insert(result.itemID)
+            workflow.applyReconciliationDisposition(
+                componentID: result.itemID,
+                state: .queued,
+                message: result.error ?? "Workflow authentication is required.",
+                errorCode: "AUTHENTICATION_REQUIRED",
+                retryable: true,
+                reconciliationRequired: true
+            )
+        }
+    }
+
+    private func preservedWorkflowPayload(
+        component: CVRUploadComponentRecord,
+        generatedPayload: [String: Any],
+        workflow: CVRWorkflowStore
+    ) throws -> [String: Any] {
+        if let snapshot = component.requestPayloadSnapshot {
+            guard let payload = try JSONSerialization.jsonObject(with: snapshot) as? [String: Any] else {
+                throw APIClientError.invalidJSON("Preserved workflow request payload is not a JSON object.")
+            }
+            return payload
+        }
+        let snapshot = try JSONSerialization.data(withJSONObject: generatedPayload, options: [.sortedKeys])
+        guard snapshot.count <= CVRWorkflowStore.maximumRequestPayloadSnapshotBytes else {
+            throw APIClientError.badResponse(
+                "Workflow request payload snapshot exceeds the \(CVRWorkflowStore.maximumRequestPayloadSnapshotBytes)-byte limit."
+            )
+        }
+        guard workflow.persistRequestPayloadSnapshot(componentID: component.id, payload: snapshot) else {
+            throw APIClientError.badResponse("Workflow request payload snapshot could not be durably persisted.")
+        }
+        return generatedPayload
+    }
+
+    private static func parseServerDate(_ value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value) {
+            return date
+        }
+        let databaseTimestamp = DateFormatter()
+        databaseTimestamp.calendar = Calendar(identifier: .gregorian)
+        databaseTimestamp.locale = Locale(identifier: "en_US_POSIX")
+        databaseTimestamp.timeZone = TimeZone(secondsFromGMT: 0)
+        databaseTimestamp.dateFormat = value.contains(".")
+            ? "yyyy-MM-dd HH:mm:ss.SSS"
+            : "yyyy-MM-dd HH:mm:ss"
+        return databaseTimestamp.date(from: value)
+    }
+
+    private static func isUncertainTransportFailure(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(urlError.code)
     }
 
     private func scheduleRetryFields(recording: inout Recording, reason: String) {
@@ -239,7 +744,7 @@ final class UploadManager: ObservableObject {
         settings: SettingsStore,
         baseURL: URL,
         workflow: CVRWorkflowStore
-    ) async throws -> (receiptID: String, serverDispatchID: String) {
+    ) async throws -> WorkflowAcceptedMetadata {
         guard let credential = settings.deviceCredential, !credential.isEmpty else {
             throw APIClientError.badResponse("CVR Unit is not enrolled. Generate an enrollment code in IPCA.training and enter it in Admin.")
         }
@@ -263,7 +768,7 @@ final class UploadManager: ObservableObject {
             progress: 0.25,
             lastError: "Sending Dispatch metadata and consent evidence..."
         )
-        let payload = workflowDispatchPayload(
+        let generatedPayload = workflowDispatchPayload(
             dispatch: dispatch,
             flightRecord: flightRecord,
             consents: refreshedContext.consents.filter {
@@ -271,14 +776,34 @@ final class UploadManager: ObservableObject {
             },
             settings: settings
         )
+        let payload = try preservedWorkflowPayload(
+            component: component,
+            generatedPayload: generatedPayload,
+            workflow: workflow
+        )
         let response = try await APIClient(serverURL: baseURL).syncDispatch(payload: payload, credential: credential)
         guard response.ok,
               let receiptID = response.receipt?.receiptID,
               !receiptID.isEmpty,
-              let serverDispatchID = response.dispatch?.id else {
-            throw APIClientError.badResponse(response.error ?? "Server did not verify the Dispatch.")
+              let payloadSHA256 = response.receipt?.payloadSHA256,
+              !payloadSHA256.isEmpty,
+              let verifiedAt = Self.parseServerDate(response.receipt?.serverVerifiedAt),
+              let serverDispatch = response.dispatch else {
+            throw APIClientError.badResponse(
+                response.error ?? "Server accepted Dispatch without complete authoritative verification metadata."
+            )
         }
-        return (receiptID, String(serverDispatchID))
+        return WorkflowAcceptedMetadata(
+            receiptID: receiptID,
+            payloadSHA256: payloadSHA256,
+            verifiedAt: verifiedAt,
+            canonicalIdentifiers: [
+                "server_dispatch_id": String(serverDispatch.id),
+                "dispatch_uuid": serverDispatch.dispatchUUID,
+                "dispatch_version": String(serverDispatch.dispatchVersion),
+                "flight_record_uuid": serverDispatch.flightRecordUUID
+            ]
+        )
     }
 
     private func workflowDispatchPayload(
@@ -410,7 +935,7 @@ final class UploadManager: ObservableObject {
         settings: SettingsStore,
         baseURL: URL,
         workflow: CVRWorkflowStore
-    ) async throws -> String {
+    ) async throws -> WorkflowAcceptedMetadata {
         guard let credential = settings.deviceCredential, !credential.isEmpty else {
             throw APIClientError.badResponse("CVR Unit is not enrolled. Workflow evidence remains stored locally.")
         }
@@ -420,17 +945,34 @@ final class UploadManager: ObservableObject {
             progress: 0.25,
             lastError: "Sending immutable \(component.componentType.replacingOccurrences(of: "_", with: " ")) evidence..."
         )
-        let payload = try workflowEvidencePayload(component: component, context: context, settings: settings)
+        let generatedPayload = try workflowEvidencePayload(component: component, context: context, settings: settings)
+        let payload = try preservedWorkflowPayload(
+            component: component,
+            generatedPayload: generatedPayload,
+            workflow: workflow
+        )
         let response = try await APIClient(serverURL: baseURL).syncWorkflowEvidence(
             payload: payload,
             credential: credential
         )
         guard response.ok,
               let receiptID = response.receipt?.receiptID,
-              !receiptID.isEmpty else {
-            throw APIClientError.badResponse(response.error ?? "Server did not verify workflow evidence.")
+              !receiptID.isEmpty,
+              let payloadSHA256 = response.receipt?.payloadSHA256,
+              !payloadSHA256.isEmpty,
+              let verifiedAt = Self.parseServerDate(response.receipt?.serverVerifiedAt),
+              let canonicalValues = response.canonicalIdentifiers,
+              !canonicalValues.isEmpty else {
+            throw APIClientError.badResponse(
+                response.error ?? "Server accepted workflow evidence without complete authoritative verification metadata."
+            )
         }
-        return receiptID
+        return WorkflowAcceptedMetadata(
+            receiptID: receiptID,
+            payloadSHA256: payloadSHA256,
+            verifiedAt: verifiedAt,
+            canonicalIdentifiers: canonicalValues.compactMapValues(\.stringValue)
+        )
     }
 
     private func workflowEvidencePayload(
@@ -504,14 +1046,11 @@ final class UploadManager: ObservableObject {
             ]
             if let value = flight.endingHobbs { item["ending_hobbs"] = value }
             if let value = flight.endingTacho { item["ending_tacho"] = value }
-            if let value = flight.fuelRemaining { item["fuel_remaining"] = value }
-            item["fuel_unit"] = settings.selectedAircraft?.operationalConfig.fuelUnit ?? AircraftOperationalConfig.safeDefaults.fuelUnit
-            if let value = flight.effectiveEndingOilQuantity {
-                item["ending_oil_quantity"] = value
-                item["ending_oil_unit"] = flight.effectiveEndingOilUnit
-                if flight.effectiveEndingOilUnit == "%" {
-                    item["ending_oil_percentage"] = Int(value.rounded())
-                }
+            // Compatibility only: old server builds required fuel_remaining.
+            // Its presence is optional locally and never gates Flight Closure.
+            if let value = flight.fuelRemaining?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                item["fuel_remaining"] = value
             }
             if let value = flight.verifiedTakeoffCount { item["verified_takeoff_count"] = value }
             if let value = flight.verifiedLandingCount { item["verified_landing_count"] = value }

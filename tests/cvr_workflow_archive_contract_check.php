@@ -29,9 +29,10 @@ $checks = array(
     'archives retain interrupted uploads for recovery' =>
         str_contains($store, 'archives.flatMap(\\.uploadComponents)')
         && str_contains($models, 'case uploadPending'),
-    'next flight requires every server verification receipt' =>
-        str_contains($store, 'components.allSatisfy({ $0.state == .serverVerified')
-        && str_contains($store, 'NEXT FLIGHT is blocked until every Dispatch, event, closure, and Garmin component'),
+    'locally checked-in flight can open the next flight without server receipts' =>
+        str_contains($store, 'Check-In must be saved locally before opening the next flight.')
+        && !str_contains($store, 'NEXT FLIGHT is blocked until every Dispatch, event, closure, and Garmin component')
+        && !str_contains($store, 'components.allSatisfy({ $0.state == .serverVerified'),
     'locally closed aircraft carryover prefills next dispatch while upload continues' =>
         str_contains($store, 'latestClosedCarryover(for: registration)')
         && str_contains($store, 'startingHobbs: carryover?.endingHobbs')
@@ -52,7 +53,7 @@ $checks = array(
     'server rejects incomplete or regressing closure values' =>
         str_contains($intake, 'assertCompleteClosure')
         && str_contains($intake, 'Ending Hobbs cannot be lower than Starting Hobbs.')
-        && str_contains($intake, 'fuel_remaining must be a valid non-negative quantity.')
+        && str_contains($intake, 'fuel_remaining must be a valid non-negative quantity when provided.')
         && str_contains($intake, 'verified_takeoff_count'),
     'landing cycle detection uses airport geofence gates' =>
         str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/FlightLandingCycleDetector.swift'), 'touch_and_go')
@@ -62,7 +63,10 @@ $checks = array(
     'postflight closure asks only for meters while preserving derived operational evidence' =>
         str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'AUDIO FLIGHT CLOSURE')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'Garmin CSV data is optional now')
-        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift'), 'ending_oil_quantity')
+        && !str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), '@State private var oilRemaining')
+        && !str_contains($store, 'fuel remaining, and oil remaining are required before closure upload')
+        && !str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift'), 'item["ending_oil_quantity"]')
+        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift'), 'Its presence is optional locally and never gates Flight Closure')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift'), 'verified_takeoff_count'),
     'Garmin metadata verifies dispatch counter starts' =>
         str_contains($classification, "metadata['airframe_hours']")
@@ -132,6 +136,97 @@ $checks = array(
     'interrupted active and archived uploads recover to queue' =>
         str_contains($store, 'recoverInterruptedActiveUploads')
         && str_contains($store, 'Upload was interrupted and has been queued for recovery.'),
+    'malformed archive records are isolated and raw evidence is quarantined' =>
+        str_contains($store, 'CVRArchiveRecordRecovery.records(in: sourceData)')
+        && str_contains($store, 'decoder.decode(CVRWorkflowArchiveRecord.self, from: rawRecord)')
+        && str_contains($store, 'quarantineArchiveRecord(')
+        && str_contains($store, 'rawRecord.write(to: evidenceURL, options: [.atomic])')
+        && str_contains($store, 'archiveRewriteSafe')
+        && strpos($store, 'quarantineArchiveRecord(') < strpos($store, 'try saveArchives(recovered)'),
+    'archive failure cannot suppress active workflow loading' =>
+        str_contains($store, 'Historical workflow archive recovery failed:')
+        && str_contains($store, 'Active workflow recovery failed:')
+        && strpos($store, 'diagnostics.append(contentsOf: try loadArchives())')
+            < strpos($store, 'let url = try storeURL()'),
+    'failed flight component cannot stop later queued flights' =>
+        str_contains($upload, 'for component in components')
+        && str_contains($upload, 'workflow.recordWorkflowUploadFailure(')
+        && str_contains($store, 'state = .failed')
+        && !str_contains($upload, 'break uploadQueue'),
+    'same-process orphaned workflow uploads recover without disturbing active tasks' =>
+        str_contains($store, 'func recoverOrphanedUploads(activeComponentIDs: Set<String>)')
+        && str_contains($store, '!activeComponentIDs.contains')
+        && str_contains($coordinator, 'activeWorkflowUploadIDs')
+        && str_contains(
+            (string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/IPCACVRUnitApp.swift'),
+            'workflowStore.recoverOrphanedUploads'
+        ),
+    'Dispatch verification is atomic with durable server identity and receipt' =>
+        str_contains($store, 'func persistVerifiedDispatch(')
+        && str_contains($store, 'dispatch.serverDispatchID = serverDispatchID')
+        && str_contains($store, 'func persistReconciliationMatch(')
+        && str_contains($upload, 'guard persisted else')
+        && str_contains($upload, 'local receipt persistence will reconcile automatically')
+        && str_contains($upload, 'workflow.persistReconciliationMatch(')
+        && str_contains($upload, 'self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)'),
+    'workflow reconciliation preserves payload and authoritative metadata' =>
+        str_contains($models, 'var requestPayloadSnapshot: Data?')
+        && str_contains($models, 'var authoritativePayloadSHA256: String?')
+        && str_contains($models, 'var canonicalIdentifiers: [String: String]?')
+        && str_contains($store, 'func persistReconciliationMatch(')
+        && str_contains($store, 'hasCompleteVerificationMetadata')
+        && str_contains($upload, 'reconcileWorkflowSync(')
+        && str_contains($upload, 'workflowReconciliationScanInFlight')
+        && !str_contains($upload, 'SHA256.hash(data: snapshot)'),
+    'evidence verification checks durable persistence independently' =>
+        str_contains($store, 'func persistVerifiedWorkflowComponent(')
+        && str_contains($upload, 'workflow.persistVerifiedWorkflowComponent(')
+        && str_contains($upload, 'local metadata persistence will reconcile automatically')
+        && str_contains($upload, 'for item in batch'),
+    'immutable reconciliation conflicts remain technical review only' =>
+        str_contains($upload, 'case .immutableConflict:')
+        && str_contains($upload, 'errorCode: "IMMUTABLE_CONFLICT"')
+        && str_contains($store, 'component.userActionRequired = errorCode == "USER_CORRECTION_REQUIRED"')
+        && str_contains($store, '$0.errorCode != "IMMUTABLE_CONFLICT"'),
+    'routine scans cannot bypass reconciliation-required components' =>
+        str_contains($upload, 'let reconciliationBlockedIDs = Set(allReconciliationComponents.map(\.id))')
+        && str_contains($upload, 'if reconciliationBlockedIDs.contains(component.id)')
+        && str_contains($upload, 'continue')
+        && str_contains($upload, 'case .notFound:')
+        && str_contains($upload, 'reconciliationRequired: false'),
+    'payload snapshots are byte-bounded and exclude media content' =>
+        str_contains($store, 'static let maximumRequestPayloadSnapshotBytes = 256 * 1024')
+        && str_contains($store, 'payload.count <= Self.maximumRequestPayloadSnapshotBytes')
+        && str_contains($store, 'operational evidence was preserved without the oversized snapshot')
+        && str_contains($upload, 'maximumRequestPayloadSnapshotBytes')
+        && !str_contains($upload, 'SHA256.hash(data: snapshot)'),
+    'crew-correctable reconciliation statuses remain distinct from immutable conflicts' =>
+        str_contains($upload, 'case .userCorrectionRequired:')
+        && str_contains($upload, 'errorCode: "USER_CORRECTION_REQUIRED"')
+        && str_contains($upload, 'state: .needsUserAction')
+        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/APIClient.swift'), 'case userCorrectionRequired = "USER_CORRECTION_REQUIRED"'),
+    'restart recovery reconciles incomplete accepted metadata' =>
+        str_contains($store, 'recoverIncompleteActiveVerificationMetadata')
+        && str_contains($store, 'component.state == .serverVerified && !Self.hasCompleteVerificationMetadata(component)')
+        && str_contains($store, 'component.attemptCount > 0')
+        && str_contains($store, 'component.reconciliationRequired = true'),
+    'reconciliation outcomes remain item scoped and retryable where required' =>
+        str_contains($upload, 'case .notFound:')
+        && str_contains($upload, 'reconciliationRequired: false')
+        && str_contains($upload, 'case .dependencyNotReady, .temporaryTechnicalFailure:')
+        && str_contains($upload, 'deferredWorkflowReconciliationIDs.insert(result.itemID)')
+        && str_contains($upload, 'applyReconciliationResult(result, workflow: workflow)'),
+    'Phase 1B authentication gate also controls reconciliation probes' =>
+        str_contains($upload, 'let reconciliationIsAuthenticationProbe = workflowSyncAuthenticationPaused')
+        && str_contains($upload, 'trigger.permitsAuthenticationProbe')
+        && str_contains($upload, 'activeWorkflowAuthenticationRequestIDs.isEmpty')
+        && str_contains($upload, 'let mayStartReconciliation = !workflowSyncAuthenticationPaused')
+        && str_contains($upload, 'workflowAuthenticationProbeInFlight = true'),
+    'deferred reconciliation does not hammer while Garmin and recording remain independent' =>
+        str_contains($upload, 'private var deferredWorkflowReconciliationIDs: Set<String> = []')
+        && str_contains($upload, 'if trigger != .routine')
+        && str_contains($upload, 'component.componentType != "garmin_csv"')
+        && str_contains($upload, 'func uploadPending(store: RecordingStore'),
 );
 
 $failed = array();

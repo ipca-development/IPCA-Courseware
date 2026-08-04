@@ -152,6 +152,10 @@ struct DispatchSyncResponse: Codable {
     var continuityWarnings: [String]?
     var dispatch: ServerDispatch?
     var receipt: Receipt?
+    var errorCode: String?
+    var retryable: Bool?
+    var userActionRequired: Bool?
+    var requestID: String?
     var error: String?
 
     enum CodingKeys: String, CodingKey {
@@ -160,6 +164,10 @@ struct DispatchSyncResponse: Codable {
         case continuityWarnings = "continuity_warnings"
         case dispatch
         case receipt
+        case errorCode = "error_code"
+        case retryable
+        case userActionRequired = "user_action_required"
+        case requestID = "request_id"
         case error
     }
 }
@@ -168,12 +176,164 @@ struct WorkflowEvidenceSyncResponse: Codable {
     var ok: Bool
     var alreadyPresent: Bool?
     var receipt: DispatchSyncResponse.Receipt?
+    var errorCode: String?
+    var retryable: Bool?
+    var userActionRequired: Bool?
+    var requestID: String?
+    var canonicalIdentifiers: [String: APIJSONValue]?
     var error: String?
 
     enum CodingKeys: String, CodingKey {
         case ok
         case alreadyPresent = "already_present"
         case receipt
+        case errorCode = "error_code"
+        case retryable
+        case userActionRequired = "user_action_required"
+        case requestID = "request_id"
+        case canonicalIdentifiers = "canonical_identifiers"
+        case error
+    }
+}
+
+enum APIJSONValue: Codable, Equatable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: APIJSONValue])
+    case array([APIJSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([String: APIJSONValue].self) {
+            self = .object(value)
+        } else {
+            self = .array(try container.decode([APIJSONValue].self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+
+    var stringValue: String? {
+        switch self {
+        case .string(let value):
+            return value
+        case .number(let value):
+            return value.rounded() == value ? String(Int64(value)) : String(value)
+        case .bool(let value):
+            return String(value)
+        case .object, .array, .null:
+            return nil
+        }
+    }
+}
+
+struct WorkflowReconciliationRequest: Codable {
+    var items: [WorkflowReconciliationRequestItem]
+}
+
+struct WorkflowReconciliationRequestItem: Codable {
+    var itemID: String
+    var componentType: String
+    var dispatchUUID: String
+    var dispatchVersion: Int?
+    var flightRecordUUID: String
+    var componentUUID: String?
+    var payload: [String: APIJSONValue]
+
+    enum CodingKeys: String, CodingKey {
+        case itemID = "item_id"
+        case componentType = "component_type"
+        case dispatchUUID = "dispatch_uuid"
+        case dispatchVersion = "dispatch_version"
+        case flightRecordUUID = "flight_record_uuid"
+        case componentUUID = "component_uuid"
+        case payload
+    }
+}
+
+struct WorkflowReconciliationResponse: Codable {
+    var ok: Bool
+    var requestID: String?
+    var results: [WorkflowReconciliationResult]
+    var errorCode: String?
+    var retryable: Bool?
+    var userActionRequired: Bool?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case requestID = "request_id"
+        case results
+        case errorCode = "error_code"
+        case retryable
+        case userActionRequired = "user_action_required"
+        case error
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
+        results = try container.decodeIfPresent([WorkflowReconciliationResult].self, forKey: .results) ?? []
+        errorCode = try container.decodeIfPresent(String.self, forKey: .errorCode)
+        retryable = try container.decodeIfPresent(Bool.self, forKey: .retryable)
+        userActionRequired = try container.decodeIfPresent(Bool.self, forKey: .userActionRequired)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
+struct WorkflowReconciliationResult: Codable {
+    enum Status: String, Codable {
+        case verifiedMatch = "VERIFIED_MATCH"
+        case notFound = "NOT_FOUND"
+        case immutableConflict = "IMMUTABLE_CONFLICT"
+        case userCorrectionRequired = "USER_CORRECTION_REQUIRED"
+        case dependencyNotReady = "DEPENDENCY_NOT_READY"
+        case authenticationRequired = "AUTHENTICATION_REQUIRED"
+        case temporaryTechnicalFailure = "TEMPORARY_TECHNICAL_FAILURE"
+    }
+
+    var itemID: String
+    var componentType: String
+    var status: Status
+    var receiptID: String?
+    var receivedAt: String?
+    var payloadSHA256: String?
+    var canonicalIdentifiers: [String: APIJSONValue]?
+    var retryable: Bool?
+    var userActionRequired: Bool?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case itemID = "item_id"
+        case componentType = "component_type"
+        case status
+        case receiptID = "receipt_id"
+        case receivedAt = "received_at"
+        case payloadSHA256 = "payload_sha256"
+        case canonicalIdentifiers = "canonical_identifiers"
+        case retryable
+        case userActionRequired = "user_action_required"
         case error
     }
 }
@@ -263,9 +423,37 @@ struct CvrCsvFinalizeResponse: Codable {
     }
 }
 
+struct APISynchronizationFailure: Decodable, Equatable {
+    var errorCode: String
+    var error: String
+    var retryable: Bool
+    var userActionRequired: Bool
+    var requestID: String?
+    var receiptID: String?
+    var serverDispatchID: Int?
+    var dispatchUUID: String?
+    var flightRecordUUID: String?
+    var componentUUID: String?
+    var httpStatus: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case errorCode = "error_code"
+        case error
+        case retryable
+        case userActionRequired = "user_action_required"
+        case requestID = "request_id"
+        case receiptID = "receipt_id"
+        case serverDispatchID = "server_dispatch_id"
+        case dispatchUUID = "dispatch_uuid"
+        case flightRecordUUID = "flight_record_uuid"
+        case componentUUID = "component_uuid"
+    }
+}
+
 enum APIClientError: LocalizedError {
     case invalidServerURL
     case badResponse(String)
+    case synchronization(APISynchronizationFailure)
     case invalidJSON(String)
     case missingRecordingFile
 
@@ -273,6 +461,7 @@ enum APIClientError: LocalizedError {
         switch self {
         case .invalidServerURL: "Server URL is invalid."
         case .badResponse(let message): message
+        case .synchronization(let failure): failure.error
         case .invalidJSON(let message): message
         case .missingRecordingFile: "Recording file is missing."
         }
@@ -464,6 +653,8 @@ struct APIClient {
         request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        let dispatchPayload = payload["dispatch"] as? [String: Any]
+        request.setValue(dispatchPayload?["id"] as? String, forHTTPHeaderField: "X-IPCA-Request-ID")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
@@ -477,10 +668,27 @@ struct APIClient {
         request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue(payload["component_uuid"] as? String, forHTTPHeaderField: "X-IPCA-Request-ID")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(WorkflowEvidenceSyncResponse.self, from: data, response: response)
+    }
+
+    func reconcileWorkflowSync(
+        request reconciliationRequest: WorkflowReconciliationRequest,
+        credential: String
+    ) async throws -> WorkflowReconciliationResponse {
+        let url = serverURL.appending(path: "api/cvr/sync_reconcile.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(reconciliationRequest)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(WorkflowReconciliationResponse.self, from: data, response: response)
     }
 
     func knownGarminCsvHashes(sha256List: [String], aircraftRegistration: String, credential: String) async throws -> CvrCsvKnownHashesResponse {
@@ -597,6 +805,10 @@ struct APIClient {
     private func validate(response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         if http.statusCode >= 400 {
+            if var failure = try? JSONDecoder().decode(APISynchronizationFailure.self, from: data) {
+                failure.httpStatus = http.statusCode
+                throw APIClientError.synchronization(failure)
+            }
             throw APIClientError.badResponse("HTTP \(http.statusCode): \(responsePreview(data))")
         }
     }

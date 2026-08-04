@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
+require_once __DIR__ . '/CvrSyncException.php';
 
 final class CvrDispatchIntakeService
 {
@@ -17,16 +18,11 @@ final class CvrDispatchIntakeService
     public function receive(array $payload, array $device): array
     {
         $this->requireSchema();
-        $normalized = $this->normalizeAndValidate($payload, $device);
-        $continuityWarnings = is_array($normalized['continuity_warnings'] ?? null)
-            ? array_values($normalized['continuity_warnings'])
-            : array();
-        unset($normalized['continuity_warnings']);
-        if ($normalized['scheduler_record_id'] === '') {
-            $normalized['scheduler_record_id'] = $this->resolveUnambiguousScheduledRecordId($normalized);
-        }
-        $canonicalJson = AuditEventService::jsonEncode($this->canonicalize($normalized));
-        $payloadSha256 = hash('sha256', $canonicalJson);
+        $canonicalPayload = $this->canonicalPayload($payload, $device);
+        $normalized = $canonicalPayload['normalized'];
+        $continuityWarnings = $canonicalPayload['continuity_warnings'];
+        $canonicalJson = $canonicalPayload['payload_json'];
+        $payloadSha256 = $canonicalPayload['payload_sha256'];
         $verifiedPayloadSha256 = $payloadSha256;
         $deviceId = (int)$device['id'];
         $organizationId = max(1, (int)($device['organization_id'] ?? 1));
@@ -36,10 +32,10 @@ final class CvrDispatchIntakeService
             $dispatch = $this->lockDispatch($normalized['dispatch_uuid']);
             if (is_array($dispatch)) {
                 if ((int)$dispatch['device_id'] !== $deviceId) {
-                    throw new RuntimeException('Dispatch UUID is already owned by another CVR device.');
+                    throw new CvrTechnicalReviewRequired('Dispatch identity requires technical review.');
                 }
                 if (strtolower((string)$dispatch['workflow_flight_record_uuid']) !== $normalized['flight_record_uuid']) {
-                    throw new RuntimeException('Dispatch UUID is already linked to another Flight Record.');
+                    throw new CvrTechnicalReviewRequired('Dispatch identity requires technical review.');
                 }
                 $dispatchId = (int)$dispatch['id'];
             } else {
@@ -49,7 +45,7 @@ final class CvrDispatchIntakeService
             if (is_array($dispatch)) {
                 $existingSchedulerId = trim((string)($dispatch['scheduler_record_id'] ?? ''));
                 if ($existingSchedulerId !== '' && $existingSchedulerId !== $normalized['scheduler_record_id']) {
-                    throw new RuntimeException('Dispatch UUID is already linked to another schedule slot.');
+                    throw new CvrTechnicalReviewRequired('Dispatch schedule linkage requires technical review.');
                 }
                 $this->claimScheduledSlot($normalized, $device);
             }
@@ -62,11 +58,12 @@ final class CvrDispatchIntakeService
                         (string)($existingVersion['payload_json'] ?? ''),
                         $canonicalJson
                     )) {
-                        throw new RuntimeException('Dispatch version conflict: this version was already received with different content.');
+                        throw new CvrTechnicalReviewRequired('Dispatch version conflict requires technical review.');
                     }
                 }
                 $receiptUuid = (string)$existingVersion['receipt_uuid'];
                 $verifiedPayloadSha256 = (string)$existingVersion['payload_sha256'];
+                $receivedAt = (string)$existingVersion['received_at'];
             } else {
                 $receiptUuid = AuditEventService::uuid();
                 $this->insertVersion(
@@ -77,6 +74,11 @@ final class CvrDispatchIntakeService
                     $payloadSha256,
                     $canonicalJson
                 );
+                $insertedVersion = $this->dispatchVersion($dispatchId, $normalized['dispatch_version']);
+                if (!is_array($insertedVersion)) {
+                    throw new CvrTemporaryTechnicalFailure('Dispatch receipt metadata is temporarily unavailable.');
+                }
+                $receivedAt = (string)$insertedVersion['received_at'];
                 $this->insertConsents($dispatchId, $normalized);
             }
 
@@ -119,7 +121,24 @@ final class CvrDispatchIntakeService
 
         return array(
             'ok' => true,
+            'error_code' => $alreadyPresent ? 'DUPLICATE_ALREADY_VERIFIED' : null,
+            'error' => null,
+            'retryable' => false,
+            'user_action_required' => false,
             'already_present' => $alreadyPresent,
+            'receipt_id' => $receiptUuid,
+            'server_dispatch_id' => $dispatchId,
+            'dispatch_uuid' => $normalized['dispatch_uuid'],
+            'dispatch_version' => $normalized['dispatch_version'],
+            'flight_record_uuid' => $normalized['flight_record_uuid'],
+            'payload_sha256' => $verifiedPayloadSha256,
+            'received_at' => $receivedAt,
+            'canonical_identifiers' => array(
+                'server_dispatch_id' => (string)$dispatchId,
+                'dispatch_uuid' => $normalized['dispatch_uuid'],
+                'dispatch_version' => (string)$normalized['dispatch_version'],
+                'flight_record_uuid' => $normalized['flight_record_uuid'],
+            ),
             'continuity_warnings' => $continuityWarnings,
             'dispatch' => array(
                 'id' => $dispatchId,
@@ -132,8 +151,39 @@ final class CvrDispatchIntakeService
                 'receipt_id' => $receiptUuid,
                 'component_type' => 'dispatch_metadata',
                 'payload_sha256' => $verifiedPayloadSha256,
-                'server_verified_at' => gmdate('c'),
+                'server_verified_at' => $receivedAt,
             ),
+        );
+    }
+
+    /**
+     * The single authoritative Dispatch canonicalization path used by intake and reconciliation.
+     *
+     * @param array<string,mixed> $payload
+     * @param array<string,mixed> $device
+     * @return array{
+     *   normalized:array<string,mixed>,
+     *   continuity_warnings:list<mixed>,
+     *   payload_json:string,
+     *   payload_sha256:string
+     * }
+     */
+    public function canonicalPayload(array $payload, array $device): array
+    {
+        $normalized = $this->normalizeAndValidate($payload, $device);
+        $continuityWarnings = is_array($normalized['continuity_warnings'] ?? null)
+            ? array_values($normalized['continuity_warnings'])
+            : array();
+        unset($normalized['continuity_warnings']);
+        if ($normalized['scheduler_record_id'] === '') {
+            $normalized['scheduler_record_id'] = $this->resolveUnambiguousScheduledRecordId($normalized);
+        }
+        $canonicalJson = AuditEventService::jsonEncode($this->canonicalize($normalized));
+        return array(
+            'normalized' => $normalized,
+            'continuity_warnings' => $continuityWarnings,
+            'payload_json' => $canonicalJson,
+            'payload_sha256' => hash('sha256', $canonicalJson),
         );
     }
 
@@ -166,49 +216,49 @@ final class CvrDispatchIntakeService
         $fuelOnboard = trim((string)($dispatch['fuel_onboard'] ?? ''));
 
         if (!$this->isUuid($dispatchUuid) || !$this->isUuid($flightRecordUuid)) {
-            throw new RuntimeException('Valid Dispatch and Flight Record UUIDs are required.');
+            throw new CvrUserCorrectionRequired('Valid Dispatch and Flight Record UUIDs are required.');
         }
         if ($dispatchVersion <= 0) {
-            throw new RuntimeException('Dispatch version is required.');
+            throw new CvrUserCorrectionRequired('Dispatch version is required.');
         }
         if ($scheduledDate === '' || DateTimeImmutable::createFromFormat('!Y-m-d', $scheduledDate) === false) {
-            throw new RuntimeException('Valid Dispatch scheduled date is required.');
+            throw new CvrUserCorrectionRequired('Valid Dispatch scheduled date is required.');
         }
         if ($missionCode === '' || $crew === array() || $startingHobbs === null || $startingTacho === null
             || $fuelOnboard === '' || ($oilPercentage === null && $oilQuantity === null)) {
-            throw new RuntimeException('Dispatch is incomplete and cannot be synchronized.');
+            throw new CvrUserCorrectionRequired('Dispatch is incomplete and cannot be synchronized.');
         }
         if (($oilPercentage !== null && ($oilPercentage < 0 || $oilPercentage > 100))
             || $oilQuantity !== null && ($oilQuantity < 0 || $oilUnit === '')
             || $startingHobbs < 0 || $startingTacho < 0) {
-            throw new RuntimeException('Dispatch meter or oil values are invalid.');
+            throw new CvrUserCorrectionRequired('Dispatch meter or oil values are invalid.');
         }
         if ($oilQuantity === null && $oilUnit !== '') {
-            throw new RuntimeException('Oil quantity is required when an oil unit is provided.');
+            throw new CvrUserCorrectionRequired('Oil quantity is required when an oil unit is provided.');
         }
         if ($schedulerRecordId !== '' && !$this->isUuid($schedulerRecordId)) {
-            throw new RuntimeException('scheduler_record_id must be a valid UUID.');
+            throw new CvrUserCorrectionRequired('scheduler_record_id must be a valid UUID.');
         }
 
         $deviceTail = self::normalizeTailRegistration((string)($device['aircraft_registration'] ?? ''));
         $tailNumber = self::normalizeTailRegistration($tailNumber);
         if ($deviceTail === '' || $tailNumber === '' || $deviceTail !== $tailNumber) {
-            throw new RuntimeException('Dispatch tail number does not match the enrolled CVR device.');
+            throw new CvrUserCorrectionRequired('Dispatch tail number does not match the enrolled CVR device.');
         }
         $deviceAircraftId = isset($device['aircraft_id']) ? (int)$device['aircraft_id'] : 0;
         if ($deviceAircraftId > 0 && ($aircraftId ?? 0) !== $deviceAircraftId) {
-            throw new RuntimeException('Dispatch aircraft does not match the enrolled CVR device.');
+            throw new CvrUserCorrectionRequired('Dispatch aircraft does not match the enrolled CVR device.');
         }
 
         $normalizedCrew = array();
         foreach ($crew as $member) {
             if (!is_array($member)) {
-                throw new RuntimeException('Dispatch crew entry is invalid.');
+                throw new CvrUserCorrectionRequired('Dispatch crew entry is invalid.');
             }
             $name = trim((string)($member['person_name'] ?? ''));
             $role = trim((string)($member['role'] ?? ''));
             if ($name === '' || $role === '' || $role === 'unknown') {
-                throw new RuntimeException('Dispatch crew name and role are required.');
+                throw new CvrUserCorrectionRequired('Dispatch crew name and role are required.');
             }
             $normalizedCrew[] = array(
                 'id' => strtolower(trim((string)($member['id'] ?? ''))),
@@ -221,14 +271,14 @@ final class CvrDispatchIntakeService
         $normalizedConsents = array();
         foreach ($consents as $consent) {
             if (!is_array($consent)) {
-                throw new RuntimeException('Dispatch consent entry is invalid.');
+                throw new CvrUserCorrectionRequired('Dispatch consent entry is invalid.');
             }
             $consentUuid = strtolower(trim((string)($consent['id'] ?? '')));
             $consentDispatchUuid = strtolower(trim((string)($consent['dispatch_id'] ?? '')));
             $consentVersion = (int)($consent['dispatch_version'] ?? 0);
             $consentResult = filter_var($consent['consent_result'] ?? false, FILTER_VALIDATE_BOOL);
             if (!$this->isUuid($consentUuid) || $consentDispatchUuid !== $dispatchUuid || $consentVersion !== $dispatchVersion || !$consentResult) {
-                throw new RuntimeException('Dispatch consent is invalid, declined, or stale.');
+                throw new CvrUserCorrectionRequired('Dispatch consent is invalid, declined, or stale.');
             }
             $normalizedConsents[] = array(
                 'id' => $consentUuid,
@@ -255,7 +305,7 @@ final class CvrDispatchIntakeService
                 }
             }
             if (!$hasConsent) {
-                throw new RuntimeException('Accepted current-version consent is required for every crew member.');
+                throw new CvrUserCorrectionRequired('Accepted current-version consent is required for every crew member.');
             }
         }
 
@@ -411,7 +461,7 @@ final class CvrDispatchIntakeService
         $statement->execute(array($schedulerRecordId));
         $slot = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($slot)) {
-            throw new RuntimeException('Scheduled session does not exist.');
+            throw new CvrDependencyNotReady('Scheduled session linkage is not available yet.');
         }
         $claimedDispatch = strtolower(trim((string)($slot['claimed_dispatch_uuid'] ?? '')));
         if ((string)$slot['status'] === 'completed'
@@ -419,28 +469,28 @@ final class CvrDispatchIntakeService
             return;
         }
         if (in_array((string)$slot['status'], array('cancelled', 'completed'), true)) {
-            throw new RuntimeException('Scheduled session is not available for Dispatch.');
+            throw new CvrUserCorrectionRequired('Scheduled session is not available for Dispatch.');
         }
         if ($claimedDispatch !== '' && $claimedDispatch !== $normalized['dispatch_uuid']) {
-            throw new RuntimeException('Scheduled session has already been claimed by another Dispatch.');
+            throw new CvrTechnicalReviewRequired('Scheduled session linkage requires technical review.');
         }
         $deviceAircraftId = (int)($device['aircraft_id'] ?? 0);
         if ((int)$slot['aircraft_id'] !== $deviceAircraftId
             || (int)$slot['aircraft_id'] !== (int)($normalized['aircraft_id'] ?? 0)
             || self::normalizeTailRegistration((string)$slot['aircraft_registration']) !== $normalized['aircraft_registration']) {
-            throw new RuntimeException('Scheduled session aircraft does not match the authenticated Dispatch aircraft.');
+            throw new CvrUserCorrectionRequired('Scheduled session aircraft does not match the authenticated Dispatch aircraft.');
         }
         if ((string)$slot['scheduled_date'] !== $normalized['scheduled_date']) {
-            throw new RuntimeException('Scheduled session date does not match the Dispatch.');
+            throw new CvrUserCorrectionRequired('Scheduled session date does not match the Dispatch.');
         }
         $slotMission = trim((string)($slot['mission_code'] ?? ''));
         if ($slotMission !== '' && strcasecmp($slotMission, (string)$normalized['mission_code']) !== 0) {
-            throw new RuntimeException('Scheduled session mission does not match the Dispatch.');
+            throw new CvrUserCorrectionRequired('Scheduled session mission does not match the Dispatch.');
         }
         foreach (array('planned_departure_airport', 'planned_destination_airport') as $field) {
             $scheduledAirport = strtoupper(trim((string)($slot[$field] ?? '')));
             if ($scheduledAirport !== '' && $scheduledAirport !== (string)$normalized[$field]) {
-                throw new RuntimeException('Scheduled session airports do not match the Dispatch.');
+                throw new CvrUserCorrectionRequired('Scheduled session airports do not match the Dispatch.');
             }
         }
         $crewStatement = $this->pdo->prepare(
@@ -461,7 +511,7 @@ final class CvrDispatchIntakeService
                 }
             }
             if (!$matched) {
-                throw new RuntimeException('Scheduled session crew does not match the Dispatch.');
+                throw new CvrUserCorrectionRequired('Scheduled session crew does not match the Dispatch.');
             }
         }
         $this->pdo->prepare(
@@ -641,7 +691,7 @@ final class CvrDispatchIntakeService
             $existing = $select->fetchColumn();
             if ($existing !== false) {
                 if (!hash_equals(hash('sha256', (string)$existing), hash('sha256', $consentJson))) {
-                    throw new RuntimeException('Consent UUID conflict detected.');
+                    throw new CvrTechnicalReviewRequired('Consent identity conflict requires technical review.');
                 }
                 continue;
             }
@@ -673,7 +723,7 @@ final class CvrDispatchIntakeService
         return is_array($row) ? $row : null;
     }
 
-    private function isRetryEquivalent(string $existingJson, string $incomingJson): bool
+    public function isRetryEquivalent(string $existingJson, string $incomingJson): bool
     {
         $existing = json_decode($existingJson, true);
         $incoming = json_decode($incomingJson, true);
@@ -721,7 +771,7 @@ final class CvrDispatchIntakeService
         foreach (array('ipca_cvr_dispatches', 'ipca_cvr_dispatch_versions', 'ipca_cvr_dispatch_consents') as $table) {
             $stmt = $this->pdo->query("SHOW TABLES LIKE " . $this->pdo->quote($table));
             if ($stmt === false || $stmt->fetchColumn() === false) {
-                throw new RuntimeException('Dispatch intake schema is not installed.');
+                throw new CvrTechnicalReviewRequired('Dispatch synchronization requires a server deployment review.');
             }
         }
     }
@@ -730,7 +780,7 @@ final class CvrDispatchIntakeService
     {
         $timestamp = strtotime(trim($value));
         if ($timestamp === false) {
-            throw new RuntimeException('Dispatch contains an invalid timestamp.');
+            throw new CvrUserCorrectionRequired('Dispatch contains an invalid timestamp.');
         }
         return gmdate('Y-m-d H:i:s.v', $timestamp);
     }

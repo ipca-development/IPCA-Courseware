@@ -56,6 +56,7 @@ final class CVRUnitCoordinator: ObservableObject {
     private var recoveredNextSegmentIndex = 1
     private var recoveredPreviousSegmentEndedAt: Date?
     private var recoveredAudioPrelude: RecoveredAudioPrelude?
+    private var lastNetworkUploadAvailable = false
 
     func bind(
         audio: AudioRecorderManager,
@@ -84,15 +85,25 @@ final class CVRUnitCoordinator: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self, let network = self.network, let settings = self.settings else { return }
-                if network.canUpload(allowCellular: settings.allowCellularUpload),
+                let canUpload = network.canUpload(allowCellular: settings.allowCellularUpload)
+                let networkWasRestored = canUpload && !self.lastNetworkUploadAvailable
+                self.lastNetworkUploadAvailable = canUpload
+                if canUpload,
                    let workflow = self.workflow {
+                    workflow.recoverOrphanedUploads(
+                        activeComponentIDs: self.uploadManager?.activeWorkflowUploadIDs ?? []
+                    )
                     workflow.requeueConnectivityFailedUploads()
                     if let store = self.store {
                         store.repairFlightSessionLinks(workflow.recordingSessionFlightRecordLinks())
                         store.requeueConnectivityFailedUploads()
                     }
                     self.attemptPendingUploads()
-                    self.uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    self.uploadManager?.uploadQueuedWorkflowComponents(
+                        workflow: workflow,
+                        settings: settings,
+                        trigger: networkWasRestored ? .networkRestored : .routine
+                    )
                 }
             }
             .store(in: &cancellables)

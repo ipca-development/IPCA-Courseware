@@ -667,13 +667,13 @@ struct DispatchWorkflowView: View {
                 } else {
                     CVROperationalActionButton(title: "RETRY DISPATCH UPLOAD", subtitle: "Resend failed Dispatch metadata", color: CVROperationalPalette.warning) {
                         workflow.requeueFailedUploads(componentTypes: ["dispatch_metadata"])
-                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                        uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
                     }
                 }
                 if !workflow.failedActiveUploadComponents().isEmpty {
                     CVROperationalActionButton(title: "RETRY ALL FAILED UPLOADS", subtitle: "Dispatch, events, closure, Garmin", color: CVROperationalPalette.warning) {
                         workflow.requeueFailedUploads()
-                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                        uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
                     }
                 }
                 CVROperationalActionButton(title: "EXPORT RECOVERY JSON", subtitle: "Share local flight evidence backup", color: CVROperationalPalette.standby) {
@@ -1378,10 +1378,6 @@ private struct ShutdownVerificationView: View {
     var repairExistingClosureUpload = false
     @State private var endingHobbs = ""
     @State private var endingTacho = ""
-    @State private var fuelRemaining = 0.0
-    @State private var oilRemaining = 0.0
-    @State private var hasFuelSelection = false
-    @State private var hasOilSelection = false
     @State private var verifiedTakeoffs = 0
     @State private var verifiedLandings = 0
     @State private var maintenanceRemark = ""
@@ -1519,21 +1515,6 @@ private struct ShutdownVerificationView: View {
         guard let flightRecord = workflow.state.activeFlightRecord else { return }
         endingHobbs = flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingHobbs.map { String(format: "%.1f", $0) } ?? ""
         endingTacho = flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? workflow.state.activeDispatch?.startingTacho.map { String(format: "%.1f", $0) } ?? ""
-        if let fuel = flightRecord.fuelRemaining.flatMap({ Self.quantity(from: $0, unit: operationalConfig.fuelUnit) }) {
-            fuelRemaining = min(max(fuel, 0), operationalConfig.fuelCapacity)
-            hasFuelSelection = true
-        } else if let startingFuel = workflow.state.activeDispatch?.fuelOnboard,
-                  let fuel = Self.quantity(from: startingFuel, unit: operationalConfig.fuelUnit) {
-            fuelRemaining = min(max(fuel, 0), operationalConfig.fuelCapacity)
-            hasFuelSelection = true
-        }
-        if let oil = flightRecord.effectiveEndingOilQuantity {
-            oilRemaining = min(max(oil, 0), operationalConfig.oilCapacity)
-            hasOilSelection = true
-        } else if let startingOil = workflow.state.activeDispatch?.effectiveStartingOilQuantity {
-            oilRemaining = min(max(startingOil, 0), operationalConfig.oilCapacity)
-            hasOilSelection = true
-        }
         verifiedTakeoffs = flightRecord.verifiedTakeoffCount ?? workflow.operationCounts(for: flightRecord.id).displayTakeoffs
         verifiedLandings = flightRecord.verifiedLandingCount ?? workflow.operationCounts(for: flightRecord.id).displayLandings
         maintenanceRemark = flightRecord.maintenanceRemark ?? ""
@@ -1545,9 +1526,6 @@ private struct ShutdownVerificationView: View {
             saved = workflow.saveFlightClosureValues(
                 endingHobbs: Double(endingHobbs),
                 endingTacho: Double(endingTacho),
-                fuelRemaining: String(format: "%.1f", fuelRemaining),
-                endingOilQuantity: oilRemaining,
-                endingOilUnit: operationalConfig.oilUnit,
                 verifiedTakeoffCount: verifiedTakeoffs,
                 verifiedLandingCount: verifiedLandings,
                 maintenanceRemark: maintenanceRemark,
@@ -1558,9 +1536,6 @@ private struct ShutdownVerificationView: View {
             saved = workflow.recordShutdownVerification(
                 endingHobbs: Double(endingHobbs),
                 endingTacho: Double(endingTacho),
-                fuelRemaining: String(format: "%.1f", fuelRemaining),
-                endingOilQuantity: oilRemaining,
-                endingOilUnit: operationalConfig.oilUnit,
                 verifiedTakeoffCount: verifiedTakeoffs,
                 verifiedLandingCount: verifiedLandings,
                 maintenanceRemark: maintenanceRemark,
@@ -1570,17 +1545,6 @@ private struct ShutdownVerificationView: View {
         return saved
     }
 
-    private var operationalConfig: AircraftOperationalConfig {
-        settings.selectedAircraft?.operationalConfig ?? .safeDefaults
-    }
-
-    private static func quantity(from value: String, unit: String) -> Double? {
-        let cleaned = value
-            .replacingOccurrences(of: unit, with: "", options: .caseInsensitive)
-            .replacingOccurrences(of: "USG", with: "", options: .caseInsensitive)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return Double(cleaned)
-    }
 }
 
 struct GarminWorkflowView: View {
@@ -1636,11 +1600,11 @@ struct GarminWorkflowView: View {
                                 workflow.selectTab(.dispatch)
                             } else if workflow.dispatchUploadFailure() != nil || !workflow.failedActiveUploadComponents().isEmpty {
                                 workflow.requeueFailedUploads()
-                                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
                             } else if allWorkflowComponentsVerified {
                                 workflow.resetForNextFlightIfComplete()
                             } else {
-                                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
                             }
                         }
                     }
@@ -2161,7 +2125,7 @@ private struct FlightLogView: View {
                                     Task { await flightLogs.refresh(settings: settings) }
                                 } else {
                                     workflow.requeueFailedUploads()
-                                    uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                                    uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
                                 }
                             }
                         }
@@ -2454,7 +2418,7 @@ private struct FlightLogView: View {
 
     private func retryLogUpload(_ entry: CVRFlightLogEntry) {
         workflow.requeueFailedUploads(forFlightRecordID: entry.flightRecordID)
-        uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+        uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
         for recording in linkedRecordings(forFlightRecordID: entry.flightRecordID) {
             let needsFlightRelink = recording.flightSessionID != entry.flightRecordID
             recordingStore.update(recording.id) {

@@ -123,13 +123,20 @@ struct IPCACVRUnitApp: App {
                         coordinator.appEnteredBackground()
                     case .active:
                         coordinator.appWillEnterForeground()
+                        workflowStore.recoverOrphanedUploads(
+                            activeComponentIDs: uploadManager.activeWorkflowUploadIDs
+                        )
                         if network.canUpload(allowCellular: settings.allowCellularUpload) {
                             recordingStore.repairFlightSessionLinks(workflowStore.recordingSessionFlightRecordLinks())
                             recordingStore.requeueConnectivityFailedUploads()
                             workflowStore.requeueConnectivityFailedUploads()
                             uploadManager.uploadPending(store: recordingStore, settings: settings, network: network)
                         }
-                        uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
+                        uploadManager.uploadQueuedWorkflowComponents(
+                            workflow: workflowStore,
+                            settings: settings,
+                            trigger: .appForeground
+                        )
                         Task {
                             await scheduledSessions.refresh(settings: settings)
                             await flightLogs.refresh(settings: settings)
