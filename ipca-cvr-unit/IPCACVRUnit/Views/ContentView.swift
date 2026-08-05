@@ -265,6 +265,7 @@ private struct AdminSettingsView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var garminVault: GarminCsvVaultStore
     @EnvironmentObject private var sdRecovery: GarminSDCardRecoveryService
+    @EnvironmentObject private var scheduledSessions: ScheduledSessionsStore
 
     @State private var showGarminFolderPicker = false
 
@@ -286,6 +287,8 @@ private struct AdminSettingsView: View {
                     Button("Enroll CVR Unit") {
                         Task {
                             if await settings.enrollDevice() {
+                                scheduledSessions.clearCache()
+                                await scheduledSessions.refresh(settings: settings)
                                 uploadManager.uploadQueuedWorkflowComponents(
                                     workflow: workflow,
                                     settings: settings,

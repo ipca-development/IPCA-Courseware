@@ -499,18 +499,7 @@ final class CvrDispatchIntakeService
         );
         $crewStatement->execute(array((int)$slot['id']));
         foreach ($crewStatement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $scheduledCrew) {
-            $matched = false;
-            foreach ($normalized['crew'] as $dispatchCrew) {
-                $samePerson = ($scheduledCrew['user_id'] !== null
-                        && (int)$scheduledCrew['user_id'] === (int)($dispatchCrew['person_id'] ?? 0))
-                    || ($scheduledCrew['user_id'] === null
-                        && strcasecmp((string)$scheduledCrew['person_name_snapshot'], (string)$dispatchCrew['person_name']) === 0);
-                if ($samePerson && strcasecmp((string)$scheduledCrew['crew_role'], (string)$dispatchCrew['role']) === 0) {
-                    $matched = true;
-                    break;
-                }
-            }
-            if (!$matched) {
+            if (!$this->dispatchCrewMatchesScheduledMember($normalized['crew'], $scheduledCrew)) {
                 throw new CvrUserCorrectionRequired('Scheduled session crew does not match the Dispatch.');
             }
         }
@@ -531,6 +520,40 @@ final class CvrDispatchIntakeService
             $normalized['dispatch_uuid'],
             (int)$slot['id'],
         ));
+    }
+
+    /**
+     * Match scheduled crew to Dispatch crew by person id when both are present,
+     * otherwise by normalized name. Role must still match.
+     *
+     * @param list<array<string,mixed>> $dispatchCrew
+     * @param array<string,mixed> $scheduledCrew
+     */
+    private function dispatchCrewMatchesScheduledMember(array $dispatchCrew, array $scheduledCrew): bool
+    {
+        $scheduledUserId = isset($scheduledCrew['user_id']) && $scheduledCrew['user_id'] !== '' && $scheduledCrew['user_id'] !== null
+            ? (int)$scheduledCrew['user_id']
+            : 0;
+        $scheduledName = strtolower(trim((string)($scheduledCrew['person_name_snapshot'] ?? '')));
+        $scheduledRole = strtolower(trim((string)($scheduledCrew['crew_role'] ?? '')));
+        foreach ($dispatchCrew as $member) {
+            if (!is_array($member)) {
+                continue;
+            }
+            $dispatchRole = strtolower(trim((string)($member['role'] ?? '')));
+            if ($scheduledRole !== '' && $dispatchRole !== $scheduledRole) {
+                continue;
+            }
+            $dispatchPersonId = isset($member['person_id']) ? (int)$member['person_id'] : 0;
+            if ($scheduledUserId > 0 && $dispatchPersonId > 0 && $scheduledUserId === $dispatchPersonId) {
+                return true;
+            }
+            $dispatchName = strtolower(trim((string)($member['person_name'] ?? '')));
+            if ($scheduledName !== '' && $dispatchName !== '' && $scheduledName === $dispatchName) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @param array<string,mixed> $normalized */

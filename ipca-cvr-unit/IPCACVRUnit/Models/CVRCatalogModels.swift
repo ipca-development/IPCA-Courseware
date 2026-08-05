@@ -420,6 +420,32 @@ final class ScheduledSessionsStore: ObservableObject {
         }
     }
 
+    /// Drop cached rows that do not belong to the enrolled aircraft.
+    func filterToAircraft(id: Int?, registration: String?) {
+        guard let id, id > 0 else { return }
+        let normalizedTail = registration?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() ?? ""
+        let filtered = sessions.filter {
+            $0.aircraftID == id
+                || (!$0.aircraftRegistration.isEmpty
+                    && $0.aircraftRegistration
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .uppercased() == normalizedTail)
+        }
+        if filtered.count != sessions.count {
+            sessions = filtered
+            try? JSONEncoder().encode(sessions).write(to: cacheURL(), options: [.atomic])
+        }
+    }
+
+    func clearCache() {
+        sessions = []
+        if let url = try? cacheURL() {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     func refresh(settings: SettingsStore) async {
         guard let serverURL = settings.normalizedServerURL else {
             lastError = "Server URL is invalid."
@@ -436,11 +462,17 @@ final class ScheduledSessionsStore: ObservableObject {
             guard response.ok else {
                 throw APIClientError.badResponse(response.error ?? "Could not load scheduled flights.")
             }
+            // Server already scopes by enrolled device aircraft. Replace cache entirely.
             sessions = response.sessions
             try JSONEncoder().encode(sessions).write(to: cacheURL(), options: [.atomic])
             lastError = ""
         } catch {
             lastError = error.localizedDescription
+            // Keep only same-aircraft rows from any stale cache while offline.
+            filterToAircraft(
+                id: settings.selectedAircraft?.id,
+                registration: settings.selectedAircraft?.registration
+            )
         }
     }
 

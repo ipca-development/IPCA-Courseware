@@ -550,17 +550,22 @@ final class CVRWorkflowStore: ObservableObject {
             plannedDepartureAirport: departure,
             plannedDestinationAirport: destination,
             crew: {
+                // Scheduled sessions must keep the online schedule crew for claim validation.
+                // Meter/fuel/oil carryover is separate and must not replace scheduled crew identity.
+                if session != nil {
+                    return (session?.crew ?? []).map { member in
+                        CVRCrewAssignment(
+                            id: UUID().uuidString,
+                            personID: member.personID,
+                            personName: member.personName,
+                            role: Self.crewRole(from: member.role)
+                        )
+                    }
+                }
                 if let carried = previousLegCrewCarryover(for: selectedAircraft.registration), !carried.isEmpty {
                     return Self.remintedCrewAssignments(carried)
                 }
-                return (session?.crew ?? []).map { member in
-                    CVRCrewAssignment(
-                        id: UUID().uuidString,
-                        personID: member.personID,
-                        personName: member.personName,
-                        role: Self.crewRole(from: member.role)
-                    )
-                }
+                return []
             }(),
             startingHobbs: carryover?.endingHobbs,
             startingTacho: carryover?.endingTacho,
@@ -2684,6 +2689,7 @@ final class CVRWorkflowStore: ObservableObject {
             $0.activeDispatch = dispatch
             for index in $0.uploadComponents.indices {
                 guard $0.uploadComponents[index].componentType == "dispatch_metadata" else { continue }
+                $0.uploadComponents[index].requestPayloadSnapshot = nil
                 if $0.uploadComponents[index].state == .failed || $0.uploadComponents[index].state == .needsUserAction {
                     $0.uploadComponents[index].state = .queued
                     $0.uploadComponents[index].lastError = ""
@@ -2692,6 +2698,119 @@ final class CVRWorkflowStore: ObservableObject {
             }
         }
         return true
+    }
+
+    /// Restore Dispatch crew from the matching online scheduled session (fixes carryover overwrite).
+    @discardableResult
+    func repairDispatchCrewFromScheduledSessions(_ sessions: [CVRScheduledSession]) -> Bool {
+        guard let dispatch = state.activeDispatch,
+              let schedulerRecordID = dispatch.schedulerRecordID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !schedulerRecordID.isEmpty else {
+            return false
+        }
+        guard let session = sessions.first(where: {
+            $0.schedulerRecordID.caseInsensitiveCompare(schedulerRecordID) == .orderedSame
+        }) else {
+            return false
+        }
+        let scheduledCrew = session.crew.map { member in
+            CVRCrewAssignment(
+                id: UUID().uuidString,
+                personID: member.personID,
+                personName: member.personName,
+                role: Self.crewRole(from: member.role)
+            )
+        }
+        guard !scheduledCrew.isEmpty else { return false }
+        let currentSignature = dispatch.crew
+            .map { "\($0.personID ?? 0):\($0.personName.lowercased()):\($0.role.rawValue)" }
+            .sorted()
+            .joined(separator: "|")
+        let scheduledSignature = scheduledCrew
+            .map { "\($0.personID ?? 0):\($0.personName.lowercased()):\($0.role.rawValue)" }
+            .sorted()
+            .joined(separator: "|")
+        guard currentSignature != scheduledSignature else { return true }
+
+        return mutate {
+            guard var active = $0.activeDispatch else { return }
+            active.crew = scheduledCrew
+            active.modifiedAt = Date()
+            $0.activeDispatch = active
+            // Phase 3 operational consents must follow repaired crew.
+            $0.consents = Self.ensuredOperationalConsents(
+                for: active,
+                existing: [],
+                deviceID: active.configuredCVRUnitID,
+                appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+            )
+            for index in $0.uploadComponents.indices {
+                guard $0.uploadComponents[index].componentType == "dispatch_metadata" else { continue }
+                $0.uploadComponents[index].requestPayloadSnapshot = nil
+                if $0.uploadComponents[index].state == .failed
+                    || $0.uploadComponents[index].state == .needsUserAction
+                    || $0.uploadComponents[index].state == .queued {
+                    $0.uploadComponents[index].state = .queued
+                    $0.uploadComponents[index].lastError = ""
+                    $0.uploadComponents[index].progress = 0
+                }
+            }
+        }
+    }
+
+    /// Same repair for archived Dispatch rows (Log RETRY path).
+    @discardableResult
+    func repairArchivedDispatchCrewFromScheduledSessions(
+        flightRecordID: String,
+        sessions: [CVRScheduledSession]
+    ) -> Bool {
+        guard let archiveIndex = archives.firstIndex(where: { $0.flightRecord.id == flightRecordID }) else {
+            return false
+        }
+        var archive = archives[archiveIndex]
+        guard let schedulerRecordID = archive.dispatch.schedulerRecordID?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !schedulerRecordID.isEmpty,
+              let session = sessions.first(where: {
+                  $0.schedulerRecordID.caseInsensitiveCompare(schedulerRecordID) == .orderedSame
+              }) else {
+            return false
+        }
+        let scheduledCrew = session.crew.map { member in
+            CVRCrewAssignment(
+                id: UUID().uuidString,
+                personID: member.personID,
+                personName: member.personName,
+                role: Self.crewRole(from: member.role)
+            )
+        }
+        guard !scheduledCrew.isEmpty else { return false }
+        archive.dispatch.crew = scheduledCrew
+        archive.dispatch.modifiedAt = Date()
+        archive.consents = Self.ensuredOperationalConsents(
+            for: archive.dispatch,
+            existing: [],
+            deviceID: archive.dispatch.configuredCVRUnitID,
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        )
+        for index in archive.uploadComponents.indices {
+            guard archive.uploadComponents[index].componentType == "dispatch_metadata" else { continue }
+            archive.uploadComponents[index].requestPayloadSnapshot = nil
+            if archive.uploadComponents[index].state == .failed
+                || archive.uploadComponents[index].state == .needsUserAction {
+                archive.uploadComponents[index].state = .queued
+                archive.uploadComponents[index].lastError = ""
+                archive.uploadComponents[index].progress = 0
+            }
+        }
+        archives[archiveIndex] = archive
+        do {
+            try saveArchives(archives)
+            return true
+        } catch {
+            lastError = "Could not save the repaired Dispatch crew: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func requeueFailedUploads(componentTypes: Set<String>? = nil) {

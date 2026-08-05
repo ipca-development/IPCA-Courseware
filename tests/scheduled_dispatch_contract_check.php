@@ -155,7 +155,13 @@ $checks['resource scheduler migration adds cohort assignment'] = static fn(): bo
     str_contains($resourceMigration, "COLUMN_NAME = 'cohort_id'")
     && str_contains($resourceMigration, 'idx_ipca_flight_schedule_slots_cohort')
     && str_contains($resourceMigration, 'idx_ipca_flight_schedule_slots_aircraft_time');
-
+$checks['scheduled session crew is preferred over carryover'] = static function () use ($iosWorkflow, $dispatchSource, $iosModels): bool {
+    return str_contains($iosWorkflow, 'Scheduled sessions must keep the online schedule crew')
+        && str_contains($iosWorkflow, 'repairDispatchCrewFromScheduledSessions')
+        && str_contains($iosWorkflow, 'repairArchivedDispatchCrewFromScheduledSessions')
+        && str_contains($dispatchSource, 'dispatchCrewMatchesScheduledMember')
+        && str_contains($iosModels, 'filterToAircraft');
+};
 $failed = array();
 foreach ($checks as $name => $scenario) {
     $passed = false;

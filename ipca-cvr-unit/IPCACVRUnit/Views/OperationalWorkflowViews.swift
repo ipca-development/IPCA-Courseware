@@ -3249,6 +3249,7 @@ private struct FlightLogView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var recordingStore: RecordingStore
+    @EnvironmentObject private var sessionsStore: ScheduledSessionsStore
     @State private var isShowingFileImporter = false
     @State private var isShowingGarminAssignment = false
     @State private var isDirectGarminUpload = false
@@ -3665,6 +3666,13 @@ private struct FlightLogView: View {
     }
 
     private func syncPendingLogUploads() {
+        _ = workflow.repairDispatchCrewFromScheduledSessions(sessionsStore.sessions)
+        for entry in displayEntries where logNeedsManualSync(entry) {
+            _ = workflow.repairArchivedDispatchCrewFromScheduledSessions(
+                flightRecordID: entry.flightRecordID,
+                sessions: sessionsStore.sessions
+            )
+        }
         workflow.requeueFailedUploads()
         workflow.requeueConnectivityFailedUploads()
         _ = recordingStore.requeueConnectivityFailedUploads()
@@ -3692,6 +3700,11 @@ private struct FlightLogView: View {
     }
 
     private func syncLogEntry(_ entry: CVRFlightLogEntry) {
+        _ = workflow.repairDispatchCrewFromScheduledSessions(sessionsStore.sessions)
+        _ = workflow.repairArchivedDispatchCrewFromScheduledSessions(
+            flightRecordID: entry.flightRecordID,
+            sessions: sessionsStore.sessions
+        )
         workflow.requeueFailedUploads(forFlightRecordID: entry.flightRecordID)
         uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
         for recording in linkedRecordings(forFlightRecordID: entry.flightRecordID) {

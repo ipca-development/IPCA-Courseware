@@ -78,6 +78,10 @@ struct IPCACVRUnitApp: App {
                     recordingStore.requeueConnectivityFailedUploads()
                     workflowStore.requeueConnectivityFailedUploads()
                     await scheduledSessions.load()
+                    scheduledSessions.filterToAircraft(
+                        id: settings.selectedAircraft?.id,
+                        registration: settings.selectedAircraft?.registration
+                    )
                     await garminVault.load()
                     missionCatalog.loadBundledFallback()
                     await audioRecorder.refreshInputs()
