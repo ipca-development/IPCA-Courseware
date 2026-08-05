@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
+require_once __DIR__ . '/CvrOperationalBlockTimeService.php';
 
 final class CvrDataIntakeReadService
 {
@@ -12,6 +13,7 @@ final class CvrDataIntakeReadService
     private array $columnCache = array();
 
     private ?CvrOperationalIdentityReadService $identityRead = null;
+    private ?CvrOperationalBlockTimeService $blockTimes = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -20,6 +22,11 @@ final class CvrDataIntakeReadService
     private function identityRead(): CvrOperationalIdentityReadService
     {
         return $this->identityRead ??= new CvrOperationalIdentityReadService($this->pdo);
+    }
+
+    private function blockTimes(): CvrOperationalBlockTimeService
+    {
+        return $this->blockTimes ??= new CvrOperationalBlockTimeService();
     }
 
     /**
@@ -61,13 +68,37 @@ final class CvrDataIntakeReadService
             $this->prefixedColumnExpression($columns, $tableAlias, array('last_received_at', 'received_at', 'created_at', 'updated_at'), 'received_at', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('starting_hobbs'), 'starting_hobbs', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('starting_tacho'), 'starting_tacho', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('fuel_onboard'), 'fuel_onboard', "''"),
         );
+        if ($table === 'ipca_cvr_dispatches' && $this->tableExists('ipca_cvr_dispatch_versions')) {
+            $select[] = "COALESCE((
+                SELECT NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_departure_airport')), 'null')
+                FROM ipca_cvr_dispatch_versions v
+                WHERE v.dispatch_id = {$tableAlias}.id
+                  AND v.dispatch_version = {$tableAlias}.current_version
+                LIMIT 1
+            ), '') AS departure_airport";
+            $select[] = "COALESCE((
+                SELECT NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_destination_airport')), 'null')
+                FROM ipca_cvr_dispatch_versions v
+                WHERE v.dispatch_id = {$tableAlias}.id
+                  AND v.dispatch_version = {$tableAlias}.current_version
+                LIMIT 1
+            ), '') AS arrival_airport";
+        } else {
+            $select[] = "'' AS departure_airport";
+            $select[] = "'' AS arrival_airport";
+        }
         if ($this->tableExists('ipca_cvr_flight_events')
             && isset($columns['workflow_flight_record_uuid'])) {
             $flightUuidMatch = "LOWER(fe.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)";
             $closureOffFallback = 'NULL';
             $closureOnFallback = 'NULL';
             $endingHobbsExpression = 'NULL';
+            $endingTachoExpression = 'NULL';
+            $fuelRemainingExpression = 'NULL';
+            $takeoffExpression = '0';
+            $landingExpression = '0';
             if ($this->tableExists('ipca_cvr_flight_closures')) {
                 $closureOffFallback = "(SELECT COALESCE(
                         JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.off_block_utc')),
@@ -95,6 +126,40 @@ final class CvrDataIntakeReadService
                     WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
                     ORDER BY fc.id DESC
                     LIMIT 1)";
+                $endingTachoExpression = "(SELECT fc.ending_tacho
+                    FROM ipca_cvr_flight_closures fc
+                    WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                    ORDER BY fc.id DESC
+                    LIMIT 1)";
+                $fuelRemainingExpression = "(SELECT fc.fuel_remaining
+                    FROM ipca_cvr_flight_closures fc
+                    WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                    ORDER BY fc.id DESC
+                    LIMIT 1)";
+                $takeoffExpression = "COALESCE((
+                    SELECT CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.verified_takeoff_count')), 'null') AS UNSIGNED)
+                    FROM ipca_cvr_flight_closures fc
+                    WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                    ORDER BY fc.id DESC
+                    LIMIT 1
+                ), (
+                    SELECT COUNT(*)
+                    FROM ipca_cvr_flight_events te
+                    WHERE LOWER(te.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                      AND te.event_type IN ('gps_takeoff_provisional', 'manual_takeoff_adjustment')
+                ), 0)";
+                $landingExpression = "COALESCE((
+                    SELECT CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.verified_landing_count')), 'null') AS UNSIGNED)
+                    FROM ipca_cvr_flight_closures fc
+                    WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                    ORDER BY fc.id DESC
+                    LIMIT 1
+                ), (
+                    SELECT COUNT(*)
+                    FROM ipca_cvr_flight_events le
+                    WHERE LOWER(le.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                      AND le.event_type IN ('gps_landing_provisional', 'manual_landing_adjustment')
+                ), 0)";
             }
             $select[] = "COALESCE(
                 (SELECT MIN(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
@@ -106,10 +171,43 @@ final class CvrDataIntakeReadService
             // derived as OFF Block + (Ending Hobbs − Starting Hobbs), matching the CVR app.
             $select[] = "{$closureOnFallback} AS closure_on_block_utc";
             $select[] = "{$endingHobbsExpression} AS ending_hobbs";
+            $select[] = "{$endingTachoExpression} AS ending_tacho";
+            $select[] = "{$fuelRemainingExpression} AS fuel_remaining";
+            $select[] = "{$takeoffExpression} AS takeoff_count";
+            $select[] = "{$landingExpression} AS landing_count";
+            $select[] = "(SELECT
+                    ROUND(TIMESTAMPDIFF(SECOND,
+                        MIN(CASE WHEN fe.event_type IN ('gps_takeoff_provisional', 'manual_takeoff_adjustment') THEN fe.timestamp_utc END),
+                        MAX(CASE WHEN fe.event_type IN ('gps_landing_provisional', 'manual_landing_adjustment') THEN fe.timestamp_utc END)
+                    ) / 3600, 2)
+                FROM ipca_cvr_flight_events fe
+                WHERE {$flightUuidMatch}
+            ) AS airborne_time_hours";
+            $select[] = $this->tableExists('ipca_cvr_flight_closures')
+                ? "EXISTS(
+                    SELECT 1 FROM ipca_cvr_flight_closures fc
+                    WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                    LIMIT 1
+                ) AS has_closure"
+                : '0 AS has_closure';
+            $select[] = $this->tableExists('ipca_cvr_recorder_verifications')
+                ? "EXISTS(
+                    SELECT 1 FROM ipca_cvr_recorder_verifications rv
+                    WHERE LOWER(rv.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                    LIMIT 1
+                ) AS has_recorder_verification"
+                : '0 AS has_recorder_verification';
         } else {
             $select[] = 'NULL AS off_block_utc';
             $select[] = 'NULL AS closure_on_block_utc';
             $select[] = 'NULL AS ending_hobbs';
+            $select[] = 'NULL AS ending_tacho';
+            $select[] = 'NULL AS fuel_remaining';
+            $select[] = '0 AS takeoff_count';
+            $select[] = '0 AS landing_count';
+            $select[] = 'NULL AS airborne_time_hours';
+            $select[] = '0 AS has_closure';
+            $select[] = '0 AS has_recorder_verification';
         }
         if ($table === 'ipca_cvr_dispatches' && $this->tableExists('ipca_cvr_dispatch_versions')) {
             $select[] = "COALESCE((
@@ -129,9 +227,38 @@ final class CvrDataIntakeReadService
             . ' LIMIT ' . $this->normalizeLimit($limit);
 
         $rows = $this->fetchAll($sql);
+        $audioByFlight = $this->audioStatusByFlightRecord(
+            array_values(array_filter(array_map(
+                static fn(array $row): string => strtolower(trim((string)($row['workflow_flight_record_uuid'] ?? ''))),
+                $rows
+            )))
+        );
         $projected = array();
         foreach ($rows as $row) {
-            $row['on_block_utc'] = $this->derivedOnBlockUtc($row);
+            $row['on_block_utc'] = $this->blockTimes()->derivedOnBlockUtc($row);
+            $row['engine_time_hours'] = $this->blockTimes()->engineTimeHours(
+                $row['starting_hobbs'] ?? null,
+                $row['ending_hobbs'] ?? null
+            );
+            $flightKey = strtolower(trim((string)($row['workflow_flight_record_uuid'] ?? '')));
+            $audio = $audioByFlight[$flightKey] ?? array(
+                'upload_status' => 'missing',
+                'transcription_status' => 'pending',
+            );
+            $presentation = $this->blockTimes()->presentationStatuses(
+                trim((string)($row['server_receipt_id'] ?? '')) !== '',
+                !empty($row['has_closure']),
+                !empty($row['has_recorder_verification']),
+                (string)($audio['upload_status'] ?? 'missing'),
+                (string)($audio['transcription_status'] ?? 'pending')
+            );
+            $row['audio_upload_status'] = (string)($audio['upload_status'] ?? 'missing');
+            $row['transcript_status'] = (string)($audio['transcription_status'] ?? 'pending');
+            $row['sync_status'] = $presentation['sync_status'];
+            $row['dispatch_status_label'] = $presentation['dispatch_status'];
+            $row['audio_status_label'] = $presentation['audio_status'];
+            $row['transcript_status_label'] = $presentation['transcript_status'];
+            $row['crew_members'] = $this->blockTimes()->parseCrew($row['crew_json'] ?? null);
             $organizationId = (int)($row['organization_id'] ?? 0);
             $projection = $this->identityRead()->projectLegIdentity(
                 $organizationId,
@@ -150,31 +277,66 @@ final class CvrDataIntakeReadService
     }
 
     /**
-     * ON Block = OFF Block + (Ending Hobbs − Starting Hobbs), same rule as the CVR app Log.
-     * Never use Transient Stop / Engine Shutdown button-press timestamps as the displayed ON time.
+     * Batch audio/transcript status for many flight-record UUIDs (avoids N+1).
      *
+     * @param list<string> $flightRecordUuids
+     * @return array<string,array{upload_status:string,transcription_status:string}>
+     */
+    private function audioStatusByFlightRecord(array $flightRecordUuids): array
+    {
+        $flightRecordUuids = array_values(array_unique(array_filter($flightRecordUuids)));
+        if ($flightRecordUuids === array() || !$this->tableExists('ipca_cockpit_recordings')) {
+            return array();
+        }
+        $placeholders = implode(',', array_fill(0, count($flightRecordUuids), '?'));
+        $sql = "
+            SELECT
+                LOWER(flight_session_uid) AS flight_key,
+                CASE
+                    WHEN SUM(upload_status = 'failed') > 0 THEN 'failed'
+                    WHEN SUM(upload_status = 'uploaded') = COUNT(*) THEN 'uploaded'
+                    WHEN SUM(upload_status = 'uploading') > 0 THEN 'uploading'
+                    ELSE 'pending'
+                END AS upload_status,
+                CASE
+                    WHEN SUM(transcription_status = 'failed') > 0 THEN 'failed'
+                    WHEN SUM(transcription_status = 'ready') = COUNT(*) THEN 'ready'
+                    WHEN SUM(transcription_status IN ('queued', 'transcribing')) > 0 THEN 'transcribing'
+                    ELSE 'pending'
+                END AS transcription_status
+            FROM ipca_cockpit_recordings
+            WHERE flight_session_uid IS NOT NULL
+              AND flight_session_uid <> ''
+              AND LOWER(flight_session_uid) IN ({$placeholders})
+            GROUP BY LOWER(flight_session_uid)
+        ";
+        try {
+            $statement = $this->pdo->prepare($sql);
+            $statement->execute($flightRecordUuids);
+            $map = array();
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $key = strtolower(trim((string)($row['flight_key'] ?? '')));
+                if ($key === '') {
+                    continue;
+                }
+                $map[$key] = array(
+                    'upload_status' => (string)($row['upload_status'] ?? 'pending'),
+                    'transcription_status' => (string)($row['transcription_status'] ?? 'pending'),
+                );
+            }
+            return $map;
+        } catch (Throwable) {
+            return array();
+        }
+    }
+
+    /**
+     * @deprecated Use CvrOperationalBlockTimeService::derivedOnBlockUtc()
      * @param array<string,mixed> $row
      */
     private function derivedOnBlockUtc(array $row): ?string
     {
-        $offRaw = trim((string)($row['off_block_utc'] ?? ''));
-        $startingHobbs = $row['starting_hobbs'] ?? null;
-        $endingHobbs = $row['ending_hobbs'] ?? null;
-        if ($offRaw !== '' && is_numeric($startingHobbs) && is_numeric($endingHobbs)) {
-            $deltaHours = (float)$endingHobbs - (float)$startingHobbs;
-            if ($deltaHours >= 0) {
-                try {
-                    $off = new DateTimeImmutable($offRaw, new DateTimeZone('UTC'));
-                    $seconds = (int)round($deltaHours * 3600);
-                    return $off->modify(sprintf('+%d seconds', $seconds))->format('Y-m-d H:i:s.v');
-                } catch (Throwable) {
-                    // Fall through to closure-carried Hobbs-derived ON Block.
-                }
-            }
-        }
-
-        $closureOn = trim((string)($row['closure_on_block_utc'] ?? ''));
-        return $closureOn !== '' ? $closureOn : null;
+        return $this->blockTimes()->derivedOnBlockUtc($row);
     }
 
     /**

@@ -259,6 +259,10 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
         if tailNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.append("TAIL NUMBER REQUIRED") }
         if aircraftID == nil { items.append("AIRCRAFT REQUIRED") }
         if missionCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.append("MISSION CODE REQUIRED") }
+        let departure = plannedDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let destination = plannedDestinationAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if departure.isEmpty { items.append("Departure airport is required.") }
+        if destination.isEmpty { items.append("Destination airport is required.") }
         if crew.isEmpty { items.append("CREW REQUIRED") }
         if crew.contains(where: { $0.role == .unknown }) { items.append("CREW FUNCTION REQUIRED") }
         if startingHobbs == nil { items.append("STARTING HOBBS REQUIRED") }

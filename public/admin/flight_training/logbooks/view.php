@@ -133,6 +133,7 @@ cw_header('Flight Training · Admin Logbook Workspace');
       <button class="alogw-btn alogw-btn--ghost" type="button" id="alogShow8710">FAA 8710 Summary</button>
       <a class="alogw-btn alogw-btn--secondary" target="_blank" href="/admin/flight_training/logbooks/print.php?format=easa&amp;logbook_id=<?= (int)$logbookId ?>">Print EASA Logbook</a>
       <a class="alogw-btn alogw-btn--secondary" target="_blank" href="/admin/flight_training/logbooks/print.php?format=faa&amp;logbook_id=<?= (int)$logbookId ?>">Print FAA Logbook</a>
+      <a class="alogw-btn alogw-btn--secondary" target="_blank" href="/admin/flight_training/logbooks/print_eligibility.php?logbook_id=<?= (int)$logbookId ?>">Print Eligibility Audit Overview</a>
       <span class="alogw-extract-status" id="alogExtractionStatus">Extraction status: no page</span>
     </div>
     <div class="alogw-grid-tools">
@@ -186,7 +187,10 @@ cw_header('Flight Training · Admin Logbook Workspace');
           <h2 class="alogw-panel-title">Requirement Verification</h2>
           <p class="alogw-panel-text">PASS/FAIL preview based on totals and explicit assignments.</p>
         </div>
-      <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAddRequirementCategory">Add Requirement Category</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <a class="alogw-btn alogw-btn--secondary" target="_blank" href="/admin/flight_training/logbooks/print_eligibility.php?logbook_id=<?= (int)$logbookId ?>">Print Eligibility Audit Overview</a>
+          <button class="alogw-btn alogw-btn--secondary" type="button" id="alogAddRequirementCategory">Add Requirement Category</button>
+        </div>
       </div>
       <div class="alogw-req-list" id="alogRequirements"></div>
     </div>

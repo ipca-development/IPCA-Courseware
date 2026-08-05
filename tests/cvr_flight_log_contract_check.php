@@ -39,7 +39,7 @@ $checks = array(
         && str_contains($service, "'arrival_time'")
         && str_contains($service, "'total_hobbs_time'")
         && str_contains($service, "'has_garmin_csv'")
-        && str_contains($service, "event_type IN ('engine_shutdown_on_block', 'transient_stop_on_block')")
+        && str_contains($service, 'mission_code')
         && str_contains($service, "$.evidence.off_block_utc"),
     'Check-In closure payload carries OFF/ON block times for admin intake' =>
         str_contains($uploads, 'item["off_block_utc"]')
@@ -100,11 +100,10 @@ $checks = array(
         && str_contains($workflowStore, 'recovered[archiveIndex].uploadComponents[componentIndex].state = .queued')
         && str_contains($uploads, 'flightClosureIsComplete(context.flightRecord, dispatch: context.dispatch)'),
     'arrival time is engine start plus elapsed Hobbs with shutdown fallback' =>
-        str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
-        && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")
-        && str_contains($service, "\$arrivalUtc = \$this->utcDate(\$row['arrival_event_time_utc']")
-        && str_contains($views, 'departure.timestampLocal.addingTimeInterval(max(0, endHobbs - startHobbs) * 3600)')
-        && str_contains($views, 'transient_stop_on_block'),
+        str_contains($service, 'CvrOperationalBlockTimeService')
+        && str_contains($service, 'derivedOnBlockUtc')
+        && str_contains($service, 'off_block_plus_hobbs_increment')
+        && !str_contains($service, 'arrival_event.timestamp_utc'),
     'flight log times are explicit California local time with daylight saving support' =>
         str_contains($service, 'departure_event.timestamp_utc')
         && str_contains($service, "new DateTimeZone('America/Los_Angeles')")

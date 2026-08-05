@@ -57,6 +57,13 @@ enum CVROperationalIdentityLocal {
         String(value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().prefix(8))
     }
 
+    /// Never replace a persisted non-empty airport with a blank value.
+    static func preservingNonEmptyAirport(existing: String, incoming: String) -> String {
+        let next = normalizeAirport(incoming)
+        if !next.isEmpty { return next }
+        return normalizeAirport(existing)
+    }
+
     /// Mint a new offline identity bundle for a locally created Dispatch.
     static func createOfflineBundle(
         organizationID: Int,
@@ -272,8 +279,8 @@ enum CVROperationalIdentityLocal {
             "reservation_type": identity.reservationType,
             "activity_domain": identity.activityDomain,
             "organization_timezone_iana": identity.organizationTimezoneIANA,
-            "origin_airport": identity.originAirport,
-            "destination_airport": identity.destinationAirport,
+            "origin_airport": normalizeAirport(identity.originAirport),
+            "destination_airport": normalizeAirport(identity.destinationAirport),
             "linkage_method": identity.linkageMethod,
             "aliases": identity.aliases.map { alias -> [String: Any] in
                 var row: [String: Any] = [

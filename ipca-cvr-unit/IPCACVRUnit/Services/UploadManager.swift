@@ -474,7 +474,7 @@ final class UploadManager: ObservableObject {
                     snapshot = preserved
                 } else {
                     let payload = component.componentType == "dispatch_metadata"
-                        ? workflowDispatchPayload(
+                        ? try workflowDispatchPayload(
                             dispatch: context.dispatch,
                             flightRecord: context.flightRecord,
                             consents: context.consents.filter {
@@ -768,7 +768,7 @@ final class UploadManager: ObservableObject {
             progress: 0.25,
             lastError: "Sending Dispatch metadata and consent evidence..."
         )
-        let generatedPayload = workflowDispatchPayload(
+        let generatedPayload = try workflowDispatchPayload(
             dispatch: dispatch,
             flightRecord: flightRecord,
             consents: refreshedContext.consents.filter {
@@ -811,7 +811,7 @@ final class UploadManager: ObservableObject {
         flightRecord: CVRIncompleteFlightRecord,
         consents: [CVRConsentRecord],
         settings: SettingsStore
-    ) -> [String: Any] {
+    ) throws -> [String: Any] {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let day = DateFormatter()
@@ -826,6 +826,13 @@ final class UploadManager: ObservableObject {
             ?? dispatch.tailNumber.uppercased()
         let uploadAircraftID = settings.selectedAircraft?.id ?? dispatch.aircraftID
         let operationalConfig = settings.selectedAircraft?.operationalConfig ?? .safeDefaults
+        let plannedDeparture = CVROperationalIdentityLocal.normalizeAirport(dispatch.plannedDepartureAirport)
+        let plannedDestination = CVROperationalIdentityLocal.normalizeAirport(dispatch.plannedDestinationAirport)
+        guard !plannedDeparture.isEmpty, !plannedDestination.isEmpty else {
+            throw APIClientError.badResponse(
+                "Departure and destination airports are required before Dispatch can synchronize."
+            )
+        }
 
         var dispatchPayload: [String: Any] = [
             "id": dispatch.id.lowercased(),
@@ -833,8 +840,8 @@ final class UploadManager: ObservableObject {
             "scheduled_date": day.string(from: dispatch.scheduledDate),
             "tail_number": uploadTail,
             "mission_code": dispatch.missionCode,
-            "planned_departure_airport": dispatch.plannedDepartureAirport,
-            "planned_destination_airport": dispatch.plannedDestinationAirport,
+            "planned_departure_airport": plannedDeparture,
+            "planned_destination_airport": plannedDestination,
             "crew": dispatch.crew.map { assignment in
                 var member: [String: Any] = [
                     "id": assignment.id,
@@ -1063,7 +1070,12 @@ final class UploadManager: ObservableObject {
             if let value = flight.autoDetectedLandingCount { item["auto_detected_landing_count"] = value }
             if let value = flight.maintenanceRemark { item["maintenance_remark"] = value }
             if let value = flight.checkInComments { item["check_in_comments"] = value }
-            if let value = flight.verifiedDestinationAirport { item["verified_destination_airport"] = value }
+            if let value = flight.verifiedDestinationAirport {
+                let normalized = CVROperationalIdentityLocal.normalizeAirport(value)
+                if !normalized.isEmpty {
+                    item["verified_destination_airport"] = normalized
+                }
+            }
             if let value = flight.checkInMode { item["check_in_mode"] = value.rawValue }
             // Carry block times on Check-In so admin Master Logbook can show OFF/ON even if
             // individual flight-event components are still syncing.

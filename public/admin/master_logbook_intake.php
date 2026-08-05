@@ -879,7 +879,7 @@ cw_header('Master Logbook');
   <section class="intake-card intake-hero">
     <div>
       <h1 class="intake-title">Data Intake</h1>
-      <p class="intake-muted">Raw CVR inputs received by IPCA.training. This page reports receipt and processing only; it does not correlate or merge flight data.</p>
+      <p class="intake-muted">Operational Legs are the authoritative per-leg CVR record (Reservation → Leg). Times display in America/Los_Angeles. Other tabs remain raw intake for audio, Garmin CSV, and reconstruction.</p>
     </div>
     <a class="intake-refresh" href="/admin/master_logbook.php">Refresh data</a>
   </section>
@@ -916,7 +916,7 @@ cw_header('Master Logbook');
   <section class="intake-card">
     <div class="intake-tabs" role="tablist" aria-label="Data intake sources">
       <button class="intake-tab is-active" type="button" role="tab" aria-selected="true" data-intake-tab="dispatch">
-        Dispatch <span class="intake-count"><?= count($dispatch['rows']) ?></span>
+        Operational Legs <span class="intake-count"><?= count($dispatch['rows']) ?></span>
       </button>
       <button class="intake-tab" type="button" role="tab" aria-selected="false" data-intake-tab="audio">
         Cockpit Audio <span class="intake-count" data-audio-tab-count><?= $audioVisibleRowCount ?></span>
@@ -933,8 +933,8 @@ cw_header('Master Logbook');
   <section class="intake-card intake-panel is-active" role="tabpanel" data-intake-panel="dispatch">
     <div class="intake-panel-head">
       <div>
-        <h2 class="intake-panel-title">Dispatch</h2>
-        <div class="intake-muted">Dispatch records received directly from the CVR app.</div>
+        <h2 class="intake-panel-title">Operational Legs</h2>
+        <div class="intake-muted">One row per checked-in Dispatch leg received from the CVR app. Times are America/Los_Angeles local. On Block = Off Block + Hobbs increment.</div>
       </div>
     </div>
     <?php if (!$dispatch['available']): ?>
@@ -944,24 +944,81 @@ cw_header('Master Logbook');
     <?php else: ?>
       <div class="intake-table-wrap">
         <table class="intake-table">
-          <thead><tr><th>Received (LT)</th><th>Dispatch</th><th>Flight Record</th><th>Aircraft</th><th>Mission</th><th>Crew</th><th>OFF Block</th><th>ON Block</th><th>Source</th><th>Device</th><th>Status</th><th>Server Receipt</th><th>Error</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Received (LT)</th>
+              <th>Aircraft</th>
+              <th>Reservation</th>
+              <th>Leg</th>
+              <th>Mission</th>
+              <th>Crew</th>
+              <th>Dep</th>
+              <th>Arr</th>
+              <th>Off Block</th>
+              <th>On Block</th>
+              <th>Engine</th>
+              <th>Airborne</th>
+              <th>Hobbs</th>
+              <th>Tacho</th>
+              <th>Fuel</th>
+              <th>TO / LDG</th>
+              <th>Dispatch</th>
+              <th>Audio</th>
+              <th>Transcript</th>
+              <th>Sync</th>
+            </tr>
+          </thead>
           <tbody>
           <?php foreach ($dispatch['rows'] as $row): ?>
-            <?php $tail = (string)($row['aircraft_registration'] ?? ''); ?>
+            <?php
+              $tail = (string)($row['aircraft_registration'] ?? '');
+              $startHobbs = $row['starting_hobbs'] ?? null;
+              $endHobbs = $row['ending_hobbs'] ?? null;
+              $startTacho = $row['starting_tacho'] ?? null;
+              $endTacho = $row['ending_tacho'] ?? null;
+              $hobbsLabel = (is_numeric($startHobbs) || is_numeric($endHobbs))
+                  ? trim((is_numeric($startHobbs) ? number_format((float)$startHobbs, 1) : '—') . ' → ' . (is_numeric($endHobbs) ? number_format((float)$endHobbs, 1) : '—'))
+                  : '—';
+              $tachoLabel = (is_numeric($startTacho) || is_numeric($endTacho))
+                  ? trim((is_numeric($startTacho) ? number_format((float)$startTacho, 1) : '—') . ' → ' . (is_numeric($endTacho) ? number_format((float)$endTacho, 1) : '—'))
+                  : '—';
+              $engine = $row['engine_time_hours'] ?? null;
+              $airborne = $row['airborne_time_hours'] ?? null;
+              $fuel = trim((string)($row['fuel_remaining'] ?? $row['fuel_onboard'] ?? ''));
+              $reservation = trim((string)($row['reservation_uuid'] ?? ''));
+              $leg = trim((string)($row['leg_uuid'] ?? ''));
+            ?>
             <tr>
               <td><?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['received_at'] ?? null, $tail)) ?></td>
-              <td><div class="intake-primary intake-mono"><?= cvr_intake_h($row['dispatch_uuid'] ?? '—') ?></div><div class="intake-muted">Version <?= cvr_intake_h($row['dispatch_version'] ?? '1') ?></div></td>
-              <td class="intake-mono"><?= cvr_intake_h($row['workflow_flight_record_uuid'] ?: '—') ?></td>
-              <td class="intake-primary"><?= cvr_intake_h($row['aircraft_registration'] ?: '—') ?></td>
+              <td class="intake-primary"><?= cvr_intake_h($tail !== '' ? $tail : '—') ?></td>
+              <td class="intake-mono" title="<?= cvr_intake_h($reservation) ?>"><?= cvr_intake_h($reservation !== '' ? substr($reservation, 0, 8) . '…' : '—') ?></td>
+              <td class="intake-mono" title="<?= cvr_intake_h($leg) ?>"><?= cvr_intake_h($leg !== '' ? substr($leg, 0, 8) . '…' : '—') ?></td>
               <td><?= cvr_intake_h($row['mission_code'] ?: '—') ?></td>
-              <td><?= cvr_intake_h(cvr_intake_crew($row['crew_json'] ?? null)) ?></td>
+              <td><?php
+                $crewMembers = is_array($row['crew_members'] ?? null) ? $row['crew_members'] : array();
+                if ($crewMembers !== array()) {
+                    echo cvr_intake_h(implode(', ', array_map(
+                        static fn(array $m): string => (string)($m['display'] ?? $m['name'] ?? ''),
+                        $crewMembers
+                    )));
+                } else {
+                    echo cvr_intake_h(cvr_intake_crew($row['crew_json'] ?? null));
+                }
+              ?></td>
+              <td class="intake-primary"><?= cvr_intake_h(trim((string)($row['departure_airport'] ?? '')) ?: '—') ?></td>
+              <td class="intake-primary"><?= cvr_intake_h(trim((string)($row['arrival_airport'] ?? '')) ?: '—') ?></td>
               <td><?= cvr_intake_h(cvr_intake_local_time($pdo, $row['off_block_utc'] ?? null, $tail)) ?></td>
               <td><?= cvr_intake_h(cvr_intake_local_time($pdo, $row['on_block_utc'] ?? null, $tail)) ?></td>
-              <td><?= cvr_intake_h($row['source'] ?: '—') ?></td>
-              <td class="intake-mono"><?= cvr_intake_h($row['device_identifier'] ?: '—') ?></td>
-              <td><?= cvr_intake_badge($row['status'] ?? '') ?></td>
-              <td class="intake-mono"><?= cvr_intake_h($row['server_receipt_id'] ?: '—') ?></td>
-              <td class="intake-error"><?= cvr_intake_h($row['error_message'] ?: '—') ?></td>
+              <td><?= cvr_intake_h(is_numeric($engine) ? number_format((float)$engine, 1) . ' h' : '—') ?></td>
+              <td><?= cvr_intake_h(is_numeric($airborne) && (float)$airborne > 0 ? number_format((float)$airborne, 1) . ' h' : '—') ?></td>
+              <td><?= cvr_intake_h($hobbsLabel) ?></td>
+              <td><?= cvr_intake_h($tachoLabel) ?></td>
+              <td><?= cvr_intake_h($fuel !== '' ? $fuel : '—') ?></td>
+              <td><?= cvr_intake_h(((int)($row['takeoff_count'] ?? 0)) . ' / ' . ((int)($row['landing_count'] ?? 0))) ?></td>
+              <td><?= cvr_intake_badge($row['dispatch_status_label'] ?? $row['status'] ?? '') ?></td>
+              <td><?= cvr_intake_badge($row['audio_status_label'] ?? 'Stored on Device') ?></td>
+              <td><?= cvr_intake_badge($row['transcript_status_label'] ?? 'Transcript Pending') ?></td>
+              <td><?= cvr_intake_badge($row['sync_status'] ?? 'Stored on Device') ?></td>
             </tr>
           <?php endforeach; ?>
           </tbody>

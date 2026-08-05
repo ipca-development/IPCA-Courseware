@@ -2085,7 +2085,9 @@ struct InFlightWorkflowView: View {
             }
         }
         .onAppear {
-            workflow.synthesizeEngineContinuityIfNeeded(gpsSample: gps.latestSample)
+            if workflow.synthesizeEngineContinuityIfNeeded(gpsSample: gps.latestSample) {
+                uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+            }
             Task {
                 if workflow.state.operationalSession?.pendingSoftStartRecording == true
                     || workflow.state.engineSessionContinuityActive {
@@ -2251,6 +2253,7 @@ struct InFlightWorkflowView: View {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     workflow.recordInFlightAction(eventType: "safety_event", creationMethod: "two_second_hold", gpsSample: gps.latestSample)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                    return true
                 }
                 takeoffLandingControls(metrics: metrics)
                 if canOfferTransientStop {
@@ -2263,6 +2266,7 @@ struct InFlightWorkflowView: View {
                             workflow.beginTransientStopCheckIn()
                             isShowingCheckIn = true
                         }
+                        return true
                     }
                 }
                 CVRHoldActionButton(title: "ENGINE SHUTDOWN", subtitle: "Hold 3 seconds for ON Block", color: CVROperationalPalette.critical) {
@@ -2271,13 +2275,17 @@ struct InFlightWorkflowView: View {
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                     workflow.beginEngineShutdownCheckIn()
                     isShowingCheckIn = true
+                    return true
                 }
             }
         } else if avionicsReady && workflow.needsEngineStart {
             CVRHoldActionButton(title: "ENGINE START", subtitle: "Hold 3 seconds for OFF Block", color: CVROperationalPalette.success) {
+                // Persist Off Block before UI confirmation flash / haptic.
+                let saved = workflow.recordEngineStartOffBlock(gpsSample: gps.latestSample)
+                guard saved else { return false }
                 UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                workflow.recordEngineStartOffBlock(gpsSample: gps.latestSample)
                 uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                return true
             }
         } else if workflow.state.engineSessionContinuityActive {
             CVROperationalWarningCard(
@@ -2391,7 +2399,8 @@ private struct CVRHoldActionButton: View {
     let subtitle: String
     let color: Color
     var minimumDuration: TimeInterval = 3
-    let action: () -> Void
+    /// Returns true only after the operational change is persisted (or otherwise accepted).
+    let action: () -> Bool
     @State private var isPressing = false
     @State private var holdProgress = 0.0
     @State private var confirmedFlash = false
@@ -2438,9 +2447,16 @@ private struct CVRHoldActionButton: View {
                 }
             },
             perform: {
+                // Confirm UI only after the action reports local persistence success.
+                let accepted = action()
+                guard accepted else {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        holdProgress = 0
+                    }
+                    return
+                }
                 confirmedFlash = true
                 holdProgress = 1
-                action()
                 Task {
                     try? await Task.sleep(for: .milliseconds(450))
                     confirmedFlash = false

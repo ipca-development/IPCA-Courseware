@@ -86,6 +86,8 @@ struct CVRLocalDispatchDraft: Codable, Equatable {
 
     mutating func setArrival(legIndex: Int, airport: String) {
         guard legs.indices.contains(legIndex) else { return }
+        // Edit only this leg's arrival. Continuity updates the next leg's departure —
+        // it must never blank another leg's destination.
         legs[legIndex].arrivalAirport = Self.sanitizeAirportInput(airport)
         reapplyContinuity()
     }

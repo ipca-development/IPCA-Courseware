@@ -60,7 +60,8 @@ final class AirportDataService
         $dLon = deg2rad($lon2 - $lon1);
         $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
         $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
-        return round($earthRadiusNm * $c, 1);
+        // Ceiling to whole NM so near-threshold pairs (e.g. KBWC–KTRM ≈ 49.9) satisfy 50 NM eligibility.
+        return (float)max(0, (int)ceil(($earthRadiusNm * $c) - 1e-9));
     }
 
     /**

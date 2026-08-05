@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
+require_once __DIR__ . '/CvrOperationalBlockTimeService.php';
 
 final class CvrFlightLogService
 {
     private ?CvrOperationalIdentityReadService $identityRead = null;
+    private ?CvrOperationalBlockTimeService $blockTimes = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -15,6 +17,11 @@ final class CvrFlightLogService
     private function identityRead(): CvrOperationalIdentityReadService
     {
         return $this->identityRead ??= new CvrOperationalIdentityReadService($this->pdo);
+    }
+
+    private function blockTimes(): CvrOperationalBlockTimeService
+    {
+        return $this->blockTimes ??= new CvrOperationalBlockTimeService();
     }
 
     /**
@@ -43,6 +50,7 @@ final class CvrFlightLogService
                 d.current_version AS dispatch_version,
                 d.organization_id AS dispatch_organization_id,
                 d.aircraft_registration,
+                d.mission_code,
                 d.crew_json AS dispatch_crew_json,
                 adjustment.crew_json AS adjustment_crew_json,
                 DATE_FORMAT(d.scheduled_date, '%Y-%m-%d') AS scheduled_date,
@@ -63,13 +71,17 @@ final class CvrFlightLogService
                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_destination_airport')), 'null'),
                     ''
                 ) AS arrival_airport,
-                DATE_FORMAT(
-                    COALESCE(
-                        arrival_event.timestamp_utc,
-                        CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(closure.payload_json, '$.evidence.on_block_utc')), 'null') AS DATETIME)
-                    ),
-                    '%Y-%m-%d %H:%i:%s'
-                ) AS arrival_event_time_utc,
+                CAST(
+                    CASE
+                        WHEN COALESCE(
+                            JSON_UNQUOTE(JSON_EXTRACT(closure.payload_json, '$.evidence.on_block_source')),
+                            JSON_UNQUOTE(JSON_EXTRACT(closure.payload_json, '$.on_block_source')),
+                            ''
+                        ) = 'off_block_plus_hobbs_increment'
+                        THEN NULLIF(JSON_UNQUOTE(JSON_EXTRACT(closure.payload_json, '$.evidence.on_block_utc')), 'null')
+                        ELSE NULL
+                    END AS DATETIME
+                ) AS closure_on_block_utc,
                 CAST(COALESCE(adjustment.starting_hobbs, d.starting_hobbs) AS DECIMAL(12,2)) AS starting_hobbs,
                 CAST(COALESCE(adjustment.starting_tacho, d.starting_tacho) AS DECIMAL(12,2)) AS starting_tacho,
                 CAST(COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) AS DECIMAL(12,2)) AS ending_hobbs,
@@ -178,15 +190,6 @@ final class CvrFlightLogService
                   ORDER BY e1.timestamp_utc ASC, e1.id ASC
                   LIMIT 1
               )
-            LEFT JOIN ipca_cvr_flight_events arrival_event
-              ON arrival_event.id = (
-                  SELECT e2.id
-                  FROM ipca_cvr_flight_events e2
-                  WHERE LOWER(e2.workflow_flight_record_uuid) = LOWER(d.workflow_flight_record_uuid)
-                    AND e2.event_type IN ('engine_shutdown_on_block', 'transient_stop_on_block')
-                  ORDER BY e2.timestamp_utc DESC, e2.id DESC
-                  LIMIT 1
-              )
             WHERE d.organization_id = :organization_id
               AND {$aircraftPredicate}
             ORDER BY d.scheduled_date DESC, COALESCE(departure_event.timestamp_utc, d.first_received_at) DESC
@@ -207,26 +210,18 @@ final class CvrFlightLogService
             $crewJson = $row['adjustment_crew_json'] !== null
                 ? (string)$row['adjustment_crew_json']
                 : (string)($row['dispatch_crew_json'] ?? '[]');
-            $crew = json_decode($crewJson, true);
-            $crewNames = array();
-            foreach (is_array($crew) ? $crew : array() as $member) {
-                $name = is_array($member)
-                    ? trim((string)($member['person_name'] ?? ''))
-                    : trim((string)$member);
-                if ($name !== '') {
-                    $crewNames[] = $name;
-                }
-            }
+            $crewMembers = $this->blockTimes()->parseCrew($crewJson);
+            $crewNames = array_map(static fn(array $member): string => $member['display'], $crewMembers);
             $departureUtc = $this->utcDate($row['departure_time_utc'] ?? null);
-            $arrivalUtc = $this->utcDate($row['arrival_event_time_utc'] ?? null);
-            if ($departureUtc !== null && $row['total_hobbs_time'] !== null) {
-                try {
-                    $elapsedSeconds = (int)round((float)$row['total_hobbs_time'] * 3600);
-                    $arrivalUtc = $departureUtc->modify(sprintf('+%d seconds', $elapsedSeconds));
-                } catch (Throwable) {
-                    // Preserve the recorded shutdown instant if Hobbs derivation fails.
-                }
-            }
+            $onBlockUtc = $this->blockTimes()->derivedOnBlockUtc(array(
+                'off_block_utc' => $row['departure_time_utc'] ?? null,
+                'starting_hobbs' => $row['starting_hobbs'] ?? null,
+                'ending_hobbs' => $row['ending_hobbs'] ?? null,
+                'closure_on_block_utc' => isset($row['closure_on_block_utc'])
+                    ? (string)$row['closure_on_block_utc']
+                    : null,
+            ));
+            $arrivalUtc = $this->utcDate($onBlockUtc);
             $departureTime = $this->californiaIso($departureUtc);
             $arrivalTime = $this->californiaIso($arrivalUtc);
             $audioUploadStatus = strtolower(trim((string)($row['audio_upload_status'] ?? 'missing')));
@@ -241,15 +236,24 @@ final class CvrFlightLogService
                 : ($hasClosure && $hasRecorderVerification && $audioUploadStatus === 'uploaded'
                     ? 'complete'
                     : ($serverUploadProgress > 25 ? 'partial' : 'pending'));
+            $presentation = $this->blockTimes()->presentationStatuses(
+                true,
+                $hasClosure,
+                $hasRecorderVerification,
+                $audioUploadStatus,
+                (string)($row['transcript_status'] ?? 'pending')
+            );
             $entry = array(
                 'flight_record_uuid' => (string)$row['workflow_flight_record_uuid'],
                 'dispatch_uuid' => (string)$row['dispatch_uuid'],
                 'scheduler_record_id' => $row['scheduler_record_id'] !== null
                     ? (string)$row['scheduler_record_id']
                     : null,
+                'mission_code' => (string)($row['mission_code'] ?? ''),
                 'aircraft_registration' => (string)$row['aircraft_registration'],
                 'scheduled_date' => (string)$row['scheduled_date'],
                 'crew_names' => array_values(array_unique($crewNames)),
+                'crew_members' => $crewMembers,
                 'departure_airport' => (string)$row['departure_airport'],
                 'departure_time' => $departureTime,
                 'arrival_airport' => (string)$row['arrival_airport'],
@@ -262,7 +266,14 @@ final class CvrFlightLogService
                 'ending_oil_percentage' => $row['oil_percentage'] !== null ? (int)$row['oil_percentage'] : null,
                 'ending_oil_quantity' => $row['oil_quantity'] !== null ? (float)$row['oil_quantity'] : null,
                 'ending_oil_unit' => $row['oil_unit'] !== null ? (string)$row['oil_unit'] : null,
-                'total_hobbs_time' => $row['total_hobbs_time'] !== null ? (float)$row['total_hobbs_time'] : null,
+                'total_hobbs_time' => $this->blockTimes()->engineTimeHours(
+                    $row['starting_hobbs'] ?? null,
+                    $row['ending_hobbs'] ?? null
+                ),
+                'engine_time_hours' => $this->blockTimes()->engineTimeHours(
+                    $row['starting_hobbs'] ?? null,
+                    $row['ending_hobbs'] ?? null
+                ),
                 'has_garmin_csv' => (bool)$row['has_garmin_csv'],
                 'server_upload_status' => $serverUploadStatus,
                 'server_upload_progress' => $serverUploadProgress,
@@ -280,6 +291,10 @@ final class CvrFlightLogService
                 'takeoff_count' => max(0, (int)($row['takeoff_count'] ?? 0)),
                 'landing_count' => max(0, (int)($row['landing_count'] ?? 0)),
                 'server_component_count' => max(0, (int)($row['server_component_count'] ?? 0)),
+                'sync_status' => $presentation['sync_status'],
+                'dispatch_status_label' => $presentation['dispatch_status'],
+                'audio_status_label' => $presentation['audio_status'],
+                'transcript_status_label' => $presentation['transcript_status'],
             );
             $rowOrg = (int)($row['dispatch_organization_id'] ?? 0);
             $projectionOrg = $rowOrg > 0 ? $rowOrg : $organizationId;
