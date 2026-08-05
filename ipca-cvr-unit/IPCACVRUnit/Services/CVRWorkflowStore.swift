@@ -2626,6 +2626,33 @@ final class CVRWorkflowStore: ObservableObject {
                 $0.uploadComponents[index].progress = 0
             }
         }
+
+        var updated = archives
+        var changed = false
+        for archiveIndex in updated.indices {
+            let includesDispatch = componentTypes == nil || componentTypes?.contains("dispatch_metadata") == true
+            if includesDispatch {
+                changed = Self.repairArchivedDispatchConsents(in: &updated[archiveIndex]) || changed
+            }
+            for componentIndex in updated[archiveIndex].uploadComponents.indices {
+                let component = updated[archiveIndex].uploadComponents[componentIndex]
+                guard component.state == .failed || component.state == .needsUserAction else { continue }
+                if let componentTypes, !componentTypes.contains(component.componentType) { continue }
+                updated[archiveIndex].uploadComponents[componentIndex].state = .queued
+                updated[archiveIndex].uploadComponents[componentIndex].lastError = ""
+                updated[archiveIndex].uploadComponents[componentIndex].progress = 0
+                updated[archiveIndex].status = .uploadPending
+                changed = true
+            }
+        }
+        guard changed else { return }
+        do {
+            try saveArchives(updated)
+            archives = updated
+            lastError = ""
+        } catch {
+            lastError = "Could not requeue archived flight uploads: \(error.localizedDescription)"
+        }
     }
 
     func requeueFailedUploads(forFlightRecordID flightRecordID: String) {

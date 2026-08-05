@@ -59,18 +59,57 @@ final class CvrDataIntakeReadService
             $this->prefixedColumnExpression($columns, $tableAlias, array('scheduler_record_id'), 'scheduler_record_id', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('organization_id'), 'organization_id', '0'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('last_received_at', 'received_at', 'created_at', 'updated_at'), 'received_at', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('starting_hobbs'), 'starting_hobbs', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('starting_tacho'), 'starting_tacho', 'NULL'),
         );
         if ($this->tableExists('ipca_cvr_flight_events')
             && isset($columns['workflow_flight_record_uuid'])) {
-            $select[] = "(SELECT MIN(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
-                WHERE fe.workflow_flight_record_uuid = {$tableAlias}.workflow_flight_record_uuid
-                  AND fe.event_type = 'engine_start_off_block') AS off_block_utc";
-            $select[] = "(SELECT MAX(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
-                WHERE fe.workflow_flight_record_uuid = {$tableAlias}.workflow_flight_record_uuid
-                  AND fe.event_type = 'engine_shutdown_on_block') AS on_block_utc";
+            $flightUuidMatch = "LOWER(fe.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)";
+            $closureOffFallback = 'NULL';
+            $closureOnFallback = 'NULL';
+            $endingHobbsExpression = 'NULL';
+            if ($this->tableExists('ipca_cvr_flight_closures')) {
+                $closureOffFallback = "(SELECT COALESCE(
+                        JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.off_block_utc')),
+                        JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.off_block_utc'))
+                    )
+                    FROM ipca_cvr_flight_closures fc
+                    WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                    ORDER BY fc.id DESC
+                    LIMIT 1)";
+                $closureOnFallback = "(SELECT COALESCE(
+                        JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.on_block_utc')),
+                        JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.on_block_utc'))
+                    )
+                    FROM ipca_cvr_flight_closures fc
+                    WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                      AND COALESCE(
+                        JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.on_block_source')),
+                        JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.on_block_source')),
+                        ''
+                      ) = 'off_block_plus_hobbs_increment'
+                    ORDER BY fc.id DESC
+                    LIMIT 1)";
+                $endingHobbsExpression = "(SELECT fc.ending_hobbs
+                    FROM ipca_cvr_flight_closures fc
+                    WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                    ORDER BY fc.id DESC
+                    LIMIT 1)";
+            }
+            $select[] = "COALESCE(
+                (SELECT MIN(fe.timestamp_utc) FROM ipca_cvr_flight_events fe
+                    WHERE {$flightUuidMatch}
+                      AND fe.event_type = 'engine_start_off_block'),
+                {$closureOffFallback}
+            ) AS off_block_utc";
+            // Raw button-press ON times are intentionally not selected. ON Block is
+            // derived as OFF Block + (Ending Hobbs − Starting Hobbs), matching the CVR app.
+            $select[] = "{$closureOnFallback} AS closure_on_block_utc";
+            $select[] = "{$endingHobbsExpression} AS ending_hobbs";
         } else {
             $select[] = 'NULL AS off_block_utc';
-            $select[] = 'NULL AS on_block_utc';
+            $select[] = 'NULL AS closure_on_block_utc';
+            $select[] = 'NULL AS ending_hobbs';
         }
         if ($table === 'ipca_cvr_dispatches' && $this->tableExists('ipca_cvr_dispatch_versions')) {
             $select[] = "COALESCE((
@@ -92,6 +131,7 @@ final class CvrDataIntakeReadService
         $rows = $this->fetchAll($sql);
         $projected = array();
         foreach ($rows as $row) {
+            $row['on_block_utc'] = $this->derivedOnBlockUtc($row);
             $organizationId = (int)($row['organization_id'] ?? 0);
             $projection = $this->identityRead()->projectLegIdentity(
                 $organizationId,
@@ -107,6 +147,34 @@ final class CvrDataIntakeReadService
             'rows' => $projected,
             'message' => '',
         );
+    }
+
+    /**
+     * ON Block = OFF Block + (Ending Hobbs − Starting Hobbs), same rule as the CVR app Log.
+     * Never use Transient Stop / Engine Shutdown button-press timestamps as the displayed ON time.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function derivedOnBlockUtc(array $row): ?string
+    {
+        $offRaw = trim((string)($row['off_block_utc'] ?? ''));
+        $startingHobbs = $row['starting_hobbs'] ?? null;
+        $endingHobbs = $row['ending_hobbs'] ?? null;
+        if ($offRaw !== '' && is_numeric($startingHobbs) && is_numeric($endingHobbs)) {
+            $deltaHours = (float)$endingHobbs - (float)$startingHobbs;
+            if ($deltaHours >= 0) {
+                try {
+                    $off = new DateTimeImmutable($offRaw, new DateTimeZone('UTC'));
+                    $seconds = (int)round($deltaHours * 3600);
+                    return $off->modify(sprintf('+%d seconds', $seconds))->format('Y-m-d H:i:s.v');
+                } catch (Throwable) {
+                    // Fall through to closure-carried Hobbs-derived ON Block.
+                }
+            }
+        }
+
+        $closureOn = trim((string)($row['closure_on_block_utc'] ?? ''));
+        return $closureOn !== '' ? $closureOn : null;
     }
 
     /**

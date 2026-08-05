@@ -1065,6 +1065,23 @@ final class UploadManager: ObservableObject {
             if let value = flight.checkInComments { item["check_in_comments"] = value }
             if let value = flight.verifiedDestinationAirport { item["verified_destination_airport"] = value }
             if let value = flight.checkInMode { item["check_in_mode"] = value.rawValue }
+            // Carry block times on Check-In so admin Master Logbook can show OFF/ON even if
+            // individual flight-event components are still syncing.
+            // ON Block must be OFF + Hobbs delta — never Transient Stop / Shutdown button time.
+            let flightEvents = context.events.filter { $0.flightRecordID == flight.id }
+            if let offBlock = flightEvents.first(where: { $0.eventType == "engine_start_off_block" }) {
+                item["off_block_utc"] = iso.string(from: offBlock.timestampUTC)
+            }
+            if let calculated = flight.calculatedArrivalAt {
+                item["on_block_utc"] = iso.string(from: calculated)
+                item["on_block_source"] = "off_block_plus_hobbs_increment"
+            } else if let offBlock = flightEvents.first(where: { $0.eventType == "engine_start_off_block" }),
+                      let startHobbs = context.dispatch.startingHobbs,
+                      let endHobbs = flight.endingHobbs {
+                let arrival = offBlock.timestampUTC.addingTimeInterval(max(0, endHobbs - startHobbs) * 3600)
+                item["on_block_utc"] = iso.string(from: arrival)
+                item["on_block_source"] = "off_block_plus_hobbs_increment"
+            }
             evidence = item
         default:
             throw APIClientError.badResponse("Unsupported workflow evidence component.")

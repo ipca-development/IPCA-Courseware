@@ -3251,7 +3251,7 @@ private struct FlightLogView: View {
                     VStack(spacing: metrics.spacing) {
                         CVROperationalStatusCard(
                             title: "AIRCRAFT FLIGHT LOG",
-                            subtitle: "ONE ROW PER LEG — CHECK-IN IS COMPLETE; SYNC FOLLOWS",
+                            subtitle: "CHECK-IN IS LOCAL — SYNC PENDING UNTIL DISPATCH + AUDIO FINISH ONLINE",
                             iconName: "list.bullet.clipboard",
                             color: missingCount > 0 ? CVROperationalPalette.warning : CVROperationalPalette.success,
                             value: "\(displayEntries.count)",
@@ -3315,14 +3315,22 @@ private struct FlightLogView: View {
                                     workflow.resetForNextFlightIfComplete()
                                     Task { await flightLogs.refresh(settings: settings) }
                                 } else {
-                                    workflow.requeueFailedUploads()
-                                    uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
+                                    syncPendingLogUploads()
                                 }
+                            }
+                        }
+                        if missingCount > 0 {
+                            CVROperationalActionButton(
+                                title: "SYNC NOW",
+                                subtitle: "Upload queued Dispatch, Check-In, events, and cockpit audio",
+                                color: CVROperationalPalette.secondaryBlue
+                            ) {
+                                syncPendingLogUploads()
                             }
                         }
                         CVROperationalActionButton(
                             title: flightLogs.isRefreshing ? "REFRESHING LOG" : "REFRESH FLIGHT LOG",
-                            subtitle: settings.selectedAircraft?.registration ?? "Enrolled aircraft",
+                            subtitle: "Reload online status only — does not start uploads",
                             color: CVROperationalPalette.standby
                         ) {
                             Task { await flightLogs.refresh(settings: settings) }
@@ -3334,6 +3342,7 @@ private struct FlightLogView: View {
                     .frame(width: proxy.size.width, alignment: .top)
                 }
                 .refreshable {
+                    syncPendingLogUploads()
                     await flightLogs.refresh(settings: settings)
                 }
                 if flightLogs.isUploading || flightLogs.isAdjusting {
@@ -3468,6 +3477,13 @@ private struct FlightLogView: View {
                         Label("RETRY", systemImage: "arrow.clockwise")
                     }
                     .foregroundStyle(CVROperationalPalette.critical)
+                } else if logNeedsManualSync(entry) {
+                    Button {
+                        syncLogEntry(entry)
+                    } label: {
+                        Label("SYNC", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
                 }
                 Spacer()
                 Button {
@@ -3616,13 +3632,50 @@ private struct FlightLogView: View {
             || entry.transcriptStatus?.lowercased() == "failed"
     }
 
+    private func logNeedsManualSync(_ entry: CVRFlightLogEntry) -> Bool {
+        guard isOperationallyCheckedIn(entry) else { return false }
+        if logNeedsRetry(entry) { return false }
+        let dispatchDone = entry.serverUploadStatus?.lowercased() == "complete"
+        let audioDone = entry.audioUploadStatus?.lowercased() == "uploaded"
+            || entry.audioUploadStatus?.lowercased() == "complete"
+        let transcriptDone = entry.transcriptStatus?.lowercased() == "ready"
+        return !(dispatchDone && audioDone && transcriptDone)
+    }
+
     private func logFailureMessage(_ entry: CVRFlightLogEntry) -> String? {
         let message = (entry.transcriptError ?? entry.serverUploadError ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return message.isEmpty ? nil : message
     }
 
-    private func retryLogUpload(_ entry: CVRFlightLogEntry) {
+    private func syncPendingLogUploads() {
+        workflow.requeueFailedUploads()
+        workflow.requeueConnectivityFailedUploads()
+        _ = recordingStore.requeueConnectivityFailedUploads()
+        uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
+
+        let flightIDs = Set(displayEntries.map(\.flightRecordID))
+        for recording in recordingStore.recordings {
+            let linkedFlightID = recording.flightSessionID ?? ""
+            guard flightIDs.contains(linkedFlightID) || flightIDs.contains(recording.id) else { continue }
+            guard recording.uploadStatus != .uploaded else { continue }
+            recordingStore.update(recording.id) {
+                $0.nextUploadRetryAt = nil
+                if $0.uploadStatus == .failed {
+                    $0.uploadStatus = .pending
+                    $0.lastError = ""
+                }
+            }
+            uploadManager.upload(recordingID: recording.id, store: recordingStore, settings: settings)
+        }
+
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            await flightLogs.refresh(settings: settings)
+        }
+    }
+
+    private func syncLogEntry(_ entry: CVRFlightLogEntry) {
         workflow.requeueFailedUploads(forFlightRecordID: entry.flightRecordID)
         uploadManager.retryWorkflowSynchronization(workflow: workflow, settings: settings)
         for recording in linkedRecordings(forFlightRecordID: entry.flightRecordID) {
@@ -3632,6 +3685,7 @@ private struct FlightLogView: View {
                 $0.nextUploadRetryAt = nil
                 $0.uploadRetryCount = nil
                 if $0.uploadStatus == .failed {
+                    $0.uploadStatus = .pending
                     $0.lastError = ""
                 }
             }
@@ -3641,12 +3695,16 @@ private struct FlightLogView: View {
         }
         Task {
             try? await Task.sleep(for: .seconds(4))
-            if entry.transcriptStatus?.lowercased() == "failed" {
-                await flightLogs.retryServerProcessing(entry, settings: settings)
-            } else {
-                await flightLogs.refresh(settings: settings)
-            }
-            try? await Task.sleep(for: .seconds(8))
+            await flightLogs.refresh(settings: settings)
+        }
+    }
+
+    private func retryLogUpload(_ entry: CVRFlightLogEntry) {
+        syncLogEntry(entry)
+        guard entry.transcriptStatus?.lowercased() == "failed" else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            await flightLogs.retryServerProcessing(entry, settings: settings)
             await flightLogs.refresh(settings: settings)
         }
     }

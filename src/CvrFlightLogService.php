@@ -51,13 +51,25 @@ final class CvrFlightLogService
                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_departure_airport')), 'null'),
                     ''
                 ) AS departure_airport,
-                DATE_FORMAT(departure_event.timestamp_utc, '%Y-%m-%d %H:%i:%s') AS departure_time_utc,
+                DATE_FORMAT(
+                    COALESCE(
+                        departure_event.timestamp_utc,
+                        CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(closure.payload_json, '$.evidence.off_block_utc')), 'null') AS DATETIME)
+                    ),
+                    '%Y-%m-%d %H:%i:%s'
+                ) AS departure_time_utc,
                 COALESCE(
                     NULLIF(adjustment.arrival_airport, ''),
                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(v.payload_json, '$.planned_destination_airport')), 'null'),
                     ''
                 ) AS arrival_airport,
-                DATE_FORMAT(arrival_event.timestamp_utc, '%Y-%m-%d %H:%i:%s') AS arrival_event_time_utc,
+                DATE_FORMAT(
+                    COALESCE(
+                        arrival_event.timestamp_utc,
+                        CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(closure.payload_json, '$.evidence.on_block_utc')), 'null') AS DATETIME)
+                    ),
+                    '%Y-%m-%d %H:%i:%s'
+                ) AS arrival_event_time_utc,
                 CAST(COALESCE(adjustment.starting_hobbs, d.starting_hobbs) AS DECIMAL(12,2)) AS starting_hobbs,
                 CAST(COALESCE(adjustment.starting_tacho, d.starting_tacho) AS DECIMAL(12,2)) AS starting_tacho,
                 CAST(COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) AS DECIMAL(12,2)) AS ending_hobbs,
@@ -161,7 +173,7 @@ final class CvrFlightLogService
               ON departure_event.id = (
                   SELECT e1.id
                   FROM ipca_cvr_flight_events e1
-                  WHERE e1.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+                  WHERE LOWER(e1.workflow_flight_record_uuid) = LOWER(d.workflow_flight_record_uuid)
                     AND e1.event_type = 'engine_start_off_block'
                   ORDER BY e1.timestamp_utc ASC, e1.id ASC
                   LIMIT 1
@@ -170,8 +182,8 @@ final class CvrFlightLogService
               ON arrival_event.id = (
                   SELECT e2.id
                   FROM ipca_cvr_flight_events e2
-                  WHERE e2.workflow_flight_record_uuid = d.workflow_flight_record_uuid
-                    AND e2.event_type = 'engine_shutdown_on_block'
+                  WHERE LOWER(e2.workflow_flight_record_uuid) = LOWER(d.workflow_flight_record_uuid)
+                    AND e2.event_type IN ('engine_shutdown_on_block', 'transient_stop_on_block')
                   ORDER BY e2.timestamp_utc DESC, e2.id DESC
                   LIMIT 1
               )

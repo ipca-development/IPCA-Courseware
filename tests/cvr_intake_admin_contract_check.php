@@ -24,6 +24,10 @@ if ($bundleSource === false
 $intakeSource = file_get_contents(__DIR__ . '/../src/CvrDataIntakeReadService.php');
 if ($intakeSource === false
     || !str_contains($intakeSource, 'off_block_utc')
+    || !str_contains($intakeSource, 'derivedOnBlockUtc')
+    || !str_contains($intakeSource, 'off_block_plus_hobbs_increment')
+    || !str_contains($intakeSource, "$.evidence.off_block_utc")
+    || !str_contains($intakeSource, 'LOWER(fe.workflow_flight_record_uuid)')
     || !str_contains($intakeSource, "'admin_manual'")) {
     fwrite(STDERR, "CvrDataIntakeReadService contract failed.\n");
     exit(1);

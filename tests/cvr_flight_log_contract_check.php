@@ -38,7 +38,14 @@ $checks = array(
         && str_contains($service, "'arrival_airport'")
         && str_contains($service, "'arrival_time'")
         && str_contains($service, "'total_hobbs_time'")
-        && str_contains($service, "'has_garmin_csv'"),
+        && str_contains($service, "'has_garmin_csv'")
+        && str_contains($service, "event_type IN ('engine_shutdown_on_block', 'transient_stop_on_block')")
+        && str_contains($service, "$.evidence.off_block_utc"),
+    'Check-In closure payload carries OFF/ON block times for admin intake' =>
+        str_contains($uploads, 'item["off_block_utc"]')
+        && str_contains($uploads, 'item["on_block_utc"]')
+        && str_contains($uploads, 'off_block_plus_hobbs_increment')
+        && !str_contains($uploads, 'item["on_block_source"] = onBlock.eventType'),
     'duplicate local and server rows collapse by reservation then Dispatch identity' =>
         str_contains($service, "'scheduler_record_id'")
         && str_contains($models, 'var schedulerRecordID: String?')
@@ -54,7 +61,14 @@ $checks = array(
         && str_contains($views, 'return ("SYNCING"')
         && str_contains($views, 'return ("CHECKED IN"')
         && str_contains($views, 'SYNC PENDING')
-        && str_contains($views, 'CHECK-IN IS COMPLETE; SYNC FOLLOWS'),
+        && str_contains($views, 'SYNC PENDING UNTIL DISPATCH + AUDIO FINISH ONLINE'),
+    'Log exposes manual SYNC NOW for pending uploads' =>
+        str_contains($views, 'title: "SYNC NOW"')
+        && str_contains($views, 'syncPendingLogUploads()')
+        && str_contains($views, 'logNeedsManualSync')
+        && str_contains($views, 'Label("SYNC"')
+        && str_contains($views, 'syncLogEntry(entry)')
+        && str_contains($workflowStore, 'Could not requeue archived flight uploads'),
     'offline audio is linked to the workflow flight and repaired for existing archives' =>
         str_contains($coordinator, 'recording.flightSessionID = workflow?.state.activeFlightRecord?.id')
         && str_contains($coordinator, 'linkRecordingSession(recordingID: recordingSessionID')
