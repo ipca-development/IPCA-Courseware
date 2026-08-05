@@ -231,19 +231,25 @@ enum CVROperationalIdentityLocal {
     }
 
     /// Mint one reservation and N ordered legs for Create Local Dispatch multi-leg.
+    /// When `legUUIDs` is provided, those values are reused (no reminting) for draft continuity.
     static func createOfflineMultiLegBundles(
         organizationID: Int,
         reservationUUID: String? = nil,
         organizationTimezoneIANA: String,
         airports: [String],
-        dispatchUUIDs: [String]
+        dispatchUUIDs: [String],
+        legUUIDs: [String]? = nil
     ) throws -> (reservationUUID: String, identities: [CVRLocalOperationalIdentity]) {
-        guard airports.count >= 2, dispatchUUIDs.count == airports.count - 1 else {
+        let legCount = airports.count - 1
+        guard airports.count >= 2, dispatchUUIDs.count == legCount else {
+            throw CVROperationalIdentityLocalError.immutableConflict
+        }
+        if let legUUIDs, legUUIDs.count != legCount {
             throw CVROperationalIdentityLocalError.immutableConflict
         }
         let reservation = try requiredUUID(reservationUUID ?? UUID().uuidString.lowercased())
         var identities: [CVRLocalOperationalIdentity] = []
-        for index in 0..<(airports.count - 1) {
+        for index in 0..<legCount {
             let identity = try createOfflineBundle(
                 organizationID: organizationID,
                 dispatchUUID: dispatchUUIDs[index],
@@ -251,7 +257,7 @@ enum CVROperationalIdentityLocal {
                 originAirport: airports[index],
                 destinationAirport: airports[index + 1],
                 reservationUUID: reservation,
-                legUUID: UUID().uuidString.lowercased()
+                legUUID: legUUIDs?[index] ?? UUID().uuidString.lowercased()
             )
             identities.append(identity)
         }

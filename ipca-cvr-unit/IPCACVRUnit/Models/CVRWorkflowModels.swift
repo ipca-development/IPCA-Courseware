@@ -142,6 +142,12 @@ struct CVROperationalSessionContext: Codable, Equatable {
     var carryoverHobbs: Double?
     var carryoverTacho: Double?
     var carryoverFuel: String?
+    /// Oil from the previous leg Dispatch (Check-In does not collect oil).
+    var carryoverOilPercentage: Int?
+    var carryoverOilQuantity: Double?
+    var carryoverOilUnit: String?
+    /// Crew selected on the previous leg Dispatch — default for the next leg.
+    var carryoverCrew: [CVRCrewAssignment]?
     var awaitingAvionicsOffConfirmation: Bool
     var continuityEngineStartSynthesized: Bool
     /// Request soft-start of a new recording after next-leg Dispatch/recorder ready.
@@ -157,6 +163,10 @@ struct CVROperationalSessionContext: Codable, Equatable {
             carryoverHobbs: nil,
             carryoverTacho: nil,
             carryoverFuel: nil,
+            carryoverOilPercentage: nil,
+            carryoverOilQuantity: nil,
+            carryoverOilUnit: nil,
+            carryoverCrew: nil,
             awaitingAvionicsOffConfirmation: false,
             continuityEngineStartSynthesized: false,
             pendingSoftStartRecording: false

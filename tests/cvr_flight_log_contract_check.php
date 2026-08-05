@@ -46,7 +46,15 @@ $checks = array(
         && str_contains($views, 'return "schedule:')
         && str_contains($views, 'return "dispatch:')
         && str_contains($views, 'mergeLogEntries')
-        && str_contains($views, 'existing.hasGarminCSV || candidate.hasGarminCSV'),
+        && str_contains($views, 'existing.hasGarminCSV || candidate.hasGarminCSV')
+        && str_contains($views, 'merged.endingHobbs = merged.endingHobbs ?? existing.endingHobbs ?? candidate.endingHobbs')
+        && str_contains($views, 'merged.endingTacho = merged.endingTacho ?? existing.endingTacho ?? candidate.endingTacho'),
+    'checked-in Log rows are not labeled incomplete while sync is pending' =>
+        str_contains($views, 'isOperationallyCheckedIn')
+        && str_contains($views, 'return ("SYNCING"')
+        && str_contains($views, 'return ("CHECKED IN"')
+        && str_contains($views, 'SYNC PENDING')
+        && str_contains($views, 'CHECK-IN IS COMPLETE; SYNC FOLLOWS'),
     'offline audio is linked to the workflow flight and repaired for existing archives' =>
         str_contains($coordinator, 'recording.flightSessionID = workflow?.state.activeFlightRecord?.id')
         && str_contains($coordinator, 'linkRecordingSession(recordingID: recordingSessionID')
@@ -81,7 +89,8 @@ $checks = array(
         str_contains($service, '$elapsedSeconds = (int)round((float)$row[\'total_hobbs_time\'] * 3600)')
         && str_contains($service, "->modify(sprintf('+%d seconds', \$elapsedSeconds))")
         && str_contains($service, "\$arrivalUtc = \$this->utcDate(\$row['arrival_event_time_utc']")
-        && str_contains($views, 'departure.timestampLocal.addingTimeInterval(totalHobbs * 3600)'),
+        && str_contains($views, 'departure.timestampLocal.addingTimeInterval(max(0, endHobbs - startHobbs) * 3600)')
+        && str_contains($views, 'transient_stop_on_block'),
     'flight log times are explicit California local time with daylight saving support' =>
         str_contains($service, 'departure_event.timestamp_utc')
         && str_contains($service, "new DateTimeZone('America/Los_Angeles')")
@@ -123,7 +132,7 @@ $checks = array(
         && str_contains($models, 'var transcriptProgress: Int?')
         && str_contains($models, 'var takeoffCount: Int?')
         && str_contains($models, 'var landingCount: Int?')
-        && str_contains($views, '"SERVER"')
+        && str_contains($views, '"DISPATCH"')
         && str_contains($views, '"TRANSCRIPT"')
         && str_contains($views, '"TAKEOFFS"')
         && str_contains($views, '"LANDINGS"'),
@@ -133,7 +142,7 @@ $checks = array(
         && str_contains($service, 'requeueTranscription')
         && str_contains($models, 'func retryServerProcessing(')
         && str_contains($workflowStore, 'func requeueFailedUploads(forFlightRecordID')
-        && str_contains($views, 'Label("RE-UPLOAD"')
+        && str_contains($views, 'Label("RETRY"')
         && str_contains($views, 'retryLogUpload(entry)'),
     'iOS accepts AirDrop CSV and routes it to Log assignment' =>
         str_contains($plist, 'public.comma-separated-values-text')
@@ -160,10 +169,10 @@ $checks = array(
         && str_contains($garminEvidence, 'GarminCsvValidationService')
         && str_contains($garminEvidence, 'enqueueJobs')
         && str_contains($uploads, 'finalized.workflowLinked == true'),
-    'Log tab uses the operational shell and exposes missing CSV records' =>
+    'Log tab uses the operational shell and highlights missing Garmin CSV' =>
         str_contains($models, 'case log')
         && str_contains($views, 'AIRCRAFT FLIGHT LOG')
-        && str_contains($views, 'CSV MISSING')
+        && str_contains($views, 'entry.hasGarminCSV ? CVROperationalPalette.cardBorder : CVROperationalPalette.warning.opacity(0.55)')
         && str_contains($views, 'OperationalBottomTabBar'),
     'Log replaces the standalone Garmin operational tab' =>
         str_contains($views, 'CVROperationalTab.allCases.filter { $0 != .garmin }')
@@ -175,15 +184,16 @@ $checks = array(
         && str_contains($views, 'NoActiveFlightView(caption: "RECORDER")')
         && str_contains($views, 'NoActiveFlightView(caption: "IN-FLIGHT")')
         && str_contains($views, 'PREVIOUS FLIGHT ENDED'),
-    'flight closure makes Garmin optional and asks only for ending meters' =>
-        str_contains($views, 'AUDIO FLIGHT CLOSURE')
-        && str_contains($views, 'Garmin CSV data is optional now')
-        && str_contains($views, 'Enter Ending Hobbs and Tacho'),
+    'flight Check-In asks for ending meters and does not require Garmin' =>
+        str_contains($views, 'SAVE CHECK-IN')
+        && str_contains($views, 'Enter Ending Hobbs and Tacho')
+        && str_contains($views, 'ENGINE SHUTDOWN CHECK-IN')
+        && str_contains($views, 'TRANSIENT STOP CHECK-IN'),
     'ending meters finish locally while uploads continue from the archive' =>
         str_contains($workflowStore, 'func finishEndedFlightLocally() -> Bool')
         && str_contains($workflowStore, 'guard archiveActiveWorkflow() else { return false }')
-        && str_contains($workflowStore, '$0.selectedTab = .log')
-        && str_contains($views, 'workflow.finishEndedFlightLocally()')
+        && str_contains($workflowStore, 'completeEngineShutdownAfterAvionicsOff')
+        && str_contains($coordinator, 'completeEngineShutdownAfterAvionicsOff()')
         && str_contains($views, 'uploadManager.uploadQueuedWorkflowComponents'),
     'just-ended local flight is immediately selectable for Garmin attachment' =>
         str_contains($views, 'private var displayEntries: [CVRFlightLogEntry]')

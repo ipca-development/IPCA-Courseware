@@ -36,7 +36,7 @@ struct CVROperationalMetrics {
     var statusFontSize: CGFloat { isCompact ? 24 : 27 }
     var timerFontSize: CGFloat { isCompact ? 32 : 38 }
     var tileIconSize: CGFloat { isCompact ? 20 : 23 }
-    var tileHeight: CGFloat { isCompact ? 88 : 98 }
+    var tileHeight: CGFloat { isCompact ? 104 : 116 }
     var primaryHeight: CGFloat { isCompact ? 112 : 128 }
 }
 
@@ -149,9 +149,11 @@ struct CVROperationalTile: View {
     var value: String
     var color: Color
     var metrics: CVROperationalMetrics
+    var caption: String? = nil
+    var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 5) {
+        let content = VStack(spacing: 4) {
             Image(systemName: iconName)
                 .font(.system(size: metrics.tileIconSize, weight: .semibold))
                 .foregroundStyle(CVROperationalPalette.secondaryBlue)
@@ -164,16 +166,38 @@ struct CVROperationalTile: View {
             Text(value)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(color)
-                .lineLimit(2)
+                .lineLimit(3)
                 .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.82)
-                .frame(height: 32, alignment: .top)
+                .minimumScaleFactor(0.75)
+                .frame(minHeight: caption == nil ? 32 : 28, alignment: .top)
+            if let caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.85)
+            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: metrics.tileHeight, maxHeight: metrics.tileHeight)
+        .frame(maxWidth: .infinity, minHeight: metrics.tileHeight, maxHeight: .infinity)
         .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(
+            action == nil ? CVROperationalPalette.cardBorder : CVROperationalPalette.secondaryBlue.opacity(0.55),
+            lineWidth: 1
+        ))
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+
+        if let action {
+            Button(action: action) {
+                content
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(caption ?? "Opens editor")
+        } else {
+            content
+        }
     }
 }
 

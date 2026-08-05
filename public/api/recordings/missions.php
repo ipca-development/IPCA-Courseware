@@ -33,6 +33,16 @@ try {
         );
     }
 
+    usort($missions, static function (array $a, array $b): int {
+        foreach (array('program', 'stage', 'phase', 'scenario') as $key) {
+            $cmp = ((int)$a[$key]) <=> ((int)$b[$key]);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+        }
+        return strnatcasecmp((string)$a['missionCode'], (string)$b['missionCode']);
+    });
+
     echo json_encode(array(
         'ok' => true,
         'missions' => $missions,

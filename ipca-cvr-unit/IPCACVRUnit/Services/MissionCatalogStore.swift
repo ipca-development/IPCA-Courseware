@@ -13,10 +13,10 @@ final class MissionCatalogStore: ObservableObject {
 
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
-            missions = try Self.parse(text)
+            replaceMissions(try Self.parse(text))
             lastError = ""
         } catch {
-            missions = []
+            replaceMissions([])
             lastError = "Mission catalogue could not be loaded: \(error.localizedDescription)"
         }
     }
@@ -36,7 +36,7 @@ final class MissionCatalogStore: ObservableObject {
             let response = try await APIClient(serverURL: url).missions()
             if response.ok {
                 if !response.missions.isEmpty {
-                    missions = response.missions
+                    replaceMissions(response.missions)
                     lastError = ""
                 } else if missions.isEmpty {
                     lastError = "Server mission catalogue is empty."
@@ -51,9 +51,47 @@ final class MissionCatalogStore: ObservableObject {
         }
     }
 
+    /// Avoid publishing identical catalogues — parent Menu/List blink when `missions` is reassigned.
+    private func replaceMissions(_ next: [CVRMissionCatalogEntry]) {
+        let sorted = Self.chronological(next)
+        if missions == sorted { return }
+        missions = sorted
+    }
+
     func mission(code: String) -> CVRMissionCatalogEntry? {
         let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return missions.first { $0.missionCode.uppercased() == normalized }
+    }
+
+    /// Missions valid for aircraft Flight Training / approved flight activities on this device.
+    var flightMissions: [CVRMissionCatalogEntry] {
+        Self.chronological(
+            missions.filter {
+                CVRLocalDispatchDraft.isAircraftFlightMission(
+                    code: $0.missionCode,
+                    description: $0.missionDescription
+                )
+            }
+        )
+    }
+
+    func flightMissionPickerTitle(_ entry: CVRMissionCatalogEntry) -> String {
+        CVRLocalDispatchDraft.missionPickerTitle(
+            code: entry.missionCode,
+            description: entry.missionDescription
+        )
+    }
+
+    /// Curriculum order: Program → Stage → Phase → Scenario (numeric), not string code order.
+    /// Prevents `1-1-11` / `1-1-12` appearing before `1-1-4`.
+    static func chronological(_ entries: [CVRMissionCatalogEntry]) -> [CVRMissionCatalogEntry] {
+        entries.sorted { lhs, rhs in
+            if lhs.program != rhs.program { return lhs.program < rhs.program }
+            if lhs.stage != rhs.stage { return lhs.stage < rhs.stage }
+            if lhs.phase != rhs.phase { return lhs.phase < rhs.phase }
+            if lhs.scenario != rhs.scenario { return lhs.scenario < rhs.scenario }
+            return lhs.missionCode.localizedStandardCompare(rhs.missionCode) == .orderedAscending
+        }
     }
 
     private static func parse(_ text: String) throws -> [CVRMissionCatalogEntry] {

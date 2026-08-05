@@ -33,6 +33,9 @@ final class CVRWorkflowStore: ObservableObject {
         var diagnostics: [String] = []
         do {
             diagnostics.append(contentsOf: try loadArchives())
+            if repairConsentFailuresInArchives() {
+                diagnostics.append("Repaired Phase 3 operational consent for archived Dispatch uploads.")
+            }
         } catch {
             archives = []
             archiveRewriteSafe = false
@@ -106,7 +109,7 @@ final class CVRWorkflowStore: ObservableObject {
         }
 
         let continuity = state.operationalSession
-        let carryover = continuityCarryover(for: registration) ?? latestClosedCarryover(for: registration)
+        let carryover = resolvedLegCarryover(for: registration)
         let dispatchID = UUID().uuidString
         var operationalIdentity: CVRLocalOperationalIdentity?
         if canonicalWriteEnabled {
@@ -201,17 +204,24 @@ final class CVRWorkflowStore: ObservableObject {
         cvrUnitID: String,
         beaconID: String,
         missionCode: String = "",
-        canonicalWriteEnabled: Bool = false
+        canonicalWriteEnabled: Bool = false,
+        reservationUUID: String? = nil,
+        legUUIDs: [String]? = nil
     ) {
         guard let selectedAircraft else {
             lastError = "Aircraft configuration is required before creating a Dispatch."
             return
         }
         let normalizedAirports = airports
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .map { CVROperationalIdentityLocal.normalizeAirport($0) }
             .filter { !$0.isEmpty }
         guard normalizedAirports.count >= 2 else {
-            lastError = "Enter at least two airports to create a multi-leg reservation."
+            lastError = "Enter the departure airport and destination for each leg."
+            return
+        }
+        let legCount = normalizedAirports.count - 1
+        if let legUUIDs, legUUIDs.count != legCount {
+            lastError = "Unable to create the Dispatch. Please try again."
             return
         }
         if state.activeDispatch != nil || state.activeFlightRecord != nil {
@@ -220,20 +230,22 @@ final class CVRWorkflowStore: ObservableObject {
         }
 
         let registration = selectedAircraft.registration
-        let carryover = continuityCarryover(for: registration) ?? latestClosedCarryover(for: registration)
-        let legCount = normalizedAirports.count - 1
+        let carryover = resolvedLegCarryover(for: registration)
         let dispatchIDs = (0..<legCount).map { _ in UUID().uuidString }
         var identities: [CVRLocalOperationalIdentity] = []
-        var reservationUUID = UUID().uuidString.lowercased()
+        var resolvedReservationUUID = reservationUUID.flatMap { CVROperationalIdentityLocal.normalizeUUID($0) }
+            ?? UUID().uuidString.lowercased()
         if canonicalWriteEnabled {
             do {
                 let minted = try CVROperationalIdentityLocal.createOfflineMultiLegBundles(
                     organizationID: 1,
+                    reservationUUID: resolvedReservationUUID,
                     organizationTimezoneIANA: TimeZone.current.identifier,
                     airports: normalizedAirports,
-                    dispatchUUIDs: dispatchIDs
+                    dispatchUUIDs: dispatchIDs,
+                    legUUIDs: legUUIDs
                 )
-                reservationUUID = minted.reservationUUID
+                resolvedReservationUUID = minted.reservationUUID
                 identities = minted.identities
             } catch {
                 CVROperationalIdentityLocal.logSanitized("offline_multileg_identity_create_failed", fields: [
@@ -245,9 +257,16 @@ final class CVRWorkflowStore: ObservableObject {
             }
         } else {
             identities = (0..<legCount).map { index in
-                CVRLocalOperationalIdentity(
-                    reservationUUID: reservationUUID,
-                    legUUID: UUID().uuidString.lowercased(),
+                let legUUID: String
+                if let provided = legUUIDs?[index],
+                   let normalized = CVROperationalIdentityLocal.normalizeUUID(provided) {
+                    legUUID = normalized
+                } else {
+                    legUUID = UUID().uuidString.lowercased()
+                }
+                return CVRLocalOperationalIdentity(
+                    reservationUUID: resolvedReservationUUID,
+                    legUUID: legUUID,
                     organizationID: 1,
                     reservationType: "flight_training",
                     activityDomain: "flight",
@@ -265,7 +284,7 @@ final class CVRWorkflowStore: ObservableObject {
         let plannedLegs: [CVRPlannedLegRecord] = identities.enumerated().map { index, identity in
             CVRPlannedLegRecord(
                 id: identity.legUUID,
-                reservationUUID: reservationUUID,
+                reservationUUID: resolvedReservationUUID,
                 legUUID: identity.legUUID,
                 sequenceNumber: index + 1,
                 departureAirport: normalizedAirports[index],
@@ -275,7 +294,8 @@ final class CVRWorkflowStore: ObservableObject {
                 schedulerRecordID: nil,
                 plannedStartAt: Date(),
                 plannedEndAt: nil,
-                status: index == 0 ? "active" : "planned"
+                // Remains Scheduled until DISPATCH FLIGHT confirms the current leg.
+                status: "planned"
             )
         }
 
@@ -323,7 +343,7 @@ final class CVRWorkflowStore: ObservableObject {
 
         let persisted = mutate {
             $0.operationalSession = CVROperationalSessionContext(
-                reservationUUID: reservationUUID,
+                reservationUUID: resolvedReservationUUID,
                 engineSessionContinuityActive: false,
                 plannedLegs: plannedLegs,
                 currentLegIndex: 1,
@@ -331,6 +351,10 @@ final class CVRWorkflowStore: ObservableObject {
                 carryoverHobbs: nil,
                 carryoverTacho: nil,
                 carryoverFuel: nil,
+                carryoverOilPercentage: nil,
+                carryoverOilQuantity: nil,
+                carryoverOilUnit: nil,
+                carryoverCrew: nil,
                 awaitingAvionicsOffConfirmation: false,
                 continuityEngineStartSynthesized: false,
                 pendingSoftStartRecording: false
@@ -450,7 +474,7 @@ final class CVRWorkflowStore: ObservableObject {
 
         let continuity = state.operationalSession
         let useContinuity = continuity?.engineSessionContinuityActive == true
-        let carryover = continuityCarryover(for: registration) ?? latestClosedCarryover(for: registration)
+        let carryover = resolvedLegCarryover(for: registration)
         let dispatchID = UUID().uuidString
         var operationalIdentity: CVRLocalOperationalIdentity?
         if canonicalWriteEnabled {
@@ -504,14 +528,19 @@ final class CVRWorkflowStore: ObservableObject {
             missionCode: missionCode,
             plannedDepartureAirport: departure,
             plannedDestinationAirport: destination,
-            crew: (session?.crew ?? []).map { member in
-                CVRCrewAssignment(
-                    id: UUID().uuidString,
-                    personID: member.personID,
-                    personName: member.personName,
-                    role: Self.crewRole(from: member.role)
-                )
-            },
+            crew: {
+                if let carried = previousLegCrewCarryover(for: selectedAircraft.registration), !carried.isEmpty {
+                    return Self.remintedCrewAssignments(carried)
+                }
+                return (session?.crew ?? []).map { member in
+                    CVRCrewAssignment(
+                        id: UUID().uuidString,
+                        personID: member.personID,
+                        personName: member.personName,
+                        role: Self.crewRole(from: member.role)
+                    )
+                }
+            }(),
             startingHobbs: carryover?.endingHobbs,
             startingTacho: carryover?.endingTacho,
             fuelOnboard: carryover?.fuelRemaining ?? "",
@@ -548,19 +577,9 @@ final class CVRWorkflowStore: ObservableObject {
                 sessionContext.reservationUUID = reservationUUID.lowercased()
             }
             if let plannedLeg {
-                if let index = sessionContext.plannedLegs.firstIndex(where: { $0.legUUID == plannedLeg.legUUID }) {
-                    sessionContext.plannedLegs[index].status = "active"
-                    sessionContext.currentLegIndex = sessionContext.plannedLegs[index].sequenceNumber
-                }
+                Self.activatePlannedLeg(plannedLeg.legUUID, in: &sessionContext)
             } else if let legUUID, sessionContext.plannedLegs.contains(where: { $0.legUUID == legUUID }) {
-                for index in sessionContext.plannedLegs.indices {
-                    if sessionContext.plannedLegs[index].legUUID == legUUID {
-                        sessionContext.plannedLegs[index].status = "active"
-                        sessionContext.currentLegIndex = sessionContext.plannedLegs[index].sequenceNumber
-                    } else if sessionContext.plannedLegs[index].status == "active" {
-                        sessionContext.plannedLegs[index].status = "planned"
-                    }
-                }
+                Self.activatePlannedLeg(legUUID, in: &sessionContext)
             } else if let session {
                 // Seed planned legs from this reservation group if not already local.
                 if sessionContext.plannedLegs.isEmpty, let reservationUUID {
@@ -569,6 +588,7 @@ final class CVRWorkflowStore: ObservableObject {
                 sessionContext.currentLegIndex = 1
                 _ = session
             }
+            Self.sanitizePlannedLegStatuses(in: &sessionContext)
             sessionContext.pendingCheckInMode = nil
             sessionContext.awaitingAvionicsOffConfirmation = false
             sessionContext.continuityEngineStartSynthesized = false
@@ -763,9 +783,19 @@ final class CVRWorkflowStore: ObservableObject {
             dispatch.modifiedAt = Date()
             $0.activeDispatch = dispatch
             $0.activeFlightRecord = flightRecord
+            // Phase 3: no consent UI — mint accepted operational-test consents so server intake succeeds.
+            $0.consents = Self.ensuredOperationalConsents(
+                for: dispatch,
+                existing: $0.consents,
+                deviceID: dispatch.configuredCVRUnitID,
+                appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+            )
             if !$0.uploadComponents.contains(where: { $0.id == dispatchComponent.id }) {
                 $0.uploadComponents.append(dispatchComponent)
             }
+            var session = $0.operationalSession ?? .empty
+            Self.markCurrentPlannedLeg(dispatchedIn: &session, dispatch: dispatch)
+            $0.operationalSession = session
             $0.selectedTab = .recorder
         }
     }
@@ -838,6 +868,10 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     func recordTransientStopOnBlock(gpsSample: GPSSample?) {
+        guard hasRemainingPlannedLegAfterCurrent else {
+            lastError = "Transient Stop is only available when another leg remains. Use Engine Shutdown for the final leg."
+            return
+        }
         guard var flightRecord = state.activeFlightRecord else { return }
         let hasEngineRunning = state.flightEvents.contains {
             $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
@@ -991,6 +1025,32 @@ final class CVRWorkflowStore: ObservableObject {
 
     var needsEngineStart: Bool {
         !state.engineSessionContinuityActive
+    }
+
+    /// True when at least one unfinished planned leg remains after the current leg.
+    /// Transient Stop is only offered when this is true (never for single-leg / last-leg flights).
+    var hasRemainingPlannedLegAfterCurrent: Bool {
+        let legs = state.plannedLegs
+        guard legs.count > 1 else { return false }
+
+        let currentUUID = (state.activeDispatch?.operationalIdentity?.legUUID)
+            .flatMap { CVROperationalIdentityLocal.normalizeUUID($0) }
+        let currentIndex = state.operationalSession?.currentLegIndex
+
+        return legs.contains { leg in
+            let status = leg.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if status == "checked_in" || status == "cancelled" || status == "canceled" {
+                return false
+            }
+            let legUUID = CVROperationalIdentityLocal.normalizeUUID(leg.legUUID) ?? leg.legUUID.lowercased()
+            if let currentUUID, legUUID == currentUUID {
+                return false
+            }
+            if currentUUID == nil, let currentIndex, leg.sequenceNumber == currentIndex {
+                return false
+            }
+            return true
+        }
     }
 
     func estimatedCheckInHobbs() -> Double? {
@@ -1387,6 +1447,9 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord.endingHobbs = endingHobbs
             flightRecord.endingTacho = endingTacho
             flightRecord.fuelRemaining = fuel
+            flightRecord.endingOilPercentage = dispatch.oilPercentage
+            flightRecord.endingOilQuantity = dispatch.effectiveStartingOilQuantity
+            flightRecord.endingOilUnit = dispatch.startingOilUnit ?? dispatch.effectiveStartingOilUnit
             flightRecord.verifiedDestinationAirport = destination
             flightRecord.verifiedTakeoffCount = verifiedTakeoffCount
             flightRecord.verifiedLandingCount = verifiedLandingCount
@@ -1432,10 +1495,23 @@ final class CVRWorkflowStore: ObservableObject {
             session.carryoverHobbs = endingHobbs
             session.carryoverTacho = endingTacho
             session.carryoverFuel = fuel
-            if let legUUID = dispatch.operationalIdentity?.legUUID,
-               let index = session.plannedLegs.firstIndex(where: { $0.legUUID == legUUID }) {
+            session.carryoverCrew = dispatch.crew
+            session.carryoverOilPercentage = dispatch.oilPercentage
+            session.carryoverOilQuantity = dispatch.effectiveStartingOilQuantity
+            session.carryoverOilUnit = dispatch.effectiveStartingOilUnit
+            let currentLegUUID = dispatch.operationalIdentity?.legUUID
+            if let legUUID = currentLegUUID,
+               let index = session.plannedLegs.firstIndex(where: {
+                   CVROperationalIdentityLocal.normalizeUUID($0.legUUID)
+                       == CVROperationalIdentityLocal.normalizeUUID(legUUID)
+               }) {
+                session.plannedLegs[index].status = "checked_in"
+            } else if let index = session.currentLegIndex.flatMap({ desired in
+                session.plannedLegs.firstIndex(where: { $0.sequenceNumber == desired })
+            }) {
                 session.plannedLegs[index].status = "checked_in"
             }
+            Self.sanitizePlannedLegStatuses(in: &session)
             if mode == .transientStop {
                 session.engineSessionContinuityActive = true
                 session.awaitingAvionicsOffConfirmation = false
@@ -1533,6 +1609,71 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    /// Fill empty Dispatch meters / fuel / oil from continuity or latest closed archive.
+    /// Crew is only backfilled during an active continuous engine session (next leg), never for a brand-new local Dispatch.
+    func backfillDispatchCarryoverIfNeeded() {
+        guard !isDispatchLocked,
+              var dispatch = state.activeDispatch else { return }
+
+        let registration = dispatch.tailNumber
+        let continuityActive = state.engineSessionContinuityActive
+            || dispatch.dispatchSource == "transient_stop_carryover"
+        let carryover = resolvedLegCarryover(for: registration)
+        var changed = false
+
+        if continuityActive,
+           dispatch.crew.isEmpty,
+           let carriedCrew = previousLegCrewCarryover(for: registration),
+           !carriedCrew.isEmpty {
+            dispatch.crew = Self.remintedCrewAssignments(carriedCrew)
+            changed = true
+        }
+        if dispatch.startingHobbs == nil, let hobbs = carryover?.endingHobbs {
+            dispatch.startingHobbs = hobbs
+            dispatch.previousEndingHobbs = hobbs
+            changed = true
+        }
+        if dispatch.startingTacho == nil, let tacho = carryover?.endingTacho {
+            dispatch.startingTacho = tacho
+            dispatch.previousEndingTacho = tacho
+            changed = true
+        }
+        if dispatch.fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let fuel = carryover?.fuelRemaining,
+           !fuel.isEmpty {
+            dispatch.fuelOnboard = fuel
+            dispatch.previousFuelRemaining = fuel
+            changed = true
+        }
+        if dispatch.effectiveStartingOilQuantity == nil,
+           let oil = carryover?.oilQuantity {
+            dispatch.startingOilQuantity = oil
+            dispatch.oilPercentage = carryover?.oilPercentage
+            dispatch.startingOilUnit = carryover?.oilUnit ?? dispatch.startingOilUnit
+            dispatch.previousEndingOilQuantity = oil
+            dispatch.previousOilPercentage = carryover?.oilPercentage
+            dispatch.previousEndingOilUnit = carryover?.oilUnit
+            changed = true
+        } else if dispatch.effectiveStartingOilQuantity == nil,
+                  let oilPct = carryover?.oilPercentage {
+            dispatch.oilPercentage = oilPct
+            dispatch.startingOilQuantity = Double(oilPct)
+            dispatch.startingOilUnit = carryover?.oilUnit ?? "%"
+            changed = true
+        }
+        if dispatch.previousFlightRecordID == nil, let previousID = carryover?.flightRecordID {
+            dispatch.previousFlightRecordID = previousID
+            changed = true
+        }
+
+        guard changed else { return }
+        dispatch.modifiedAt = Date()
+        dispatch.status = Self.dispatchStatus(for: dispatch, consents: state.consents)
+        _ = mutate {
+            $0.activeDispatch = dispatch
+        }
+    }
+
     private func continuityCarryover(for registration: String) -> (
         flightRecordID: String,
         endingHobbs: Double,
@@ -1556,10 +1697,94 @@ final class CVRWorkflowStore: ObservableObject {
             hobbs,
             tacho,
             fuel,
-            nil,
-            nil,
-            nil
+            session.carryoverOilPercentage,
+            session.carryoverOilQuantity,
+            session.carryoverOilUnit
         )
+    }
+
+    /// Merges continuity session values with the latest closed archive so oil/crew
+    /// still fill when session oil fields are missing (or continuity is partial).
+    private func resolvedLegCarryover(for registration: String) -> (
+        flightRecordID: String,
+        endingHobbs: Double,
+        endingTacho: Double,
+        fuelRemaining: String,
+        oilPercentage: Int?,
+        oilQuantity: Double?,
+        oilUnit: String?
+    )? {
+        let continuity = continuityCarryover(for: registration)
+        let archived = latestClosedCarryover(for: registration)
+        guard continuity != nil || archived != nil else { return nil }
+
+        guard let hobbs = continuity?.endingHobbs ?? archived?.endingHobbs,
+              let tacho = continuity?.endingTacho ?? archived?.endingTacho else {
+            return nil
+        }
+        let fuel = (continuity?.fuelRemaining ?? archived?.fuelRemaining ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fuel.isEmpty else { return nil }
+
+        return (
+            continuity?.flightRecordID ?? archived?.flightRecordID ?? "carryover",
+            hobbs,
+            tacho,
+            fuel,
+            continuity?.oilPercentage ?? archived?.oilPercentage,
+            continuity?.oilQuantity ?? archived?.oilQuantity,
+            {
+                let unit = (continuity?.oilUnit ?? archived?.oilUnit)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return (unit?.isEmpty == false) ? unit : nil
+            }()
+        )
+    }
+
+    /// Crew remembered from the previous closed leg — session first, then latest archive.
+    private func previousLegCrewCarryover(for registration: String? = nil) -> [CVRCrewAssignment]? {
+        if let crew = state.operationalSession?.carryoverCrew, !crew.isEmpty {
+            return crew
+        }
+        let normalizedRegistration = (registration
+            ?? state.operationalSession?.plannedLegs.first?.tailNumber
+            ?? state.activeDispatch?.tailNumber
+            ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard !normalizedRegistration.isEmpty else { return nil }
+
+        let reservation = state.operationalSession?.reservationUUID
+            .flatMap { CVROperationalIdentityLocal.normalizeUUID($0) }
+
+        let candidates = archives
+            .filter {
+                $0.dispatch.tailNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    == normalizedRegistration
+                    && !$0.dispatch.crew.isEmpty
+            }
+            .sorted { $0.archivedAt > $1.archivedAt }
+
+        if let reservation,
+           let match = candidates.first(where: {
+               CVROperationalIdentityLocal.normalizeUUID(
+                   $0.dispatch.operationalIdentity?.reservationUUID ?? ""
+               ) == reservation
+           }) {
+            return match.dispatch.crew
+        }
+        return candidates.first?.dispatch.crew
+    }
+
+    private static func remintedCrewAssignments(_ crew: [CVRCrewAssignment]) -> [CVRCrewAssignment] {
+        crew.map { member in
+            CVRCrewAssignment(
+                id: UUID().uuidString,
+                personID: member.personID,
+                personName: member.personName,
+                role: member.role
+            )
+        }
     }
 
     func importGarminCSV(from sourceURL: URL) {
@@ -2406,6 +2631,7 @@ final class CVRWorkflowStore: ObservableObject {
     func requeueFailedUploads(forFlightRecordID flightRecordID: String) {
         mutate {
             guard $0.activeFlightRecord?.id == flightRecordID else { return }
+            _ = Self.repairStaleDispatchConsents(in: &$0)
             for index in $0.uploadComponents.indices {
                 guard $0.uploadComponents[index].state == .failed
                     || $0.uploadComponents[index].state == .needsUserAction else {
@@ -2421,7 +2647,7 @@ final class CVRWorkflowStore: ObservableObject {
             return
         }
         var updated = archives
-        var changed = false
+        var changed = Self.repairArchivedDispatchConsents(in: &updated[archiveIndex])
         for componentIndex in updated[archiveIndex].uploadComponents.indices {
             guard updated[archiveIndex].uploadComponents[componentIndex].state == .failed
                 || updated[archiveIndex].uploadComponents[componentIndex].state == .needsUserAction else {
@@ -2845,9 +3071,19 @@ final class CVRWorkflowStore: ObservableObject {
                     endingHobbs,
                     endingTacho,
                     fuelRemaining,
-                    archive.flightRecord.endingOilPercentage,
-                    archive.flightRecord.effectiveEndingOilQuantity,
-                    archive.flightRecord.effectiveEndingOilUnit
+                    archive.flightRecord.endingOilPercentage ?? archive.dispatch.oilPercentage,
+                    archive.flightRecord.effectiveEndingOilQuantity ?? archive.dispatch.effectiveStartingOilQuantity,
+                    {
+                        if let ending = archive.flightRecord.endingOilUnit?
+                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                           !ending.isEmpty {
+                            return ending
+                        }
+                        if archive.dispatch.effectiveStartingOilQuantity != nil {
+                            return archive.dispatch.effectiveStartingOilUnit
+                        }
+                        return archive.dispatch.startingOilUnit
+                    }()
                 )
             }
             .first
@@ -3306,6 +3542,183 @@ final class CVRWorkflowStore: ObservableObject {
         return formatter
     }()
 
+    /// Local route may be edited until the first leg is actually dispatched.
+    var canEditLocalRoute: Bool {
+        guard state.activeDispatch != nil, !isDispatchLocked else { return false }
+        let statuses = state.plannedLegs.map(\.status)
+        return !CVRDispatchRouteOverview.isRouteEditingLocked(statuses: statuses)
+    }
+
+    func sanitizeRouteStatusesIfNeeded() {
+        guard state.operationalSession != nil else { return }
+        _ = mutate {
+            var session = $0.operationalSession ?? .empty
+            Self.sanitizePlannedLegStatuses(in: &session)
+            $0.operationalSession = session
+        }
+    }
+
+    /// Replace planned route from the Create/Edit Local Dispatch draft while preserving UUIDs.
+    func applyLocalRouteDraft(_ draft: CVRLocalDispatchDraft) {
+        lastError = ""
+        guard canEditLocalRoute else {
+            lastError = "The route can no longer be changed after a leg has been dispatched."
+            return
+        }
+        guard !draft.legs.isEmpty else {
+            lastError = "Add at least one flight leg."
+            return
+        }
+        for (index, leg) in draft.legs.enumerated() {
+            let dep = CVROperationalIdentityLocal.normalizeAirport(leg.departureAirport)
+            let arr = CVROperationalIdentityLocal.normalizeAirport(leg.arrivalAirport)
+            if index == 0 && (dep.isEmpty || !CVRLocalDispatchDraft.isValidICAOIdentifier(dep)) {
+                lastError = dep.isEmpty ? "Enter the departure airport." : "Airport code must be a valid ICAO identifier."
+                return
+            }
+            if arr.isEmpty {
+                lastError = index == 0 ? "Enter the destination airport." : "Enter the destination for Leg \(index + 1)."
+                return
+            }
+            if !CVRLocalDispatchDraft.isValidICAOIdentifier(arr)
+                || (index > 0 && !CVRLocalDispatchDraft.isValidICAOIdentifier(dep)) {
+                lastError = "Airport code must be a valid ICAO identifier."
+                return
+            }
+            if index > 0 {
+                let expected = CVROperationalIdentityLocal.normalizeAirport(draft.legs[index - 1].arrivalAirport)
+                if expected != dep {
+                    lastError = "Enter the destination for Leg \(index)."
+                    return
+                }
+            }
+        }
+
+        let mission = draft.selectedMissionCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? (state.activeDispatch?.missionCode ?? "")
+            : draft.selectedMissionCode
+        let reservation = CVROperationalIdentityLocal.normalizeUUID(draft.reservationUUID)
+            ?? state.operationalSession?.reservationUUID
+            ?? UUID().uuidString.lowercased()
+        let tail = state.activeDispatch?.tailNumber ?? ""
+
+        let plannedLegs: [CVRPlannedLegRecord] = draft.legs.enumerated().map { index, leg in
+            CVRPlannedLegRecord(
+                id: leg.legUUID,
+                reservationUUID: reservation,
+                legUUID: leg.legUUID,
+                sequenceNumber: index + 1,
+                departureAirport: CVROperationalIdentityLocal.normalizeAirport(leg.departureAirport),
+                destinationAirport: CVROperationalIdentityLocal.normalizeAirport(leg.arrivalAirport),
+                missionCode: mission,
+                tailNumber: tail,
+                schedulerRecordID: nil,
+                plannedStartAt: Date(),
+                plannedEndAt: nil,
+                status: "planned"
+            )
+        }
+
+        _ = mutate {
+            var session = $0.operationalSession ?? .empty
+            session.reservationUUID = reservation
+            session.plannedLegs = plannedLegs
+            session.currentLegIndex = 1
+            Self.sanitizePlannedLegStatuses(in: &session)
+            $0.operationalSession = session
+            if var dispatch = $0.activeDispatch, let first = plannedLegs.first {
+                dispatch.plannedDepartureAirport = first.departureAirport
+                dispatch.plannedDestinationAirport = first.destinationAirport
+                if !mission.isEmpty {
+                    dispatch.missionCode = mission
+                }
+                if var identity = dispatch.operationalIdentity {
+                    identity.reservationUUID = reservation
+                    identity.legUUID = first.legUUID
+                    identity.originAirport = first.departureAirport
+                    identity.destinationAirport = first.destinationAirport
+                    dispatch.operationalIdentity = identity
+                }
+                dispatch.modifiedAt = Date()
+                $0.activeDispatch = dispatch
+            }
+        }
+    }
+
+    private static func activatePlannedLeg(_ legUUID: String, in session: inout CVROperationalSessionContext) {
+        let normalized = CVROperationalIdentityLocal.normalizeUUID(legUUID) ?? legUUID.lowercased()
+        for index in session.plannedLegs.indices {
+            let legNormalized = CVROperationalIdentityLocal.normalizeUUID(session.plannedLegs[index].legUUID)
+                ?? session.plannedLegs[index].legUUID.lowercased()
+            let status = session.plannedLegs[index].status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if legNormalized == normalized {
+                if status != "checked_in" && status != "cancelled" && status != "canceled" {
+                    session.plannedLegs[index].status = "active"
+                }
+                session.currentLegIndex = session.plannedLegs[index].sequenceNumber
+            } else if status == "active" {
+                session.plannedLegs[index].status = "planned"
+            }
+        }
+        sanitizePlannedLegStatuses(in: &session)
+    }
+
+    private static func markCurrentPlannedLeg(dispatchedIn session: inout CVROperationalSessionContext, dispatch: CVRDispatchRecord) {
+        let currentUUID = dispatch.operationalIdentity?.legUUID
+        let currentIndex = session.currentLegIndex ?? 1
+        for index in session.plannedLegs.indices {
+            let leg = session.plannedLegs[index]
+            let status = leg.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if status == "checked_in" || status == "cancelled" || status == "canceled" {
+                continue
+            }
+            let matchesUUID: Bool = {
+                guard let currentUUID,
+                      let left = CVROperationalIdentityLocal.normalizeUUID(leg.legUUID),
+                      let right = CVROperationalIdentityLocal.normalizeUUID(currentUUID) else { return false }
+                return left == right
+            }()
+            let matchesIndex = currentUUID == nil && leg.sequenceNumber == currentIndex
+            if matchesUUID || matchesIndex {
+                session.plannedLegs[index].status = "dispatched"
+                session.currentLegIndex = leg.sequenceNumber
+            } else if status == "active" || status == "dispatched" {
+                session.plannedLegs[index].status = "planned"
+            }
+        }
+        sanitizePlannedLegStatuses(in: &session)
+    }
+
+    /// At most one Active/Dispatched current leg; checked-in/cancelled are preserved.
+    private static func sanitizePlannedLegStatuses(in session: inout CVROperationalSessionContext) {
+        let currentUUID = session.plannedLegs.first(where: {
+            let status = $0.status.lowercased()
+            return status == "active" || status == "dispatched"
+        })?.legUUID
+        let preferredUUID = currentUUID
+            ?? session.currentLegIndex.flatMap { index in
+                session.plannedLegs.first(where: { $0.sequenceNumber == index })?.legUUID
+            }
+        var sawCurrent = false
+        for index in session.plannedLegs.indices {
+            let status = session.plannedLegs[index].status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if status == "checked_in" || status == "cancelled" || status == "canceled" {
+                continue
+            }
+            let isPreferred = preferredUUID.map {
+                (CVROperationalIdentityLocal.normalizeUUID(session.plannedLegs[index].legUUID)
+                    ?? session.plannedLegs[index].legUUID.lowercased())
+                    == (CVROperationalIdentityLocal.normalizeUUID($0) ?? $0.lowercased())
+            } ?? (session.plannedLegs[index].sequenceNumber == (session.currentLegIndex ?? 1))
+
+            if (status == "active" || status == "dispatched") && (!isPreferred || sawCurrent) {
+                session.plannedLegs[index].status = "planned"
+            } else if (status == "active" || status == "dispatched") && isPreferred {
+                sawCurrent = true
+            }
+        }
+    }
+
     private static func dispatchStatus(for dispatch: CVRDispatchRecord, consents: [CVRConsentRecord]) -> CVRDispatchStatus {
         _ = consents
         if !dispatch.missingItems.isEmpty {
@@ -3321,19 +3734,19 @@ final class CVRWorkflowStore: ObservableObject {
         return true
     }
 
-    private static func repairStaleDispatchConsents(in workflow: inout CVRWorkflowState) -> Bool {
-        guard var dispatch = workflow.activeDispatch,
-              workflow.uploadComponents.contains(where: {
-                  $0.componentType == "dispatch_metadata"
-                      && ($0.state == .failed || $0.state == .needsUserAction)
-                      && $0.lastError.localizedCaseInsensitiveContains("current-version consent")
-              }) else {
-            return false
-        }
+    /// Phase 3 operational-test consent text version. Marks server-bound consent evidence as waived UI.
+    private static let operationalConsentTextVersion = "phase3_operational_flight_test_waiver"
 
-        var repairedConsents = workflow.consents
+    private static func ensuredOperationalConsents(
+        for dispatch: CVRDispatchRecord,
+        existing: [CVRConsentRecord],
+        deviceID: String,
+        appVersion: String
+    ) -> [CVRConsentRecord] {
+        var consents = existing.filter { $0.dispatchID == dispatch.id }
+        let now = Date()
         for assignment in dispatch.crew {
-            if repairedConsents.contains(where: {
+            if consents.contains(where: {
                 $0.dispatchID == dispatch.id
                     && $0.dispatchVersion == dispatch.version
                     && $0.personName == assignment.personName
@@ -3342,47 +3755,135 @@ final class CVRWorkflowStore: ObservableObject {
             }) {
                 continue
             }
-            guard let accepted = workflow.consents.last(where: {
+            consents.removeAll {
                 $0.dispatchID == dispatch.id
                     && $0.personName == assignment.personName
                     && $0.crewRole == assignment.role
-                    && $0.consentResult
-            }) else {
-                return false
             }
-            repairedConsents.append(CVRConsentRecord(
+            consents.append(CVRConsentRecord(
                 id: UUID().uuidString,
-                personID: accepted.personID,
-                personName: accepted.personName,
-                crewRole: accepted.crewRole,
+                personID: assignment.personID,
+                personName: assignment.personName,
+                crewRole: assignment.role,
                 consentResult: true,
-                timestamp: accepted.timestamp,
-                deviceID: accepted.deviceID,
+                timestamp: now,
+                deviceID: deviceID.isEmpty ? "local_cvr_unit" : deviceID,
                 dispatchID: dispatch.id,
                 dispatchVersion: dispatch.version,
-                consentTextVersion: accepted.consentTextVersion,
-                appVersion: accepted.appVersion
+                consentTextVersion: operationalConsentTextVersion,
+                appVersion: appVersion
             ))
         }
+        let other = existing.filter { $0.dispatchID != dispatch.id }
+        return other + consents
+    }
 
-        guard hasRequiredConsents(dispatch: dispatch, consents: repairedConsents) else {
+    private static func repairStaleDispatchConsents(in workflow: inout CVRWorkflowState) -> Bool {
+        guard var dispatch = workflow.activeDispatch,
+              workflow.uploadComponents.contains(where: {
+                  $0.componentType == "dispatch_metadata"
+                      && ($0.state == .failed || $0.state == .needsUserAction)
+                      && $0.lastError.localizedCaseInsensitiveContains("consent")
+              }) else {
             return false
         }
+
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let repairedConsents = ensuredOperationalConsents(
+            for: dispatch,
+            existing: workflow.consents,
+            deviceID: dispatch.configuredCVRUnitID,
+            appVersion: appVersion
+        )
         workflow.consents = repairedConsents
         dispatch.consentStatus = "complete"
         workflow.activeDispatch = dispatch
         for index in workflow.uploadComponents.indices {
             guard workflow.uploadComponents[index].componentType == "dispatch_metadata",
-                  workflow.uploadComponents[index].lastError.localizedCaseInsensitiveContains("current-version consent"),
+                  workflow.uploadComponents[index].lastError.localizedCaseInsensitiveContains("consent"),
                   workflow.uploadComponents[index].state == .failed
                       || workflow.uploadComponents[index].state == .needsUserAction else {
                 continue
             }
+            // Drop the failed empty-consent snapshot so retry rebuilds with operational consents.
+            workflow.uploadComponents[index].requestPayloadSnapshot = nil
+            workflow.uploadComponents[index].reconciliationRequired = true
             workflow.uploadComponents[index].state = .queued
             workflow.uploadComponents[index].progress = 0
-            workflow.uploadComponents[index].lastError = "Recovered consent version metadata; Dispatch is queued for retry."
+            workflow.uploadComponents[index].lastError = "Recovered Phase 3 operational consent; Dispatch is queued for retry."
         }
         return true
+    }
+
+    @discardableResult
+    private static func repairArchivedDispatchConsents(in archive: inout CVRWorkflowArchiveRecord) -> Bool {
+        let consentFailedComponents = archive.uploadComponents.filter {
+            $0.componentType == "dispatch_metadata"
+                && ($0.state == .failed || $0.state == .needsUserAction || $0.state == .queued)
+                && $0.lastError.localizedCaseInsensitiveContains("consent")
+        }
+        let missingCrewConsents = archive.dispatch.crew.contains { assignment in
+            !archive.consents.contains {
+                $0.dispatchID == archive.dispatch.id
+                    && $0.dispatchVersion == archive.dispatch.version
+                    && $0.personName == assignment.personName
+                    && $0.crewRole == assignment.role
+                    && $0.consentResult
+            }
+        }
+        let hasDispatchUpload = archive.uploadComponents.contains { $0.componentType == "dispatch_metadata" }
+        guard !consentFailedComponents.isEmpty || (hasDispatchUpload && missingCrewConsents) else {
+            return false
+        }
+
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        archive.consents = ensuredOperationalConsents(
+            for: archive.dispatch,
+            existing: archive.consents,
+            deviceID: archive.dispatch.configuredCVRUnitID,
+            appVersion: appVersion
+        )
+        archive.dispatch.consentStatus = "complete"
+
+        for index in archive.uploadComponents.indices {
+            guard archive.uploadComponents[index].componentType == "dispatch_metadata" else { continue }
+            let mentionsConsent = archive.uploadComponents[index].lastError
+                .localizedCaseInsensitiveContains("consent")
+            let isFailed = archive.uploadComponents[index].state == .failed
+                || archive.uploadComponents[index].state == .needsUserAction
+            guard mentionsConsent || isFailed || missingCrewConsents else { continue }
+
+            // Clear the failed empty-consent snapshot so retry rebuilds a valid payload.
+            archive.uploadComponents[index].requestPayloadSnapshot = nil
+            archive.uploadComponents[index].reconciliationRequired = true
+            archive.uploadComponents[index].state = .queued
+            archive.uploadComponents[index].progress = 0
+            archive.uploadComponents[index].lastError =
+                "Recovered Phase 3 operational consent; Dispatch is queued for retry."
+        }
+        return true
+    }
+
+    @discardableResult
+    private func repairConsentFailuresInArchives() -> Bool {
+        guard archiveRewriteSafe else { return false }
+        var updated = archives
+        var changed = false
+        for index in updated.indices {
+            if Self.repairArchivedDispatchConsents(in: &updated[index]) {
+                updated[index].status = .uploadPending
+                changed = true
+            }
+        }
+        guard changed else { return false }
+        do {
+            try saveArchives(updated)
+            archives = updated
+            return true
+        } catch {
+            lastError = "Could not repair archived Dispatch consent uploads: \(error.localizedDescription)"
+            return false
+        }
     }
 
     private static func materialSignature(_ dispatch: CVRDispatchRecord) -> String {
