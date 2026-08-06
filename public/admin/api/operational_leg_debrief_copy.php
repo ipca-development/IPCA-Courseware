@@ -5,7 +5,14 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/FlightDebriefService.php';
 require_once __DIR__ . '/../../../src/ManualReconstructionBundleService.php';
 
-cw_require_admin();
+cw_require_login();
+$user = cw_current_user($pdo) ?: array();
+$role = strtolower(trim((string)($user['role'] ?? '')));
+if (!in_array($role, array('admin', 'supervisor', 'instructor', 'chief_instructor'), true)) {
+    http_response_code(403);
+    echo json_encode(array('ok' => false, 'copy_text' => '', 'message' => 'Forbidden.'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
 header('Content-Type: application/json; charset=utf-8');
 
 $debriefId = (int)($_GET['debrief_id'] ?? 0);

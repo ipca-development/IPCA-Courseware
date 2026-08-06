@@ -77,6 +77,15 @@ return [
         ],
     ],
     [
+        'key' => 'master_logbook',
+        'label' => 'Master Logbook',
+        'icon' => 'flight',
+        'href' => '/instructor/master_logbook.php',
+        'match_paths' => [
+            '/instructor/master_logbook.php',
+        ],
+    ],
+    [
         'key' => 'manuals',
         'label' => 'Documents',
         'icon' => 'documents',

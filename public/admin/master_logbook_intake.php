@@ -18,7 +18,43 @@ require_once __DIR__ . '/../../src/CockpitRecorderDebriefQueueService.php';
 require_once __DIR__ . '/../../src/MissionCatalogService.php';
 require_once __DIR__ . '/../../src/AircraftOperationalConfigService.php';
 
-cw_require_admin();
+if (!isset($cvrMasterLogbookContext) || !is_array($cvrMasterLogbookContext)) {
+    $cvrMasterLogbookContext = array(
+        'audience' => 'admin',
+        'base_path' => '/admin/master_logbook.php',
+        'can_enroll' => true,
+        'can_remove' => true,
+        'can_edit' => true,
+        'show_audio' => true,
+        'show_garmin' => true,
+        'show_reconstruction' => true,
+    );
+}
+
+$cvrMlAudience = strtolower(trim((string)($cvrMasterLogbookContext['audience'] ?? 'admin')));
+$cvrMlBasePath = trim((string)($cvrMasterLogbookContext['base_path'] ?? '/admin/master_logbook.php'));
+if ($cvrMlBasePath === '' || !str_starts_with($cvrMlBasePath, '/')) {
+    $cvrMlBasePath = '/admin/master_logbook.php';
+}
+$cvrMlCanEnroll = !empty($cvrMasterLogbookContext['can_enroll']);
+$cvrMlCanRemove = !empty($cvrMasterLogbookContext['can_remove']);
+$cvrMlCanEdit = !empty($cvrMasterLogbookContext['can_edit']);
+$cvrMlShowAudio = !empty($cvrMasterLogbookContext['show_audio']);
+$cvrMlShowGarmin = !empty($cvrMasterLogbookContext['show_garmin']);
+$cvrMlShowReconstruction = !empty($cvrMasterLogbookContext['show_reconstruction']);
+$GLOBALS['cvrMlBasePath'] = $cvrMlBasePath;
+$GLOBALS['cvrMlCanRemove'] = $cvrMlCanRemove;
+
+if ($cvrMlAudience === 'instructor') {
+    cw_require_login();
+    $viewer = cw_current_user($pdo) ?: array();
+    $viewerRole = strtolower(trim((string)($viewer['role'] ?? '')));
+    if (!in_array($viewerRole, array('admin', 'supervisor', 'instructor', 'chief_instructor'), true)) {
+        redirect(cw_home_path_for_role($viewerRole));
+    }
+} else {
+    cw_require_admin();
+}
 
 $enrollmentResult = null;
 $enrollmentError = '';
@@ -82,6 +118,9 @@ try {
     $crewCatalogUsers = $userStatement ? ($userStatement->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array();
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'
         && (string)($_POST['action'] ?? '') === 'create_cvr_enrollment') {
+        if (!$cvrMlCanEnroll) {
+            throw new RuntimeException('CVR enrollment is not available in this view.');
+        }
         if (!hash_equals($enrollmentCsrf, (string)($_POST['csrf_token'] ?? ''))) {
             throw new RuntimeException('Enrollment request expired. Refresh the page and try again.');
         }
@@ -133,6 +172,38 @@ try {
         }
         $action = (string)($_POST['action'] ?? '');
         $actorUserId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
+        $adminOnlyActions = array(
+            'freeze_reconstruction_bundle',
+            'supersede_reconstruction_bundle',
+            'upload_manual_garmin_csv',
+            'upload_manual_audio',
+            'retry_reconstruction_bundle',
+            'lock_bundle_transcript',
+            'rebuild_bundle_flight_record',
+            'save_debrief_review',
+            'verify_debrief',
+            'reject_debrief',
+            'release_debrief',
+            'create_replay_share',
+            'revoke_replay_share',
+            'generate_bundle_debrief',
+            'hide_operational_leg',
+            'restore_operational_leg',
+        );
+        if ($cvrMlAudience === 'instructor') {
+            if (in_array($action, $adminOnlyActions, true) || $action === 'create_cvr_enrollment') {
+                throw new RuntimeException('This action is not available in the instructor Master Logbook.');
+            }
+            if ($action === 'save_operational_leg' && !$cvrMlCanEdit) {
+                throw new RuntimeException('Editing operational legs is not available in this view.');
+            }
+            if ($action !== 'save_operational_leg') {
+                throw new RuntimeException('This action is not available in the instructor Master Logbook.');
+            }
+        }
+        if (in_array($action, array('hide_operational_leg', 'restore_operational_leg'), true) && !$cvrMlCanRemove) {
+            throw new RuntimeException('Removing operational legs is not available in this view.');
+        }
         if ($action === 'freeze_reconstruction_bundle') {
             $bundle = $reconstructionService->freezeAndPrepare(
                 (int)($_POST['dispatch_id'] ?? 0),
@@ -288,7 +359,7 @@ try {
 $legsAircraftFilter = strtoupper(trim((string)($_GET['legs_aircraft'] ?? '')));
 $legsFrom = trim((string)($_GET['legs_from'] ?? ''));
 $legsTo = trim((string)($_GET['legs_to'] ?? ''));
-$legsShowRemoved = ((string)($_GET['legs_show_removed'] ?? '')) === '1';
+$legsShowRemoved = $cvrMlCanRemove && ((string)($_GET['legs_show_removed'] ?? '')) === '1';
 $legsPage = max(1, (int)($_GET['legs_page'] ?? 1));
 $legsLimit = 30;
 $legsOffset = ($legsPage - 1) * $legsLimit;
@@ -305,23 +376,32 @@ $dispatch = $intake->dispatchRows(
 $legsTotal = (int)($dispatch['total'] ?? count($dispatch['rows']));
 $legsPageCount = max(1, (int)($dispatch['page_count'] ?? 1));
 $legsPage = max(1, min($legsPageCount, (int)($dispatch['page'] ?? $legsPage)));
-$audio = $intake->audioRows();
-if ($audio['available'] && $audio['rows'] !== array()) {
-    $audio['rows'] = (new CvrAudioIntakeMetricsService($pdo))->enrichRows($audio['rows']);
-}
 $audioShortThresholdSeconds = 600;
 $audioShortRowCount = 0;
-foreach ($audio['rows'] as $audioRow) {
-    $audioDurationSeconds = (float)($audioRow['duration_seconds'] ?? 0);
-    if ($audioDurationSeconds > 0 && $audioDurationSeconds < $audioShortThresholdSeconds) {
-        $audioShortRowCount++;
+$audioVisibleRowCount = 0;
+if ($cvrMlShowAudio) {
+    $audio = $intake->audioRows();
+    if ($audio['available'] && $audio['rows'] !== array()) {
+        $audio['rows'] = (new CvrAudioIntakeMetricsService($pdo))->enrichRows($audio['rows']);
     }
+    foreach ($audio['rows'] as $audioRow) {
+        $audioDurationSeconds = (float)($audioRow['duration_seconds'] ?? 0);
+        if ($audioDurationSeconds > 0 && $audioDurationSeconds < $audioShortThresholdSeconds) {
+            $audioShortRowCount++;
+        }
+    }
+    $audioVisibleRowCount = max(0, count($audio['rows']) - $audioShortRowCount);
+} else {
+    $audio = array('available' => false, 'rows' => array(), 'message' => '');
 }
-$audioVisibleRowCount = max(0, count($audio['rows']) - $audioShortRowCount);
-$garmin = $intake->garminRows();
-$reconstructionBundles = $reconstructionService->recentBundles();
+$garmin = $cvrMlShowGarmin
+    ? $intake->garminRows()
+    : array('available' => false, 'rows' => array(), 'message' => '');
+$reconstructionBundles = $cvrMlShowReconstruction
+    ? $reconstructionService->recentBundles()
+    : array();
 $selectedDebrief = null;
-if ((int)($_GET['debrief_id'] ?? 0) > 0) {
+if ($cvrMlShowReconstruction && (int)($_GET['debrief_id'] ?? 0) > 0) {
     try {
         $selectedDebrief = $debriefService->structuredDebrief((int)$_GET['debrief_id']);
     } catch (Throwable $e) {
@@ -825,6 +905,7 @@ function cvr_intake_local_date(PDO $pdo, mixed $value, string $registration = ''
 
 function cvr_intake_legs_query(array $overrides = []): string
 {
+    $base = (string)($GLOBALS['cvrMlBasePath'] ?? '/admin/master_logbook.php');
     $params = array_merge(array(
         'tab' => 'dispatch',
         'legs_aircraft' => (string)($GLOBALS['legsAircraftFilter'] ?? ''),
@@ -838,7 +919,7 @@ function cvr_intake_legs_query(array $overrides = []): string
             unset($params[$key]);
         }
     }
-    return '/admin/master_logbook.php?' . http_build_query($params);
+    return $base . '?' . http_build_query($params);
 }
 
 function cvr_intake_short_hash(mixed $value): string
@@ -1555,32 +1636,46 @@ a.intake-refresh:hover{
       <div class="intake-hero-copy">
         <h2 class="intake-hero-title">Master Logbook</h2>
         <p class="intake-hero-text">
-          Operational Legs are the authoritative per-leg CVR record (Reservation → Leg). Times use the aircraft operational timezone (America/Los_Angeles). Audio, Garmin CSV, and reconstruction remain available as supporting intake evidence.
+          <?php if ($cvrMlAudience === 'instructor'): ?>
+            Operational Legs are the authoritative per-leg CVR record (Reservation → Leg). Times use the aircraft operational timezone (America/Los_Angeles).
+          <?php else: ?>
+            Operational Legs are the authoritative per-leg CVR record (Reservation → Leg). Times use the aircraft operational timezone (America/Los_Angeles). Audio, Garmin CSV, and reconstruction remain available as supporting intake evidence.
+          <?php endif; ?>
         </p>
       </div>
       <div class="intake-hero-actions">
-        <button class="app-btn app-btn-primary" type="button" data-enrollment-open>Enroll CVR Unit</button>
-        <a class="app-btn app-btn-secondary" href="/admin/master_logbook.php">Refresh data</a>
+        <?php if ($cvrMlCanEnroll): ?>
+          <button class="app-btn app-btn-primary" type="button" data-enrollment-open>Enroll CVR Unit</button>
+        <?php endif; ?>
+        <a class="app-btn app-btn-secondary" href="<?= cvr_intake_h($cvrMlBasePath) ?>">Refresh data</a>
       </div>
     </div>
   </section>
 
+  <?php if ($cvrMlShowAudio || $cvrMlShowGarmin || $cvrMlShowReconstruction): ?>
   <section class="intake-card">
     <div class="intake-tabs" role="tablist" aria-label="Data intake sources">
       <button class="intake-tab is-active" type="button" role="tab" aria-selected="true" data-intake-tab="dispatch">
         Operational Legs <span class="intake-count"><?= count($dispatch['rows']) ?></span>
       </button>
+      <?php if ($cvrMlShowAudio): ?>
       <button class="intake-tab" type="button" role="tab" aria-selected="false" data-intake-tab="audio">
         Cockpit Audio <span class="intake-count" data-audio-tab-count><?= $audioVisibleRowCount ?></span>
       </button>
+      <?php endif; ?>
+      <?php if ($cvrMlShowGarmin): ?>
       <button class="intake-tab" type="button" role="tab" aria-selected="false" data-intake-tab="garmin">
         Garmin CSV <span class="intake-count"><?= count($garmin['rows']) ?></span>
       </button>
+      <?php endif; ?>
+      <?php if ($cvrMlShowReconstruction): ?>
       <button class="intake-tab" type="button" role="tab" aria-selected="false" data-intake-tab="reconstruction">
         Reconstruction <span class="intake-count"><?= count($reconstructionBundles) ?></span>
       </button>
+      <?php endif; ?>
     </div>
   </section>
+  <?php endif; ?>
 
   <section class="intake-card intake-panel is-active" role="tabpanel" data-intake-panel="dispatch">
     <div class="intake-panel-head">
@@ -1589,7 +1684,7 @@ a.intake-refresh:hover{
         <div class="intake-muted">Logbook view — one row per checked-in Dispatch leg. Times use the aircraft operational timezone.</div>
       </div>
     </div>
-    <form class="legs-toolbar" method="get" action="/admin/master_logbook.php">
+    <form class="legs-toolbar" method="get" action="<?= cvr_intake_h($cvrMlBasePath) ?>">
       <input type="hidden" name="tab" value="dispatch">
       <div class="legs-filters">
         <label>Aircraft
@@ -1608,12 +1703,14 @@ a.intake-refresh:hover{
         <label>To
           <input class="intake-select" type="date" name="legs_to" value="<?= cvr_intake_h($legsTo) ?>">
         </label>
+        <?php if ($cvrMlCanRemove): ?>
         <label class="legs-show-removed" title="Soft-removed legs keep all evidence and can be restored">
           <input type="checkbox" name="legs_show_removed" value="1" <?= $legsShowRemoved ? 'checked' : '' ?> onchange="this.form.submit()">
           Show removed
         </label>
+        <?php endif; ?>
         <button class="app-btn app-btn-primary" type="submit">Apply</button>
-        <a class="app-btn app-btn-secondary" href="/admin/master_logbook.php?tab=dispatch">Clear</a>
+        <a class="app-btn app-btn-secondary" href="<?= cvr_intake_h(cvr_intake_legs_query(array('legs_aircraft' => '', 'legs_from' => '', 'legs_to' => '', 'legs_show_removed' => '', 'legs_page' => '1'))) ?>">Clear</a>
       </div>
       <div class="intake-muted">
         Showing <?= $legsTotal === 0 ? 0 : (($legsPage - 1) * $legsLimit + 1) ?>–<?= min($legsTotal, $legsPage * $legsLimit) ?>
@@ -1857,8 +1954,11 @@ a.intake-refresh:hover{
               </td>
               <td>
                 <div class="legs-actions">
+                  <?php
+                    $replayReturn = $cvrMlBasePath . '?tab=dispatch';
+                  ?>
                   <?php if ($replayReady): ?>
-                    <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>&amp;return=<?= rawurlencode('/admin/master_logbook.php?tab=dispatch') ?>" data-legs-stop>
+                    <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>&amp;return=<?= rawurlencode($replayReturn) ?>" data-legs-stop>
                       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
                       <span>Replay</span>
                     </a>
@@ -1869,6 +1969,7 @@ a.intake-refresh:hover{
                     </span>
                   <?php endif; ?>
                   <button type="button" class="app-btn app-btn-secondary" data-legs-details><span>Details</span></button>
+                  <?php if ($cvrMlCanRemove): ?>
                   <?php if (!empty($row['is_hidden'])): ?>
                     <form method="post" action="<?= cvr_intake_h(cvr_intake_legs_query()) ?>" data-legs-stop>
                       <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
@@ -1883,6 +1984,7 @@ a.intake-refresh:hover{
                       <input type="hidden" name="dispatch_id" value="<?= (int)($row['id'] ?? 0) ?>">
                       <button class="app-btn app-btn-secondary legs-btn-remove" type="submit"><span>Remove</span></button>
                     </form>
+                  <?php endif; ?>
                   <?php endif; ?>
                 </div>
               </td>
@@ -1909,6 +2011,7 @@ a.intake-refresh:hover{
     <?php endif; ?>
   </section>
 
+  <?php if ($cvrMlShowAudio): ?>
   <section class="intake-card intake-panel" role="tabpanel" data-intake-panel="audio">
     <div class="intake-panel-head">
       <div>
@@ -2083,7 +2186,9 @@ a.intake-refresh:hover{
       <?php endif; ?>
     <?php endif; ?>
   </section>
+  <?php endif; ?>
 
+  <?php if ($cvrMlShowGarmin): ?>
   <section class="intake-card intake-panel" role="tabpanel" data-intake-panel="garmin">
     <div class="intake-panel-head">
       <div>
@@ -2145,7 +2250,9 @@ a.intake-refresh:hover{
       </div>
     <?php endif; ?>
   </section>
+  <?php endif; ?>
 
+  <?php if ($cvrMlShowReconstruction): ?>
   <section class="intake-card intake-panel" role="tabpanel" data-intake-panel="reconstruction">
     <div class="intake-panel-head">
       <div>
@@ -2769,8 +2876,10 @@ a.intake-refresh:hover{
       </div>
     <?php endif; ?>
   </section>
+  <?php endif; ?>
 </div>
 
+<?php if ($cvrMlCanEnroll): ?>
 <div class="intake-modal-backdrop" id="enrollment-modal"<?= (is_array($enrollmentResult) || $enrollmentError !== '') ? '' : ' hidden' ?>>
   <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="enrollment-modal-title">
     <div class="intake-modal-head">
@@ -2807,6 +2916,7 @@ a.intake-refresh:hover{
     </div>
   </div>
 </div>
+<?php endif; ?>
 
 <div class="intake-modal-backdrop" id="legs-edit-modal" hidden>
   <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="legs-edit-title">
@@ -2949,10 +3059,13 @@ a.intake-refresh:hover{
         </div>
         <div class="leg-edit-footer">
           <button class="leg-edit-cancel" type="button" data-legs-edit-close>Cancel</button>
-          <button class="leg-edit-save" type="submit">Save Changes</button>
+          <?php if ($cvrMlCanEdit): ?>
+            <button class="leg-edit-save" type="submit">Save Changes</button>
+          <?php endif; ?>
         </div>
       </form>
 
+      <?php if ($cvrMlShowGarmin): ?>
       <div class="leg-edit-garmin">
         <h4>Garmin CSV Recovery</h4>
         <p>Attach a missing Garmin CSV to this operational leg. This does not save or discard other edits above.</p>
@@ -2971,6 +3084,14 @@ a.intake-refresh:hover{
           <button class="intake-button" type="submit" style="margin-top:12px;background:#475569">Upload CSV</button>
         </form>
       </div>
+      <?php else: ?>
+        <input type="hidden" id="legs-csv-flight-uuid" value="">
+        <input type="hidden" id="legs-csv-aircraft" value="">
+        <input type="hidden" id="legs-csv-aircraft-id" value="">
+        <span id="legs-csv-aircraft-label" hidden></span>
+        <span id="legs-csv-flight-label" hidden></span>
+        <span id="legs-csv-status" hidden></span>
+      <?php endif; ?>
 
       <div class="leg-edit-briefing" data-leg-section="generic-briefing">
         <div class="leg-edit-briefing-head">

@@ -7,7 +7,12 @@ require_once __DIR__ . '/../../src/CockpitRecorderService.php';
 $isPublicReplay = defined('IPCA_PUBLIC_REPLAY') && IPCA_PUBLIC_REPLAY === true;
 if (!$isPublicReplay) {
     require_once __DIR__ . '/../../src/layout.php';
-    cw_require_admin();
+    cw_require_login();
+    $replayUser = cw_current_user($pdo) ?: array();
+    $replayRole = strtolower(trim((string)($replayUser['role'] ?? '')));
+    if (!in_array($replayRole, array('admin', 'supervisor', 'instructor', 'chief_instructor'), true)) {
+        redirect(cw_home_path_for_role($replayRole));
+    }
 }
 
 $id = $isPublicReplay
@@ -18,17 +23,18 @@ $replayBackHref = '/admin/cockpit_recorder.php';
 $replayBackLabel = 'Back to cockpit recorder';
 if (!$isPublicReplay) {
     $requestedReturn = trim((string)($_GET['return'] ?? ''));
-    if ($requestedReturn !== '' && str_starts_with($requestedReturn, '/admin/')) {
+    if ($requestedReturn !== '' && (str_starts_with($requestedReturn, '/admin/') || str_starts_with($requestedReturn, '/instructor/'))) {
         $returnPath = parse_url($requestedReturn, PHP_URL_PATH);
         $allowedReturnPrefixes = array(
             '/admin/master_logbook.php',
             '/admin/cockpit_recorder.php',
             '/admin/flight_log_garmin_connection.php',
+            '/instructor/master_logbook.php',
         );
         foreach ($allowedReturnPrefixes as $prefix) {
             if (is_string($returnPath) && $returnPath === $prefix) {
                 $replayBackHref = $requestedReturn;
-                if ($returnPath === '/admin/master_logbook.php') {
+                if ($returnPath === '/admin/master_logbook.php' || $returnPath === '/instructor/master_logbook.php') {
                     $replayBackLabel = 'Back to Master Logbook';
                 } elseif ($returnPath === '/admin/flight_log_garmin_connection.php') {
                     $replayBackLabel = 'Back to Garmin connection';
