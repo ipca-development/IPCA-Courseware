@@ -1297,109 +1297,65 @@ a.intake-refresh:hover{
   .leg-edit-grid,.leg-edit-grid-3,.leg-edit-grid-4,.leg-edit-meter-row,.leg-edit-crew-row{grid-template-columns:1fr}
   .leg-edit-meter-arrow{display:none}
 }
-/* Operational Legs — design board (Flight / Route / Crew / Times / Hobbs / Tacho / Fuel / Evidence) */
-.ml-aircraft-pill{font-size:10px;padding:2px 7px;letter-spacing:.02em;line-height:1.2}
-.legs-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e2e8f0;border-radius:14px;background:#fff}
-.legs-table{width:100%;min-width:1180px;border-collapse:collapse;font-size:10px;table-layout:fixed}
-.legs-table col.legs-col-flight{width:118px}
-.legs-table col.legs-col-route{width:148px}
-.legs-table col.legs-col-times{width:168px}
-.legs-table col.legs-col-hobbs{width:118px}
-.legs-table col.legs-col-tacho{width:118px}
-.legs-table col.legs-col-fuel{width:148px}
-.legs-table col.legs-col-ops{width:64px}
-.legs-table col.legs-col-evidence{width:108px}
-.legs-table col.legs-col-actions{width:108px}
-.legs-table th,.legs-table td{padding:7px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top}
-.legs-table th{position:sticky;top:0;z-index:2;background:#f8fafc;font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:#64748b;font-weight:800;white-space:nowrap;text-align:left}
-.legs-table td{color:#102845;text-align:left}
+/* Operational Legs — one coherent flight strip per row */
+.ml-aircraft-pill{font-size:11px;padding:3px 8px;letter-spacing:.03em;line-height:1.2;white-space:nowrap}
+.legs-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e2e8f0;border-radius:16px;background:#fff}
+.legs-table{width:100%;min-width:1280px;border-collapse:separate;border-spacing:0;font-size:12px;table-layout:fixed}
+.legs-table col.legs-col-flight{width:132px}
+.legs-table col.legs-col-route{width:92px}
+.legs-table col.legs-col-crew{width:168px}
+.legs-table col.legs-col-times{width:108px}
+.legs-table col.legs-col-meters{width:148px}
+.legs-table col.legs-col-fuel{width:150px}
+.legs-table col.legs-col-evidence{width:118px}
+.legs-table col.legs-col-actions{width:120px}
+.legs-table th{position:sticky;top:0;z-index:2;background:#f8fafc;padding:10px 14px;border-bottom:1px solid #e2e8f0;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#64748b;font-weight:800;text-align:left;white-space:nowrap}
+.legs-table td{padding:14px 14px;border-bottom:1px solid #e8eef5;vertical-align:top;color:#102845;overflow:visible}
 .legs-table tbody tr.legs-row{cursor:pointer;transition:background-color .12s ease,box-shadow .12s ease}
-.legs-table tbody tr.legs-row:hover{background:#eef6ff;box-shadow:inset 3px 0 0 #2563eb}
-.legs-flight{display:grid;gap:3px;min-width:0}
-.legs-flight-date{font-size:10px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.legs-flight-mission{font-size:9px;font-weight:700;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.legs-route-cell{display:grid;grid-template-columns:minmax(70px,1fr) 20px minmax(70px,1fr);column-gap:16px;align-items:start}
-.legs-route-end{display:grid;gap:2px;min-width:0;justify-items:start;text-align:left}
-.legs-route-icao{font-weight:900;letter-spacing:.04em;color:#0f172a;font-size:11px;line-height:1.15}
-.legs-route-place{font-size:8px;font-weight:650;color:#94a3b8;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.legs-route-arrow{color:#94a3b8;font-weight:800;padding-top:1px;text-align:center}
-.legs-times-pair{display:grid;grid-template-columns:max-content 20px max-content;column-gap:18px;align-items:start;justify-content:start;font-variant-numeric:tabular-nums}
-.legs-times-end{display:grid;gap:2px;justify-items:start;text-align:left}
-.legs-times-value{font-size:11px;font-weight:850;color:#0f172a;line-height:1.15;white-space:nowrap}
-.legs-times-label{font-size:8px;font-weight:700;color:#94a3b8;line-height:1.2;white-space:nowrap}
-.legs-times-arrow{color:#94a3b8;font-weight:800;padding-top:1px;text-align:center}
-.legs-pair{display:grid;gap:2px;font-variant-numeric:tabular-nums}
-.legs-pair-main{font-size:11px;font-weight:850;color:#0f172a;white-space:nowrap}
-.legs-pair-sub{font-size:9px;font-weight:700;color:#64748b}
-.legs-crew{display:grid;gap:3px;min-width:0}
-.legs-crew-line{display:flex;gap:5px;align-items:center;min-width:0;line-height:1.2}
-.legs-crew-name{min-width:0;font-size:10px;font-weight:750;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.legs-role-pill{flex:0 0 auto;display:inline-flex;border-radius:999px;padding:1px 6px;font-size:8px;font-weight:900;letter-spacing:.03em}
-.legs-role-pic{background:#dbeafe;color:#1d4ed8}
-.legs-role-student{background:#e0f2fe;color:#0369a1}
-.legs-role-instructor{background:#dcfce7;color:#166534}
-.legs-role-muted{background:#e2e8f0;color:#475569}
-.legs-fuel{display:grid;gap:4px;min-width:0}
-.legs-fuel-line{display:flex;align-items:center;gap:5px;min-width:0}
-.legs-fuel-vals{font-size:10px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums;white-space:nowrap}
-.legs-fuel-burn{font-size:9px;font-weight:800;color:#0f172a}
-.legs-gauge{flex:1;min-width:36px;max-width:72px;height:7px;border-radius:999px;background:#e5e7eb;overflow:hidden}
-.legs-gauge > span{display:block;height:100%;border-radius:999px}
-.legs-gauge-fuel > span{background:linear-gradient(90deg,#16a34a 0%,#4ade80 55%,#a3e635 100%)}
-.legs-gauge-oil > span{background:linear-gradient(90deg,#c2410c 0%,#f59e0b 55%,#fbbf24 100%)}
-.legs-oil-pct{font-size:9px;font-weight:800;color:#92400e;font-variant-numeric:tabular-nums;min-width:2rem}
-.legs-ops{display:grid;gap:2px;justify-items:center;text-align:center}
-.legs-ops-main{font-size:12px;font-weight:900;color:#0f172a;font-variant-numeric:tabular-nums}
-.legs-ops-labels{display:flex;gap:10px;font-size:8px;font-weight:700;color:#94a3b8}
-.legs-evidence{display:grid;gap:3px}
-.legs-ev-row{display:flex;align-items:center;gap:5px;font-size:9px;font-weight:700;color:#475569}
-.legs-ev-icon{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;font-size:8px;font-weight:900;line-height:1}
-.legs-ev-ok{background:#dcfce7;color:#166534}
-.legs-ev-warn{background:#ffedd5;color:#c2410c}
-.legs-ev-bad{background:#fee2e2;color:#991b1b}
-.legs-ev-na{background:#f1f5f9;color:#94a3b8}
-.legs-actions{display:grid;gap:6px;justify-items:stretch;min-width:0}
-.legs-actions .app-btn{
-  min-height:30px;
-  padding:0 10px;
-  border-radius:999px;
-  font-size:10px;
-  font-weight:800;
-  gap:6px;
-  width:100%;
-  box-shadow:0 6px 14px rgba(16,36,64,0.10);
-}
+.legs-table tbody tr.legs-row:hover{background:#f5f9ff;box-shadow:inset 3px 0 0 #17345d}
+.legs-flight{display:grid;gap:6px;align-content:start}
+.legs-flight-date{font-size:11px;font-weight:800;color:#0f172a;line-height:1.25;white-space:nowrap}
+.legs-flight-mission{font-size:11px;font-weight:700;color:#64748b;line-height:1.25}
+.legs-route{display:grid;gap:2px;justify-items:start;font-variant-numeric:tabular-nums}
+.legs-route-icao{font-size:14px;font-weight:900;letter-spacing:.05em;color:#0f172a;line-height:1.15}
+.legs-route-join{font-size:11px;font-weight:800;color:#94a3b8;line-height:1;padding:1px 0}
+.legs-route-place{font-size:10px;font-weight:650;color:#94a3b8;line-height:1.25;margin-top:2px}
+.legs-crew{display:grid;gap:10px;min-width:0}
+.legs-crew-person{display:grid;gap:1px;min-width:0}
+.legs-crew-name{font-size:12px;font-weight:800;color:#0f172a;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
+.legs-crew-role{font-size:10px;font-weight:700;color:#64748b;line-height:1.2;text-transform:capitalize}
+.legs-times{display:grid;gap:2px;font-variant-numeric:tabular-nums;justify-items:start}
+.legs-times-value{font-size:14px;font-weight:900;color:#0f172a;line-height:1.1}
+.legs-times-label{font-size:10px;font-weight:700;color:#94a3b8;line-height:1.2}
+.legs-times-join{font-size:11px;font-weight:800;color:#94a3b8;line-height:1;padding:2px 0}
+.legs-times-ops{margin-top:6px;font-size:10px;font-weight:700;color:#64748b}
+.legs-meters{display:grid;gap:10px;font-variant-numeric:tabular-nums}
+.legs-meter{display:grid;gap:2px}
+.legs-meter-label{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#94a3b8}
+.legs-meter-main{font-size:13px;font-weight:850;color:#0f172a;white-space:nowrap}
+.legs-meter-delta{font-size:11px;font-weight:700;color:#64748b}
+.legs-fuel{display:grid;gap:5px;min-width:0}
+.legs-fuel-bar{width:100%;height:8px;border-radius:999px;background:#e5e7eb;overflow:hidden}
+.legs-fuel-bar > span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#15803d 0%,#22c55e 45%,#86efac 100%)}
+.legs-fuel-vals{font-size:12px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums;white-space:nowrap}
+.legs-fuel-burn{font-size:11px;font-weight:700;color:#334155}
+.legs-oil{font-size:11px;font-weight:700;color:#92400e}
+.legs-evidence{display:grid;gap:4px}
+.legs-ev{font-size:11px;font-weight:700;color:#475569;white-space:nowrap}
+.legs-ev-mark{font-weight:900}
+.legs-ev-ok .legs-ev-mark{color:#15803d}
+.legs-ev-warn .legs-ev-mark{color:#c2410c}
+.legs-ev-bad .legs-ev-mark{color:#b91c1c}
+.legs-ev-na .legs-ev-mark{color:#94a3b8}
+.legs-actions{display:grid;gap:8px;justify-items:stretch;min-width:0}
+.legs-actions .app-btn{min-height:34px;height:34px;padding:0 12px;border-radius:999px;font-size:11px;font-weight:800;gap:6px;width:100%;box-sizing:border-box}
 .legs-actions .app-btn svg{width:12px;height:12px;flex:0 0 12px}
-.legs-actions .app-btn-primary{
-  background:linear-gradient(180deg,#17345d 0%,#102440 100%);
-  color:#fff;
-  border-color:transparent;
-  box-shadow:0 8px 16px rgba(16,36,64,0.14);
-}
-.legs-actions .app-btn-primary:hover{
-  background:linear-gradient(180deg,#1b3d6c 0%,#15304f 100%);
-  color:#fff;
-}
-.legs-actions .app-btn-secondary{
-  background:#fff;
-  color:#102440;
-  border-color:rgba(15,23,42,0.12);
-  box-shadow:none;
-}
-.legs-actions .app-btn-secondary:hover{
-  background:#f9fbfe;
-  color:#102440;
-}
-.legs-actions .app-btn.is-disabled,
-.legs-actions .app-btn:disabled{
-  opacity:.45;
-  cursor:not-allowed;
-  pointer-events:none;
-  transform:none;
-  box-shadow:none;
-}
-.legs-legend{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;font-size:10px;color:#64748b;font-weight:700}
-.legs-legend span{display:inline-flex;align-items:center;gap:4px}
+.legs-actions .app-btn-primary{background:linear-gradient(180deg,#17345d 0%,#102440 100%);color:#fff;border-color:transparent;box-shadow:0 8px 16px rgba(16,36,64,.14)}
+.legs-actions .app-btn-primary:hover{background:linear-gradient(180deg,#1b3d6c 0%,#15304f 100%);color:#fff}
+.legs-actions .app-btn-secondary{background:#fff;color:#102440;border:1px solid rgba(15,23,42,.12);box-shadow:none}
+.legs-actions .app-btn-secondary:hover{background:#f9fbfe;color:#102440}
+.legs-actions .app-btn.is-disabled,.legs-actions .app-btn:disabled{opacity:.45;cursor:not-allowed;pointer-events:none;transform:none;box-shadow:none}
+.legs-legend{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:10px;font-size:11px;color:#64748b;font-weight:700}
 .legs-num{font-weight:750;color:#334155}
 .legs-blank{color:#cbd5e1;font-weight:700}
 .legs-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:12px}
@@ -1407,9 +1363,6 @@ a.intake-refresh:hover{
 .legs-pagination a{color:#1d4ed8}
 .legs-link-btn{border:0;background:transparent;color:#1d4ed8;font:inherit;font-weight:800;font-size:11px;cursor:pointer;padding:0;text-decoration:underline}
 .legs-link-btn:disabled{color:#94a3b8;cursor:not-allowed;text-decoration:none}
-@media (max-width:1200px){
-  .legs-table{min-width:1080px}
-}
 .legs-modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
 .legs-modal-grid label{display:grid;gap:4px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#64748b}
 .legs-modal-grid input,.legs-modal-grid select{height:42px;min-height:42px;border:1px solid rgba(15,23,42,.10);border-radius:12px;padding:0 12px;font-size:13px;color:#0f172a;background:#fff;box-sizing:border-box}
@@ -1650,25 +1603,21 @@ a.intake-refresh:hover{
             <col class="legs-col-route">
             <col class="legs-col-crew">
             <col class="legs-col-times">
-            <col class="legs-col-hobbs">
-            <col class="legs-col-tacho">
+            <col class="legs-col-meters">
             <col class="legs-col-fuel">
-            <col class="legs-col-ops">
             <col class="legs-col-evidence">
             <col class="legs-col-actions">
           </colgroup>
           <thead>
             <tr>
-              <th>Flight</th>
+              <th>Aircraft</th>
               <th>Route</th>
               <th>Crew</th>
-              <th>Times (Local)</th>
-              <th>Hobbs</th>
-              <th>Tacho</th>
-              <th>Fuel / Oil Dep</th>
-              <th>TO / LDG</th>
+              <th>Times</th>
+              <th>Meters</th>
+              <th>Fuel</th>
               <th>Evidence</th>
-              <th></th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1690,6 +1639,7 @@ a.intake-refresh:hover{
               $fuelUnit = (string)($acCfg['fuel_unit'] ?? 'USG');
               $depAirport = strtoupper(trim((string)($row['departure_airport'] ?? '')));
               $arrAirport = strtoupper(trim((string)($row['arrival_airport'] ?? '')));
+              $sameAirport = $depAirport !== '' && $depAirport === $arrAirport;
               $offLocal = cvr_intake_local_time($pdo, $row['off_block_utc'] ?? null, $tail);
               $onLocal = cvr_intake_local_time($pdo, $row['on_block_utc'] ?? null, $tail);
               $flightDate = cvr_intake_local_date($pdo, $row['off_block_utc'] ?? null, $tail);
@@ -1763,31 +1713,41 @@ a.intake-refresh:hover{
                   $tzName = $legPayload['timezone'];
                   try {
                       $dt = new DateTimeImmutable((string)$row['off_block_utc'], new DateTimeZone('UTC'));
-                      $legPayload['off_block_local'] = $dt->setTimezone(new DateTimeZone($tzName))->format('Y-m-d\TH:i');
+                      $legPayload['off_block_local'] = $dt->setTimezone(new DateTimeZone($tzName))->format('Y-m-d\\TH:i');
                   } catch (Throwable) {
                       $legPayload['off_block_local'] = '';
                   }
               }
+              $evMark = static function (string $state): string {
+                  return match ($state) {
+                      'ok' => '✓',
+                      'warn' => '⟳',
+                      'bad' => '!',
+                      default => '–',
+                  };
+              };
             ?>
             <tr class="legs-row" data-leg="<?= cvr_intake_h(json_encode($legPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP)) ?>">
               <td>
                 <div class="legs-flight">
-                  <div class="legs-flight-date" title="<?= cvr_intake_h($flightDate) ?>"><?= cvr_intake_h($flightDate) ?></div>
+                  <div class="legs-flight-date"><?= cvr_intake_h($flightDate) ?></div>
                   <?= cvr_intake_aircraft_pill_html($tail) ?>
-                  <div class="legs-flight-mission"><?= cvr_intake_h($missionCode !== '' ? ('Mission ' . $missionCode) : 'Mission —') ?></div>
+                  <div class="legs-flight-mission"><?= cvr_intake_h($missionCode !== '' ? $missionCode : '—') ?></div>
                 </div>
               </td>
               <td>
-                <div class="legs-route-cell">
-                  <div class="legs-route-end">
-                    <div class="legs-route-icao"><?= cvr_intake_h($depAirport !== '' ? $depAirport : '—') ?></div>
-                    <div class="legs-route-place" title="<?= cvr_intake_h($depPlace) ?>"><?= cvr_intake_h($depPlace !== '' ? $depPlace : '—') ?></div>
-                  </div>
-                  <div class="legs-route-arrow">→</div>
-                  <div class="legs-route-end is-arr">
-                    <div class="legs-route-icao"><?= cvr_intake_h($arrAirport !== '' ? $arrAirport : '—') ?></div>
-                    <div class="legs-route-place" title="<?= cvr_intake_h($arrPlace) ?>"><?= cvr_intake_h($arrPlace !== '' ? $arrPlace : '—') ?></div>
-                  </div>
+                <div class="legs-route">
+                  <?php if ($sameAirport): ?>
+                    <div class="legs-route-icao"><?= cvr_intake_h($depAirport) ?></div>
+                    <div class="legs-route-join">↓</div>
+                    <div class="legs-route-icao"><?= cvr_intake_h($arrAirport) ?></div>
+                    <?php if ($depPlace !== ''): ?><div class="legs-route-place"><?= cvr_intake_h($depPlace) ?></div><?php endif; ?>
+                  <?php else: ?>
+                    <div class="legs-route-icao"><?= cvr_intake_h($depAirport !== '' ? $depAirport : '—') ?> → <?= cvr_intake_h($arrAirport !== '' ? $arrAirport : '—') ?></div>
+                    <?php if ($depPlace !== '' || $arrPlace !== ''): ?>
+                      <div class="legs-route-place"><?= cvr_intake_h(trim(($depPlace !== '' ? $depPlace : '—') . ' → ' . ($arrPlace !== '' ? $arrPlace : '—'))) ?></div>
+                    <?php endif; ?>
+                  <?php endif; ?>
                 </div>
               </td>
               <td>
@@ -1798,74 +1758,69 @@ a.intake-refresh:hover{
                       $shown = 0;
                       foreach ($crewMembers as $member) {
                           if ($shown >= 3) {
-                              echo '<div class="legs-crew-line"><span class="legs-crew-name">+' . (count($crewMembers) - $shown) . ' more</span></div>';
+                              echo '<div class="legs-crew-person"><div class="legs-crew-name">+' . (count($crewMembers) - $shown) . ' more</div></div>';
                               break;
                           }
                           $name = trim((string)($member['name'] ?? ''));
-                          echo '<div class="legs-crew-line"><span class="legs-crew-name" title="' . cvr_intake_h($name) . '">' . cvr_intake_h($name !== '' ? $name : '—') . '</span>'
-                              . cvr_intake_crew_role_pill((string)($member['role'] ?? 'crew')) . '</div>';
+                          $roleKey = strtolower(trim(str_replace(array(' ', '-'), '_', (string)($member['role'] ?? 'crew'))));
+                          $roleLabel = match ($roleKey) {
+                              'pic', 'pilot_in_command' => 'PIC',
+                              'student' => 'Student',
+                              'flight_instructor', 'instructor', 'cfi' => 'Instructor',
+                              'supervising_instructor', 'supervisor' => 'Supervisor',
+                              'pilot_flying', 'pf' => 'Pilot Flying',
+                              'pilot_monitoring', 'pm' => 'Pilot Monitoring',
+                              'examiner' => 'Examiner',
+                              'safety_pilot' => 'Safety Pilot',
+                              default => ucwords(str_replace('_', ' ', (string)($member['role'] ?? 'Crew'))),
+                          };
+                          echo '<div class="legs-crew-person"><div class="legs-crew-name">' . cvr_intake_h($name !== '' ? $name : '—') . '</div><div class="legs-crew-role">' . cvr_intake_h($roleLabel) . '</div></div>';
                           $shown++;
                       }
                   }
                 ?></div>
               </td>
               <td>
-                <div class="legs-times-pair">
-                  <div class="legs-times-end">
-                    <div class="legs-times-value"><?= cvr_intake_h($offLocal) ?></div>
-                    <div class="legs-times-label">Off Block</div>
-                  </div>
-                  <div class="legs-times-arrow">→</div>
-                  <div class="legs-times-end">
-                    <div class="legs-times-value"><?= cvr_intake_h($onLocal) ?></div>
-                    <div class="legs-times-label">On Block</div>
-                  </div>
+                <div class="legs-times">
+                  <div class="legs-times-value"><?= cvr_intake_h($offLocal) ?></div>
+                  <div class="legs-times-label">Off Block</div>
+                  <div class="legs-times-join">↓</div>
+                  <div class="legs-times-value"><?= cvr_intake_h($onLocal) ?></div>
+                  <div class="legs-times-label">On Block</div>
+                  <div class="legs-times-ops"><?= (int)$toCount ?>/<?= (int)$ldgCount ?> TO/LDG</div>
                 </div>
               </td>
               <td>
-                <div class="legs-pair">
-                  <div class="legs-pair-main"><?= cvr_intake_h($hobbsStartLabel !== '' ? $hobbsStartLabel : '—') ?> → <?= cvr_intake_h($hobbsEndLabel !== '' ? $hobbsEndLabel : '—') ?></div>
-                  <div class="legs-pair-sub">Δ <?= cvr_intake_h($hobbsDelta !== '' ? $hobbsDelta : '—') ?> h</div>
-                </div>
-              </td>
-              <td>
-                <div class="legs-pair">
-                  <div class="legs-pair-main"><?= cvr_intake_h($tachoStartLabel !== '' ? $tachoStartLabel : '—') ?> → <?= cvr_intake_h($tachoEndLabel !== '' ? $tachoEndLabel : '—') ?></div>
-                  <div class="legs-pair-sub">Δ <?= cvr_intake_h($tachoDeltaLabel !== '' ? $tachoDeltaLabel : '—') ?> h</div>
+                <div class="legs-meters">
+                  <div class="legs-meter">
+                    <div class="legs-meter-label">Hobbs</div>
+                    <div class="legs-meter-main"><?= cvr_intake_h($hobbsStartLabel !== '' ? $hobbsStartLabel : '—') ?> → <?= cvr_intake_h($hobbsEndLabel !== '' ? $hobbsEndLabel : '—') ?></div>
+                    <div class="legs-meter-delta">Δ <?= cvr_intake_h($hobbsDelta !== '' ? $hobbsDelta : '—') ?></div>
+                  </div>
+                  <div class="legs-meter">
+                    <div class="legs-meter-label">Tacho</div>
+                    <div class="legs-meter-main"><?= cvr_intake_h($tachoStartLabel !== '' ? $tachoStartLabel : '—') ?> → <?= cvr_intake_h($tachoEndLabel !== '' ? $tachoEndLabel : '—') ?></div>
+                    <div class="legs-meter-delta">Δ <?= cvr_intake_h($tachoDeltaLabel !== '' ? $tachoDeltaLabel : '—') ?></div>
+                  </div>
                 </div>
               </td>
               <td>
                 <div class="legs-fuel">
-                  <div class="legs-fuel-line">
-                    <div class="legs-gauge legs-gauge-fuel" title="Fuel remaining <?= cvr_intake_h($fuelGauge['label']) ?> <?= cvr_intake_h($fuelUnit) ?>"><span style="width:<?= (int)round($fuelGauge['pct']) ?>%"></span></div>
-                    <div class="legs-fuel-vals"><?= cvr_intake_h(($fuelDep !== '' ? $fuelDep : '—') . ' → ' . ($fuelLdg !== '' ? $fuelLdg : '—')) ?> <?= cvr_intake_h($fuelUnit) ?></div>
-                  </div>
+                  <div class="legs-fuel-bar" title="Fuel remaining <?= cvr_intake_h($fuelGauge['label']) ?> <?= cvr_intake_h($fuelUnit) ?>"><span style="width:<?= (int)round($fuelGauge['pct']) ?>%"></span></div>
+                  <div class="legs-fuel-vals"><?= cvr_intake_h(($fuelDep !== '' ? $fuelDep : '—') . ' → ' . ($fuelLdg !== '' ? $fuelLdg : '—')) ?> <?= cvr_intake_h($fuelUnit) ?></div>
                   <div class="legs-fuel-burn">Burn <?= cvr_intake_h($burnLabel !== '' ? $burnLabel : '—') ?> <?= cvr_intake_h($fuelUnit) ?></div>
-                  <div class="legs-fuel-line">
-                    <div class="legs-gauge legs-gauge-oil" title="Oil Dep <?= cvr_intake_h($oilGauge['label']) ?>"><span style="width:<?= (int)round($oilGauge['pct']) ?>%"></span></div>
-                    <span class="legs-oil-pct"><?= cvr_intake_h($oilGauge['label']) ?></span>
-                  </div>
-                </div>
-              </td>
-              <td>
-                <div class="legs-ops">
-                  <div class="legs-ops-main"><?= (int)$toCount ?> / <?= (int)$ldgCount ?></div>
-                  <div class="legs-ops-labels"><span>TO</span><span>LDG</span></div>
+                  <div class="legs-oil"><?= cvr_intake_h($oilGauge['label']) ?></div>
                 </div>
               </td>
               <td>
                 <div class="legs-evidence">
-                  <div class="legs-ev-row"><?= cvr_intake_evidence_icon($audioState) ?> Audio</div>
-                  <div class="legs-ev-row"><?= cvr_intake_evidence_icon($garminState) ?> Garmin</div>
-                  <div class="legs-ev-row"><?= cvr_intake_evidence_icon($transcriptState) ?> Transcript</div>
+                  <div class="legs-ev legs-ev-<?= cvr_intake_h($audioState) ?>"><span class="legs-ev-mark"><?= $evMark($audioState) ?></span> Audio</div>
+                  <div class="legs-ev legs-ev-<?= cvr_intake_h($garminState) ?>"><span class="legs-ev-mark"><?= $evMark($garminState) ?></span> Garmin</div>
+                  <div class="legs-ev legs-ev-<?= cvr_intake_h($transcriptState) ?>"><span class="legs-ev-mark"><?= $evMark($transcriptState) ?></span> Transcript</div>
                 </div>
               </td>
               <td>
                 <div class="legs-actions">
-                  <button type="button" class="app-btn app-btn-secondary" data-legs-details>
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3h7v7M10 14L21 3M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    <span>Details</span>
-                  </button>
                   <?php if ($replayReady): ?>
                     <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>&amp;return=<?= rawurlencode('/admin/master_logbook.php?tab=dispatch') ?>" data-legs-stop>
                       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
@@ -1877,21 +1832,13 @@ a.intake-refresh:hover{
                       <span>Replay</span>
                     </span>
                   <?php endif; ?>
-                  <button type="button" class="app-btn app-btn-secondary" data-legs-debrief data-debrief-id="<?= $debriefId ?>" data-bundle-id="<?= $bundleId ?>" data-legs-stop>
-                    <span>Debriefing</span>
-                  </button>
+                  <button type="button" class="app-btn app-btn-secondary" data-legs-details><span>Details</span></button>
                 </div>
               </td>
             </tr>
           <?php endforeach; ?>
           </tbody>
         </table>
-      </div>
-      <div class="legs-legend">
-        <span><?= cvr_intake_evidence_icon('ok') ?> Complete</span>
-        <span><?= cvr_intake_evidence_icon('warn') ?> Pending</span>
-        <span><?= cvr_intake_evidence_icon('bad') ?> Issue</span>
-        <span><?= cvr_intake_evidence_icon('na') ?> Not available</span>
       </div>
       <div class="legs-pagination">
         <div class="intake-muted">Page <?= (int)$legsPage ?> of <?= (int)$legsPageCount ?></div>

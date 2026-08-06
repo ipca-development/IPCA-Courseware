@@ -65,18 +65,20 @@ require_absent($flightLog, 'arrival_event.timestamp_utc', 'flight log must not p
 require_contains($page, 'Operational Legs', 'intake panel title', $failures);
 require_contains($page, 'Off Block', 'off block column', $failures);
 require_contains($page, 'On Block', 'on block label', $failures);
-require_contains($page, 'Oil Dep', 'oil departure column', $failures);
-require_contains($page, 'Hobbs', 'hobbs column visible', $failures);
-require_contains($page, 'Tacho', 'tacho column visible', $failures);
-require_contains($page, 'legs-gauge-fuel', 'fuel remaining gauge', $failures);
-require_contains($page, 'legs-gauge-oil', 'oil departure gauge', $failures);
+require_contains($page, 'Hobbs', 'hobbs meters visible', $failures);
+require_contains($page, 'Tacho', 'tacho meters visible', $failures);
+require_contains($page, 'legs-fuel-bar', 'fuel remaining gauge', $failures);
+require_contains($page, 'legs-oil', 'oil departure value', $failures);
 require_contains($page, 'Evidence', 'evidence column', $failures);
-require_contains($page, 'Debriefing', 'debriefing action', $failures);
 require_contains($page, 'legs-route', 'dispatcher route strip', $failures);
-require_contains($page, 'Times (Local)', 'local times column', $failures);
+require_contains($page, 'legs-crew-name', 'crew name primary', $failures);
+require_contains($page, 'legs-meters', 'grouped aircraft meters', $failures);
+require_contains($page, 'Replay', 'replay primary action', $failures);
+require_absent($page, '<th>Fuel Dep</th>', 'raw fuel-dep column removed from dispatch board', $failures);
+require_absent($page, 'KTRMKay', 'route/crew collision marker must not be hardcoded', $failures);
+require_contains($page, 'legs_aircraft', 'aircraft filter', $failures);
 require_contains($page, 'cvr_intake_california_timezone', 'california/local timezone helper', $failures);
 require_contains($page, 'cvr_intake_local_time($pdo', 'local time helper used for display', $failures);
-// local_time must not display raw aircraft UTC when config timezone is unset
 $localTimeFn = '';
 if (preg_match('/function cvr_intake_local_time\(.*?^\}/ms', (string)@file_get_contents($page), $m)) {
     $localTimeFn = $m[0];
@@ -84,12 +86,6 @@ if (preg_match('/function cvr_intake_local_time\(.*?^\}/ms', (string)@file_get_c
 if ($localTimeFn === '' || !str_contains($localTimeFn, 'cvr_intake_california_timezone')) {
     $failures[] = 'cvr_intake_local_time must convert via cvr_intake_california_timezone (not raw UTC)';
 }
-if ($localTimeFn !== '' && preg_match('/cw_aircraft_operational_timezone_by_registration/', $localTimeFn)
-    && !str_contains($localTimeFn, 'cvr_intake_california_timezone')) {
-    $failures[] = 'cvr_intake_local_time still uses raw aircraft timezone without California fallback';
-}
-require_absent($page, '<th>Fuel Dep</th>', 'raw fuel-dep column removed from dispatch board', $failures);
-require_contains($page, 'legs_aircraft', 'aircraft filter', $failures);
 require_contains($page, '30 / page', 'pagination page size', $failures);
 require_contains($page, 'save_operational_leg', 'admin leg save action', $failures);
 require_absent($page, 'Server Receipt', 'technical receipt column removed from operational legs table', $failures);
