@@ -39,19 +39,43 @@ final class CvrAdminLegCorrectionService
             $aircraft = strtoupper(substr(trim((string)($input['aircraft_registration'] ?? $beforeDispatch['aircraft_registration'] ?? '')), 0, 16));
             $departure = strtoupper(substr(trim((string)($input['departure_airport'] ?? '')), 0, 8));
             $arrival = strtoupper(substr(trim((string)($input['arrival_airport'] ?? '')), 0, 8));
-            $startingHobbs = $this->nullableFloat($input['starting_hobbs'] ?? null);
-            $endingHobbs = $this->nullableFloat($input['ending_hobbs'] ?? null);
-            $startingTacho = $this->nullableFloat($input['starting_tacho'] ?? null);
-            $endingTacho = $this->nullableFloat($input['ending_tacho'] ?? null);
-            $fuelOnboard = substr(trim((string)($input['fuel_onboard'] ?? $input['fuel_departure'] ?? '')), 0, 64);
-            $fuelRemaining = substr(trim((string)($input['fuel_remaining'] ?? $input['fuel_landing'] ?? '')), 0, 64);
-            $oilPercentage = isset($input['oil_percentage']) && $input['oil_percentage'] !== ''
-                ? (int)$input['oil_percentage']
-                : null;
-            $oilQuantity = $this->nullableFloat($input['oil_quantity'] ?? null);
             $oilUnit = substr(trim((string)($input['oil_unit'] ?? '')), 0, 16);
-            if ($oilQuantity === null) {
-                $oilUnit = null;
+            $oilValueRaw = $input['oil_value'] ?? null;
+            $oilPercentage = null;
+            $oilQuantity = null;
+            if ($oilUnit === '%' || strcasecmp($oilUnit, 'percent') === 0 || strcasecmp($oilUnit, 'percentage') === 0) {
+                $oilUnit = '%';
+                if ($oilValueRaw !== null && $oilValueRaw !== '') {
+                    $oilPercentage = (int)round((float)$oilValueRaw);
+                } elseif (isset($input['oil_percentage']) && $input['oil_percentage'] !== '') {
+                    $oilPercentage = (int)$input['oil_percentage'];
+                }
+            } else {
+                if ($oilValueRaw !== null && $oilValueRaw !== '') {
+                    $oilQuantity = $this->oneDecimal($oilValueRaw);
+                } else {
+                    $oilQuantity = $this->oneDecimal($input['oil_quantity'] ?? null);
+                }
+                if ($oilQuantity === null) {
+                    $oilUnit = null;
+                }
+            }
+            $startingHobbs = $this->oneDecimal($input['starting_hobbs'] ?? null);
+            $endingHobbs = $this->oneDecimal($input['ending_hobbs'] ?? null);
+            $startingTacho = $this->oneDecimal($input['starting_tacho'] ?? null);
+            $endingTacho = $this->oneDecimal($input['ending_tacho'] ?? null);
+            if ($startingHobbs !== null && $endingHobbs !== null && $endingHobbs < $startingHobbs) {
+                throw new InvalidArgumentException('Hobbs End cannot be lower than Hobbs Start.');
+            }
+            if ($startingTacho !== null && $endingTacho !== null && $endingTacho < $startingTacho) {
+                throw new InvalidArgumentException('Tacho End cannot be lower than Tacho Start.');
+            }
+            $fuelOnboard = $this->formatFuel($input['fuel_onboard'] ?? $input['fuel_departure'] ?? '');
+            $fuelRemaining = $this->formatFuel($input['fuel_remaining'] ?? $input['fuel_landing'] ?? '');
+            if ($fuelOnboard !== '' && $fuelRemaining !== ''
+                && is_numeric($fuelOnboard) && is_numeric($fuelRemaining)
+                && (float)$fuelRemaining > (float)$fuelOnboard) {
+                throw new InvalidArgumentException('Landing fuel cannot exceed departure fuel.');
             }
             $takeoffs = max(0, (int)($input['takeoff_count'] ?? 0));
             $landings = max(0, (int)($input['landing_count'] ?? 0));
@@ -327,6 +351,9 @@ final class CvrAdminLegCorrectionService
             $out[] = array(
                 'role' => $role,
                 'personName' => $name,
+                'person_id' => isset($member['person_id']) && (int)$member['person_id'] > 0
+                    ? (int)$member['person_id']
+                    : (isset($member['id']) && (int)$member['id'] > 0 ? (int)$member['id'] : null),
             );
         }
         return $out;
@@ -343,21 +370,47 @@ final class CvrAdminLegCorrectionService
         return (float)$value;
     }
 
+    private function oneDecimal(mixed $value): ?float
+    {
+        $n = $this->nullableFloat($value);
+        return $n === null ? null : round($n, 1);
+    }
+
+    private function formatFuel(mixed $value): string
+    {
+        $text = trim((string)$value);
+        if ($text === '') {
+            return '';
+        }
+        if (!is_numeric($text) || (float)$text < 0) {
+            throw new InvalidArgumentException('Fuel values must be non-negative numbers.');
+        }
+        return number_format(round((float)$text, 1), 1, '.', '');
+    }
+
     private function localToUtc(string $local, string $timezone): ?string
     {
         $local = trim($local);
         if ($local === '') {
             return null;
         }
+        // Reject AM/PM strings — operational UI is 24-hour only.
+        if (preg_match('/\b(am|pm)\b/i', $local) === 1) {
+            throw new InvalidArgumentException('Enter Off Block time using the 24-hour clock.');
+        }
         try {
             $tz = new DateTimeZone($timezone);
-            // Accept "Y-m-d H:i" or "Y-m-d\TH:i"
             $normalized = str_replace('T', ' ', $local);
             if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $normalized)) {
                 $normalized .= ':00';
             }
+            if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $normalized)) {
+                throw new InvalidArgumentException('Off Block local time is invalid.');
+            }
             $dt = new DateTimeImmutable($normalized, $tz);
             return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s.v');
+        } catch (InvalidArgumentException $e) {
+            throw $e;
         } catch (Throwable $e) {
             throw new InvalidArgumentException('Off Block local time is invalid.');
         }

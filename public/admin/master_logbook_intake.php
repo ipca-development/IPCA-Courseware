@@ -14,6 +14,8 @@ require_once __DIR__ . '/../../src/FlightDebriefService.php';
 require_once __DIR__ . '/../../src/ReplayShareService.php';
 require_once __DIR__ . '/../../src/CvrAdminLegCorrectionService.php';
 require_once __DIR__ . '/../../src/CockpitRecorderDebriefQueueService.php';
+require_once __DIR__ . '/../../src/MissionCatalogService.php';
+require_once __DIR__ . '/../../src/AircraftOperationalConfigService.php';
 
 cw_require_admin();
 
@@ -25,8 +27,49 @@ if ($enrollmentCsrf === '') {
     $_SESSION['cvr_intake_enrollment_csrf'] = $enrollmentCsrf;
 }
 $aircraftOptions = array();
+$flightMissions = array();
+$crewCatalogUsers = array();
+$aircraftUnitMap = array();
 try {
-    $aircraftOptions = (new CockpitAircraftService($pdo))->activeAircraft();
+    $aircraftService = new CockpitAircraftService($pdo);
+    $aircraftOptions = $aircraftService->activeAircraft();
+    $configService = new AircraftOperationalConfigService($pdo);
+    foreach ($aircraftOptions as $aircraftOption) {
+        $reg = strtoupper(trim((string)($aircraftOption['registration'] ?? '')));
+        if ($reg === '') {
+            continue;
+        }
+        $cfg = $configService->configForAircraft((int)($aircraftOption['id'] ?? 0));
+        $aircraftUnitMap[$reg] = array(
+            'id' => (int)($aircraftOption['id'] ?? 0),
+            'fuel_unit' => strtoupper(trim((string)($cfg['fuel_unit'] ?? 'USG'))) ?: 'USG',
+            'oil_unit' => trim((string)($cfg['oil_unit'] ?? '%')) ?: '%',
+        );
+    }
+    foreach ((new MissionCatalogService($pdo))->listMissions() as $missionRow) {
+        $code = strtoupper(trim((string)($missionRow['code'] ?? '')));
+        $name = trim((string)($missionRow['name'] ?? ''));
+        $description = trim((string)($missionRow['description'] ?? $name));
+        $status = strtolower(trim((string)($missionRow['status'] ?? 'active')));
+        if ($code === '' || ($status !== '' && $status !== 'active')) {
+            continue;
+        }
+        if (!cvr_intake_is_aircraft_flight_mission($code, $description . ' ' . $name)) {
+            continue;
+        }
+        $flightMissions[] = array(
+            'code' => $code,
+            'name' => $name !== '' ? $name : $description,
+            'label' => $code . ' — ' . ($name !== '' ? $name : $description),
+        );
+    }
+    $userStatement = $pdo->query(
+        "SELECT id, COALESCE(NULLIF(TRIM(name), ''), email) AS display_name, role"
+        . " FROM users WHERE role IN ('student', 'instructor', 'supervisor', 'chief_instructor')"
+        . " AND status = 'active'"
+        . ' ORDER BY display_name ASC, id ASC'
+    );
+    $crewCatalogUsers = $userStatement ? ($userStatement->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array();
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'
         && (string)($_POST['action'] ?? '') === 'create_cvr_enrollment') {
         if (!hash_equals($enrollmentCsrf, (string)($_POST['csrf_token'] ?? ''))) {
@@ -262,6 +305,64 @@ if ((int)($_GET['debrief_id'] ?? 0) > 0) {
 function cvr_intake_h(mixed $value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+/** Match CVR unit flight-mission filter (exclude FSTD/sim/ground). */
+function cvr_intake_is_aircraft_flight_mission(string $code, string $description): bool
+{
+    $haystack = strtoupper($description . ' ' . $code);
+    foreach (array('FSTD', 'SIMULATOR', 'AATD', 'FNPT', 'BRIEFING', 'THEORY', 'MEETING', 'GROUND SCHOOL', 'CLASSROOM') as $token) {
+        if (str_contains($haystack, $token)) {
+            return false;
+        }
+    }
+    if (preg_match('/\bLB\b/', $haystack) === 1) {
+        $hasFlight = str_contains($haystack, 'DUAL')
+            || str_contains($haystack, 'PIC')
+            || str_contains($haystack, 'SOLO');
+        if (!$hasFlight) {
+            return false;
+        }
+    }
+    return str_contains($haystack, 'DUAL')
+        || str_contains($haystack, 'PIC')
+        || str_contains($haystack, 'SOLO')
+        || str_contains($haystack, 'NIGHT')
+        || str_contains($haystack, 'X-C')
+        || str_contains($haystack, 'XC');
+}
+
+/**
+ * Distinct background colors per aircraft registration pill.
+ * @return array{bg:string,fg:string,border:string}
+ */
+function cvr_intake_aircraft_pill_colors(string $registration): array
+{
+    $palette = array(
+        array('bg' => '#dbeafe', 'fg' => '#1e40af', 'border' => '#93c5fd'),
+        array('bg' => '#dcfce7', 'fg' => '#166534', 'border' => '#86efac'),
+        array('bg' => '#fef3c7', 'fg' => '#92400e', 'border' => '#fcd34d'),
+        array('bg' => '#ede9fe', 'fg' => '#5b21b6', 'border' => '#c4b5fd'),
+        array('bg' => '#ffe4e6', 'fg' => '#9f1239', 'border' => '#fda4af'),
+        array('bg' => '#ccfbf1', 'fg' => '#115e59', 'border' => '#5eead4'),
+        array('bg' => '#ffedd5', 'fg' => '#9a3412', 'border' => '#fdba74'),
+        array('bg' => '#e0e7ff', 'fg' => '#3730a3', 'border' => '#a5b4fc'),
+    );
+    $idx = abs((int)crc32(strtoupper(trim($registration)))) % count($palette);
+    return $palette[$idx];
+}
+
+function cvr_intake_aircraft_pill_html(string $registration): string
+{
+    $reg = strtoupper(trim($registration));
+    if ($reg === '') {
+        return '<span class="legs-blank">—</span>';
+    }
+    $c = cvr_intake_aircraft_pill_colors($reg);
+    return '<span class="ml-aircraft-pill" style="background:' . cvr_intake_h($c['bg'])
+        . ';color:' . cvr_intake_h($c['fg'])
+        . ';border-color:' . cvr_intake_h($c['border']) . '">'
+        . cvr_intake_h($reg) . '</span>';
 }
 
 function cvr_replay_share_base_url(): string
@@ -837,6 +938,52 @@ cw_header('Master Logbook');
 .ml-pill-processing{background:#fef3c7;color:#92400e}
 .ml-pill-failed{background:#fee2e2;color:#991b1b}
 .ml-aircraft-pill{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;border:1px solid #93c5fd;color:#1d4ed8;background:#eff6ff}
+/* Edit Operational Leg — structured aviation correction modal */
+#legs-edit-modal .intake-modal{max-width:980px;width:min(980px,96vw);display:flex;flex-direction:column;max-height:92vh}
+#legs-edit-modal .intake-modal-body{overflow:auto;padding:16px 18px 8px}
+.leg-edit-sections{display:grid;gap:14px}
+.leg-edit-card{border:1px solid #dbe3ee;border-radius:14px;background:#fff;padding:14px 14px 12px;box-shadow:0 4px 12px rgba(15,23,42,.04)}
+.leg-edit-card h4{margin:0 0 10px;font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#0f3a6d}
+.leg-edit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.leg-edit-grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.leg-edit-grid-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.leg-edit-field{display:grid;gap:5px;min-width:0}
+.leg-edit-field > span{font-size:11px;font-weight:800;color:#334155}
+.leg-edit-field > span em{font-style:normal;font-weight:700;color:#64748b}
+.leg-edit-field input,.leg-edit-field select{border:1px solid #cbd5e1;border-radius:10px;padding:9px 10px;font-size:14px;font-weight:700;color:#0f172a;background:#fff;width:100%;box-sizing:border-box}
+.leg-edit-field input:focus,.leg-edit-field select:focus{outline:2px solid #93c5fd;border-color:#2563eb}
+.leg-edit-icao{text-transform:uppercase;letter-spacing:.06em;font-size:16px!important}
+.leg-edit-time{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+.leg-edit-unit{display:flex;align-items:center;gap:8px}
+.leg-edit-unit input{flex:1}
+.leg-edit-suffix{font-size:13px;font-weight:900;color:#475569;min-width:2.5rem}
+.leg-edit-derived{margin-top:10px;padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px dashed #cbd5e1;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.leg-edit-derived strong{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#64748b}
+.leg-edit-derived span{font-size:14px;font-weight:850;color:#0f172a;font-variant-numeric:tabular-nums}
+.leg-edit-meter{display:grid;gap:8px;padding:10px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}
+.leg-edit-meter-title{font-size:11px;font-weight:900;color:#0f3a6d;letter-spacing:.04em}
+.leg-edit-meter-row{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end}
+.leg-edit-meter-arrow{font-weight:900;color:#64748b;padding-bottom:10px}
+.leg-edit-error{display:none;margin-top:6px;font-size:12px;font-weight:700;color:#991b1b}
+.leg-edit-error.is-visible{display:block}
+.leg-edit-crew-row{display:grid;grid-template-columns:minmax(140px,180px) minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:8px}
+.leg-edit-crew-remove{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:9px;padding:8px 10px;font-size:11px;font-weight:800;cursor:pointer}
+.leg-edit-add-crew{border:1px solid #cbd5e1;background:#fff;color:#1d4ed8;border-radius:9px;padding:8px 12px;font-size:12px;font-weight:850;cursor:pointer}
+.leg-edit-footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:12px 0 4px;background:linear-gradient(180deg,rgba(255,255,255,0),#fff 28%);border-top:1px solid #e2e8f0;margin-top:8px}
+.leg-edit-save{border:0;border-radius:10px;background:#1d4ed8;color:#fff;padding:10px 16px;font-size:13px;font-weight:900;cursor:pointer}
+.leg-edit-cancel{border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#334155;padding:10px 14px;font-size:13px;font-weight:800;cursor:pointer}
+.leg-edit-garmin{margin-top:8px;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px}
+.leg-edit-garmin h4{margin:0 0 6px;font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#475569}
+.leg-edit-garmin p{margin:0 0 10px;font-size:12px;color:#64748b;line-height:1.4}
+.leg-edit-tz{font-size:12px;font-weight:700;color:#64748b}
+.leg-edit-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#475569}
+.leg-edit-badge-staff{background:#dbeafe;color:#1e40af}
+.leg-edit-badge-student{background:#dcfce7;color:#166534}
+.leg-edit-badge-legacy{background:#ffedd5;color:#9a3412}
+@media (max-width:820px){
+  .leg-edit-grid,.leg-edit-grid-3,.leg-edit-grid-4,.leg-edit-meter-row,.leg-edit-crew-row{grid-template-columns:1fr}
+  .leg-edit-meter-arrow{display:none}
+}
 .ml-crew{display:grid;gap:3px;font-size:10px;line-height:1.15;min-width:0;max-width:118px}
 .ml-crew-member{display:grid;gap:0}
 .ml-crew-role{font-size:8px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800}
@@ -1174,6 +1321,7 @@ cw_header('Master Logbook');
                   'bundle_id' => $bundleId,
                   'debrief_id' => $debriefId,
                   'recording_uid' => $recordingUid,
+                  'has_garmin_csv' => $garminOn,
                   'timezone' => cvr_intake_california_timezone($pdo, $tail),
               );
               if (!empty($row['off_block_utc'])) {
@@ -1188,7 +1336,7 @@ cw_header('Master Logbook');
             ?>
             <tr class="legs-row" data-leg="<?= cvr_intake_h(json_encode($legPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP)) ?>">
               <td class="legs-num"><?= cvr_intake_h($flightDate) ?></td>
-              <td><span class="ml-aircraft-pill"><?= cvr_intake_h($tail !== '' ? $tail : '—') ?></span></td>
+              <td><?= cvr_intake_aircraft_pill_html($tail) ?></td>
               <td class="legs-crew"><div class="ml-crew"><?php
                 if ($crewMembers === array()) {
                     echo '<span class="legs-blank">—</span>';
@@ -2111,77 +2259,182 @@ cw_header('Master Logbook');
 </div>
 
 <div class="intake-modal-backdrop" id="legs-edit-modal" hidden>
-  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="legs-edit-title" style="max-width:920px">
+  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="legs-edit-title">
     <div class="intake-modal-head">
       <div>
         <h3 class="intake-modal-title" id="legs-edit-title">Edit Operational Leg</h3>
-        <div class="intake-muted">Admin correction of the online Dispatch / Check-In record. On Block recalculates from Off Block + Hobbs.</div>
+        <div class="intake-muted">Administrative correction. On Block is calculated from Off Block + Hobbs. Times use the aircraft operational timezone.</div>
       </div>
-      <button class="intake-modal-close" type="button" data-legs-edit-close>Close</button>
+      <button class="intake-modal-close" type="button" data-legs-edit-close aria-label="Close">Close</button>
     </div>
     <div class="intake-modal-body">
-      <form method="post" id="legs-edit-form">
+      <form method="post" id="legs-edit-form" novalidate>
         <input type="hidden" name="action" value="save_operational_leg">
         <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
         <input type="hidden" name="dispatch_id" id="legs-edit-dispatch-id" value="">
         <input type="hidden" name="leg[timezone]" id="legs-edit-timezone" value="America/Los_Angeles">
-        <div class="legs-modal-grid">
-          <label>Aircraft
-            <select name="leg[aircraft_registration]" id="legs-edit-aircraft">
-              <?php foreach ($aircraftOptions as $aircraftOption): ?>
-                <?php $reg = strtoupper(trim((string)($aircraftOption['registration'] ?? ''))); ?>
-                <?php if ($reg === '') { continue; } ?>
-                <option value="<?= cvr_intake_h($reg) ?>"><?= cvr_intake_h($reg) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </label>
-          <label>Mission <input name="leg[mission_code]" id="legs-edit-mission" type="text"></label>
-          <label>Departure <input name="leg[departure_airport]" id="legs-edit-dep" type="text" maxlength="8"></label>
-          <label>Arrival <input name="leg[arrival_airport]" id="legs-edit-arr" type="text" maxlength="8"></label>
-          <label>Off Block (local) <input name="leg[off_block_local]" id="legs-edit-off" type="datetime-local"></label>
-          <label>Hobbs Start <input name="leg[starting_hobbs]" id="legs-edit-hobbs-start" type="number" step="0.1"></label>
-          <label>Hobbs End <input name="leg[ending_hobbs]" id="legs-edit-hobbs-end" type="number" step="0.1"></label>
-          <label>Tacho Start <input name="leg[starting_tacho]" id="legs-edit-tacho-start" type="number" step="0.1"></label>
-          <label>Tacho End <input name="leg[ending_tacho]" id="legs-edit-tacho-end" type="number" step="0.1"></label>
-          <label>Fuel Departure <input name="leg[fuel_onboard]" id="legs-edit-fuel-dep" type="text"></label>
-          <label>Fuel Landing <input name="leg[fuel_remaining]" id="legs-edit-fuel-ldg" type="text"></label>
-          <label>Oil Qty <input name="leg[oil_quantity]" id="legs-edit-oil-qty" type="number" step="0.1"></label>
-          <label>Oil Unit <input name="leg[oil_unit]" id="legs-edit-oil-unit" type="text" maxlength="16"></label>
-          <label>Oil % <input name="leg[oil_percentage]" id="legs-edit-oil-pct" type="number" min="0" max="100"></label>
-          <label>Takeoffs <input name="leg[takeoff_count]" id="legs-edit-to" type="number" min="0"></label>
-          <label>Landings <input name="leg[landing_count]" id="legs-edit-ldg" type="number" min="0"></label>
+        <input type="hidden" name="leg[off_block_local]" id="legs-edit-off-combined" value="">
+        <input type="hidden" name="leg[oil_unit]" id="legs-edit-oil-unit" value="%">
+        <input type="hidden" id="legs-edit-fuel-unit" value="USG">
+        <div class="leg-edit-sections">
+          <section class="leg-edit-card" data-leg-section="identity">
+            <h4>Flight Identity</h4>
+            <div class="leg-edit-grid">
+              <label class="leg-edit-field"><span>Aircraft</span>
+                <select name="leg[aircraft_registration]" id="legs-edit-aircraft" required>
+                  <?php foreach ($aircraftOptions as $aircraftOption): ?>
+                    <?php $reg = strtoupper(trim((string)($aircraftOption['registration'] ?? ''))); ?>
+                    <?php if ($reg === '') { continue; } ?>
+                    <option value="<?= cvr_intake_h($reg) ?>"
+                      data-fuel-unit="<?= cvr_intake_h($aircraftUnitMap[$reg]['fuel_unit'] ?? 'USG') ?>"
+                      data-oil-unit="<?= cvr_intake_h($aircraftUnitMap[$reg]['oil_unit'] ?? '%') ?>"
+                      data-aircraft-id="<?= (int)($aircraftUnitMap[$reg]['id'] ?? $aircraftOption['id'] ?? 0) ?>"
+                    ><?= cvr_intake_h($reg) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label class="leg-edit-field"><span>Mission</span>
+                <select name="leg[mission_code]" id="legs-edit-mission" required>
+                  <option value="">Select a mission</option>
+                  <?php foreach ($flightMissions as $mission): ?>
+                    <option value="<?= cvr_intake_h($mission['code']) ?>"><?= cvr_intake_h($mission['label']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+                <div class="leg-edit-error" data-error-for="mission"></div>
+              </label>
+            </div>
+          </section>
+
+          <section class="leg-edit-card" data-leg-section="route">
+            <h4>Route and Time</h4>
+            <div class="leg-edit-grid">
+              <label class="leg-edit-field"><span>Departure Airport</span>
+                <input class="leg-edit-icao" name="leg[departure_airport]" id="legs-edit-dep" type="text" maxlength="4" minlength="3" autocomplete="off" required>
+                <div class="leg-edit-error" data-error-for="dep"></div>
+              </label>
+              <label class="leg-edit-field"><span>Arrival Airport</span>
+                <input class="leg-edit-icao" name="leg[arrival_airport]" id="legs-edit-arr" type="text" maxlength="4" minlength="3" autocomplete="off" required>
+                <div class="leg-edit-error" data-error-for="arr"></div>
+              </label>
+              <label class="leg-edit-field"><span>Date</span>
+                <input name="leg_date" id="legs-edit-date" type="date" required>
+                <div class="leg-edit-error" data-error-for="date"></div>
+              </label>
+              <label class="leg-edit-field">
+                <span>Off Block Time — Local <em id="legs-edit-tz-label">(America/Los_Angeles)</em></span>
+                <input class="leg-edit-time" name="leg_off_time" id="legs-edit-off-time" type="text" inputmode="numeric" maxlength="5" placeholder="18:29" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" required>
+                <div class="leg-edit-error" data-error-for="off"></div>
+              </label>
+            </div>
+            <div class="leg-edit-derived">
+              <div><strong>Calculated On Block</strong><div><span id="legs-edit-onblock">—</span> <span class="leg-edit-tz">Local</span></div></div>
+              <div class="leg-edit-tz">Timezone: <span id="legs-edit-tz-value">America/Los_Angeles</span></div>
+            </div>
+          </section>
+
+          <section class="leg-edit-card" data-leg-section="meters">
+            <h4>Aircraft Meters</h4>
+            <div class="leg-edit-grid">
+              <div class="leg-edit-meter">
+                <div class="leg-edit-meter-title">Hobbs</div>
+                <div class="leg-edit-meter-row">
+                  <label class="leg-edit-field"><span>Start</span><input name="leg[starting_hobbs]" id="legs-edit-hobbs-start" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                  <div class="leg-edit-meter-arrow">→</div>
+                  <label class="leg-edit-field"><span>End</span><input name="leg[ending_hobbs]" id="legs-edit-hobbs-end" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                </div>
+                <div class="leg-edit-derived"><strong>Difference</strong><span id="legs-edit-hobbs-diff">—</span></div>
+                <div class="leg-edit-error" data-error-for="hobbs"></div>
+              </div>
+              <div class="leg-edit-meter">
+                <div class="leg-edit-meter-title">Tacho</div>
+                <div class="leg-edit-meter-row">
+                  <label class="leg-edit-field"><span>Start</span><input name="leg[starting_tacho]" id="legs-edit-tacho-start" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                  <div class="leg-edit-meter-arrow">→</div>
+                  <label class="leg-edit-field"><span>End</span><input name="leg[ending_tacho]" id="legs-edit-tacho-end" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                </div>
+                <div class="leg-edit-derived"><strong>Difference</strong><span id="legs-edit-tacho-diff">—</span></div>
+                <div class="leg-edit-error" data-error-for="tacho"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="leg-edit-card" data-leg-section="fuel">
+            <h4>Fuel and Oil</h4>
+            <div class="leg-edit-grid-3">
+              <label class="leg-edit-field"><span>Fuel Departure</span>
+                <div class="leg-edit-unit"><input name="leg[fuel_onboard]" id="legs-edit-fuel-dep" type="number" step="0.1" min="0" inputmode="decimal" required><span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
+              </label>
+              <label class="leg-edit-field"><span>Fuel Landing</span>
+                <div class="leg-edit-unit"><input name="leg[fuel_remaining]" id="legs-edit-fuel-ldg" type="number" step="0.1" min="0" inputmode="decimal" required><span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
+              </label>
+              <div class="leg-edit-field"><span>Fuel Burn</span>
+                <div class="leg-edit-derived" style="margin:0"><span id="legs-edit-fuel-burn">—</span>&nbsp;<span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
+              </div>
+            </div>
+            <div class="leg-edit-error" data-error-for="fuel"></div>
+            <div style="margin-top:12px;max-width:280px">
+              <label class="leg-edit-field"><span>Oil Quantity</span>
+                <div class="leg-edit-unit">
+                  <input name="leg[oil_value]" id="legs-edit-oil-value" type="number" step="0.1" min="0" inputmode="decimal">
+                  <span class="leg-edit-suffix" id="legs-edit-oil-suffix">%</span>
+                </div>
+              </label>
+            </div>
+          </section>
+
+          <section class="leg-edit-card" data-leg-section="ops">
+            <h4>Takeoffs and Landings</h4>
+            <div class="leg-edit-grid" style="max-width:420px">
+              <label class="leg-edit-field"><span>Takeoffs</span><input name="leg[takeoff_count]" id="legs-edit-to" type="number" min="0" step="1" inputmode="numeric" required></label>
+              <label class="leg-edit-field"><span>Landings</span><input name="leg[landing_count]" id="legs-edit-ldg" type="number" min="0" step="1" inputmode="numeric" required></label>
+            </div>
+          </section>
+
+          <section class="leg-edit-card" data-leg-section="crew">
+            <h4>Crew</h4>
+            <div class="legs-crew-editor" id="legs-edit-crew"></div>
+            <button class="leg-edit-add-crew" type="button" id="legs-edit-add-crew">+ Add Crew Member</button>
+            <div class="leg-edit-error" data-error-for="crew"></div>
+          </section>
         </div>
-        <div style="margin-top:12px">
-          <div class="intake-muted" style="margin-bottom:6px">Crew</div>
-          <div class="legs-crew-editor" id="legs-edit-crew"></div>
-          <button class="intake-button" type="button" id="legs-edit-add-crew" style="margin-top:8px;background:#475569">Add crew</button>
-        </div>
-        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
-          <button class="intake-modal-close" type="button" data-legs-edit-close>Cancel</button>
-          <button class="intake-button" type="submit">Save Leg</button>
+        <div class="leg-edit-footer">
+          <button class="leg-edit-cancel" type="button" data-legs-edit-close>Cancel</button>
+          <button class="leg-edit-save" type="submit">Save Changes</button>
         </div>
       </form>
-      <form method="post" enctype="multipart/form-data" style="border-top:1px solid #e2e8f0;padding-top:14px;margin-top:4px">
-        <input type="hidden" name="action" value="upload_manual_garmin_csv">
-        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-        <input type="hidden" name="workflow_flight_record_uuid" id="legs-csv-flight-uuid" value="">
-        <input type="hidden" name="aircraft_registration" id="legs-csv-aircraft" value="">
-        <div class="intake-muted" style="margin-bottom:8px">Upload missing Garmin CSV for this leg</div>
-        <div class="legs-modal-grid">
-          <label>Aircraft ID
-            <select name="aircraft_id" id="legs-csv-aircraft-id">
-              <?php foreach ($aircraftOptions as $aircraftOption): ?>
-                <option value="<?= (int)($aircraftOption['id'] ?? 0) ?>" data-reg="<?= cvr_intake_h(strtoupper(trim((string)($aircraftOption['registration'] ?? '')))) ?>"><?= cvr_intake_h((string)($aircraftOption['registration'] ?? '')) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </label>
-          <label>Garmin CSV <input type="file" name="garmin_csv" accept=".csv,text/csv" required></label>
-        </div>
-        <button class="intake-button" type="submit" style="margin-top:10px">Upload CSV</button>
-      </form>
+
+      <div class="leg-edit-garmin">
+        <h4>Garmin CSV Recovery</h4>
+        <p>Attach a missing Garmin CSV to this operational leg. This does not save or discard other edits above.</p>
+        <form method="post" enctype="multipart/form-data" id="legs-garmin-form">
+          <input type="hidden" name="action" value="upload_manual_garmin_csv">
+          <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+          <input type="hidden" name="workflow_flight_record_uuid" id="legs-csv-flight-uuid" value="">
+          <input type="hidden" name="aircraft_registration" id="legs-csv-aircraft" value="">
+          <input type="hidden" name="aircraft_id" id="legs-csv-aircraft-id" value="">
+          <div class="leg-edit-grid">
+            <div class="leg-edit-field"><span>Aircraft</span><div id="legs-csv-aircraft-label" style="font-weight:850;color:#0f172a">—</div></div>
+            <div class="leg-edit-field"><span>Flight Record</span><div id="legs-csv-flight-label" class="intake-mono" style="font-size:11px;word-break:break-all">—</div></div>
+            <label class="leg-edit-field"><span>Garmin CSV file</span><input type="file" name="garmin_csv" accept=".csv,text/csv" required></label>
+          </div>
+          <div style="margin-top:10px"><span class="leg-edit-badge" id="legs-csv-status">Status unknown</span></div>
+          <button class="intake-button" type="submit" style="margin-top:12px;background:#475569">Upload CSV</button>
+        </form>
+      </div>
     </div>
   </div>
 </div>
+
+<script type="application/json" id="legs-crew-catalog"><?= json_encode(array_map(static function (array $u): array {
+    $role = strtolower((string)($u['role'] ?? ''));
+    return array(
+        'id' => (int)$u['id'],
+        'name' => (string)($u['display_name'] ?? ''),
+        'role' => $role,
+        'kind' => in_array($role, array('instructor', 'supervisor', 'chief_instructor'), true) ? 'staff' : 'student',
+    );
+}, $crewCatalogUsers), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script type="application/json" id="legs-flight-missions"><?= json_encode($flightMissions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 
 <div class="intake-modal-backdrop" id="legs-debrief-modal" hidden>
   <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="legs-debrief-title" style="max-width:860px">
@@ -2827,79 +3080,272 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     });
   }
 
-  // Operational Legs — edit modal + debrief copy panel
+  // Operational Legs — structured edit modal + debrief copy panel
   (function initOperationalLegs() {
     const table = page.querySelector('[data-operational-legs-table]');
     const editModal = document.getElementById('legs-edit-modal');
     const debriefModal = document.getElementById('legs-debrief-modal');
     const crewBox = document.getElementById('legs-edit-crew');
-    if (!table || !editModal || !debriefModal || !crewBox) {
+    const form = document.getElementById('legs-edit-form');
+    if (!table || !editModal || !debriefModal || !crewBox || !form) {
       return;
     }
 
+    const crewCatalog = JSON.parse(document.getElementById('legs-crew-catalog')?.textContent || '[]');
+    const flightMissions = JSON.parse(document.getElementById('legs-flight-missions')?.textContent || '[]');
+    const roleOptions = [
+      ['student', 'Student'],
+      ['pic', 'PIC'],
+      ['pilot_flying', 'Pilot Flying'],
+      ['pilot_monitoring', 'Pilot Monitoring'],
+      ['flight_instructor', 'Flight Instructor'],
+      ['supervising_instructor', 'Supervising Instructor'],
+      ['examiner', 'Examiner'],
+      ['safety_pilot', 'Safety Pilot'],
+    ];
+
+    let baselineSnapshot = '';
+    let currentLeg = null;
+
     const openModal = (modal) => { modal.hidden = false; };
     const closeModal = (modal) => { modal.hidden = true; };
+    const oneDecimal = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? (Math.round(n * 10) / 10).toFixed(1) : '';
+    };
+    const showError = (key, message) => {
+      const el = form.querySelector('[data-error-for="' + key + '"]');
+      if (!el) return;
+      el.textContent = message || '';
+      el.classList.toggle('is-visible', !!message);
+    };
+    const clearErrors = () => {
+      form.querySelectorAll('[data-error-for]').forEach((el) => {
+        el.textContent = '';
+        el.classList.remove('is-visible');
+      });
+    };
+    const snapshotForm = () => new FormData(form);
+
+    const serializeSnapshot = () => {
+      const data = new FormData(form);
+      const pairs = [];
+      data.forEach((value, key) => { pairs.push(key + '=' + String(value)); });
+      return pairs.sort().join('&');
+    };
+
+    const isDirty = () => serializeSnapshot() !== baselineSnapshot;
+
+    const applyAircraftUnits = () => {
+      const select = document.getElementById('legs-edit-aircraft');
+      const opt = select?.selectedOptions?.[0];
+      const fuelUnit = opt?.getAttribute('data-fuel-unit') || 'USG';
+      const oilUnit = opt?.getAttribute('data-oil-unit') || '%';
+      const aircraftId = opt?.getAttribute('data-aircraft-id') || '';
+      document.getElementById('legs-edit-fuel-unit').value = fuelUnit;
+      document.getElementById('legs-edit-oil-unit').value = oilUnit;
+      document.querySelectorAll('[data-fuel-suffix]').forEach((el) => { el.textContent = fuelUnit; });
+      document.getElementById('legs-edit-oil-suffix').textContent = oilUnit;
+      document.getElementById('legs-csv-aircraft-id').value = aircraftId;
+      document.getElementById('legs-csv-aircraft').value = select?.value || '';
+      document.getElementById('legs-csv-aircraft-label').textContent = select?.value || '—';
+    };
+
+    const ensureMissionOption = (code, label) => {
+      const select = document.getElementById('legs-edit-mission');
+      if (!select || !code) return;
+      const exists = Array.from(select.options).some((o) => o.value === code);
+      if (!exists) {
+        const opt = document.createElement('option');
+        opt.value = code;
+        opt.textContent = (label || code) + ' (Legacy mission)';
+        opt.dataset.legacy = '1';
+        select.appendChild(opt);
+      }
+      select.value = code;
+    };
+
+    const updateDerived = () => {
+      const hs = Number(document.getElementById('legs-edit-hobbs-start').value);
+      const he = Number(document.getElementById('legs-edit-hobbs-end').value);
+      const ts = Number(document.getElementById('legs-edit-tacho-start').value);
+      const te = Number(document.getElementById('legs-edit-tacho-end').value);
+      const fd = Number(document.getElementById('legs-edit-fuel-dep').value);
+      const fl = Number(document.getElementById('legs-edit-fuel-ldg').value);
+      document.getElementById('legs-edit-hobbs-diff').textContent =
+        Number.isFinite(hs) && Number.isFinite(he) && he >= hs ? oneDecimal(he - hs) : '—';
+      document.getElementById('legs-edit-tacho-diff').textContent =
+        Number.isFinite(ts) && Number.isFinite(te) && te >= ts ? oneDecimal(te - ts) : '—';
+      document.getElementById('legs-edit-fuel-burn').textContent =
+        Number.isFinite(fd) && Number.isFinite(fl) ? oneDecimal(fd - fl) : '—';
+
+      const date = document.getElementById('legs-edit-date').value;
+      const time = document.getElementById('legs-edit-off-time').value;
+      const hobbsDiff = Number.isFinite(hs) && Number.isFinite(he) ? (he - hs) : NaN;
+      if (date && /^([01]\d|2[0-3]):[0-5]\d$/.test(time) && Number.isFinite(hobbsDiff) && hobbsDiff >= 0) {
+        const [hh, mm] = time.split(':').map(Number);
+        const totalMin = hh * 60 + mm + Math.round(hobbsDiff * 60);
+        const onH = Math.floor((((totalMin % 1440) + 1440) % 1440) / 60);
+        const onM = ((totalMin % 1440) + 1440) % 60;
+        document.getElementById('legs-edit-onblock').textContent =
+          String(onH).padStart(2, '0') + ':' + String(onM).padStart(2, '0');
+      } else {
+        document.getElementById('legs-edit-onblock').textContent = '—';
+      }
+      document.getElementById('legs-edit-off-combined').value =
+        date && time ? (date + ' ' + time) : '';
+    };
+
+    const normalizeTimeInput = (input) => {
+      let v = String(input.value || '').replace(/[^\d:]/g, '');
+      if (v.length === 3 && !v.includes(':')) v = v.slice(0, 1) + ':' + v.slice(1);
+      if (v.length === 4 && !v.includes(':')) v = v.slice(0, 2) + ':' + v.slice(2);
+      if (v.length > 5) v = v.slice(0, 5);
+      input.value = v;
+    };
 
     const renderCrew = (crew) => {
       crewBox.innerHTML = '';
-      const list = Array.isArray(crew) && crew.length ? crew : [{ role: 'pic', name: '' }];
+      const list = Array.isArray(crew) && crew.length ? crew : [{ role: 'student', name: '', person_id: null, historical: false }];
       list.forEach((member, index) => {
         const row = document.createElement('div');
-        row.className = 'legs-crew-row';
-        row.innerHTML =
-          '<select name="leg[crew][' + index + '][role]">'
-          + '<option value="pic">PIC</option>'
-          + '<option value="sic">SIC</option>'
-          + '<option value="instructor">Instructor</option>'
-          + '<option value="student">Student</option>'
-          + '<option value="observer">Observer</option>'
-          + '</select>'
-          + '<input type="text" name="leg[crew][' + index + '][personName]" placeholder="Name" value="">'
-          + '<button type="button" class="intake-modal-close" data-legs-crew-remove>Remove</button>';
-        const role = String(member.role || '').toLowerCase();
-        const select = row.querySelector('select');
-        const input = row.querySelector('input');
-        if (select && role) {
-          select.value = role;
+        row.className = 'leg-edit-crew-row';
+        const role = String(member.role || 'student').toLowerCase();
+        const name = String(member.name || member.personName || '');
+        const personId = member.person_id || member.id || '';
+        const matched = crewCatalog.find((u) => Number(u.id) === Number(personId)
+          || String(u.name).toLowerCase() === name.toLowerCase());
+        const historical = !matched && name !== '';
+        let roleHtml = '<select name="leg[crew][' + index + '][role]">';
+        roleOptions.forEach(([value, label]) => {
+          roleHtml += '<option value="' + value + '"' + (role === value || (role === 'instructor' && value === 'flight_instructor') ? ' selected' : '') + '>' + label + '</option>';
+        });
+        roleHtml += '</select>';
+        let userHtml = '<select name="leg[crew][' + index + '][person_id]" data-crew-user>';
+        userHtml += '<option value="">Select crew member</option>';
+        if (historical) {
+          userHtml += '<option value="historical" selected data-name="' + name.replace(/"/g, '&quot;') + '">' + name + ' (Historical crew entry)</option>';
         }
-        if (input) {
-          input.value = String(member.name || member.personName || '');
-        }
+        crewCatalog.forEach((u) => {
+          const selected = matched && Number(matched.id) === Number(u.id) ? ' selected' : '';
+          const badge = u.kind === 'staff' ? 'Staff' : 'Student';
+          userHtml += '<option value="' + u.id + '" data-name="' + String(u.name).replace(/"/g, '&quot;') + '"' + selected + '>'
+            + u.name + ' · ' + badge + '</option>';
+        });
+        userHtml += '</select>';
+        userHtml += '<input type="hidden" name="leg[crew][' + index + '][personName]" value="' + (matched ? matched.name : name).replace(/"/g, '&quot;') + '">';
+        row.innerHTML = roleHtml + userHtml
+          + '<button type="button" class="leg-edit-crew-remove" data-legs-crew-remove aria-label="Remove crew member">Remove</button>';
         crewBox.appendChild(row);
       });
     };
 
+    const syncCrewHiddenNames = () => {
+      crewBox.querySelectorAll('.leg-edit-crew-row').forEach((row) => {
+        const userSelect = row.querySelector('[data-crew-user]');
+        const hidden = row.querySelector('input[type="hidden"]');
+        if (!userSelect || !hidden) return;
+        const opt = userSelect.selectedOptions[0];
+        hidden.value = opt?.getAttribute('data-name') || opt?.textContent?.replace(/\s·\s(Staff|Student).*$/, '').replace(/\s\(Historical.*\)$/, '') || '';
+      });
+    };
+
     const fillEditForm = (leg) => {
+      currentLeg = leg;
+      clearErrors();
       document.getElementById('legs-edit-dispatch-id').value = leg.dispatch_id || '';
-      document.getElementById('legs-edit-timezone').value = leg.timezone || 'America/Los_Angeles';
+      const tz = leg.timezone || 'America/Los_Angeles';
+      document.getElementById('legs-edit-timezone').value = tz;
+      document.getElementById('legs-edit-tz-label').textContent = '(' + tz + ')';
+      document.getElementById('legs-edit-tz-value').textContent = tz;
       document.getElementById('legs-edit-aircraft').value = String(leg.aircraft_registration || '').toUpperCase();
-      document.getElementById('legs-edit-mission').value = leg.mission_code || '';
-      document.getElementById('legs-edit-dep').value = leg.departure_airport || '';
-      document.getElementById('legs-edit-arr').value = leg.arrival_airport || '';
-      document.getElementById('legs-edit-off').value = leg.off_block_local || '';
-      document.getElementById('legs-edit-hobbs-start').value = leg.starting_hobbs ?? '';
-      document.getElementById('legs-edit-hobbs-end').value = leg.ending_hobbs ?? '';
-      document.getElementById('legs-edit-tacho-start').value = leg.starting_tacho ?? '';
-      document.getElementById('legs-edit-tacho-end').value = leg.ending_tacho ?? '';
-      document.getElementById('legs-edit-fuel-dep').value = leg.fuel_onboard || '';
-      document.getElementById('legs-edit-fuel-ldg').value = leg.fuel_remaining || '';
-      document.getElementById('legs-edit-oil-qty').value = leg.oil_quantity ?? '';
-      document.getElementById('legs-edit-oil-unit').value = leg.oil_unit || '';
-      document.getElementById('legs-edit-oil-pct').value = leg.oil_percentage ?? '';
+      applyAircraftUnits();
+      ensureMissionOption(String(leg.mission_code || '').toUpperCase(), String(leg.mission_code || ''));
+      document.getElementById('legs-edit-dep').value = String(leg.departure_airport || '').toUpperCase();
+      document.getElementById('legs-edit-arr').value = String(leg.arrival_airport || '').toUpperCase();
+      const local = String(leg.off_block_local || '');
+      const datePart = local.slice(0, 10);
+      const timePart = local.includes('T') ? local.slice(11, 16) : (local.slice(11, 16) || '');
+      document.getElementById('legs-edit-date').value = datePart;
+      document.getElementById('legs-edit-off-time').value = timePart;
+      document.getElementById('legs-edit-hobbs-start').value = oneDecimal(leg.starting_hobbs);
+      document.getElementById('legs-edit-hobbs-end').value = oneDecimal(leg.ending_hobbs);
+      document.getElementById('legs-edit-tacho-start').value = oneDecimal(leg.starting_tacho);
+      document.getElementById('legs-edit-tacho-end').value = oneDecimal(leg.ending_tacho);
+      document.getElementById('legs-edit-fuel-dep').value = oneDecimal(leg.fuel_onboard);
+      document.getElementById('legs-edit-fuel-ldg').value = oneDecimal(leg.fuel_remaining);
+      const oilUnit = document.getElementById('legs-edit-oil-unit').value || '%';
+      const oilVal = oilUnit === '%' ? (leg.oil_percentage ?? '') : (leg.oil_quantity ?? '');
+      document.getElementById('legs-edit-oil-value').value = oilUnit === '%' ? (oilVal === '' ? '' : String(Math.round(Number(oilVal)))) : oneDecimal(oilVal);
       document.getElementById('legs-edit-to').value = leg.takeoff_count ?? 0;
       document.getElementById('legs-edit-ldg').value = leg.landing_count ?? 0;
       document.getElementById('legs-csv-flight-uuid').value = leg.workflow_flight_record_uuid || '';
-      document.getElementById('legs-csv-aircraft').value = String(leg.aircraft_registration || '').toUpperCase();
-      const csvSelect = document.getElementById('legs-csv-aircraft-id');
-      if (csvSelect) {
-        const reg = String(leg.aircraft_registration || '').toUpperCase();
-        Array.from(csvSelect.options).forEach((opt) => {
-          if (String(opt.getAttribute('data-reg') || '').toUpperCase() === reg) {
-            csvSelect.value = opt.value;
-          }
-        });
-      }
+      document.getElementById('legs-csv-flight-label').textContent = leg.workflow_flight_record_uuid || '—';
+      document.getElementById('legs-csv-status').textContent = leg.has_garmin_csv ? 'Garmin Uploaded' : 'Garmin Missing';
       renderCrew(leg.crew || []);
+      updateDerived();
+      baselineSnapshot = serializeSnapshot();
+    };
+
+    const validate = () => {
+      clearErrors();
+      let ok = true;
+      if (!document.getElementById('legs-edit-mission').value) {
+        showError('mission', 'Select a mission.');
+        ok = false;
+      }
+      const dep = document.getElementById('legs-edit-dep').value.trim().toUpperCase();
+      const arr = document.getElementById('legs-edit-arr').value.trim().toUpperCase();
+      document.getElementById('legs-edit-dep').value = dep;
+      document.getElementById('legs-edit-arr').value = arr;
+      if (!/^[A-Z]{3,4}$/.test(dep)) { showError('dep', 'Enter a valid departure airport.'); ok = false; }
+      if (!/^[A-Z]{3,4}$/.test(arr)) { showError('arr', 'Enter a valid arrival airport.'); ok = false; }
+      if (!document.getElementById('legs-edit-date').value) { showError('date', 'Enter the flight date.'); ok = false; }
+      const time = document.getElementById('legs-edit-off-time').value.trim();
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+        showError('off', 'Enter Off Block time using the 24-hour clock.');
+        ok = false;
+      }
+      const hs = Number(document.getElementById('legs-edit-hobbs-start').value);
+      const he = Number(document.getElementById('legs-edit-hobbs-end').value);
+      const ts = Number(document.getElementById('legs-edit-tacho-start').value);
+      const te = Number(document.getElementById('legs-edit-tacho-end').value);
+      if (!(he >= hs)) { showError('hobbs', 'Hobbs End cannot be lower than Hobbs Start.'); ok = false; }
+      if (!(te >= ts)) { showError('tacho', 'Tacho End cannot be lower than Tacho Start.'); ok = false; }
+      const fd = Number(document.getElementById('legs-edit-fuel-dep').value);
+      const fl = Number(document.getElementById('legs-edit-fuel-ldg').value);
+      if (Number.isFinite(fd) && Number.isFinite(fl) && fl > fd) {
+        showError('fuel', 'Landing fuel cannot exceed departure fuel.');
+        ok = false;
+      }
+      syncCrewHiddenNames();
+      const crewRows = Array.from(crewBox.querySelectorAll('.leg-edit-crew-row'));
+      if (crewRows.length === 0) { showError('crew', 'Select a crew member.'); ok = false; }
+      crewRows.forEach((row) => {
+        const userSelect = row.querySelector('[data-crew-user]');
+        if (!userSelect?.value) { showError('crew', 'Select a crew member.'); ok = false; }
+      });
+      updateDerived();
+      return ok;
+    };
+
+    const requestClose = () => {
+      if (isDirty() && !window.confirm('Discard unsaved changes?\n\nContinue Editing: Cancel this dialog.\nDiscard Changes: Close without saving.')) {
+        return;
+      }
+      // Native confirm: OK = discard, Cancel = continue editing
+      // Re-prompt with clearer UX:
+    };
+
+    const attemptClose = () => {
+      if (!isDirty()) {
+        closeModal(editModal);
+        return;
+      }
+      const discard = window.confirm('Discard unsaved changes?');
+      if (discard) {
+        closeModal(editModal);
+      }
     };
 
     table.addEventListener('click', (event) => {
@@ -2908,19 +3354,14 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
         if (stop.matches('[data-legs-debrief]')) {
           event.preventDefault();
           event.stopPropagation();
-          const debriefId = stop.getAttribute('data-debrief-id') || '0';
-          const bundleId = stop.getAttribute('data-bundle-id') || '0';
-          openDebrief(debriefId, bundleId);
+          openDebrief(stop.getAttribute('data-debrief-id') || '0', stop.getAttribute('data-bundle-id') || '0');
         }
         return;
       }
       const row = event.target instanceof Element ? event.target.closest('tr[data-leg]') : null;
-      if (!row) {
-        return;
-      }
+      if (!row) return;
       try {
-        const leg = JSON.parse(row.getAttribute('data-leg') || '{}');
-        fillEditForm(leg);
+        fillEditForm(JSON.parse(row.getAttribute('data-leg') || '{}'));
         openModal(editModal);
       } catch (error) {
         window.alert('Could not open leg editor.');
@@ -2928,31 +3369,104 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     });
 
     editModal.querySelectorAll('[data-legs-edit-close]').forEach((btn) => {
-      btn.addEventListener('click', () => closeModal(editModal));
+      btn.addEventListener('click', attemptClose);
     });
     debriefModal.querySelectorAll('[data-legs-debrief-close]').forEach((btn) => {
       btn.addEventListener('click', () => closeModal(debriefModal));
     });
 
+    document.getElementById('legs-edit-aircraft')?.addEventListener('change', () => {
+      applyAircraftUnits();
+      updateDerived();
+    });
+    ['legs-edit-hobbs-start','legs-edit-hobbs-end','legs-edit-tacho-start','legs-edit-tacho-end','legs-edit-fuel-dep','legs-edit-fuel-ldg','legs-edit-date','legs-edit-off-time']
+      .forEach((id) => document.getElementById(id)?.addEventListener('input', updateDerived));
+    document.getElementById('legs-edit-off-time')?.addEventListener('blur', (e) => {
+      normalizeTimeInput(e.target);
+      updateDerived();
+    });
+    document.getElementById('legs-edit-dep')?.addEventListener('input', (e) => {
+      e.target.value = String(e.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+    });
+    document.getElementById('legs-edit-arr')?.addEventListener('input', (e) => {
+      e.target.value = String(e.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+    });
+
     document.getElementById('legs-edit-add-crew')?.addEventListener('click', () => {
-      const current = Array.from(crewBox.querySelectorAll('.legs-crew-row')).map((row) => ({
-        role: row.querySelector('select')?.value || 'student',
-        name: row.querySelector('input')?.value || '',
+      const current = Array.from(crewBox.querySelectorAll('.leg-edit-crew-row')).map((row) => ({
+        role: row.querySelector('select[name*="[role]"]')?.value || 'student',
+        person_id: row.querySelector('[data-crew-user]')?.value || '',
+        name: row.querySelector('input[type="hidden"]')?.value || '',
       }));
-      current.push({ role: 'student', name: '' });
+      current.push({ role: 'student', name: '', person_id: '' });
       renderCrew(current);
+    });
+    crewBox.addEventListener('change', (event) => {
+      if (event.target && event.target.matches('[data-crew-user]')) {
+        syncCrewHiddenNames();
+      }
     });
     crewBox.addEventListener('click', (event) => {
       const btn = event.target instanceof Element ? event.target.closest('[data-legs-crew-remove]') : null;
-      if (!btn) {
-        return;
-      }
-      btn.closest('.legs-crew-row')?.remove();
-      const current = Array.from(crewBox.querySelectorAll('.legs-crew-row')).map((row) => ({
-        role: row.querySelector('select')?.value || 'student',
-        name: row.querySelector('input')?.value || '',
+      if (!btn) return;
+      btn.closest('.leg-edit-crew-row')?.remove();
+      const current = Array.from(crewBox.querySelectorAll('.leg-edit-crew-row')).map((row) => ({
+        role: row.querySelector('select[name*="[role]"]')?.value || 'student',
+        person_id: row.querySelector('[data-crew-user]')?.value || '',
+        name: row.querySelector('input[type="hidden"]')?.value || '',
       }));
-      renderCrew(current.length ? current : [{ role: 'pic', name: '' }]);
+      renderCrew(current.length ? current : [{ role: 'student', name: '', person_id: '' }]);
+    });
+
+    form.addEventListener('submit', (event) => {
+      // Normalize meter decimals before submit
+      ['legs-edit-hobbs-start','legs-edit-hobbs-end','legs-edit-tacho-start','legs-edit-tacho-end','legs-edit-fuel-dep','legs-edit-fuel-ldg']
+        .forEach((id) => {
+          const el = document.getElementById(id);
+          if (el && el.value !== '') el.value = oneDecimal(el.value);
+        });
+      syncCrewHiddenNames();
+      updateDerived();
+      // Map oil value into percentage or quantity via oil_unit already set
+      const oilUnit = document.getElementById('legs-edit-oil-unit').value || '%';
+      const oilVal = document.getElementById('legs-edit-oil-value').value;
+      // hidden fields injected dynamically
+      let pct = form.querySelector('input[name="leg[oil_percentage]"]');
+      let qty = form.querySelector('input[name="leg[oil_quantity]"]');
+      let oval = form.querySelector('input[name="leg[oil_value]"]');
+      if (!pct) {
+        pct = document.createElement('input');
+        pct.type = 'hidden';
+        pct.name = 'leg[oil_percentage]';
+        form.appendChild(pct);
+      }
+      if (!qty) {
+        qty = document.createElement('input');
+        qty.type = 'hidden';
+        qty.name = 'leg[oil_quantity]';
+        form.appendChild(qty);
+      }
+      if (!oval) {
+        oval = document.createElement('input');
+        oval.type = 'hidden';
+        oval.name = 'leg[oil_value]';
+        form.appendChild(oval);
+      }
+      oval.value = oilVal;
+      if (oilUnit === '%') {
+        pct.value = oilVal;
+        qty.value = '';
+      } else {
+        qty.value = oilVal;
+        pct.value = '';
+      }
+      // Convert historical crew person_id
+      crewBox.querySelectorAll('[data-crew-user]').forEach((sel) => {
+        if (sel.value === 'historical') sel.value = '';
+      });
+      if (!validate()) {
+        event.preventDefault();
+      }
     });
 
     async function openDebrief(debriefId, bundleId) {
@@ -2971,15 +3485,9 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
           + '&bundle_id=' + encodeURIComponent(bundleId || '0');
         const response = await fetch(url, { credentials: 'same-origin' });
         const payload = await response.json();
-        if (payload.copy_text) {
-          box.textContent = payload.copy_text;
-        } else {
-          box.textContent = payload.message || 'No debrief text available.';
-        }
+        box.textContent = payload.copy_text || payload.message || 'No debrief text available.';
         message.textContent = payload.ok ? '' : (payload.message || '');
-        if (!payload.ok && Number(bundleId) > 0) {
-          generateForm.hidden = false;
-        }
+        if (!payload.ok && Number(bundleId) > 0) generateForm.hidden = false;
       } catch (error) {
         box.textContent = error instanceof Error ? error.message : 'Could not load debrief.';
       }
