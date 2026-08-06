@@ -55,6 +55,7 @@ require_contains($page, 'legs_show_removed', 'show removed filter', $failures);
 require_contains($page, 'Show removed', 'show removed label', $failures);
 require_contains($page, 'legs-btn-remove', 'remove button', $failures);
 require_contains($page, 'Evidence stays on file', 'soft-remove confirmation copy', $failures);
+require_contains($page, 'cvr_intake_legs_query()', 'remove/restore preserve filter query', $failures);
 require_absent($page, 'DELETE FROM ipca_cvr_dispatches', 'page must not hard-delete dispatches', $failures);
 
 require_once $visibility;

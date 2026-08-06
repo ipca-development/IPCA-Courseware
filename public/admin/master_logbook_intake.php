@@ -1872,14 +1872,14 @@ a.intake-refresh:hover{
                   <?php endif; ?>
                   <button type="button" class="app-btn app-btn-secondary" data-legs-details><span>Details</span></button>
                   <?php if (!empty($row['is_hidden'])): ?>
-                    <form method="post" action="/admin/master_logbook.php?tab=dispatch&amp;legs_show_removed=1" data-legs-stop>
+                    <form method="post" action="<?= cvr_intake_h(cvr_intake_legs_query()) ?>" data-legs-stop>
                       <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
                       <input type="hidden" name="action" value="restore_operational_leg">
                       <input type="hidden" name="dispatch_id" value="<?= (int)($row['id'] ?? 0) ?>">
                       <button class="app-btn app-btn-secondary" type="submit"><span>Restore</span></button>
                     </form>
                   <?php else: ?>
-                    <form method="post" action="/admin/master_logbook.php?tab=dispatch" data-legs-stop onsubmit="return confirm('Remove this leg from the Master Logbook list? Evidence stays on file and can be restored.');">
+                    <form method="post" action="<?= cvr_intake_h(cvr_intake_legs_query()) ?>" data-legs-stop onsubmit="return confirm('Remove this leg from the Master Logbook list? Evidence stays on file and can be restored.');">
                       <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
                       <input type="hidden" name="action" value="hide_operational_leg">
                       <input type="hidden" name="dispatch_id" value="<?= (int)($row['id'] ?? 0) ?>">
