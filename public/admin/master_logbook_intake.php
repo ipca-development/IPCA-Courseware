@@ -17,6 +17,8 @@ require_once __DIR__ . '/../../src/CvrOperationalLegVisibilityService.php';
 require_once __DIR__ . '/../../src/CockpitRecorderDebriefQueueService.php';
 require_once __DIR__ . '/../../src/MissionCatalogService.php';
 require_once __DIR__ . '/../../src/AircraftOperationalConfigService.php';
+require_once __DIR__ . '/../../src/AircraftFleetStatusService.php';
+require_once __DIR__ . '/../../src/AircraftFuelUpliftService.php';
 
 if (!isset($cvrMasterLogbookContext) || !is_array($cvrMasterLogbookContext)) {
     $cvrMasterLogbookContext = array(
@@ -39,6 +41,7 @@ if ($cvrMlBasePath === '' || !str_starts_with($cvrMlBasePath, '/')) {
 $cvrMlCanEnroll = !empty($cvrMasterLogbookContext['can_enroll']);
 $cvrMlCanRemove = !empty($cvrMasterLogbookContext['can_remove']);
 $cvrMlCanEdit = !empty($cvrMasterLogbookContext['can_edit']);
+$cvrMlCanManageFuelUplifts = $cvrMlAudience === 'admin';
 $cvrMlShowAudio = !empty($cvrMasterLogbookContext['show_audio']);
 $cvrMlShowGarmin = !empty($cvrMasterLogbookContext['show_garmin']);
 $cvrMlShowReconstruction = !empty($cvrMasterLogbookContext['show_reconstruction']);
@@ -189,6 +192,8 @@ try {
             'generate_bundle_debrief',
             'hide_operational_leg',
             'restore_operational_leg',
+            'create_fuel_uplift',
+            'delete_fuel_uplift',
         );
         if ($cvrMlAudience === 'instructor') {
             if (in_array($action, $adminOnlyActions, true) || $action === 'create_cvr_enrollment') {
@@ -350,6 +355,41 @@ try {
             $reconstructionNotice = $already
                 ? 'AI Debrief generation is already running. Progress updates live below.'
                 : 'AI Debrief generation started in the background. Progress updates live below.';
+        } elseif ($action === 'create_fuel_uplift') {
+            if (!$cvrMlCanManageFuelUplifts) {
+                throw new RuntimeException('Fuel uplift logging is only available to admins.');
+            }
+            $registration = strtoupper(trim((string)($_POST['aircraft_registration'] ?? '')));
+            $aircraftId = (int)($_POST['aircraft_id'] ?? 0);
+            if ($aircraftId <= 0) {
+                foreach ($aircraftOptions as $aircraftOption) {
+                    if (strtoupper(trim((string)($aircraftOption['registration'] ?? ''))) === $registration) {
+                        $aircraftId = (int)($aircraftOption['id'] ?? 0);
+                        break;
+                    }
+                }
+            }
+            (new AircraftFuelUpliftService($pdo))->create(
+                $aircraftId,
+                $registration,
+                (float)($_POST['fuel_after_usg'] ?? 0),
+                trim((string)($_POST['uplifted_at_local'] ?? '')) !== ''
+                    ? trim((string)$_POST['uplifted_at_local'])
+                    : null,
+                trim((string)($_POST['notes'] ?? '')),
+                $actorUserId > 0 ? $actorUserId : null,
+                cvr_intake_california_timezone($pdo, $registration)
+            );
+            $reconstructionNotice = 'Fuel uplift logged for ' . $registration . '.';
+        } elseif ($action === 'delete_fuel_uplift') {
+            if (!$cvrMlCanManageFuelUplifts) {
+                throw new RuntimeException('Deleting fuel uplifts is only available to admins.');
+            }
+            (new AircraftFuelUpliftService($pdo))->softDelete(
+                (int)($_POST['uplift_id'] ?? 0),
+                $actorUserId > 0 ? $actorUserId : null
+            );
+            $reconstructionNotice = 'Fuel uplift deleted.';
         }
     }
 } catch (Throwable $e) {
@@ -376,6 +416,12 @@ $dispatch = $intake->dispatchRows(
 $legsTotal = (int)($dispatch['total'] ?? count($dispatch['rows']));
 $legsPageCount = max(1, (int)($dispatch['page_count'] ?? 1));
 $legsPage = max(1, min($legsPageCount, (int)($dispatch['page'] ?? $legsPage)));
+$fleetStatusCards = array();
+try {
+    $fleetStatusCards = (new AircraftFleetStatusService($pdo))->cardsForAircraft($aircraftOptions, $aircraftUnitMap);
+} catch (Throwable) {
+    $fleetStatusCards = array();
+}
 $audioShortThresholdSeconds = 600;
 $audioShortRowCount = 0;
 $audioVisibleRowCount = 0;
@@ -675,6 +721,23 @@ function cvr_intake_local_datetime(PDO $pdo, mixed $value, string $registration 
     }
     $timezone = cvr_intake_california_timezone($pdo, $registration);
     return cw_logbook_datetime($text, $timezone);
+}
+
+/** Fleet card timestamp: "Thu Aug 6, 2026 - 10:20 LT" */
+function cvr_intake_fleet_logged_label(PDO $pdo, mixed $value, string $registration = ''): string
+{
+    $text = trim((string)$value);
+    if ($text === '') {
+        return 'No flight logged yet';
+    }
+    $timezone = cvr_intake_california_timezone($pdo, $registration);
+    try {
+        $dt = new DateTimeImmutable($text, new DateTimeZone('UTC'));
+        $local = $dt->setTimezone(new DateTimeZone($timezone));
+        return $local->format('D M j, Y - H:i') . ' LT';
+    } catch (Throwable) {
+        return cvr_intake_local_datetime($pdo, $text, $registration);
+    }
 }
 
 function cvr_intake_local_time(PDO $pdo, mixed $value, string $registration = ''): string
@@ -1466,6 +1529,26 @@ a.intake-refresh:hover{
 .legs-fuel-vals{font-size:12px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums;white-space:nowrap}
 .legs-fuel-burn{font-size:11px;font-weight:700;color:#334155}
 .legs-oil{font-size:11px;font-weight:700;color:#92400e}
+.fleet-status-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin:0 0 18px}
+.fleet-status-card{border:1px solid #dbe3ee;border-radius:16px;background:#fff;padding:14px 14px 12px;box-shadow:0 8px 22px rgba(15,23,42,.05);display:grid;gap:10px}
+.fleet-status-reg{font-size:18px;font-weight:900;letter-spacing:.02em;color:#0f172a}
+.fleet-status-meter{display:grid;gap:2px}
+.fleet-status-meter-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+.fleet-status-meter-value{font-size:20px;font-weight:900;color:#0f172a;font-variant-numeric:tabular-nums}
+.fleet-status-logged{font-size:11px;color:#94a3b8;font-weight:600}
+.fleet-status-bar-row{display:grid;gap:5px}
+.fleet-status-bar-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.fleet-status-bar-title{font-size:11px;font-weight:800;color:#334155}
+.fleet-status-bar-value{font-size:12px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums}
+.fleet-status-bar{height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden}
+.fleet-status-bar>span{display:block;height:100%;border-radius:999px}
+.fleet-status-bar.is-oil>span{background:linear-gradient(90deg,#d97706,#fbbf24)}
+.fleet-status-bar.is-fuel>span{background:linear-gradient(90deg,#15803d,#4ade80)}
+.fleet-status-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fleet-status-uplifts{border-top:1px solid #e2e8f0;padding-top:8px;display:grid;gap:6px}
+.fleet-status-uplift-row{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;font-size:11px;color:#475569}
+.fleet-status-uplift-meta{display:grid;gap:2px}
+.fleet-status-empty{font-size:11px;color:#94a3b8}
 .legs-evidence{display:grid;gap:4px}
 .legs-ev{font-size:11px;font-weight:700;color:#475569;white-space:nowrap}
 .legs-ev-mark{font-weight:900}
@@ -1684,6 +1767,92 @@ a.intake-refresh:hover{
         <div class="intake-muted">Logbook view — one row per checked-in Dispatch leg. Times use the aircraft operational timezone.</div>
       </div>
     </div>
+
+    <?php if ($fleetStatusCards !== array()): ?>
+      <div class="fleet-status-grid" data-fleet-status>
+        <?php foreach ($fleetStatusCards as $card): ?>
+          <?php
+            $reg = (string)($card['registration'] ?? '');
+            $hobbs = $card['hobbs'];
+            $tacho = $card['tacho'];
+            $oilPct = $card['oil_percentage'];
+            $fuelQty = $card['fuel_quantity'];
+            $fuelUnit = (string)($card['fuel_unit'] ?? 'USG');
+            $uplifts = is_array($card['uplifts'] ?? null) ? $card['uplifts'] : array();
+          ?>
+          <article class="fleet-status-card" data-fleet-aircraft="<?= cvr_intake_h($reg) ?>">
+            <div class="fleet-status-reg"><?= cvr_intake_h($reg) ?></div>
+            <div class="fleet-status-meter">
+              <div class="fleet-status-meter-label">Latest Hobbs</div>
+              <div class="fleet-status-meter-value"><?= cvr_intake_h($hobbs !== null ? cvr_intake_format_one_decimal($hobbs) : '—') ?></div>
+              <div class="fleet-status-logged"><?= cvr_intake_h(cvr_intake_fleet_logged_label($pdo, $card['logged_at'] ?? null, $reg)) ?></div>
+            </div>
+            <div class="fleet-status-meter">
+              <div class="fleet-status-meter-label">Latest Tacho</div>
+              <div class="fleet-status-meter-value"><?= cvr_intake_h($tacho !== null ? cvr_intake_format_one_decimal($tacho) : '—') ?></div>
+            </div>
+            <div class="fleet-status-bar-row">
+              <div class="fleet-status-bar-head">
+                <span class="fleet-status-bar-title">Oil last logged</span>
+                <span class="fleet-status-bar-value"><?= cvr_intake_h((string)($card['oil_label'] ?? '—')) ?></span>
+              </div>
+              <div class="fleet-status-bar is-oil" title="Oil <?= cvr_intake_h((string)($card['oil_label'] ?? '—')) ?>">
+                <span style="width:<?= (int)round((float)($oilPct ?? 0)) ?>%"></span>
+              </div>
+            </div>
+            <div class="fleet-status-bar-row">
+              <div class="fleet-status-bar-head">
+                <span class="fleet-status-bar-title">Fuel</span>
+                <span class="fleet-status-bar-value"><?= cvr_intake_h($fuelQty !== null ? (cvr_intake_format_one_decimal($fuelQty) . ' ' . $fuelUnit) : '—') ?></span>
+              </div>
+              <div class="fleet-status-bar is-fuel" title="Fuel <?= cvr_intake_h($fuelQty !== null ? (cvr_intake_format_one_decimal($fuelQty) . ' ' . $fuelUnit) : '—') ?>">
+                <span style="width:<?= (int)round((float)($card['fuel_pct'] ?? 0)) ?>%"></span>
+              </div>
+            </div>
+            <div class="fleet-status-actions">
+              <?php if ($cvrMlCanManageFuelUplifts): ?>
+                <button
+                  type="button"
+                  class="app-btn app-btn-secondary"
+                  data-fleet-uplift-open
+                  data-aircraft-id="<?= (int)($card['aircraft_id'] ?? 0) ?>"
+                  data-aircraft-registration="<?= cvr_intake_h($reg) ?>"
+                  data-fuel-unit="<?= cvr_intake_h($fuelUnit) ?>"
+                  data-fuel-capacity="<?= cvr_intake_h((string)($card['fuel_capacity'] ?? 13)) ?>"
+                ><span>Log Fuel Uplift</span></button>
+              <?php endif; ?>
+              <button type="button" class="app-btn app-btn-secondary" data-fleet-uplift-toggle aria-expanded="false"><span>Uplifts (<?= count($uplifts) ?>)</span></button>
+            </div>
+            <div class="fleet-status-uplifts" data-fleet-uplift-list hidden>
+              <?php if ($uplifts === array()): ?>
+                <div class="fleet-status-empty">No fuel uplifts logged yet.</div>
+              <?php else: ?>
+                <?php foreach ($uplifts as $uplift): ?>
+                  <div class="fleet-status-uplift-row">
+                    <div class="fleet-status-uplift-meta">
+                      <strong><?= cvr_intake_h(cvr_intake_format_one_decimal($uplift['fuel_after_usg'] ?? null)) ?> <?= cvr_intake_h((string)($uplift['fuel_unit'] ?? 'USG')) ?></strong>
+                      <span><?= cvr_intake_h(cvr_intake_fleet_logged_label($pdo, $uplift['uplifted_at'] ?? null, $reg)) ?></span>
+                      <?php if (trim((string)($uplift['notes'] ?? '')) !== ''): ?>
+                        <span><?= cvr_intake_h((string)$uplift['notes']) ?></span>
+                      <?php endif; ?>
+                    </div>
+                    <?php if ($cvrMlCanManageFuelUplifts): ?>
+                      <form method="post" action="<?= cvr_intake_h(cvr_intake_legs_query()) ?>" onsubmit="return confirm('Delete this fuel uplift?');">
+                        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                        <input type="hidden" name="action" value="delete_fuel_uplift">
+                        <input type="hidden" name="uplift_id" value="<?= (int)($uplift['id'] ?? 0) ?>">
+                        <button class="app-btn app-btn-secondary legs-btn-remove" type="submit"><span>Delete</span></button>
+                      </form>
+                    <?php endif; ?>
+                  </div>
+                <?php endforeach; ?>
+              <?php endif; ?>
+            </div>
+          </article>
+        <?php endforeach; ?>
+      </div>
+    <?php endif; ?>
+
     <form class="legs-toolbar" method="get" action="<?= cvr_intake_h($cvrMlBasePath) ?>">
       <input type="hidden" name="tab" value="dispatch">
       <div class="legs-filters">
@@ -3195,6 +3364,46 @@ a.intake-refresh:hover{
   </div>
 </div>
 
+<?php if ($cvrMlCanManageFuelUplifts): ?>
+<div class="intake-modal-backdrop" id="fleet-uplift-modal" hidden>
+  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="fleet-uplift-title" style="max-width:480px">
+    <div class="intake-modal-head">
+      <div>
+        <h3 class="intake-modal-title" id="fleet-uplift-title">Log Fuel Uplift</h3>
+        <div class="intake-muted">Enter fuel quantity <strong>after</strong> refueling.</div>
+      </div>
+      <button class="intake-modal-close" type="button" data-fleet-uplift-close>Close</button>
+    </div>
+    <div class="intake-modal-body">
+      <form method="post" action="<?= cvr_intake_h(cvr_intake_legs_query()) ?>" id="fleet-uplift-form">
+        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+        <input type="hidden" name="action" value="create_fuel_uplift">
+        <input type="hidden" name="aircraft_id" id="fleet-uplift-aircraft-id" value="">
+        <input type="hidden" name="aircraft_registration" id="fleet-uplift-aircraft-registration" value="">
+        <div class="intake-field" style="margin-bottom:12px">
+          <label>Aircraft</label>
+          <div class="intake-primary" id="fleet-uplift-aircraft-label">—</div>
+        </div>
+        <div class="intake-field" style="margin-bottom:12px">
+          <label for="fleet-uplift-fuel">Fuel after refueling (<span id="fleet-uplift-unit">USG</span>)</label>
+          <input class="intake-select" type="number" min="0" max="500" step="0.1" name="fuel_after_usg" id="fleet-uplift-fuel" required>
+          <div class="intake-muted" id="fleet-uplift-capacity-hint" style="margin-top:4px"></div>
+        </div>
+        <div class="intake-field" style="margin-bottom:12px">
+          <label for="fleet-uplift-when">When (local, optional)</label>
+          <input class="intake-select" type="datetime-local" name="uplifted_at_local" id="fleet-uplift-when">
+        </div>
+        <div class="intake-field" style="margin-bottom:14px">
+          <label for="fleet-uplift-notes">Notes (optional)</label>
+          <input class="intake-select" type="text" name="notes" id="fleet-uplift-notes" maxlength="500" placeholder="e.g. Self-serve KHHR">
+        </div>
+        <button class="intake-button" type="submit">Save Uplift</button>
+      </form>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <div class="intake-modal-backdrop" id="intake-audio-transcript-modal" hidden>
   <div class="intake-modal intake-modal-transcript-review" role="dialog" aria-modal="true" aria-labelledby="intake-audio-transcript-title">
     <div class="intake-modal-head">
@@ -3830,6 +4039,61 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       }
     });
   }
+
+  // Fleet status cards — uplift list toggle + log modal
+  (function initFleetStatusCards() {
+    const grid = page.querySelector('[data-fleet-status]');
+    if (!grid) {
+      return;
+    }
+    grid.addEventListener('click', (event) => {
+      const toggle = event.target instanceof Element ? event.target.closest('[data-fleet-uplift-toggle]') : null;
+      if (toggle) {
+        const card = toggle.closest('.fleet-status-card');
+        const list = card ? card.querySelector('[data-fleet-uplift-list]') : null;
+        if (!list) {
+          return;
+        }
+        const open = list.hasAttribute('hidden');
+        if (open) {
+          list.removeAttribute('hidden');
+        } else {
+          list.setAttribute('hidden', '');
+        }
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        return;
+      }
+      const openBtn = event.target instanceof Element ? event.target.closest('[data-fleet-uplift-open]') : null;
+      if (!openBtn) {
+        return;
+      }
+      const modal = document.getElementById('fleet-uplift-modal');
+      if (!modal) {
+        return;
+      }
+      const reg = openBtn.getAttribute('data-aircraft-registration') || '';
+      const unit = openBtn.getAttribute('data-fuel-unit') || 'USG';
+      const capacity = openBtn.getAttribute('data-fuel-capacity') || '';
+      document.getElementById('fleet-uplift-aircraft-id').value = openBtn.getAttribute('data-aircraft-id') || '';
+      document.getElementById('fleet-uplift-aircraft-registration').value = reg;
+      document.getElementById('fleet-uplift-aircraft-label').textContent = reg || '—';
+      document.getElementById('fleet-uplift-unit').textContent = unit;
+      document.getElementById('fleet-uplift-capacity-hint').textContent = capacity !== ''
+        ? ('Aircraft capacity ≈ ' + capacity + ' ' + unit)
+        : '';
+      document.getElementById('fleet-uplift-fuel').value = '';
+      document.getElementById('fleet-uplift-notes').value = '';
+      modal.hidden = false;
+    });
+    const modal = document.getElementById('fleet-uplift-modal');
+    if (modal) {
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal || (event.target instanceof Element && event.target.closest('[data-fleet-uplift-close]'))) {
+          modal.hidden = true;
+        }
+      });
+    }
+  })();
 
   // Live Debrief generation progress (Operational Legs + Reconstruction). No page refresh required.
   (function initDebriefProgressPoller() {
