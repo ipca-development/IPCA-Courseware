@@ -23,9 +23,7 @@ struct AvionicsBeaconTestView: View {
                 }
                 .padding(16)
             }
-            .background(IPCATheme.pageBackground.ignoresSafeArea())
-            .navigationTitle("Avionics Beacon Test")
-            .navigationBarTitleDisplayMode(.inline)
+            .cvrAdminScreenChrome(title: "Avionics Beacon Test")
             .sheet(isPresented: $isShowingShareSheet) {
                 BeaconActivityView(activityItems: exportURLs)
             }
@@ -37,25 +35,19 @@ struct AvionicsBeaconTestView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Avionics Beacon Test")
                     .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(CVROperationalPalette.textPrimary)
                 Text("Foreground BLE diagnostic for the avionics-power beacon")
                     .font(.headline)
-                    .foregroundStyle(.white.opacity(0.82))
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
             }
             Spacer()
             Image(systemName: "antenna.radiowaves.left.and.right")
                 .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
         }
         .padding(18)
-        .background(
-            LinearGradient(
-                colors: [IPCATheme.navy, IPCATheme.blue, IPCATheme.brightBlue.opacity(0.82)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 24)
-        )
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
     }
 
     private var statusBanner: some View {
@@ -79,7 +71,7 @@ struct AvionicsBeaconTestView: View {
                     .disabled(settings.isBeaconTriggerEnabled)
                 Text("Normal mode scans only for the custom avionics beacon service. Scan All is only for troubleshooting advertisements and still does not connect to any device.")
                     .font(.caption)
-                    .foregroundStyle(IPCATheme.secondaryText)
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
                     Button("Start Scan") {
@@ -111,7 +103,7 @@ struct AvionicsBeaconTestView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Beacon Pairing")
                         .font(.headline.weight(.semibold))
-                        .foregroundStyle(IPCATheme.navy)
+                        .foregroundStyle(CVROperationalPalette.textPrimary)
 
                     LabeledContent("Paired beacon", value: emptyDash(settings.expectedBeaconIdentityHex))
                     LabeledContent("Connected beacon", value: emptyDash(manager.latestStatus?.beaconIdentityHex ?? ""))
@@ -119,7 +111,7 @@ struct AvionicsBeaconTestView: View {
                     if !manager.lastIgnoredBeaconIdentityHex.isEmpty {
                         Text("Ignored unpaired beacon \(manager.lastIgnoredBeaconIdentityHex).")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(IPCATheme.warning)
+                            .foregroundStyle(CVROperationalPalette.warning)
                     }
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 138), spacing: 8)], alignment: .leading, spacing: 8) {
@@ -138,7 +130,7 @@ struct AvionicsBeaconTestView: View {
 
                     Text("When a paired identity is set, only that beacon can trigger recording. Other IPCA beacons are visible in diagnostics but ignored for recording.")
                         .font(.caption)
-                        .foregroundStyle(IPCATheme.secondaryText)
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
                 }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
@@ -158,18 +150,18 @@ struct AvionicsBeaconTestView: View {
                 if settings.isBeaconTriggerEnabled {
                     Text("Production beacon trigger is connected. This screen is observing the active listener.")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(IPCATheme.success)
+                        .foregroundStyle(CVROperationalPalette.success)
                 }
 
                 if !exportError.isEmpty {
                     Text(exportError)
                         .font(.caption)
-                        .foregroundStyle(IPCATheme.danger)
+                        .foregroundStyle(CVROperationalPalette.critical)
                 }
                 if !manager.lastError.isEmpty {
                     Text(manager.lastError)
                         .font(.caption)
-                        .foregroundStyle(IPCATheme.danger)
+                        .foregroundStyle(CVROperationalPalette.critical)
                 }
             }
         }
@@ -179,10 +171,10 @@ struct AvionicsBeaconTestView: View {
         IPCACard(title: "Live Beacon Status", systemImage: "dot.radiowaves.left.and.right") {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
                 statusRow("Bluetooth authorization", manager.bluetoothAuthorization, color: bluetoothColor)
-                statusRow("Central manager state", manager.centralState, color: manager.centralState == "Powered On" ? IPCATheme.success : IPCATheme.danger)
-                statusRow("Scan", manager.isScanning ? "Active" : "Inactive", color: manager.isScanning ? IPCATheme.success : IPCATheme.secondaryText)
-                statusRow("Scan mode", manager.scanAllMode ? "Scan All" : "Service UUID only", color: manager.scanAllMode ? IPCATheme.warning : IPCATheme.success)
-                statusRow("Beacon detected", manager.beaconDetected ? "true" : "false", color: manager.beaconDetected ? IPCATheme.success : IPCATheme.secondaryText)
+                statusRow("Central manager state", manager.centralState, color: manager.centralState == "Powered On" ? CVROperationalPalette.success : CVROperationalPalette.critical)
+                statusRow("Scan", manager.isScanning ? "Active" : "Inactive", color: manager.isScanning ? CVROperationalPalette.success : CVROperationalPalette.textSecondary)
+                statusRow("Scan mode", manager.scanAllMode ? "Scan All" : "Service UUID only", color: manager.scanAllMode ? CVROperationalPalette.warning : CVROperationalPalette.success)
+                statusRow("Beacon detected", manager.beaconDetected ? "true" : "false", color: manager.beaconDetected ? CVROperationalPalette.success : CVROperationalPalette.textSecondary)
                 statusRow("Interpreted state", manager.currentState.label, color: bannerColor)
                 statusRow("First seen", timestamp(manager.firstSeenAt))
                 statusRow("Last seen", timestamp(manager.lastSeenAt))
@@ -194,9 +186,9 @@ struct AvionicsBeaconTestView: View {
                 statusRow("Advertised local name", emptyDash(manager.advertisedLocalName))
                 statusRow("Service UUIDs", manager.advertisedServiceUUIDs.isEmpty ? "--" : manager.advertisedServiceUUIDs.joined(separator: ", "))
                 statusRow("Manufacturer data", emptyDash(manager.manufacturerDataHex))
-                statusRow("Paired beacon identity", emptyDash(settings.expectedBeaconIdentityHex), color: settings.expectedBeaconIdentityHex.isEmpty ? IPCATheme.warning : IPCATheme.success)
+                statusRow("Paired beacon identity", emptyDash(settings.expectedBeaconIdentityHex), color: settings.expectedBeaconIdentityHex.isEmpty ? CVROperationalPalette.warning : CVROperationalPalette.success)
                 statusRow("Connected beacon identity", emptyDash(manager.latestStatus?.beaconIdentityHex ?? ""), color: connectedBeaconColor)
-                statusRow("Last ignored beacon", emptyDash(manager.lastIgnoredBeaconIdentityHex), color: manager.lastIgnoredBeaconIdentityHex.isEmpty ? IPCATheme.secondaryText : IPCATheme.warning)
+                statusRow("Last ignored beacon", emptyDash(manager.lastIgnoredBeaconIdentityHex), color: manager.lastIgnoredBeaconIdentityHex.isEmpty ? CVROperationalPalette.textSecondary : CVROperationalPalette.warning)
             }
         }
     }
@@ -205,7 +197,7 @@ struct AvionicsBeaconTestView: View {
         IPCACard(title: "Recent Beacon Log", systemImage: "doc.text.magnifyingglass") {
             if manager.logEntries.isEmpty {
                 Text("No log entries yet.")
-                    .foregroundStyle(IPCATheme.secondaryText)
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(manager.logEntries.suffix(10).reversed()) { entry in
@@ -214,7 +206,7 @@ struct AvionicsBeaconTestView: View {
                                 .font(.caption.weight(.bold))
                             Text(logSummary(entry))
                                 .font(.caption)
-                                .foregroundStyle(IPCATheme.secondaryText)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
                                 .textSelection(.enabled)
                         }
                     }
@@ -233,7 +225,7 @@ struct AvionicsBeaconTestView: View {
                 Text("Test E: Rapidly cycle power off/on. Confirm the app recognizes the same beacon identity after reboot and does not rely on the iOS peripheral identifier.")
                 Text("When Admin > Connect Beacon is enabled, this beacon state starts and stops the CVR recording.")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(IPCATheme.secondaryText)
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
             }
             .font(.subheadline)
         }
@@ -261,48 +253,48 @@ struct AvionicsBeaconTestView: View {
     private var bannerColor: Color {
         switch manager.currentState {
         case .avionicsOn:
-            return IPCATheme.success
+            return CVROperationalPalette.success
         case .avionicsOff:
-            return IPCATheme.danger
+            return CVROperationalPalette.critical
         case .temporarilyMissing, .candidateOn, .scanning:
-            return IPCATheme.warning
+            return CVROperationalPalette.warning
         case .bluetoothUnavailable, .unknown:
-            return IPCATheme.secondaryText
+            return CVROperationalPalette.textSecondary
         }
     }
 
     private var bluetoothColor: Color {
-        manager.bluetoothAuthorization == "Allowed Always" ? IPCATheme.success : IPCATheme.warning
+        manager.bluetoothAuthorization == "Allowed Always" ? CVROperationalPalette.success : CVROperationalPalette.warning
     }
 
     private var connectedBeaconColor: Color {
         guard let identity = manager.latestStatus?.beaconIdentityHex, !identity.isEmpty else {
-            return IPCATheme.secondaryText
+            return CVROperationalPalette.textSecondary
         }
         if settings.expectedBeaconIdentityHex.isEmpty || settings.expectedBeaconIdentityHex == identity {
-            return IPCATheme.success
+            return CVROperationalPalette.success
         }
-        return IPCATheme.warning
+        return CVROperationalPalette.warning
     }
 
     private var ageColor: Color {
         guard let seconds = manager.secondsSinceLastAdvertisement else {
-            return IPCATheme.secondaryText
+            return CVROperationalPalette.textSecondary
         }
         if seconds > AvionicsBeaconManager.offConfirmationAfter {
-            return IPCATheme.danger
+            return CVROperationalPalette.critical
         }
         if seconds > AvionicsBeaconManager.temporarilyMissingAfter {
-            return IPCATheme.warning
+            return CVROperationalPalette.warning
         }
-        return IPCATheme.success
+        return CVROperationalPalette.success
     }
 
-    private func statusRow(_ label: String, _ value: String, color: Color = IPCATheme.navy) -> some View {
+    private func statusRow(_ label: String, _ value: String, color: Color = CVROperationalPalette.textPrimary) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(IPCATheme.secondaryText)
+                .foregroundStyle(CVROperationalPalette.textSecondary)
             Text(value)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color)

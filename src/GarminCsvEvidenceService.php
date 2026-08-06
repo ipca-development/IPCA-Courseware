@@ -208,10 +208,13 @@ final class GarminCsvEvidenceService
         foreach (array_keys($normalized) as $sha256) {
             $row = $this->csvBySha($sha256);
             if ($row !== null) {
+                $workflowFlightRecordUuid = trim((string)($row['workflow_flight_record_uuid'] ?? ''));
                 $known[] = array(
                     'sha256' => $sha256,
                     'csv_file_uuid' => (string)($row['csv_file_uuid'] ?? ''),
                     'status' => 'finalized',
+                    'workflow_flight_record_uuid' => $workflowFlightRecordUuid,
+                    'workflow_linked' => $workflowFlightRecordUuid !== '',
                 );
             } else {
                 $unknown[] = $sha256;
@@ -357,8 +360,12 @@ final class GarminCsvEvidenceService
      */
     private function assertWorkflowFlightOwnership(array $device, string $workflowFlightRecordUuid): void
     {
+        $deviceId = (int)($device['id'] ?? 0);
         $aircraftId = (int)($device['aircraft_id'] ?? 0);
         $registration = strtoupper(trim((string)($device['aircraft_registration'] ?? '')));
+        $organizationId = max(1, (int)($device['organization_id'] ?? 1));
+
+        // Matching Dispatch for this enrolled aircraft → PASS.
         $aircraftPredicate = $aircraftId > 0
             ? 'aircraft_id = :aircraft_id'
             : 'UPPER(aircraft_registration) = :registration';
@@ -372,7 +379,7 @@ final class GarminCsvEvidenceService
         );
         $parameters = array(
             ':flight_uuid' => $workflowFlightRecordUuid,
-            ':organization_id' => max(1, (int)($device['organization_id'] ?? 1)),
+            ':organization_id' => $organizationId,
         );
         if ($aircraftId > 0) {
             $parameters[':aircraft_id'] = $aircraftId;
@@ -380,9 +387,108 @@ final class GarminCsvEvidenceService
             $parameters[':registration'] = $registration;
         }
         $stmt->execute($parameters);
-        if ($stmt->fetchColumn() === false) {
+        if ($stmt->fetchColumn() !== false) {
+            return;
+        }
+
+        // Any Dispatch for this Flight Record on another aircraft → FAIL.
+        $conflict = $this->pdo->prepare(
+            'SELECT aircraft_id, aircraft_registration
+             FROM ipca_cvr_dispatches
+             WHERE workflow_flight_record_uuid = ?
+             LIMIT 1'
+        );
+        $conflict->execute(array($workflowFlightRecordUuid));
+        $dispatchRow = $conflict->fetch(PDO::FETCH_ASSOC);
+        if (is_array($dispatchRow)) {
             throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');
         }
+
+        // Offline-first: Garmin may finalize while Dispatch is still queued.
+        // Ownership is NEVER optional — verify against immutable workflow context when present.
+        $contextOwners = $this->workflowFlightOwnerContexts($workflowFlightRecordUuid);
+        if ($contextOwners === array()) {
+            // No Dispatch and no workflow context yet: authenticated enrolled device/aircraft
+            // is the authoritative ownership source for this not-yet-synced Flight Record.
+            if ($deviceId <= 0 || ($aircraftId <= 0 && $registration === '')) {
+                throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');
+            }
+            return;
+        }
+
+        foreach ($contextOwners as $owner) {
+            if ($this->ownerContextMatchesDevice($owner, $deviceId, $aircraftId, $registration)) {
+                return;
+            }
+        }
+
+        throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');
+    }
+
+    /**
+     * Immutable workflow ownership context for a Flight Record when Dispatch is not yet present.
+     *
+     * @return list<array{device_id:int,aircraft_id:int,aircraft_registration:string}>
+     */
+    private function workflowFlightOwnerContexts(string $workflowFlightRecordUuid): array
+    {
+        $owners = array();
+        $seen = array();
+
+        $queries = array(
+            'SELECT e.device_id AS device_id,
+                    d.aircraft_id AS aircraft_id,
+                    UPPER(TRIM(COALESCE(d.aircraft_registration, \'\'))) AS aircraft_registration
+             FROM ipca_cvr_workflow_evidence_batches e
+             INNER JOIN ipca_cvr_devices d ON d.id = e.device_id
+             WHERE e.workflow_flight_record_uuid = ?',
+            'SELECT f.device_id AS device_id,
+                    f.aircraft_id AS aircraft_id,
+                    UPPER(TRIM(COALESCE(f.aircraft_registration, \'\'))) AS aircraft_registration
+             FROM ipca_garmin_csv_files f
+             WHERE f.workflow_flight_record_uuid = ?
+               AND (f.device_id IS NOT NULL OR f.aircraft_id IS NOT NULL OR TRIM(COALESCE(f.aircraft_registration, \'\')) <> \'\')',
+        );
+
+        foreach ($queries as $sql) {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute(array($workflowFlightRecordUuid));
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+                $deviceId = (int)($row['device_id'] ?? 0);
+                $aircraftId = (int)($row['aircraft_id'] ?? 0);
+                $registration = strtoupper(trim((string)($row['aircraft_registration'] ?? '')));
+                if ($deviceId <= 0 && $aircraftId <= 0 && $registration === '') {
+                    continue;
+                }
+                $key = $deviceId . '|' . $aircraftId . '|' . $registration;
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $owners[] = array(
+                    'device_id' => $deviceId,
+                    'aircraft_id' => $aircraftId,
+                    'aircraft_registration' => $registration,
+                );
+            }
+        }
+
+        return $owners;
+    }
+
+    /**
+     * @param array{device_id:int,aircraft_id:int,aircraft_registration:string} $owner
+     */
+    private function ownerContextMatchesDevice(array $owner, int $deviceId, int $aircraftId, string $registration): bool
+    {
+        if ($deviceId > 0 && (int)$owner['device_id'] === $deviceId) {
+            return true;
+        }
+        if ($aircraftId > 0 && (int)$owner['aircraft_id'] === $aircraftId) {
+            return true;
+        }
+        $ownerRegistration = strtoupper(trim((string)$owner['aircraft_registration']));
+        return $registration !== '' && $ownerRegistration !== '' && $ownerRegistration === $registration;
     }
 
     /**

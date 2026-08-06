@@ -14,6 +14,18 @@ struct GarminCsvClassification: Equatable {
     var reason: String
 }
 
+/// Result of scanning an arbitrary CSV file discovered on an external folder (SD card).
+/// Broader than `GarminCsvClassification` because it must also represent files that are
+/// not Garmin flight logs at all (unsupported), or that could not be classified reliably.
+enum GarminImportCandidateClassification: Equatable {
+    case classified(GarminCsvClassification)
+    case gpsOnly
+    case invalid(String)
+    case unsupported(String)
+    case unreadable(String)
+    case unknown(String)
+}
+
 enum GarminCsvClassifier {
     static func classify(headers: [String]) -> GarminCsvClassification {
         let normalized = Set(headers.map(normalizeHeader).filter { !$0.isEmpty })
@@ -65,13 +77,114 @@ enum GarminCsvClassifier {
         )
     }
 
+    /// Legacy entry point kept for existing callers that only care about Garmin-format
+    /// flight logs. Internally delegates to `classifyImportCandidate` so both code paths
+    /// share one source of truth; returns `nil` for anything that isn't a usable Garmin log.
     static func classify(fileURL: URL) -> GarminCsvClassification? {
-        do {
-            let preview = try G3XFlightStreamParser.parsePreview(fileURL: fileURL)
-            return classify(headers: preview.headers)
-        } catch {
+        switch classifyImportCandidate(fileURL: fileURL) {
+        case .classified(let classification):
+            return classification
+        case .gpsOnly:
+            return GarminCsvClassification(
+                dataLogType: .gpsOnly,
+                isDataRich: false,
+                reason: "GPS track only; no engine or avionics fields."
+            )
+        case .invalid, .unsupported, .unreadable, .unknown:
             return nil
         }
+    }
+
+    /// Broad classification for arbitrary CSV files found on an external folder (SD card).
+    /// Unlike `classify(fileURL:)`, this never returns `nil` — every file resolves to a
+    /// concrete bucket so SD-card scanning UI always has something meaningful to show.
+    static func classifyImportCandidate(fileURL: URL) -> GarminImportCandidateClassification {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            return .unreadable("The file is no longer available.")
+        }
+        guard let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
+              let size = attributes[.size] as? Int else {
+            return .unreadable("The file size could not be determined.")
+        }
+        if size == 0 {
+            return .invalid("The file is empty.")
+        }
+
+        do {
+            let preview = try G3XFlightStreamParser.parsePreview(fileURL: fileURL)
+            return mapClassification(classify(headers: preview.headers))
+        } catch is G3XParserError {
+            // Not a recognizable Garmin #airframe_info export. Fall back to reading the
+            // first non-empty line as a plain CSV header (no #airframe_info required).
+            guard let headers = try? readSimpleCSVHeaders(fileURL: fileURL) else {
+                return .unreadable("The file could not be read as CSV.")
+            }
+            guard !headers.isEmpty else {
+                return .unknown("No recognizable column headers were found.")
+            }
+            let classification = classify(headers: headers)
+            if classification.dataLogType == .invalid {
+                return .unsupported("This CSV does not contain recognizable flight time/GPS columns.")
+            }
+            return mapClassification(classification)
+        } catch {
+            return .unreadable("The file could not be read: \(error.localizedDescription)")
+        }
+    }
+
+    private static func mapClassification(_ classification: GarminCsvClassification) -> GarminImportCandidateClassification {
+        switch classification.dataLogType {
+        case .gpsOnly:
+            return .gpsOnly
+        case .invalid:
+            return .unsupported(classification.reason)
+        case .fullAvionics, .partialAvionics, .unknownSupported:
+            return .classified(classification)
+        }
+    }
+
+    /// Reads only the first ~64 KB of the file to recover a plain (non-Garmin-prefixed)
+    /// CSV header row for lightweight SD-card scanning.
+    private static func readSimpleCSVHeaders(fileURL: URL) throws -> [String] {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        var prefix = try handle.read(upToCount: 64 * 1024) ?? Data()
+        if prefix.starts(with: [0xEF, 0xBB, 0xBF]) {
+            prefix = Data(prefix.dropFirst(3))
+        }
+        guard let text = String(data: prefix, encoding: .utf8) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let lines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard let firstNonEmpty = lines.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            return []
+        }
+        return parseSimpleCSVLine(firstNonEmpty)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "#\"")) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func parseSimpleCSVLine(_ line: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var inQuotes = false
+        for char in line {
+            if char == "\"" {
+                inQuotes.toggle()
+            } else if char == ",", !inQuotes {
+                result.append(current)
+                current = ""
+            } else {
+                current.append(char)
+            }
+        }
+        result.append(current)
+        return result
     }
 
     static func normalizeRegistration(_ value: String) -> String {

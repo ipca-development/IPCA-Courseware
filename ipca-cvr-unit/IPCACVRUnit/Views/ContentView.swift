@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var adminPIN = ""
     @State private var adminUnlocked = false
     @State private var showAdminUnlock = false
+    @State private var adminTab: AdminTab = .status
 
     var body: some View {
         ZStack {
@@ -18,10 +19,18 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: adminUnlocked)
-        .background(IPCATheme.pageBackground.ignoresSafeArea())
+        .background(
+            (adminUnlocked ? CVROperationalPalette.background : IPCATheme.pageBackground)
+                .ignoresSafeArea()
+        )
         .onChange(of: settings.isSimulationModeEnabled) {
             if settings.isSimulationModeEnabled {
                 adminUnlocked = false
+            }
+        }
+        .onChange(of: adminUnlocked) {
+            if adminUnlocked {
+                adminTab = .status
             }
         }
         .onChange(of: showAdminUnlock) {
@@ -31,6 +40,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showAdminUnlock) {
             AdminUnlockView(adminPIN: $adminPIN, adminUnlocked: $adminUnlocked)
+                .preferredColorScheme(.dark)
                 .onChange(of: adminUnlocked) {
                     if adminUnlocked {
                         adminPIN = ""
@@ -41,47 +51,104 @@ struct ContentView: View {
     }
 
     private var adminTabs: some View {
-        TabView {
-            StatusDashboardView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
-                .tabItem {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 12))
-                    Text("Status")
+        VStack(spacing: 0) {
+            Group {
+                switch adminTab {
+                case .status:
+                    StatusDashboardView(adminUnlocked: $adminUnlocked, showAdminUnlock: $showAdminUnlock)
+                case .beacon:
+                    AvionicsBeaconTestView()
+                case .recordings:
+                    AdminRecordingsView()
+                case .flightHistory:
+                    AdminWorkflowArchivesView()
+                case .admin:
+                    AdminSettingsView()
+                case .exitAdmin:
+                    ExitAdminView(adminUnlocked: $adminUnlocked)
                 }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            AvionicsBeaconTestView()
-                .tabItem {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.system(size: 12))
-                    Text("Beacon Test")
-                }
+            AdminBottomTabBar(selectedTab: $adminTab)
+        }
+        .background(CVROperationalPalette.background.ignoresSafeArea())
+        // Admin shell must stay dark like the operational workflow (app root forces light).
+        .preferredColorScheme(.dark)
+    }
+}
 
-            AdminRecordingsView()
-                .tabItem {
-                    Image(systemName: "externaldrive")
-                        .font(.system(size: 12))
-                    Text("Recordings")
-                }
+private enum AdminTab: String, CaseIterable, Identifiable {
+    case status
+    case beacon
+    case recordings
+    case flightHistory
+    case admin
+    case exitAdmin
 
-            AdminWorkflowArchivesView()
-                .tabItem {
-                    Image(systemName: "archivebox")
-                    Text("Flight History")
-                }
+    var id: String { rawValue }
 
-            AdminSettingsView()
-                .tabItem {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 12))
-                    Text("Admin")
-                }
+    var title: String {
+        switch self {
+        case .status: return "Status"
+        case .beacon: return "Beacon"
+        case .recordings: return "Recordings"
+        case .flightHistory: return "History"
+        case .admin: return "Admin"
+        case .exitAdmin: return "Exit"
+        }
+    }
 
-            ExitAdminView(adminUnlocked: $adminUnlocked)
-                .tabItem {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 12))
-                    Text("Exit Admin")
+    var systemImage: String {
+        switch self {
+        case .status: return "waveform"
+        case .beacon: return "antenna.radiowaves.left.and.right"
+        case .recordings: return "externaldrive"
+        case .flightHistory: return "archivebox"
+        case .admin: return "gearshape"
+        case .exitAdmin: return "lock.fill"
+        }
+    }
+}
+
+/// Matches the operational bottom menu: opaque black bar with readable icons.
+private struct AdminBottomTabBar: View {
+    @Binding var selectedTab: AdminTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AdminTab.allCases) { tab in
+                Button {
+                    selectedTab = tab
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(tab.title)
+                            .font(.system(size: 7, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundStyle(
+                        selectedTab == tab
+                            ? Color(red: 0.12, green: 0.47, blue: 0.92)
+                            : Color.white.opacity(0.62)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+            }
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 6)
+        .background(Color.black.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(height: 1)
         }
     }
 }
@@ -98,6 +165,9 @@ private struct AdminWorkflowArchivesView: View {
                         systemImage: "archivebox",
                         description: Text("Completed workflows will be retained here before NEXT FLIGHT clears the active screen.")
                     )
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
+                    .cvrAdminListRowStyle()
+                    .listRowInsets(EdgeInsets())
                 } else {
                     ForEach(workflow.archives.sorted(by: { $0.archivedAt > $1.archivedAt })) { archive in
                         NavigationLink {
@@ -106,18 +176,25 @@ private struct AdminWorkflowArchivesView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("\(archive.dispatch.tailNumber) · \(archive.dispatch.missionCode)")
                                     .font(.headline)
+                                    .foregroundStyle(CVROperationalPalette.textPrimary)
                                 Text(archive.archivedAt.formatted(date: .abbreviated, time: .shortened))
                                     .font(.caption)
-                                    .foregroundStyle(IPCATheme.secondaryText)
+                                    .foregroundStyle(CVROperationalPalette.textSecondary)
                                 Text("\(archive.flightEvents.count) events · \(archive.status == .serverVerified ? "Server verified" : "Upload pending")")
                                     .font(.caption)
-                                    .foregroundStyle(archive.status == .serverVerified ? IPCATheme.success : IPCATheme.warning)
+                                    .foregroundStyle(
+                                        archive.status == .serverVerified
+                                            ? CVROperationalPalette.success
+                                            : CVROperationalPalette.warning
+                                    )
                             }
                         }
+                        .cvrAdminListRowStyle()
                     }
                 }
             }
-            .navigationTitle("Flight History")
+            .cvrAdminListChrome()
+            .cvrAdminScreenChrome(title: "Flight History")
         }
     }
 }
@@ -137,6 +214,8 @@ private struct AdminWorkflowArchiveDetailView: View {
                 LabeledContent("Archived", value: archive.archivedAt.formatted(date: .abbreviated, time: .standard))
                 LabeledContent("Recording Session", value: archive.flightRecord.recordingSessionID ?? "Not linked")
             }
+            .cvrAdminListRowStyle()
+
             Section("Closure") {
                 LabeledContent("Ending Hobbs", value: archive.flightRecord.endingHobbs.map { String(format: "%.1f", $0) } ?? "—")
                 LabeledContent("Ending Tacho", value: archive.flightRecord.endingTacho.map { String(format: "%.1f", $0) } ?? "—")
@@ -148,20 +227,26 @@ private struct AdminWorkflowArchiveDetailView: View {
                         ?? "—"
                 )
             }
+            .cvrAdminListRowStyle()
+
             Section("Event Timeline") {
                 ForEach(archive.flightEvents.sorted(by: { $0.timestampUTC < $1.timestampUTC })) { event in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(event.eventType.replacingOccurrences(of: "_", with: " ").uppercased())
                             .font(.caption.weight(.bold))
+                            .foregroundStyle(CVROperationalPalette.textPrimary)
                         Text(event.timestampUTC.formatted(date: .omitted, time: .standard))
+                            .foregroundStyle(CVROperationalPalette.textSecondary)
                         if let offset = event.audioOffset {
                             Text(String(format: "Audio +%.1f s", offset))
                                 .font(.caption)
-                                .foregroundStyle(IPCATheme.secondaryText)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
                         }
                     }
+                    .cvrAdminListRowStyle()
                 }
             }
+
             Section("Export") {
                 Button("Prepare JSON Export") {
                     do {
@@ -171,17 +256,22 @@ private struct AdminWorkflowArchiveDetailView: View {
                         exportError = error.localizedDescription
                     }
                 }
+                .cvrAdminListRowStyle()
                 if let exportURL {
                     ShareLink(item: exportURL) {
                         Label("Share Archive", systemImage: "square.and.arrow.up")
                     }
+                    .cvrAdminListRowStyle()
                 }
                 if !exportError.isEmpty {
-                    Text(exportError).foregroundStyle(IPCATheme.danger)
+                    Text(exportError)
+                        .foregroundStyle(CVROperationalPalette.critical)
+                        .cvrAdminListRowStyle()
                 }
             }
         }
-        .navigationTitle("Archived Flight")
+        .cvrAdminListChrome()
+        .cvrAdminScreenChrome(title: "Archived Flight")
     }
 }
 
@@ -193,14 +283,14 @@ private struct ExitAdminView: View {
         VStack(spacing: 18) {
             Image(systemName: "lock.shield.fill")
                 .font(.system(size: 48))
-                .foregroundStyle(IPCATheme.brightBlue)
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
             Text("Exit Admin Mode")
                 .font(.title.weight(.bold))
-                .foregroundStyle(IPCATheme.navy)
+                .foregroundStyle(CVROperationalPalette.textPrimary)
             Text("Lock admin tools and return to the public recorder status screen.")
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(IPCATheme.secondaryText)
+                .foregroundStyle(CVROperationalPalette.textSecondary)
                 .padding(.horizontal)
             Button("Exit Admin Mode", role: .destructive) {
                 if reduceMotion {
@@ -212,9 +302,11 @@ private struct ExitAdminView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
+            .tint(CVROperationalPalette.critical)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(IPCATheme.pageBackground.ignoresSafeArea())
+        .background(CVROperationalPalette.background.ignoresSafeArea())
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -228,11 +320,14 @@ private struct AdminUnlockView: View {
         VStack(spacing: 18) {
             Text("Admin Access")
                 .font(.largeTitle.weight(.bold))
-                .foregroundStyle(IPCATheme.navy)
+                .foregroundStyle(CVROperationalPalette.textPrimary)
 
             SecureField("Admin PIN", text: $adminPIN)
-                .textFieldStyle(.roundedBorder)
                 .keyboardType(.numberPad)
+                .padding(12)
+                .foregroundStyle(CVROperationalPalette.textPrimary)
+                .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
                 .frame(maxWidth: 260)
 
             Button("Unlock") {
@@ -244,14 +339,16 @@ private struct AdminUnlockView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
+            .tint(CVROperationalPalette.primaryBlue)
 
             if !error.isEmpty {
                 Text(error)
-                    .foregroundStyle(IPCATheme.danger)
+                    .foregroundStyle(CVROperationalPalette.critical)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(IPCATheme.pageBackground.ignoresSafeArea())
+        .background(CVROperationalPalette.background.ignoresSafeArea())
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -264,249 +361,328 @@ private struct AdminSettingsView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var garminVault: GarminCsvVaultStore
-    @EnvironmentObject private var sdRecovery: GarminSDCardRecoveryService
     @EnvironmentObject private var scheduledSessions: ScheduledSessionsStore
-
-    @State private var showGarminFolderPicker = false
+    @EnvironmentObject private var garminSDCard: GarminSDCardImportCoordinator
+    @State private var isShowingGarminSDCardFolderPicker = false
+    @State private var isShowingGarminSDCardClearConfirmation = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Server") {
-                    TextField("Courseware server URL", text: $settings.serverURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Toggle("Allow 5G/cellular upload", isOn: $settings.allowCellularUpload)
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    CVROperationalSectionCard(title: "Server", systemImage: "server.rack") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            adminField("Courseware server URL", text: $settings.serverURL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            Toggle("Allow 5G/cellular upload", isOn: $settings.allowCellularUpload)
+                                .tint(CVROperationalPalette.primaryBlue)
+                        }
+                    }
 
-                Section("CVR Device Enrollment") {
-                    LabeledContent("Status", value: settings.deviceEnrollmentStatus)
-                    TextField("One-time enrollment code", text: $settings.enrollmentCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                    Button("Enroll CVR Unit") {
-                        Task {
-                            if await settings.enrollDevice() {
-                                scheduledSessions.clearCache()
-                                await scheduledSessions.refresh(settings: settings)
-                                uploadManager.uploadQueuedWorkflowComponents(
-                                    workflow: workflow,
-                                    settings: settings,
-                                    trigger: .enrollmentSucceeded
+                    CVROperationalSectionCard(title: "CVR Device Enrollment", systemImage: "iphone.and.arrow.forward") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            adminLabeled("Status", settings.deviceEnrollmentStatus)
+                            adminField("One-time enrollment code", text: $settings.enrollmentCode)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                            Button("Enroll CVR Unit") {
+                                Task {
+                                    if await settings.enrollDevice() {
+                                        scheduledSessions.clearCache()
+                                        await scheduledSessions.refresh(settings: settings)
+                                        uploadManager.uploadQueuedWorkflowComponents(
+                                            workflow: workflow,
+                                            settings: settings,
+                                            trigger: .enrollmentSucceeded
+                                        )
+                                    }
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(CVROperationalPalette.primaryBlue)
+                            .disabled(settings.enrollmentCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            Text("Generate the code on IPCA.training under Master Logbook → Data Intake.")
+                                .font(.caption)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
+                            if !settings.deviceEnrollmentError.isEmpty {
+                                Text(settings.deviceEnrollmentError)
+                                    .font(.caption)
+                                    .foregroundStyle(CVROperationalPalette.critical)
+                            }
+                        }
+                    }
+
+                    CVROperationalSectionCard(title: "Dedicated Aircraft", systemImage: "airplane") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Picker("Aircraft", selection: $settings.selectedAircraftID) {
+                                Text("Not selected").tag(0)
+                                ForEach(settings.aircraft) { aircraft in
+                                    Text(aircraft.label).tag(aircraft.id)
+                                }
+                            }
+                            .tint(CVROperationalPalette.secondaryBlue)
+                            adminField("CVR Unit Identifier", text: $settings.cvrUnitIdentifier)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                            Button("Refresh Aircraft") {
+                                Task {
+                                    await settings.refreshAircraft()
+                                    await settings.refreshCrewUsers()
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            if !settings.aircraftError.isEmpty {
+                                Text(settings.aircraftError)
+                                    .foregroundStyle(CVROperationalPalette.critical)
+                            }
+                        }
+                    }
+
+                    CVROperationalSectionCard(title: "Crew Users", systemImage: "person.2") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            adminLabeled("Loaded users", "\(settings.crewUsers.count)")
+                            Button("Refresh Crew Users") {
+                                Task { await settings.refreshCrewUsers() }
+                            }
+                            .buttonStyle(.bordered)
+                            if !settings.crewUsersError.isEmpty {
+                                Text(settings.crewUsersError)
+                                    .font(.caption)
+                                    .foregroundStyle(CVROperationalPalette.critical)
+                            }
+                        }
+                    }
+
+                    CVROperationalSectionCard(title: "Garmin Local Vault", systemImage: "externaldrive") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Stepper(
+                                "Retain synced CSVs: \(settings.garminVaultRetentionDays) days",
+                                value: $settings.garminVaultRetentionDays,
+                                in: 7...180
+                            )
+                            Stepper(
+                                "Vault limit: \(settings.garminVaultMaxMegabytes) MB",
+                                value: $settings.garminVaultMaxMegabytes,
+                                in: 100...2000,
+                                step: 50
+                            )
+                            adminLabeled("Local vault files", "\(garminVault.records.count)")
+                            Text("Garmin CSV files attached from Log / AirDrop are retained locally for retry and cleanup according to these limits.")
+                                .font(.caption)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
+                        }
+                    }
+
+                    CVROperationalSectionCard(title: "Garmin SD Card", systemImage: "sdcard") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let info = settings.garminSDCardFolderDisplayInfo {
+                                adminLabeled("Folder", info.folderName)
+                                adminLabeled("Volume", info.volumeName)
+                                if let configuredAt = info.configuredAt {
+                                    adminLabeled("Configured", configuredAt.formatted(date: .abbreviated, time: .shortened))
+                                }
+                                if settings.bookmarkIsStale {
+                                    Text("Access needs restoration — re-select the folder below.")
+                                        .font(.caption)
+                                        .foregroundStyle(CVROperationalPalette.warning)
+                                }
+                            } else {
+                                Text("No Garmin folder configured yet. Select it once here, or from the Log tab, to enable SD card imports.")
+                                    .font(.caption)
+                                    .foregroundStyle(CVROperationalPalette.textSecondary)
+                            }
+                            HStack(spacing: 12) {
+                                Button(settings.hasGarminSDCardFolderConfigured ? "Change Folder" : "Choose Folder") {
+                                    isShowingGarminSDCardFolderPicker = true
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(CVROperationalPalette.primaryBlue)
+                                if settings.hasGarminSDCardFolderConfigured {
+                                    Button("Clear", role: .destructive) {
+                                        isShowingGarminSDCardClearConfirmation = true
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    }
+
+                    CVROperationalSectionCard(title: "Simulation Demo", systemImage: "play.circle") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Toggle("Simulation Mode", isOn: $settings.isSimulationModeEnabled)
+                                .tint(CVROperationalPalette.primaryBlue)
+                            Text("Walk through Dispatch → Recorder → In-Flight → Garmin without audio logging or server uploads. Enabling simulation returns you to the operational tabs; use the bottom bar for avionics and takeoff/landing controls.")
+                                .font(.caption)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
+                            if settings.isSimulationModeEnabled {
+                                Button("Simulate Avionics ON") {
+                                    beacon.simulateAvionicsOn()
+                                }
+                                .buttonStyle(.bordered)
+                                Button("Simulate Avionics OFF") {
+                                    beacon.simulateAvionicsOff()
+                                }
+                                .buttonStyle(.bordered)
+                                Button("Reset Simulation Workflow", role: .destructive) {
+                                    workflow.resetSimulationWorkflow {
+                                        beacon.clearSimulationOverride()
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(CVROperationalPalette.critical)
+                            }
+                        }
+                    }
+
+                    CVROperationalSectionCard(title: "Avionics Beacon", systemImage: "antenna.radiowaves.left.and.right") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("One-time setup for the avionics-power beacon. After connection is enabled, the iPhone listens for the assigned beacon identity and uses it to start and stop recording.")
+                                .font(.caption)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
+
+                            Button(settings.isBeaconTriggerEnabled ? "Beacon Connected" : "Connect Beacon") {
+                                settings.isBeaconTriggerEnabled = true
+                                beacon.startScan(scanAll: false)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(CVROperationalPalette.primaryBlue)
+                            .disabled(settings.isBeaconTriggerEnabled)
+
+                            Button("Disconnect Beacon Trigger", role: .destructive) {
+                                settings.isBeaconTriggerEnabled = false
+                                beacon.stopScan()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(CVROperationalPalette.critical)
+                            .disabled(!settings.isBeaconTriggerEnabled)
+
+                            adminLabeled(
+                                "Trigger",
+                                settings.isBeaconTriggerEnabled ? "Enabled" : "Not connected",
+                                valueColor: settings.isBeaconTriggerEnabled
+                                    ? CVROperationalPalette.success
+                                    : CVROperationalPalette.textSecondary
+                            )
+                            adminLabeled("Beacon state", operationalBeaconStatus.label, valueColor: operationalBeaconStatusColor)
+                            adminLabeled("Advertisements", "\(beacon.advertisementCount)")
+                        }
+                    }
+
+                    CVROperationalSectionCard(title: "Audio", systemImage: "mic") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Button("Reset Audio Path") {
+                                Task { await coordinator.resetAudioRoute(source: "admin UI") }
+                            }
+                            .buttonStyle(.bordered)
+                            Text(audio.sourceSummary)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
+                            if audio.isInputGainSettable {
+                                Slider(
+                                    value: Binding(
+                                        get: { Double(audio.inputGain) },
+                                        set: { audio.setInputGain(Float($0)) }
+                                    ),
+                                    in: 0...1
                                 )
+                                .tint(CVROperationalPalette.primaryBlue)
+                                adminLabeled("Hardware input gain", "\(Int((audio.inputGain * 100).rounded()))%")
+                            } else {
+                                adminLabeled("Hardware input gain", "Not controllable by iOS")
+                            }
+                            Picker("Post recording gain", selection: $settings.postRecordingGainDB) {
+                                Text("Off").tag(0.0)
+                                Text("+3 dB").tag(3.0)
+                                Text("+6 dB").tag(6.0)
+                                Text("+9 dB").tag(9.0)
+                                Text("+12 dB").tag(12.0)
+                            }
+                            .tint(CVROperationalPalette.secondaryBlue)
+                            Text("Post recording gain makes finalized files louder after capture. It cannot recover clipped or noisy input.")
+                                .font(.caption)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
+                        }
+                    }
+
+                    CVROperationalSectionCard(title: "GPS Time", systemImage: "location") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            adminLabeled("Status", gpsStatusText, valueColor: gpsStatusColor)
+                            adminLabeled("Last UTC", gpsTimestampText)
+                            if gps.state == .permissionNeeded {
+                                Button("Request GPS Permission") {
+                                    gps.requestPermission()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(CVROperationalPalette.primaryBlue)
+                            }
+                            if !gps.lastError.isEmpty {
+                                Text(gps.lastError)
+                                    .font(.caption)
+                                    .foregroundStyle(CVROperationalPalette.critical)
                             }
                         }
                     }
-                    .disabled(settings.enrollmentCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Text("Generate the code on IPCA.training under Master Logbook → Data Intake.")
-                        .font(.caption)
-                        .foregroundStyle(IPCATheme.secondaryText)
-                    if !settings.deviceEnrollmentError.isEmpty {
-                        Text(settings.deviceEnrollmentError)
-                            .font(.caption)
-                            .foregroundStyle(IPCATheme.danger)
+
+                    CVROperationalSectionCard(title: "Security", systemImage: "lock") {
+                        SecureField("Admin PIN", text: $settings.adminPIN)
+                            .keyboardType(.numberPad)
+                            .padding(12)
+                            .foregroundStyle(CVROperationalPalette.textPrimary)
+                            .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
                     }
                 }
-
-                Section("Dedicated Aircraft") {
-                    Picker("Aircraft", selection: $settings.selectedAircraftID) {
-                        Text("Not selected").tag(0)
-                        ForEach(settings.aircraft) { aircraft in
-                            Text(aircraft.label).tag(aircraft.id)
-                        }
-                    }
-                    TextField("CVR Unit Identifier", text: $settings.cvrUnitIdentifier)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                    Button("Refresh Aircraft") {
-                        Task {
-                            await settings.refreshAircraft()
-                            await settings.refreshCrewUsers()
-                        }
-                    }
-                    if !settings.aircraftError.isEmpty {
-                        Text(settings.aircraftError)
-                            .foregroundStyle(IPCATheme.danger)
-                    }
-                }
-
-                Section("Crew Users") {
-                    LabeledContent("Loaded users", value: "\(settings.crewUsers.count)")
-                    Button("Refresh Crew Users") {
-                        Task { await settings.refreshCrewUsers() }
-                    }
-                    if !settings.crewUsersError.isEmpty {
-                        Text(settings.crewUsersError)
-                            .font(.caption)
-                            .foregroundStyle(IPCATheme.danger)
-                    }
-                }
-
-                Section("Garmin SD Card Recovery") {
-                    LabeledContent("Folder") {
-                        Text(settings.garminSDCardFolderLabel.isEmpty ? "Not configured" : settings.garminSDCardFolderLabel)
-                    }
-                    LabeledContent("Access") {
-                        Text(sdRecovery.cardAvailable ? "Available" : (settings.garminSDCardBookmarkData == nil ? "Not configured" : "Unavailable"))
-                            .foregroundStyle(sdRecovery.cardAvailable ? IPCATheme.success : IPCATheme.warning)
-                    }
-                    Button("Select Garmin SD Card Folder") {
-                        showGarminFolderPicker = true
-                    }
-                    if settings.garminSDCardBookmarkData != nil {
-                        Button("Test SD Card Access") {
-                            sdRecovery.refreshBookmarkState(settings: settings)
-                        }
-                        Button("Clear SD Card Folder", role: .destructive) {
-                            settings.clearGarminSDCardFolder()
-                            sdRecovery.refreshBookmarkState(settings: settings)
-                        }
-                    }
-                    if !settings.garminSDCardSetupMessage.isEmpty {
-                        Text(settings.garminSDCardSetupMessage)
-                            .font(.caption)
-                            .foregroundStyle(settings.garminSDCardSetupMessage.contains("verified")
-                                ? IPCATheme.success
-                                : IPCATheme.warning)
-                    }
-                    if !settings.garminSDCardLastAccessError.isEmpty {
-                        Text(settings.garminSDCardLastAccessError)
-                            .font(.caption)
-                            .foregroundStyle(IPCATheme.danger)
-                    }
-                    Stepper(
-                        "Retain synced CSVs: \(settings.garminVaultRetentionDays) days",
-                        value: $settings.garminVaultRetentionDays,
-                        in: 7...180
-                    )
-                    Stepper(
-                        "Vault limit: \(settings.garminVaultMaxMegabytes) MB",
-                        value: $settings.garminVaultMaxMegabytes,
-                        in: 100...2000,
-                        step: 50
-                    )
-                    LabeledContent("Local vault files", value: "\(garminVault.records.count)")
-                    Text("One-time setup: with the SD card inserted, choose the card root or its data_log folder in Files. After saving, tap Test SD Card Access. If it shows Unavailable, re-select the folder with the card inserted.")
-                        .font(.caption)
-                        .foregroundStyle(IPCATheme.secondaryText)
-                }
-
-                Section("Simulation Demo") {
-                    Toggle("Simulation Mode", isOn: $settings.isSimulationModeEnabled)
-                    Text("Walk through Dispatch → Recorder → In-Flight → Garmin without audio logging or server uploads. Enabling simulation returns you to the operational tabs; use the bottom bar for avionics and takeoff/landing controls.")
-                        .font(.caption)
-                        .foregroundStyle(IPCATheme.secondaryText)
-                    if settings.isSimulationModeEnabled {
-                        Button("Simulate Avionics ON") {
-                            beacon.simulateAvionicsOn()
-                        }
-                        Button("Simulate Avionics OFF") {
-                            beacon.simulateAvionicsOff()
-                        }
-                        Button("Reset Simulation Workflow", role: .destructive) {
-                            workflow.resetSimulationWorkflow {
-                                beacon.clearSimulationOverride()
-                            }
-                        }
-                    }
-                }
-
-                Section("Avionics Beacon") {
-                    Text("One-time setup for the avionics-power beacon. After connection is enabled, the iPhone listens for the assigned beacon identity and uses it to start and stop recording.")
-                        .font(.caption)
-                        .foregroundStyle(IPCATheme.secondaryText)
-
-                    Button(settings.isBeaconTriggerEnabled ? "Beacon Connected" : "Connect Beacon") {
-                        settings.isBeaconTriggerEnabled = true
-                        beacon.startScan(scanAll: false)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(settings.isBeaconTriggerEnabled)
-
-                    Button("Disconnect Beacon Trigger", role: .destructive) {
-                        settings.isBeaconTriggerEnabled = false
-                        beacon.stopScan()
-                    }
-                    .disabled(!settings.isBeaconTriggerEnabled)
-
-                    LabeledContent("Trigger") {
-                        Text(settings.isBeaconTriggerEnabled ? "Enabled" : "Not connected")
-                            .foregroundStyle(settings.isBeaconTriggerEnabled ? IPCATheme.success : IPCATheme.secondaryText)
-                    }
-                    LabeledContent("Beacon state") {
-                        Text(operationalBeaconStatus.label)
-                            .foregroundStyle(operationalBeaconStatusColor)
-                    }
-                    LabeledContent("Advertisements") {
-                        Text("\(beacon.advertisementCount)")
-                    }
-                }
-
-                Section("Audio") {
-                    Button("Reset Audio Path") {
-                        Task { await coordinator.resetAudioRoute(source: "admin UI") }
-                    }
-                    Text(audio.sourceSummary)
-                    if audio.isInputGainSettable {
-                        Slider(
-                            value: Binding(
-                                get: { Double(audio.inputGain) },
-                                set: { audio.setInputGain(Float($0)) }
-                            ),
-                            in: 0...1
-                        )
-                        LabeledContent("Hardware input gain", value: "\(Int((audio.inputGain * 100).rounded()))%")
-                    } else {
-                        LabeledContent("Hardware input gain", value: "Not controllable by iOS")
-                    }
-                    Picker("Post recording gain", selection: $settings.postRecordingGainDB) {
-                        Text("Off").tag(0.0)
-                        Text("+3 dB").tag(3.0)
-                        Text("+6 dB").tag(6.0)
-                        Text("+9 dB").tag(9.0)
-                        Text("+12 dB").tag(12.0)
-                    }
-                    Text("Post recording gain makes finalized files louder after capture. It cannot recover clipped or noisy input.")
-                        .font(.caption)
-                        .foregroundStyle(IPCATheme.secondaryText)
-                }
-
-                Section("GPS Time") {
-                    LabeledContent("Status") {
-                        Text(gpsStatusText)
-                            .foregroundStyle(gpsStatusColor)
-                    }
-                    LabeledContent("Last UTC", value: gpsTimestampText)
-                    if gps.state == .permissionNeeded {
-                        Button("Request GPS Permission") {
-                            gps.requestPermission()
-                        }
-                    }
-                    if !gps.lastError.isEmpty {
-                        Text(gps.lastError)
-                            .font(.caption)
-                            .foregroundStyle(IPCATheme.danger)
-                    }
-                }
-
-                Section("Security") {
-                    SecureField("Admin PIN", text: $settings.adminPIN)
-                        .keyboardType(.numberPad)
-                }
+                .padding(16)
+                .padding(.bottom, 24)
             }
-            .navigationTitle("CVR Unit Admin")
-            .sheet(isPresented: $showGarminFolderPicker) {
-                GarminSDCardFolderPicker(
-                    onPick: { url in
-                        settings.setGarminSDCardFolder(url)
-                        sdRecovery.refreshBookmarkState(settings: settings)
-                        showGarminFolderPicker = false
-                    },
-                    onCancel: {
-                        showGarminFolderPicker = false
-                    }
-                )
+            .cvrAdminScreenChrome(title: "CVR Unit Admin")
+        }
+        .sheet(isPresented: $isShowingGarminSDCardFolderPicker) {
+            GarminSDCardFolderPicker(
+                onPick: { url in
+                    isShowingGarminSDCardFolderPicker = false
+                    garminSDCard.selectFolder(url, settings: settings)
+                },
+                onCancel: { isShowingGarminSDCardFolderPicker = false }
+            )
+        }
+        .confirmationDialog(
+            "Clear the configured Garmin folder?",
+            isPresented: $isShowingGarminSDCardClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear Folder", role: .destructive) {
+                garminSDCard.clearFolder(settings: settings)
             }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("IPCA will forget this folder. You will need to select it again before importing more Garmin CSV files.")
+        }
+    }
+
+    private func adminField(_ title: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            TextField(title, text: text)
+                .padding(12)
+                .foregroundStyle(CVROperationalPalette.textPrimary)
+                .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+        }
+    }
+
+    private func adminLabeled(_ title: String, _ value: String, valueColor: Color = CVROperationalPalette.textPrimary) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(valueColor)
+                .multilineTextAlignment(.trailing)
         }
     }
 
@@ -517,13 +693,13 @@ private struct AdminSettingsView: View {
     private var operationalBeaconStatusColor: Color {
         switch operationalBeaconStatus.severity {
         case .nominal:
-            return IPCATheme.success
+            return CVROperationalPalette.success
         case .warning:
-            return IPCATheme.warning
+            return CVROperationalPalette.warning
         case .danger:
-            return IPCATheme.danger
+            return CVROperationalPalette.critical
         case .inactive:
-            return IPCATheme.secondaryText
+            return CVROperationalPalette.textSecondary
         }
     }
 
@@ -547,11 +723,11 @@ private struct AdminSettingsView: View {
     private var gpsStatusColor: Color {
         switch gps.state {
         case .ready, .recording:
-            return IPCATheme.success
+            return CVROperationalPalette.success
         case .permissionNeeded, .unavailable:
-            return IPCATheme.warning
+            return CVROperationalPalette.warning
         case .denied, .failed:
-            return IPCATheme.danger
+            return CVROperationalPalette.critical
         }
     }
 

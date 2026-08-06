@@ -366,11 +366,17 @@ struct CvrCsvKnownHashEntry: Codable {
     var sha256: String
     var csvFileUuid: String?
     var status: String?
+    /// Present once the server links this CSV to a workflow Flight Record; absent on older
+    /// deployments. Consumers must treat a missing value as "unknown" rather than "false".
+    var workflowFlightRecordUuid: String?
+    var workflowLinked: Bool?
 
     enum CodingKeys: String, CodingKey {
         case sha256
         case csvFileUuid = "csv_file_uuid"
         case status
+        case workflowFlightRecordUuid = "workflow_flight_record_uuid"
+        case workflowLinked = "workflow_linked"
     }
 }
 

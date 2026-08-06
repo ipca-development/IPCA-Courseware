@@ -176,12 +176,25 @@ $checks = array(
         str_contains($garminFinalize, 'requireDevice()')
         && str_contains($garminFinalize, "'workflow_flight_record_uuid'")
         && str_contains($garminEvidence, 'assertWorkflowFlightOwnership')
+        && str_contains($garminEvidence, 'Offline-first: Garmin may finalize while Dispatch is still queued')
+        && str_contains($garminEvidence, 'Ownership is NEVER optional')
+        && str_contains($garminEvidence, 'workflowFlightOwnerContexts')
+        && str_contains($garminEvidence, 'ownerContextMatchesDevice')
         && str_contains($garminEvidence, 'workflow_flight_record_uuid')
         && str_contains($garminEvidence, "'workflow_linked' => \$workflowLinked")
         && str_contains($garminEvidence, 'workflowLinkConfirmed')
         && str_contains($garminEvidence, 'GarminCsvValidationService')
         && str_contains($garminEvidence, 'enqueueJobs')
         && str_contains($uploads, 'finalized.workflowLinked == true'),
+    'Log keeps pending Garmin file when Dispatch sync is still outstanding' =>
+        str_contains($models, 'The Garmin file is stored on this device')
+        && str_contains($models, 'Synchronize the flight first, then retry')
+        && str_contains($models, 'You will not need to select the file again')
+        && str_contains($models, 'targetFlightRecordID')
+        && str_contains($models, 'sha256')
+        && str_contains($models, 'retryPendingGarminCSV')
+        && str_contains($models, 'CVRPendingGarminPersistence')
+        && str_contains($models, 'clearPendingGarminAfterVerifiedSuccess'),
     'Log tab uses the operational shell and highlights missing Garmin CSV' =>
         str_contains($models, 'case log')
         && str_contains($views, 'AIRCRAFT FLIGHT LOG')
@@ -216,8 +229,8 @@ $checks = array(
         str_contains($models, 'locallyAttachedGarminFlightRecordIDs.insert(entry.flightRecordID)')
         && str_contains($models, 'entries[index].hasGarminCSV = true')
         && str_contains($models, 'await refresh(settings: settings)')
-        && str_contains($models, 'self.pendingGarminCSV = nil')
-        && strpos($models, 'await refresh(settings: settings)') < strrpos($models, 'self.pendingGarminCSV = nil')
+        && str_contains($models, 'clearPendingGarminAfterVerifiedSuccess')
+        && strpos($models, 'await refresh(settings: settings)') < strpos($models, 'clearPendingGarminAfterVerifiedSuccess')
         && str_contains($models, 'catch is CancellationError')
         && str_contains($views, 'hasLocallyAttachedGarminCSV'),
     'manual Log CSV upload cannot reopen its assignment sheet in a loop' =>

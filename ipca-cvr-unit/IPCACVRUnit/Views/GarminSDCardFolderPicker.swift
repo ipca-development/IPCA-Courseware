@@ -1,6 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Wraps `UIDocumentPickerViewController` configured for folder selection so the crew can
+/// choose the Garmin SD card's Data Log folder once; the resulting URL is persisted as a
+/// security-scoped bookmark by `SettingsStore.setGarminSDCardFolder`.
 struct GarminSDCardFolderPicker: UIViewControllerRepresentable {
     var onPick: (URL) -> Void
     var onCancel: () -> Void

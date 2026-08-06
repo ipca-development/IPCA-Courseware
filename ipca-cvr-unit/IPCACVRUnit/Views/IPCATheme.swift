@@ -23,10 +23,11 @@ struct IPCAStatusPill: View {
             .foregroundStyle(color)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(color.opacity(0.12), in: Capsule())
+            .background(color.opacity(0.18), in: Capsule())
     }
 }
 
+/// Legacy card name kept for Beacon/Admin call sites; renders operational dark panels.
 struct IPCACard<Content: View>: View {
     var title: String
     var systemImage: String
@@ -39,22 +40,8 @@ struct IPCACard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(IPCATheme.brightBlue)
-                    .frame(width: 26, height: 26)
-                    .background(IPCATheme.lightBlue.opacity(0.72), in: Circle())
-                Text(title)
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(IPCATheme.navy)
-            }
+        CVROperationalSectionCard(title: title, systemImage: systemImage) {
             content
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(IPCATheme.navy)
-        .background(IPCATheme.cardBackground, in: RoundedRectangle(cornerRadius: 18))
-        .shadow(color: IPCATheme.navy.opacity(0.08), radius: 12, y: 6)
     }
 }

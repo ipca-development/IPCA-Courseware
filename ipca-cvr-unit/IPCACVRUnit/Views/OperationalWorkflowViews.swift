@@ -49,6 +49,8 @@ struct OperationalTabsView: View {
     @EnvironmentObject private var settings: SettingsStore
     @Binding var adminUnlocked: Bool
     @Binding var showAdminUnlock: Bool
+    @State private var logoTapCount = 0
+    @State private var lastLogoTapAt: Date?
 
     var body: some View {
         GeometryReader { proxy in
@@ -60,7 +62,7 @@ struct OperationalTabsView: View {
                         ?? "NO AIRCRAFT",
                     unitIdentifier: settings.cvrUnitIdentifier,
                     metrics: metrics,
-                    onLogoTap: { showAdminUnlock = true }
+                    onLogoTap: handleHiddenAdminLogoTap
                 )
                 .padding(.horizontal, metrics.outerHorizontalPadding)
                 .padding(.vertical, metrics.outerVerticalPadding)
@@ -84,6 +86,24 @@ struct OperationalTabsView: View {
                 OperationalBottomTabBar()
             }
             .background(CVROperationalPalette.background.ignoresSafeArea())
+        }
+    }
+
+    /// Hidden Admin entry requires five logo taps within 3 seconds (same as Status dashboard).
+    private func handleHiddenAdminLogoTap() {
+        guard !adminUnlocked else {
+            logoTapCount = 0
+            return
+        }
+        let now = Date()
+        if let lastLogoTapAt, now.timeIntervalSince(lastLogoTapAt) > 3 {
+            logoTapCount = 0
+        }
+        lastLogoTapAt = now
+        logoTapCount += 1
+        if logoTapCount >= 5 {
+            logoTapCount = 0
+            showAdminUnlock = true
         }
     }
 
@@ -2760,7 +2780,6 @@ struct GarminWorkflowView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var recordingStore: RecordingStore
     @EnvironmentObject private var beacon: AvionicsBeaconManager
-    @EnvironmentObject private var sdRecovery: GarminSDCardRecoveryService
     @EnvironmentObject private var garminVault: GarminCsvVaultStore
     @EnvironmentObject private var garminSync: GarminCsvSyncManager
     @EnvironmentObject private var network: NetworkMonitor
@@ -2780,15 +2799,6 @@ struct GarminWorkflowView: View {
                             CVROperationalTile(title: "UPLOAD", iconName: "icloud.and.arrow.up.fill", value: uploadTileValue, color: uploadTileColor, metrics: metrics)
                             CVROperationalTile(title: "TRANSCRIPT", iconName: "text.bubble.fill", value: transcriptTileValue, color: transcriptTileColor, metrics: metrics)
                             CVROperationalTile(title: "REPLAY", iconName: "play.rectangle.fill", value: replayTileValue, color: replayTileColor, metrics: metrics)
-                            CVROperationalTile(title: "SD CARD", iconName: "sdcard.fill", value: sdCardTileValue, color: sdCardTileColor, metrics: metrics)
-                        }
-                        if !sdRecovery.isScanning, !garminSync.isSyncing, let summary = sdRecovery.lastSummary {
-                            CVROperationalWarningCard(
-                                title: "SD CARD SCAN",
-                                message: summary.message,
-                                iconName: summary.matchedFlightRecord ? "checkmark.circle.fill" : "externaldrive.fill",
-                                color: summary.matchedFlightRecord ? CVROperationalPalette.success : CVROperationalPalette.secondaryBlue
-                            )
                         }
                         CVROperationalWarningCard(
                             title: garminWarningTitle,
@@ -2840,12 +2850,6 @@ struct GarminWorkflowView: View {
     }
 
     private func runRecoveryPipelineOnce() async {
-        sdRecovery.refreshBookmarkState(settings: settings)
-        _ = await sdRecovery.scanAndImportIfNeeded(
-            settings: settings,
-            vault: garminVault,
-            workflow: workflow
-        )
         await garminSync.syncPending(
             settings: settings,
             vault: garminVault,
@@ -2885,35 +2889,6 @@ struct GarminWorkflowView: View {
                 }
             }
         }
-    }
-
-    private var sdCardTileValue: String {
-        if sdRecovery.isScanning {
-            return progressPercent(sdRecovery.scanProgress) ?? "Scanning"
-        }
-        if garminSync.isSyncing {
-            return progressPercent(garminSync.syncProgress) ?? "Syncing"
-        }
-        if !sdRecovery.cardConfigured {
-            return "Setup"
-        }
-        if !sdRecovery.cardAvailable {
-            return "Waiting"
-        }
-        if let summary = sdRecovery.lastSummary, summary.matchedFlightRecord || summary.imported > 0 {
-            return "Ready"
-        }
-        return "Scan"
-    }
-
-    private var sdCardTileColor: Color {
-        if !sdRecovery.cardConfigured {
-            return CVROperationalPalette.warning
-        }
-        if sdRecovery.cardAvailable, sdRecovery.lastSummary?.matchedFlightRecord == true {
-            return CVROperationalPalette.success
-        }
-        return sdRecovery.cardAvailable ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby
     }
 
     private var garminComponents: [CVRUploadComponentRecord] {
@@ -2959,9 +2934,6 @@ struct GarminWorkflowView: View {
     }
 
     private var activeRecoveryProgress: Double? {
-        if sdRecovery.isScanning {
-            return sdRecovery.scanProgress
-        }
         if garminSync.isSyncing {
             return garminSync.syncProgress
         }
@@ -3092,26 +3064,20 @@ struct GarminWorkflowView: View {
         if settings.isSimulationModeEnabled {
             return "SIMULATION MODE"
         }
-        if !sdRecovery.cardConfigured {
-            return "SD CARD SETUP REQUIRED"
-        }
-        if sdRecovery.isScanning {
-            return "SCANNING SD CARD"
-        }
         if garminSync.isSyncing {
-            return "SYNCHRONIZING CARD FILES"
+            return "SYNCHRONIZING GARMIN FILES"
         }
         if garminComponents.isEmpty {
             if vaultFailedCount > 0 {
-                return "CARD SYNC NEEDS RETRY"
+                return "GARMIN SYNC NEEDS RETRY"
             }
             if garminSync.isSyncing || vaultPendingCount > 0 {
-                return "CARD FILES QUEUED FOR SYNC"
+                return "GARMIN FILES QUEUED FOR SYNC"
             }
             if vaultSyncedCount > 0 {
-                return "CARD FILES SYNCHRONIZED"
+                return "GARMIN FILES SYNCHRONIZED"
             }
-            return sdRecovery.cardAvailable ? "WAITING FOR MATCHING LOG" : "INSERT SD CARD READER"
+            return "IMPORT GARMIN CSV"
         }
         if let failedWorkflowComponent {
             return switch failedWorkflowComponent.componentType {
@@ -3128,18 +3094,7 @@ struct GarminWorkflowView: View {
 
     private var garminWarningMessage: String {
         if settings.isSimulationModeEnabled {
-            return "Simulation mode skips SD card import and server uploads."
-        }
-        if !sdRecovery.cardConfigured {
-            return "Configure the Garmin SD card folder once in Admin, then insert the USB-C reader. The app imports data-rich logs automatically."
-        }
-        if sdRecovery.isScanning {
-            let total = sdRecovery.scanFilesTotal
-            let processed = min(sdRecovery.scanFilesProcessed, total)
-            let counts = total > 0
-                ? " \(processed)/\(total) · \(sdRecovery.scanDataRichFound) data-rich · \(sdRecovery.scanGpsOnlySkipped) GPS-only."
-                : ""
-            return "\(sdRecovery.scanPhase).\(counts)"
+            return "Simulation mode skips Garmin import and server uploads."
         }
         if garminSync.isSyncing {
             let total = garminSync.syncFilesTotal
@@ -3152,19 +3107,16 @@ struct GarminWorkflowView: View {
             if vaultFailedCount > 0 {
                 let detail = garminSync.lastError.trimmingCharacters(in: .whitespacesAndNewlines)
                 return detail.isEmpty
-                    ? "\(vaultFailedCount) data-rich card file(s) failed to synchronize and will retry automatically."
-                    : "\(vaultFailedCount) data-rich card file(s) failed to synchronize: \(detail)"
+                    ? "\(vaultFailedCount) Garmin file(s) failed to synchronize and will retry automatically."
+                    : "\(vaultFailedCount) Garmin file(s) failed to synchronize: \(detail)"
             }
             if garminSync.isSyncing || vaultPendingCount > 0 {
-                return "\(vaultPendingCount) data-rich card file(s) are queued. GPS-only files are excluded. \(vaultSyncedCount) already synchronized or confirmed on the server."
+                return "\(vaultPendingCount) Garmin file(s) are queued. \(vaultSyncedCount) already synchronized or confirmed on the server."
             }
             if vaultSyncedCount > 0 {
-                return "\(vaultSyncedCount) data-rich card file(s) are synchronized or already existed on the server. GPS-only files were excluded."
+                return "\(vaultSyncedCount) Garmin file(s) are synchronized or already existed on the server."
             }
-            if let summary = sdRecovery.lastSummary, !summary.cardAvailable {
-                return "Insert the USB-C SD card reader. GPS-only logs are skipped automatically."
-            }
-            return sdRecovery.lastSummary?.message ?? "Waiting for a matching data-rich Garmin CSV on the SD card."
+            return "Open a Garmin CSV from Files or AirDrop on the Log tab. Matching files are stored locally and synced when the flight is online."
         }
         if let failedWorkflowComponent {
             if workflow.canEditFlightClosure {
@@ -3180,7 +3132,7 @@ struct GarminWorkflowView: View {
     }
 
     private var garminWarningIcon: String {
-        if sdRecovery.isScanning || garminSync.isSyncing {
+        if garminSync.isSyncing {
             return "arrow.triangle.2.circlepath"
         }
         if failedWorkflowComponent != nil || vaultFailedCount > 0 {
@@ -3189,11 +3141,11 @@ struct GarminWorkflowView: View {
         if vaultPendingCount > 0 || garminSync.isSyncing {
             return "arrow.triangle.2.circlepath"
         }
-        return garminComponents.isEmpty && vaultSyncedCount == 0 ? "externaldrive.fill" : "checkmark.seal.fill"
+        return garminComponents.isEmpty && vaultSyncedCount == 0 ? "doc.badge.arrow.up" : "checkmark.seal.fill"
     }
 
     private var garminWarningColor: Color {
-        if sdRecovery.isScanning || garminSync.isSyncing {
+        if garminSync.isSyncing {
             return CVROperationalPalette.secondaryBlue
         }
         if failedWorkflowComponent != nil || vaultFailedCount > 0 {
@@ -3250,6 +3202,8 @@ private struct FlightLogView: View {
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var recordingStore: RecordingStore
     @EnvironmentObject private var sessionsStore: ScheduledSessionsStore
+    @EnvironmentObject private var network: NetworkMonitor
+    @EnvironmentObject private var garminSDCard: GarminSDCardImportCoordinator
     @State private var isShowingFileImporter = false
     @State private var isShowingGarminAssignment = false
     @State private var isDirectGarminUpload = false
@@ -3336,10 +3290,12 @@ private struct FlightLogView: View {
                                 }
                             }
                         }
-                        if missingCount > 0 {
+                        if missingCount > 0 || flightLogs.pendingGarminCSV?.targetFlightRecordID != nil {
                             CVROperationalActionButton(
                                 title: "SYNC NOW",
-                                subtitle: "Upload queued Dispatch, Check-In, events, and cockpit audio",
+                                subtitle: flightLogs.pendingGarminCSV?.targetFlightRecordID != nil
+                                    ? "Upload queued flight data and retry the stored Garmin file"
+                                    : "Upload queued Dispatch, Check-In, events, and cockpit audio",
                                 color: CVROperationalPalette.secondaryBlue
                             ) {
                                 syncPendingLogUploads()
@@ -3352,6 +3308,22 @@ private struct FlightLogView: View {
                         ) {
                             Task { await flightLogs.refresh(settings: settings) }
                         }
+                        HStack(spacing: 12) {
+                            Button {
+                                isShowingFileImporter = true
+                            } label: {
+                                Label("FILES", systemImage: "doc.badge.plus")
+                            }
+                            Button {
+                                garminSDCard.openBrowse(settings: settings)
+                            } label: {
+                                Label("SD CARD", systemImage: "sdcard")
+                            }
+                            .accessibilityLabel("Import Garmin CSV from SD card")
+                        }
+                        .font(.caption.weight(.bold))
+                        .buttonStyle(.bordered)
+                        .tint(CVROperationalPalette.secondaryBlue)
                     }
                     .padding(.horizontal, metrics.outerHorizontalPadding)
                     .padding(.top, metrics.outerVerticalPadding)
@@ -3368,15 +3340,23 @@ private struct FlightLogView: View {
             }
         }
         .task {
+            flightLogs.preparePendingGarminImportForLog()
             await flightLogs.refresh(settings: settings)
-            if flightLogs.pendingGarminCSV != nil && directImportTarget == nil {
+            // Only open assignment when a new file needs a flight pick.
+            // Restored pending with an existing flight association must not reopen the picker.
+            if flightLogs.pendingGarminCSV != nil
+                && flightLogs.pendingGarminCSV?.targetFlightRecordID == nil
+                && directImportTarget == nil {
                 isShowingGarminAssignment = true
             }
         }
         .onChange(of: flightLogs.pendingGarminCSV?.id) { _, pendingID in
             if pendingID == nil {
                 isShowingGarminAssignment = false
-            } else if directImportTarget == nil && !isShowingFileImporter && !isDirectGarminUpload {
+            } else if flightLogs.pendingGarminCSV?.targetFlightRecordID == nil
+                && directImportTarget == nil
+                && !isShowingFileImporter
+                && !isDirectGarminUpload {
                 isShowingGarminAssignment = true
             }
         }
@@ -3422,6 +3402,23 @@ private struct FlightLogView: View {
                 .environmentObject(flightLogs)
                 .environmentObject(settings)
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $garminSDCard.showingFileSheet) {
+            GarminSDCardImportSheet(coordinator: garminSDCard)
+                .environmentObject(settings)
+                .environmentObject(flightLogs)
+                .environmentObject(network)
+                .environmentObject(uploadManager)
+        }
+        .sheet(isPresented: $garminSDCard.showingSetupSheet) {
+            GarminSDCardFolderPicker(
+                onPick: { url in
+                    garminSDCard.showingSetupSheet = false
+                    garminSDCard.selectFolder(url, settings: settings)
+                    garminSDCard.showingFileSheet = true
+                },
+                onCancel: { garminSDCard.showingSetupSheet = false }
+            )
         }
     }
 
@@ -3501,6 +3498,15 @@ private struct FlightLogView: View {
                         Label("SYNC", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                }
+                if garminSDCardNeedsAttention(entry) {
+                    Button {
+                        garminSDCard.openFromLogRow(entry: entry, settings: settings)
+                    } label: {
+                        Label("SD CARD", systemImage: "sdcard")
+                    }
+                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                    .accessibilityLabel("Import Garmin CSV from SD card")
                 }
                 Spacer()
                 Button {
@@ -3659,6 +3665,13 @@ private struct FlightLogView: View {
         return !(dispatchDone && audioDone && transcriptDone)
     }
 
+    private func garminSDCardNeedsAttention(_ entry: CVRFlightLogEntry) -> Bool {
+        if !entry.hasGarminCSV { return true }
+        guard let pending = flightLogs.pendingGarminCSV,
+              pending.targetFlightRecordID == entry.flightRecordID else { return false }
+        return pending.lastFailureMessage?.isEmpty == false
+    }
+
     private func logFailureMessage(_ entry: CVRFlightLogEntry) -> String? {
         let message = (entry.transcriptError ?? entry.serverUploadError ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3694,6 +3707,10 @@ private struct FlightLogView: View {
         }
 
         Task {
+            await flightLogs.retryPendingGarminCSV(
+                settings: settings,
+                uploadManager: uploadManager
+            )
             try? await Task.sleep(for: .seconds(4))
             await flightLogs.refresh(settings: settings)
         }

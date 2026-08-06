@@ -19,8 +19,8 @@ struct IPCACVRUnitApp: App {
     @StateObject private var scheduledSessions = ScheduledSessionsStore()
     @StateObject private var flightLogs = CVRFlightLogStore()
     @StateObject private var garminVault = GarminCsvVaultStore()
-    @StateObject private var sdRecovery = GarminSDCardRecoveryService()
     @StateObject private var garminSync = GarminCsvSyncManager()
+    @StateObject private var garminSDCard = GarminSDCardImportCoordinator()
 
     init() {
         let background = UIColor.black
@@ -68,10 +68,11 @@ struct IPCACVRUnitApp: App {
                 .environmentObject(scheduledSessions)
                 .environmentObject(flightLogs)
                 .environmentObject(garminVault)
-                .environmentObject(sdRecovery)
                 .environmentObject(garminSync)
+                .environmentObject(garminSDCard)
                 .preferredColorScheme(.light)
                 .task {
+                    garminSDCard.bootstrap(settings: settings)
                     await recordingStore.load()
                     await workflowStore.load()
                     recordingStore.repairFlightSessionLinks(workflowStore.recordingSessionFlightRecordLinks())
@@ -95,12 +96,6 @@ struct IPCACVRUnitApp: App {
                     await flightLogs.refresh(settings: settings)
                     await missionCatalog.refreshFromServer(settings: settings)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflowStore, settings: settings)
-                    sdRecovery.refreshBookmarkState(settings: settings)
-                    _ = await sdRecovery.scanAndImportIfNeeded(
-                        settings: settings,
-                        vault: garminVault,
-                        workflow: workflowStore
-                    )
                     await garminSync.syncPending(
                         settings: settings,
                         vault: garminVault,
@@ -144,12 +139,6 @@ struct IPCACVRUnitApp: App {
                         Task {
                             await scheduledSessions.refresh(settings: settings)
                             await flightLogs.refresh(settings: settings)
-                            sdRecovery.refreshBookmarkState(settings: settings)
-                            _ = await sdRecovery.scanAndImportIfNeeded(
-                                settings: settings,
-                                vault: garminVault,
-                                workflow: workflowStore
-                            )
                             await garminSync.syncPending(
                                 settings: settings,
                                 vault: garminVault,

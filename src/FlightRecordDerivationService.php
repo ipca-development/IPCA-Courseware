@@ -461,7 +461,7 @@ final class FlightRecordDerivationService
         $stmt = $this->pdo->prepare('
             SELECT v.exact_hobbs_duration_ms, v.exact_tacho_duration_ms
             FROM ipca_operational_flight_record_versions v
-            WHERE CAST(JSON_UNQUOTE(JSON_EXTRACT(v.summary_json, "$.csv_file_id")) AS UNSIGNED) = ?
+            WHERE CAST(JSON_UNQUOTE(JSON_EXTRACT(v.summary_json, \'$.csv_file_id\')) AS UNSIGNED) = ?
             ORDER BY v.id DESC
             LIMIT 1
         ');

@@ -34,25 +34,3 @@ struct GarminCsvVaultRecord: Identifiable, Codable, Equatable {
 struct GarminCsvVaultIndex: Codable, Equatable {
     var records: [GarminCsvVaultRecord] = []
 }
-
-struct GarminSDCardScanSummary: Equatable {
-    var scannedAt: Date
-    var cardAvailable: Bool
-    var csvFilesScanned: Int
-    var dataRichFound: Int
-    var gpsOnlySkipped: Int
-    var unreadableFiles: Int
-    var alreadyKnown: Int
-    var imported: Int
-    var matchedFlightRecord: Bool
-    var message: String
-}
-
-struct GarminSDCardCandidate: Equatable {
-    var fileURL: URL
-    var filename: String
-    var relativePath: String
-    var metadata: G3XFlightStreamMetadata
-    var classification: GarminCsvClassification
-    var modificationDate: Date?
-}

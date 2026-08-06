@@ -20,9 +20,10 @@ struct AdminRecordingsView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("\(selectedDeletableRecordings.count) selected")
                                     .font(.headline)
+                                    .foregroundStyle(CVROperationalPalette.textPrimary)
                                 Text("\(format(bytes: selectedLocalStorageBytes)) will be freed from this iPhone")
                                     .font(.caption)
-                                    .foregroundStyle(IPCATheme.secondaryText)
+                                    .foregroundStyle(CVROperationalPalette.textSecondary)
                             }
                             Spacer()
                             Button(isAllSelected ? "Clear" : "Select All") {
@@ -33,8 +34,10 @@ struct AdminRecordingsView: View {
                                 isBulkDeleteConfirmationPresented = true
                             }
                             .disabled(selectedDeletableRecordings.isEmpty)
+                            .tint(CVROperationalPalette.critical)
                         }
                     }
+                    .cvrAdminListRowStyle()
                 }
 
                 ForEach(store.recordings) { recording in
@@ -42,18 +45,21 @@ struct AdminRecordingsView: View {
                         HStack {
                             Toggle("", isOn: selectionBinding(for: recording))
                                 .labelsHidden()
+                                .tint(CVROperationalPalette.primaryBlue)
                                 .disabled(recording.uploadStatus == .uploading)
 
                             Text(recording.startedAt, style: .date)
                                 .font(.headline)
+                                .foregroundStyle(CVROperationalPalette.textPrimary)
                             Text(recording.startedAt, style: .time)
                                 .font(.headline)
+                                .foregroundStyle(CVROperationalPalette.textPrimary)
                             Spacer()
                             IPCAStatusPill(text: recording.statusLabel, color: statusColor(recording))
                         }
 
                         Text(recording.aircraftLabel)
-                            .foregroundStyle(IPCATheme.secondaryText)
+                            .foregroundStyle(CVROperationalPalette.textSecondary)
 
                         HStack {
                             Text("Duration \(format(duration: recording.duration))")
@@ -61,7 +67,7 @@ struct AdminRecordingsView: View {
                             Text(recording.inputDeviceName)
                         }
                         .font(.caption)
-                        .foregroundStyle(IPCATheme.secondaryText)
+                        .foregroundStyle(CVROperationalPalette.textSecondary)
 
                         ProgressView(value: recording.uploadProgress)
                             .tint(statusColor(recording))
@@ -69,7 +75,11 @@ struct AdminRecordingsView: View {
                         if !recording.lastError.isEmpty {
                             Text(recording.lastError)
                                 .font(.caption)
-                                .foregroundStyle(recording.uploadStatus == .failed ? IPCATheme.danger : IPCATheme.secondaryText)
+                                .foregroundStyle(
+                                    recording.uploadStatus == .failed
+                                        ? CVROperationalPalette.critical
+                                        : CVROperationalPalette.textSecondary
+                                )
                         }
 
                         HStack {
@@ -83,17 +93,20 @@ struct AdminRecordingsView: View {
                                 isDeleteConfirmationPresented = true
                             }
                             .disabled(recording.uploadStatus == .uploading)
+                            .tint(CVROperationalPalette.critical)
 
                             Text(recording.filePath)
                                 .font(.caption2)
-                                .foregroundStyle(IPCATheme.secondaryText)
+                                .foregroundStyle(CVROperationalPalette.textSecondary)
                                 .lineLimit(1)
                         }
                     }
                     .padding(.vertical, 6)
+                    .cvrAdminListRowStyle()
                 }
             }
-            .navigationTitle("Permanent Recordings")
+            .cvrAdminListChrome()
+            .cvrAdminScreenChrome(title: "Permanent Recordings")
             .toolbar {
                 Button("Upload Pending") {
                     uploadManager.uploadPending(store: store, settings: settings, network: network)
@@ -187,15 +200,15 @@ struct AdminRecordingsView: View {
 
     private func statusColor(_ recording: Recording) -> Color {
         if recording.uploadStatus == .uploaded && recording.transcriptStatus == .ready {
-            return IPCATheme.success
+            return CVROperationalPalette.success
         }
         if recording.uploadStatus == .failed || recording.transcriptStatus == .failed {
-            return IPCATheme.danger
+            return CVROperationalPalette.critical
         }
         if recording.uploadStatus == .uploading || recording.transcriptStatus == .transcribing {
-            return IPCATheme.brightBlue
+            return CVROperationalPalette.secondaryBlue
         }
-        return IPCATheme.warning
+        return CVROperationalPalette.warning
     }
 
     private func format(duration: TimeInterval) -> String {

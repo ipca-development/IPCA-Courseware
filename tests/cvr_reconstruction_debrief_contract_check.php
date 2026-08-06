@@ -214,6 +214,10 @@ $checks['AI evidence sanitizer only allows CVR evidence types'] =
     && ($refs[2]['type'] ?? '') === 'transcript'
     && ($refs[3]['type'] ?? '') === 'garmin';
 
+$checks['flight record continuity JSON path uses MySQL string quotes'] =
+    str_contains($derivationService, "JSON_EXTRACT(v.summary_json, \\'$.csv_file_id\\')")
+    && !str_contains($derivationService, 'JSON_EXTRACT(v.summary_json, "$.csv_file_id")');
+
 $failed = array();
 foreach ($checks as $name => $passed) {
     echo ($passed ? 'PASS' : 'FAIL') . ' ' . $name . PHP_EOL;

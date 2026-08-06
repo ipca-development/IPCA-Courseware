@@ -2,6 +2,32 @@ import Combine
 import Foundation
 import Security
 
+/// Balances `startAccessingSecurityScopedResource()` / `stopAccessingSecurityScopedResource()`
+/// for the Garmin SD card folder bookmark. Callers must call `stop()` once finished;
+/// `deinit` stops automatically as a safety net so access is never leaked.
+final class GarminSDCardAccessToken {
+    let url: URL
+    private var didStartAccess: Bool
+    private var isStopped = false
+
+    fileprivate init(url: URL, didStartAccess: Bool) {
+        self.url = url
+        self.didStartAccess = didStartAccess
+    }
+
+    func stop() {
+        guard !isStopped else { return }
+        isStopped = true
+        if didStartAccess {
+            url.stopAccessingSecurityScopedResource()
+        }
+    }
+
+    deinit {
+        stop()
+    }
+}
+
 @MainActor
 final class SettingsStore: ObservableObject {
     @Published var serverURL: String {
@@ -58,9 +84,13 @@ final class SettingsStore: ObservableObject {
         didSet { UserDefaults.standard.set(operationalIdentityCanonicalWriteEnabled, forKey: Keys.operationalIdentityCanonicalWriteEnabled) }
     }
 
+    /// Garmin SD Card folder bookmark metadata. The bookmark `Data` itself lives only in
+    /// UserDefaults (see `Keys.garminSDCardBookmark`) — never published directly.
     @Published private(set) var garminSDCardFolderLabel: String = ""
-    @Published private(set) var garminSDCardSetupMessage: String = ""
-    @Published private(set) var garminSDCardLastAccessError: String = ""
+    @Published private(set) var garminSDCardVolumeName: String = ""
+    @Published private(set) var garminSDCardConfiguredAt: Date?
+    @Published private(set) var garminSDCardAssociatedTail: String = ""
+    @Published private(set) var bookmarkIsStale: Bool = false
 
     @Published private(set) var aircraft: [CockpitAircraft] = []
     @Published private(set) var aircraftError: String = ""
@@ -89,173 +119,15 @@ final class SettingsStore: ObservableObject {
         garminVaultMaxMegabytes = UserDefaults.standard.object(forKey: Keys.garminVaultMaxMegabytes) as? Int ?? 500
         operationalIdentityCanonicalWriteEnabled =
             UserDefaults.standard.object(forKey: Keys.operationalIdentityCanonicalWriteEnabled) as? Bool ?? false
-        garminSDCardFolderLabel = UserDefaults.standard.string(forKey: Keys.garminSDCardFolderLabel) ?? ""
         deviceEnrollmentStatus = Self.keychainValue(for: Keys.deviceCredential) == nil ? "Not enrolled" : "Enrolled"
+        garminSDCardFolderLabel = UserDefaults.standard.string(forKey: Keys.garminSDCardFolderLabel) ?? ""
+        garminSDCardVolumeName = UserDefaults.standard.string(forKey: Keys.garminSDCardVolumeName) ?? ""
+        garminSDCardConfiguredAt = UserDefaults.standard.object(forKey: Keys.garminSDCardConfiguredAt) as? Date
+        garminSDCardAssociatedTail = UserDefaults.standard.string(forKey: Keys.garminSDCardAssociatedTail) ?? ""
     }
 
     var garminVaultMaxBytes: Int64 {
         Int64(max(50, garminVaultMaxMegabytes)) * 1024 * 1024
-    }
-
-    var garminSDCardBookmarkData: Data? {
-        UserDefaults.standard.data(forKey: Keys.garminSDCardBookmark)
-    }
-
-    func setGarminSDCardFolder(_ url: URL) {
-        garminSDCardSetupMessage = ""
-        garminSDCardLastAccessError = ""
-
-        let accessed = url.startAccessingSecurityScopedResource()
-        defer {
-            if accessed {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        do {
-            // Apple requires .minimalBookmark for persistent access to directories
-            // selected by UIDocumentPickerViewController on iOS.
-            let bookmark = try url.bookmarkData(
-                options: .minimalBookmark,
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            )
-            var stale = false
-            let resolved = try URL(
-                resolvingBookmarkData: bookmark,
-                options: [],
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            )
-            let verifiedAccess = resolved.startAccessingSecurityScopedResource()
-            defer {
-                if verifiedAccess {
-                    resolved.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else {
-                throw GarminSDCardSetupError.folderNotReadable
-            }
-
-            UserDefaults.standard.set(bookmark, forKey: Keys.garminSDCardBookmark)
-            garminSDCardFolderLabel = friendlyGarminSDCardLabel(for: url)
-            UserDefaults.standard.set(garminSDCardFolderLabel, forKey: Keys.garminSDCardFolderLabel)
-            garminSDCardSetupMessage = stale
-                ? "Folder saved, but iOS marked the bookmark stale. If scans fail, re-select the folder with the card inserted."
-                : "SD card folder saved and verified."
-        } catch {
-            UserDefaults.standard.removeObject(forKey: Keys.garminSDCardBookmark)
-            garminSDCardFolderLabel = ""
-            UserDefaults.standard.removeObject(forKey: Keys.garminSDCardFolderLabel)
-            garminSDCardSetupMessage = (error as? GarminSDCardSetupError)?.message
-                ?? "Could not save SD card folder access: \(error.localizedDescription)"
-        }
-    }
-
-    func clearGarminSDCardFolder() {
-        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardBookmark)
-        garminSDCardFolderLabel = ""
-        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardFolderLabel)
-        garminSDCardSetupMessage = ""
-        garminSDCardLastAccessError = ""
-    }
-
-    func resolvedGarminSDCardRootURL() -> URL? {
-        resolveGarminSDCardBookmark()?.url
-    }
-
-    var garminSDCardBookmarkIsStale: Bool {
-        resolveGarminSDCardBookmark()?.isStale ?? false
-    }
-
-    struct GarminSDCardAccess {
-        let url: URL
-        let stop: () -> Void
-
-        func stopAccess() {
-            stop()
-        }
-    }
-
-    func beginGarminSDCardAccess() -> GarminSDCardAccess? {
-        garminSDCardLastAccessError = ""
-        guard let resolved = resolveGarminSDCardBookmark() else {
-            garminSDCardLastAccessError = "Could not resolve the saved folder bookmark."
-            return nil
-        }
-
-        let url = resolved.url
-        let started = url.startAccessingSecurityScopedResource()
-        var isDirectory: ObjCBool = false
-        let readable = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
-
-        guard readable else {
-            if started {
-                url.stopAccessingSecurityScopedResource()
-            }
-            if resolved.isStale {
-                garminSDCardLastAccessError = "The saved folder bookmark is stale. Re-select the Garmin folder with the SD card inserted."
-            } else if started {
-                garminSDCardLastAccessError = "The saved folder path is not available. Insert the SD card and re-select the folder in Admin."
-            } else {
-                garminSDCardLastAccessError = "Security-scoped access to the SD card folder was denied. Re-select the folder in Admin with the card inserted."
-            }
-            return nil
-        }
-
-        return GarminSDCardAccess(url: url) {
-            if started {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-    }
-
-    private enum GarminSDCardSetupError: LocalizedError {
-        case folderNotReadable
-
-        var message: String {
-            switch self {
-            case .folderNotReadable:
-                return "The selected folder could not be read. Keep the SD card inserted and try again."
-            }
-        }
-    }
-
-    private func resolveGarminSDCardBookmark() -> (url: URL, isStale: Bool)? {
-        guard let bookmark = garminSDCardBookmarkData else { return nil }
-        var stale = false
-
-        if let url = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: [],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        ) {
-            return (url, stale)
-        }
-
-        stale = false
-        if let url = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: [.withoutImplicitStartAccessing],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        ) {
-            return (url, stale)
-        }
-
-        return nil
-    }
-
-    private func friendlyGarminSDCardLabel(for url: URL) -> String {
-        let components = url.pathComponents.filter { $0 != "/" }
-        if components.count >= 2 {
-            return components.suffix(2).joined(separator: "/")
-        }
-        return url.lastPathComponent.isEmpty ? url.path : url.lastPathComponent
     }
 
     var normalizedServerURL: URL? {
@@ -368,6 +240,129 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    // MARK: - Garmin SD Card Folder Bookmark
+
+    var hasGarminSDCardFolderConfigured: Bool {
+        UserDefaults.standard.data(forKey: Keys.garminSDCardBookmark) != nil
+    }
+
+    var garminSDCardFolderDisplayInfo: GarminExternalFolderDisplayInfo? {
+        guard hasGarminSDCardFolderConfigured else { return nil }
+        return GarminExternalFolderDisplayInfo(
+            folderName: garminSDCardFolderLabel,
+            volumeName: garminSDCardVolumeName,
+            configuredAt: garminSDCardConfiguredAt,
+            associatedTail: garminSDCardAssociatedTail
+        )
+    }
+
+    /// Verifies the selected folder (resolve, access, is-directory, one enumeration pass)
+    /// before persisting. The previously configured bookmark is left untouched until the
+    /// new selection is fully verified, so a bad pick never destroys a working configuration.
+    @discardableResult
+    func setGarminSDCardFolder(_ url: URL) -> Result<GarminExternalFolderDisplayInfo, GarminExternalFolderAccessError> {
+        let accessedNow = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessedNow {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        var isDirectoryFlag: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectoryFlag), isDirectoryFlag.boolValue else {
+            return .failure(.verificationFailed("The selected item is not a folder."))
+        }
+
+        let bookmarkData: Data
+        do {
+            bookmarkData = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        } catch {
+            return .failure(.verificationFailed("Could not create a persistent bookmark: \(error.localizedDescription)"))
+        }
+
+        // Round-trip through bookmark resolution to verify future access will work,
+        // and enumerate once to confirm the folder is actually readable.
+        var isStale = false
+        let resolvedURL: URL
+        do {
+            resolvedURL = try URL(resolvingBookmarkData: bookmarkData, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale)
+        } catch {
+            return .failure(.verificationFailed("Could not verify access to the selected folder."))
+        }
+        let resolvedAccessed = resolvedURL.startAccessingSecurityScopedResource()
+        defer {
+            if resolvedAccessed {
+                resolvedURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        guard (try? FileManager.default.contentsOfDirectory(
+            at: resolvedURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) != nil else {
+            return .failure(.verificationFailed("Could not read the contents of the selected folder."))
+        }
+
+        let volumeName = (try? resolvedURL.resourceValues(forKeys: [.volumeNameKey]))?.volumeName
+            ?? resolvedURL.deletingLastPathComponent().lastPathComponent
+        let label = url.lastPathComponent
+        let tail = selectedAircraft?.registration.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let now = Date()
+
+        UserDefaults.standard.set(bookmarkData, forKey: Keys.garminSDCardBookmark)
+        UserDefaults.standard.set(label, forKey: Keys.garminSDCardFolderLabel)
+        UserDefaults.standard.set(volumeName, forKey: Keys.garminSDCardVolumeName)
+        UserDefaults.standard.set(now, forKey: Keys.garminSDCardConfiguredAt)
+        UserDefaults.standard.set(tail, forKey: Keys.garminSDCardAssociatedTail)
+
+        garminSDCardFolderLabel = label
+        garminSDCardVolumeName = volumeName
+        garminSDCardConfiguredAt = now
+        garminSDCardAssociatedTail = tail
+        bookmarkIsStale = false
+
+        return .success(GarminExternalFolderDisplayInfo(
+            folderName: label,
+            volumeName: volumeName,
+            configuredAt: now,
+            associatedTail: tail
+        ))
+    }
+
+    func clearGarminSDCardFolder() {
+        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardBookmark)
+        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardFolderLabel)
+        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardVolumeName)
+        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardConfiguredAt)
+        UserDefaults.standard.removeObject(forKey: Keys.garminSDCardAssociatedTail)
+        garminSDCardFolderLabel = ""
+        garminSDCardVolumeName = ""
+        garminSDCardConfiguredAt = nil
+        garminSDCardAssociatedTail = ""
+        bookmarkIsStale = false
+    }
+
+    /// Resolves the persisted bookmark and starts security-scoped access. Callers MUST call
+    /// `stop()` on the returned token (via `defer`) to balance start/stop access.
+    func beginGarminSDCardAccess() throws -> GarminSDCardAccessToken {
+        guard let bookmarkData = UserDefaults.standard.data(forKey: Keys.garminSDCardBookmark) else {
+            throw GarminExternalFolderAccessError.notConfigured
+        }
+        var isStale = false
+        let resolvedURL: URL
+        do {
+            resolvedURL = try URL(resolvingBookmarkData: bookmarkData, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale)
+        } catch {
+            bookmarkIsStale = true
+            throw GarminExternalFolderAccessError.accessNeedsRestoration
+        }
+        bookmarkIsStale = isStale
+        guard resolvedURL.startAccessingSecurityScopedResource() else {
+            throw GarminExternalFolderAccessError.accessNeedsRestoration
+        }
+        return GarminSDCardAccessToken(url: resolvedURL, didStartAccess: true)
+    }
+
     private static func normalizedOrigin(from rawValue: String) -> URL? {
         var raw = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         raw = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -439,13 +434,16 @@ final class SettingsStore: ObservableObject {
         static let adminPIN = "ipca.cvrUnit.adminPIN"
         static let postRecordingGainDB = "ipca.cvrUnit.postRecordingGainDB"
         static let isSimulationModeEnabled = "ipca.cvrUnit.isSimulationModeEnabled"
-        static let garminSDCardBookmark = "ipca.cvrUnit.garminSDCardBookmark"
-        static let garminSDCardFolderLabel = "ipca.cvrUnit.garminSDCardFolderLabel"
         static let garminVaultRetentionDays = "ipca.cvrUnit.garminVaultRetentionDays"
         static let garminVaultMaxMegabytes = "ipca.cvrUnit.garminVaultMaxMegabytes"
         static let operationalIdentityCanonicalWriteEnabled = "ipca.cvrUnit.operationalIdentityCanonicalWriteEnabled"
         static let deviceUUID = "ipca.cvrUnit.deviceUUID"
         static let deviceCredential = "ipca.cvrUnit.deviceCredential"
+        static let garminSDCardBookmark = "ipca.cvrUnit.garminSDCardBookmark"
+        static let garminSDCardFolderLabel = "ipca.cvrUnit.garminSDCardFolderLabel"
+        static let garminSDCardVolumeName = "ipca.cvrUnit.garminSDCardVolumeName"
+        static let garminSDCardConfiguredAt = "ipca.cvrUnit.garminSDCardConfiguredAt"
+        static let garminSDCardAssociatedTail = "ipca.cvrUnit.garminSDCardAssociatedTail"
     }
 
     private static let keychainService = "training.ipca.cvr-unit"

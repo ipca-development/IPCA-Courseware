@@ -656,6 +656,11 @@ struct CVRPendingGarminCSV: Identifiable, Equatable {
     var id: String
     var fileURL: URL
     var originalFilename: String
+    var sha256: String
+    /// Preserved once the instructor associates the CSV with a Log flight.
+    var targetFlightRecordID: String?
+    var stagedAt: Date
+    var lastFailureMessage: String?
 }
 
 @MainActor
@@ -669,7 +674,24 @@ final class CVRFlightLogStore: ObservableObject {
     @Published var pendingGarminCSV: CVRPendingGarminCSV?
     @Published private(set) var locallyAttachedGarminFlightRecordIDs: Set<String> = []
 
+    private static let syncFirstMessage =
+        "The Garmin file is stored on this device. Synchronize the flight first, then retry. You will not need to select the file again."
+
+    init() {
+        restorePendingGarminImport()
+    }
+
+    /// Reloads durable pending Garmin state before Log becomes interactive.
+    func preparePendingGarminImportForLog() {
+        if pendingGarminCSV == nil {
+            restorePendingGarminImport()
+        } else if let pending = pendingGarminCSV, let flightID = pending.targetFlightRecordID {
+            locallyAttachedGarminFlightRecordIDs.insert(flightID)
+        }
+    }
+
     func refresh(settings: SettingsStore) async {
+        preparePendingGarminImportForLog()
         guard let baseURL = settings.normalizedServerURL,
               let credential = settings.deviceCredential,
               !credential.isEmpty else {
@@ -689,7 +711,15 @@ final class CVRFlightLogStore: ObservableObject {
                 }
                 return $0.scheduledDate > $1.scheduledDate
             }
-            lastError = ""
+            if lastError == Self.syncFirstMessage
+                || lastError.localizedCaseInsensitiveContains("Garmin file") {
+                // Keep operational Garmin recovery messaging across refresh.
+            } else {
+                lastError = ""
+            }
+            if let pending = pendingGarminCSV, let message = pending.lastFailureMessage, !message.isEmpty {
+                lastError = message
+            }
         } catch is CancellationError {
             return
         } catch let error as URLError where error.code == .cancelled {
@@ -715,14 +745,42 @@ final class CVRFlightLogStore: ObservableObject {
             guard !data.isEmpty else {
                 throw APIClientError.badResponse("The selected CSV file is empty.")
             }
-            let directory = try pendingDirectory()
-            let fileID = UUID().uuidString
+
+            // Stage the CSV file first.
+            let directory = try CVRPendingGarminPersistence.importsDirectory()
+            let fileID = UUID().uuidString.lowercased()
+            let relativePath = CVRPendingGarminPersistence.relativePath(forImportID: fileID)
             let destination = directory.appendingPathComponent("\(fileID).csv")
             try data.write(to: destination, options: [.atomic])
-            pendingGarminCSV = CVRPendingGarminCSV(
+            let digest = CVRPendingGarminPersistence.sha256Hex(of: data)
+            let stagedAt = Date()
+            let metadata = CVRPendingGarminMetadata(
                 id: fileID,
+                relativeFilePath: relativePath,
+                originalFilename: sourceURL.lastPathComponent,
+                sha256: digest,
+                targetFlightRecordID: nil,
+                stagedAt: stagedAt,
+                lastFailureMessage: nil
+            )
+
+            // Persist metadata atomically and decode-verify before exposing UI pending state.
+            let verified: CVRPendingGarminMetadata
+            do {
+                verified = try CVRPendingGarminPersistence.writeMetadata(metadata)
+            } catch {
+                lastError = "The Garmin file was copied to this device, but it is not ready for retry yet. Try selecting the file again."
+                return false
+            }
+
+            pendingGarminCSV = CVRPendingGarminCSV(
+                id: verified.id,
                 fileURL: destination,
-                originalFilename: sourceURL.lastPathComponent
+                originalFilename: verified.originalFilename,
+                sha256: verified.sha256,
+                targetFlightRecordID: verified.targetFlightRecordID,
+                stagedAt: verified.stagedAt,
+                lastFailureMessage: verified.lastFailureMessage
             )
             lastError = ""
             return true
@@ -737,39 +795,87 @@ final class CVRFlightLogStore: ObservableObject {
         settings: SettingsStore,
         uploadManager: UploadManager
     ) async {
-        guard let pendingGarminCSV else { return }
+        guard var pending = pendingGarminCSV else { return }
+        pending.targetFlightRecordID = entry.flightRecordID
+        do {
+            try persistPendingAssociation(pending, failureMessage: pending.lastFailureMessage)
+        } catch {
+            lastError = "The Garmin file is on this device, but the flight association could not be saved for retry."
+            return
+        }
+        pendingGarminCSV = pending
+        locallyAttachedGarminFlightRecordIDs.insert(entry.flightRecordID)
         isUploading = true
         uploadProgress = 0
         defer { isUploading = false }
         do {
             try await uploadManager.uploadGarminCSVAttachment(
-                fileURL: pendingGarminCSV.fileURL,
-                originalFilename: pendingGarminCSV.originalFilename,
+                fileURL: pending.fileURL,
+                originalFilename: pending.originalFilename,
                 flightRecordID: entry.flightRecordID,
                 settings: settings
             ) { [weak self] progress in
                 self?.uploadProgress = progress
             }
-            locallyAttachedGarminFlightRecordIDs.insert(entry.flightRecordID)
             if let index = entries.firstIndex(where: { $0.flightRecordID == entry.flightRecordID }) {
                 entries[index].hasGarminCSV = true
             }
             uploadProgress = 1
             lastError = ""
             await refresh(settings: settings)
-            try? FileManager.default.removeItem(at: pendingGarminCSV.fileURL)
-            self.pendingGarminCSV = nil
+            clearPendingGarminAfterVerifiedSuccess(fileURL: pending.fileURL)
         } catch is CancellationError {
-            lastError = "Garmin CSV upload was interrupted. The file is still ready to retry."
+            await preservePendingFailure(
+                pending,
+                message: "Garmin CSV upload was interrupted. The file is still ready to retry."
+            )
         } catch let error as URLError where error.code == .cancelled {
-            lastError = "Garmin CSV upload was interrupted. The file is still ready to retry."
+            await preservePendingFailure(
+                pending,
+                message: "Garmin CSV upload was interrupted. The file is still ready to retry."
+            )
         } catch {
-            lastError = "Garmin CSV upload failed: \(error.localizedDescription)"
+            let message = error.localizedDescription
+            let operational: String
+            if message.localizedCaseInsensitiveContains("does not belong")
+                || message.localizedCaseInsensitiveContains("could not be linked")
+                || message.localizedCaseInsensitiveContains("dispatch") {
+                operational = Self.syncFirstMessage
+            } else if message.localizedCaseInsensitiveContains("another")
+                && message.localizedCaseInsensitiveContains("aircraft") {
+                operational = "This Garmin file could not be attached to the selected flight for this aircraft. The file remains on this device for correction."
+            } else {
+                operational = Self.syncFirstMessage
+            }
+            await preservePendingFailure(pending, message: operational)
         }
+    }
+
+    /// Retries a preserved pending Garmin finalize after Dispatch/workflow sync catches up.
+    func retryPendingGarminCSV(
+        settings: SettingsStore,
+        uploadManager: UploadManager
+    ) async {
+        preparePendingGarminImportForLog()
+        guard let pending = pendingGarminCSV,
+              let flightRecordID = pending.targetFlightRecordID else {
+            if pendingGarminCSV != nil {
+                lastError = Self.syncFirstMessage
+            }
+            return
+        }
+        if let entry = entries.first(where: { $0.flightRecordID == flightRecordID }) {
+            await uploadPendingGarminCSV(to: entry, settings: settings, uploadManager: uploadManager)
+            return
+        }
+        // Flight not yet visible in Log — keep pending; do not clear or re-stage.
+        lastError = Self.syncFirstMessage
+        await preservePendingFailure(pending, message: Self.syncFirstMessage)
     }
 
     func hasLocallyAttachedGarminCSV(flightRecordID: String) -> Bool {
         locallyAttachedGarminFlightRecordIDs.contains(flightRecordID)
+            || pendingGarminCSV?.targetFlightRecordID == flightRecordID
     }
 
     func retryServerProcessing(_ entry: CVRFlightLogEntry, settings: SettingsStore) async {
@@ -798,6 +904,69 @@ final class CVRFlightLogStore: ObservableObject {
         if let fileURL = pendingGarminCSV?.fileURL {
             try? FileManager.default.removeItem(at: fileURL)
         }
+        try? CVRPendingGarminPersistence.clearMetadata()
+        pendingGarminCSV = nil
+        uploadProgress = 0
+    }
+
+    private func restorePendingGarminImport() {
+        let result = CVRPendingGarminPersistence.restorePending()
+        if let metadata = result.metadata, let fileURL = result.fileURL {
+            pendingGarminCSV = CVRPendingGarminCSV(
+                id: metadata.id,
+                fileURL: fileURL,
+                originalFilename: metadata.originalFilename,
+                sha256: metadata.sha256,
+                targetFlightRecordID: metadata.targetFlightRecordID,
+                stagedAt: metadata.stagedAt,
+                lastFailureMessage: metadata.lastFailureMessage
+            )
+            if let flightID = metadata.targetFlightRecordID {
+                locallyAttachedGarminFlightRecordIDs.insert(flightID)
+            }
+            if let message = result.recoveryMessage, !message.isEmpty {
+                lastError = message
+            }
+            return
+        }
+        pendingGarminCSV = nil
+        if let message = result.recoveryMessage, !message.isEmpty {
+            lastError = message
+        }
+    }
+
+    private func persistPendingAssociation(
+        _ pending: CVRPendingGarminCSV,
+        failureMessage: String?
+    ) throws {
+        let metadata = CVRPendingGarminMetadata(
+            id: pending.id,
+            relativeFilePath: CVRPendingGarminPersistence.relativePath(forImportID: pending.id),
+            originalFilename: pending.originalFilename,
+            sha256: pending.sha256,
+            targetFlightRecordID: pending.targetFlightRecordID,
+            stagedAt: pending.stagedAt,
+            lastFailureMessage: failureMessage
+        )
+        _ = try CVRPendingGarminPersistence.writeMetadata(metadata)
+    }
+
+    private func preservePendingFailure(_ pending: CVRPendingGarminCSV, message: String) async {
+        var updated = pending
+        updated.lastFailureMessage = message
+        do {
+            try persistPendingAssociation(updated, failureMessage: message)
+            pendingGarminCSV = updated
+            lastError = message
+        } catch {
+            pendingGarminCSV = updated
+            lastError = message
+        }
+    }
+
+    private func clearPendingGarminAfterVerifiedSuccess(fileURL: URL) {
+        try? CVRPendingGarminPersistence.clearMetadata()
+        try? FileManager.default.removeItem(at: fileURL)
         pendingGarminCSV = nil
         uploadProgress = 0
     }
@@ -895,17 +1064,5 @@ final class CVRFlightLogStore: ObservableObject {
             lastError = "Flight log adjustment failed: \(error.localizedDescription)"
             return false
         }
-    }
-
-    private func pendingDirectory() throws -> URL {
-        let support = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let directory = support.appendingPathComponent("PendingGarminImports", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
     }
 }

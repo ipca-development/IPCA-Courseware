@@ -360,3 +360,65 @@ struct CVROperationalActionButton: View {
         .contentShape(RoundedRectangle(cornerRadius: 17))
     }
 }
+
+/// Dark section card matching operational workflow panels (Admin / diagnostics).
+struct CVROperationalSectionCard<Content: View>: View {
+    var title: String
+    var systemImage: String? = nil
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                }
+                Text(title.uppercased())
+                    .font(.caption.weight(.bold))
+                    .tracking(1.2)
+                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                Spacer(minLength: 0)
+            }
+            content
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(CVROperationalPalette.textPrimary)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+    }
+}
+
+extension View {
+    /// Navigation + page chrome for Admin screens (matches operational dark UI).
+    func cvrAdminScreenChrome(title: String) -> some View {
+        self
+            .background(CVROperationalPalette.background.ignoresSafeArea())
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(CVROperationalPalette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .tint(CVROperationalPalette.secondaryBlue)
+            .preferredColorScheme(.dark)
+    }
+
+    /// List / Form rows on Admin screens: dark card cells, not system white panels.
+    func cvrAdminListRowStyle() -> some View {
+        self
+            .listRowBackground(CVROperationalPalette.cardBackground)
+            .listRowSeparatorTint(CVROperationalPalette.cardBorder)
+            .foregroundStyle(CVROperationalPalette.textPrimary)
+    }
+
+    func cvrAdminListChrome() -> some View {
+        self
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(CVROperationalPalette.background)
+            .tint(CVROperationalPalette.secondaryBlue)
+            .preferredColorScheme(.dark)
+    }
+}
