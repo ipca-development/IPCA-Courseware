@@ -14,6 +14,30 @@ $id = $isPublicReplay
     ? (string)(defined('IPCA_PUBLIC_REPLAY_RECORDING_ID') ? IPCA_PUBLIC_REPLAY_RECORDING_ID : '')
     : trim((string)($_GET['id'] ?? ''));
 $standaloneReplay = trim((string)($_GET['standalone'] ?? ''));
+$replayBackHref = '/admin/cockpit_recorder.php';
+$replayBackLabel = 'Back to cockpit recorder';
+if (!$isPublicReplay) {
+    $requestedReturn = trim((string)($_GET['return'] ?? ''));
+    if ($requestedReturn !== '' && str_starts_with($requestedReturn, '/admin/')) {
+        $returnPath = parse_url($requestedReturn, PHP_URL_PATH);
+        $allowedReturnPrefixes = array(
+            '/admin/master_logbook.php',
+            '/admin/cockpit_recorder.php',
+            '/admin/flight_log_garmin_connection.php',
+        );
+        foreach ($allowedReturnPrefixes as $prefix) {
+            if (is_string($returnPath) && $returnPath === $prefix) {
+                $replayBackHref = $requestedReturn;
+                if ($returnPath === '/admin/master_logbook.php') {
+                    $replayBackLabel = 'Back to Master Logbook';
+                } elseif ($returnPath === '/admin/flight_log_garmin_connection.php') {
+                    $replayBackLabel = 'Back to Garmin connection';
+                }
+                break;
+            }
+        }
+    }
+}
 $error = '';
 $recording = null;
 $cesiumIonToken = trim((string)(getenv('CW_CESIUM_ION_TOKEN') ?: getenv('CESIUM_ION_TOKEN') ?: ''));
@@ -2407,7 +2431,7 @@ if ($isPublicReplay) {
     <audio id="audio" preload="metadata"<?= $id !== '' ? ' src="/admin/cockpit_recorder_audio.php?id=' . h((string)$id) . '"' : '' ?>></audio>
     <div class="replay-dock" aria-label="Replay controls">
       <div class="replay-control-cluster">
-        <?php if (!$isPublicReplay): ?><a class="replay-icon-button" href="/admin/cockpit_recorder.php" aria-label="Back to cockpit recorder">←</a><?php endif; ?>
+        <?php if (!$isPublicReplay): ?><a class="replay-icon-button" href="<?= h($replayBackHref) ?>" aria-label="<?= h($replayBackLabel) ?>" title="<?= h($replayBackLabel) ?>">←</a><?php endif; ?>
         <button class="replay-icon-button" type="button" id="fullscreenButton" aria-label="Toggle full screen">⛶</button>
         <button class="replay-button replay-skip-button" type="button" id="rewindButton" aria-label="Rewind 10 seconds">↶10</button>
         <button class="replay-button replay-play-button" type="button" id="playButton" aria-label="Play replay">▶</button>

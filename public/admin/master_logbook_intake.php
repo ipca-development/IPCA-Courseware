@@ -1735,7 +1735,7 @@ cw_header('Master Logbook');
                     <span>Details</span>
                   </button>
                   <?php if ($replayReady): ?>
-                    <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>" data-legs-stop>
+                    <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>&amp;return=<?= rawurlencode('/admin/master_logbook.php?tab=dispatch') ?>" data-legs-stop>
                       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
                       <span>Replay</span>
                     </a>
@@ -2113,7 +2113,7 @@ cw_header('Master Logbook');
                 <?php if ($bundleReplayReady): ?>
                   <a
                     class="intake-button"
-                    href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode((string)$bundle['recording_uid']) ?>"
+                    href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode((string)$bundle['recording_uid']) ?>&amp;return=<?= rawurlencode('/admin/master_logbook.php?tab=reconstruction') ?>"
                     style="display:inline-block;text-decoration:none"
                   >Open Replay</a>
                 <?php endif; ?>
