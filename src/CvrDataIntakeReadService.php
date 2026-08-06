@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
 require_once __DIR__ . '/CvrOperationalBlockTimeService.php';
+require_once __DIR__ . '/CvrOperationalLegVisibilityService.php';
 
 final class CvrDataIntakeReadService
 {
@@ -14,6 +15,7 @@ final class CvrDataIntakeReadService
 
     private ?CvrOperationalIdentityReadService $identityRead = null;
     private ?CvrOperationalBlockTimeService $blockTimes = null;
+    private ?CvrOperationalLegVisibilityService $visibility = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -27,6 +29,11 @@ final class CvrDataIntakeReadService
     private function blockTimes(): CvrOperationalBlockTimeService
     {
         return $this->blockTimes ??= new CvrOperationalBlockTimeService();
+    }
+
+    private function visibility(): CvrOperationalLegVisibilityService
+    {
+        return $this->visibility ??= new CvrOperationalLegVisibilityService($this->pdo);
     }
 
     /**
@@ -47,7 +54,9 @@ final class CvrDataIntakeReadService
         ?string $aircraftRegistration = null,
         ?string $dateFromLocal = null,
         ?string $dateToLocal = null,
-        string $timezone = 'America/Los_Angeles'
+        string $timezone = 'America/Los_Angeles',
+        bool $includeHidden = false,
+        bool $onlyHidden = false
     ): array {
         $table = $this->firstExistingTable(array('ipca_cvr_dispatches', 'ipca_cvr_dispatch_records'));
         if ($table === null) {
@@ -296,6 +305,19 @@ final class CvrDataIntakeReadService
             $where[] = "({$offBlockExpr}) < ?";
             $params[] = $toUtcExclusive;
         }
+        if ($this->tableExists('ipca_cvr_logbook_hidden_legs')) {
+            if ($onlyHidden) {
+                $where[] = "EXISTS (
+                    SELECT 1 FROM ipca_cvr_logbook_hidden_legs h
+                    WHERE h.dispatch_id = {$tableAlias}.id
+                )";
+            } elseif (!$includeHidden) {
+                $where[] = "NOT EXISTS (
+                    SELECT 1 FROM ipca_cvr_logbook_hidden_legs h
+                    WHERE h.dispatch_id = {$tableAlias}.id
+                )";
+            }
+        }
 
         $whereSql = implode(' AND ', $where);
         $orderSql = $offBlockExpr !== 'NULL'
@@ -335,8 +357,13 @@ final class CvrDataIntakeReadService
         $audioByFlight = $this->audioStatusByFlightRecord($flightKeys);
         $recordingByFlight = $this->recordingMetaByFlightRecord($flightKeys);
         $bundleByFlight = $this->reconstructionMetaByFlightRecord($flightKeys);
+        $hiddenIds = array();
+        if ($includeHidden || $onlyHidden) {
+            $hiddenIds = array_fill_keys($this->visibility()->hiddenDispatchIds(), true);
+        }
         $projected = array();
         foreach ($rows as $row) {
+            $row['is_hidden'] = $onlyHidden || isset($hiddenIds[(int)($row['id'] ?? 0)]);
             $row['on_block_utc'] = $this->blockTimes()->derivedOnBlockUtc($row);
             $row['engine_time_hours'] = $this->blockTimes()->engineTimeHours(
                 $row['starting_hobbs'] ?? null,

@@ -88,10 +88,13 @@ if ($localTimeFn === '' || !str_contains($localTimeFn, 'cvr_intake_california_ti
 }
 require_contains($page, '30 / page', 'pagination page size', $failures);
 require_contains($page, 'save_operational_leg', 'admin leg save action', $failures);
+require_contains($page, 'hide_operational_leg', 'soft remove action', $failures);
+require_contains($page, 'legs_show_removed', 'show removed filter', $failures);
 require_absent($page, 'Server Receipt', 'technical receipt column removed from operational legs table', $failures);
 require_contains($intake, 'oil_quantity', 'intake exposes oil departure quantity', $failures);
 require_contains($intake, 'has_garmin_csv', 'intake exposes garmin flight data flag', $failures);
 require_contains($intake, 'dateFromLocal', 'intake supports date-range filter', $failures);
+require_contains($intake, 'onlyHidden', 'intake supports soft-removed filter', $failures);
 require_contains($intake, 'recordingMetaByFlightRecord', 'intake batches recording ids for replay', $failures);
 
 require_contains($diag, 'Phase 4A operational discrepancy report', 'discrepancy diagnostic', $failures);

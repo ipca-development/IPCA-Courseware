@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../src/ManualReconstructionBundleService.php';
 require_once __DIR__ . '/../../src/FlightDebriefService.php';
 require_once __DIR__ . '/../../src/ReplayShareService.php';
 require_once __DIR__ . '/../../src/CvrAdminLegCorrectionService.php';
+require_once __DIR__ . '/../../src/CvrOperationalLegVisibilityService.php';
 require_once __DIR__ . '/../../src/CockpitRecorderDebriefQueueService.php';
 require_once __DIR__ . '/../../src/MissionCatalogService.php';
 require_once __DIR__ . '/../../src/AircraftOperationalConfigService.php';
@@ -253,6 +254,19 @@ try {
                 $actorUserId > 0 ? $actorUserId : null
             );
             $reconstructionNotice = 'Operational leg updated.';
+        } elseif ($action === 'hide_operational_leg') {
+            (new CvrOperationalLegVisibilityService($pdo))->hide(
+                (int)($_POST['dispatch_id'] ?? 0),
+                $actorUserId > 0 ? $actorUserId : null,
+                trim((string)($_POST['reason'] ?? '')) ?: 'Removed from Master Logbook list'
+            );
+            $reconstructionNotice = 'Operational leg removed from the list. Evidence is retained and can be restored.';
+        } elseif ($action === 'restore_operational_leg') {
+            (new CvrOperationalLegVisibilityService($pdo))->restore(
+                (int)($_POST['dispatch_id'] ?? 0),
+                $actorUserId > 0 ? $actorUserId : null
+            );
+            $reconstructionNotice = 'Operational leg restored to the list.';
         } elseif ($action === 'generate_bundle_debrief') {
             $bundleId = (int)($_POST['bundle_id'] ?? 0);
             if ($bundleId <= 0) {
@@ -274,6 +288,7 @@ try {
 $legsAircraftFilter = strtoupper(trim((string)($_GET['legs_aircraft'] ?? '')));
 $legsFrom = trim((string)($_GET['legs_from'] ?? ''));
 $legsTo = trim((string)($_GET['legs_to'] ?? ''));
+$legsShowRemoved = ((string)($_GET['legs_show_removed'] ?? '')) === '1';
 $legsPage = max(1, (int)($_GET['legs_page'] ?? 1));
 $legsLimit = 30;
 $legsOffset = ($legsPage - 1) * $legsLimit;
@@ -282,7 +297,10 @@ $dispatch = $intake->dispatchRows(
     $legsOffset,
     $legsAircraftFilter !== '' ? $legsAircraftFilter : null,
     $legsFrom !== '' ? $legsFrom : null,
-    $legsTo !== '' ? $legsTo : null
+    $legsTo !== '' ? $legsTo : null,
+    'America/Los_Angeles',
+    false,
+    $legsShowRemoved
 );
 $legsTotal = (int)($dispatch['total'] ?? count($dispatch['rows']));
 $legsPageCount = max(1, (int)($dispatch['page_count'] ?? 1));
@@ -812,6 +830,7 @@ function cvr_intake_legs_query(array $overrides = []): string
         'legs_aircraft' => (string)($GLOBALS['legsAircraftFilter'] ?? ''),
         'legs_from' => (string)($GLOBALS['legsFrom'] ?? ''),
         'legs_to' => (string)($GLOBALS['legsTo'] ?? ''),
+        'legs_show_removed' => !empty($GLOBALS['legsShowRemoved']) ? '1' : '',
         'legs_page' => (string)($GLOBALS['legsPage'] ?? '1'),
     ), $overrides);
     foreach ($params as $key => $value) {
@@ -1308,7 +1327,7 @@ a.intake-refresh:hover{
 .legs-table col.legs-col-meters{width:148px}
 .legs-table col.legs-col-fuel{width:150px}
 .legs-table col.legs-col-evidence{width:118px}
-.legs-table col.legs-col-actions{width:120px}
+.legs-table col.legs-col-actions{width:132px}
 .legs-table th{position:sticky;top:0;z-index:2;background:#f8fafc;padding:10px 14px;border-bottom:1px solid #e2e8f0;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#64748b;font-weight:800;text-align:left;white-space:nowrap}
 .legs-table td{padding:14px 14px;border-bottom:1px solid #e8eef5;vertical-align:top;color:#102845;overflow:visible}
 .legs-table tbody tr.legs-row{cursor:pointer;transition:background-color .12s ease,box-shadow .12s ease}
@@ -1355,6 +1374,14 @@ a.intake-refresh:hover{
 .legs-actions .app-btn-secondary{background:#fff;color:#102440;border:1px solid rgba(15,23,42,.12);box-shadow:none}
 .legs-actions .app-btn-secondary:hover{background:#f9fbfe;color:#102440}
 .legs-actions .app-btn.is-disabled,.legs-actions .app-btn:disabled{opacity:.45;cursor:not-allowed;pointer-events:none;transform:none;box-shadow:none}
+.legs-actions form{margin:0}
+.legs-actions .legs-btn-remove{color:#9a3412;border-color:rgba(154,52,18,.22)}
+.legs-actions .legs-btn-remove:hover{background:#fff7ed;color:#9a3412}
+.legs-show-removed{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#334155;white-space:nowrap;min-height:42px}
+.legs-show-removed input{width:16px;height:16px;margin:0}
+.legs-table tbody tr.legs-row.is-removed{background:#f8fafc;opacity:.92}
+.legs-table tbody tr.legs-row.is-removed:hover{background:#f1f5f9}
+.legs-removed-badge{display:inline-flex;align-items:center;margin-top:6px;padding:2px 8px;border-radius:999px;background:#fee2e2;color:#9f1239;font-size:10px;font-weight:800;letter-spacing:.02em;text-transform:uppercase}
 .legs-legend{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:10px;font-size:11px;color:#64748b;font-weight:700}
 .legs-num{font-weight:750;color:#334155}
 .legs-blank{color:#cbd5e1;font-weight:700}
@@ -1583,18 +1610,25 @@ a.intake-refresh:hover{
         <label>To
           <input class="intake-select" type="date" name="legs_to" value="<?= cvr_intake_h($legsTo) ?>">
         </label>
+        <label class="legs-show-removed" title="Soft-removed legs keep all evidence and can be restored">
+          <input type="checkbox" name="legs_show_removed" value="1" <?= $legsShowRemoved ? 'checked' : '' ?> onchange="this.form.submit()">
+          Show removed
+        </label>
         <button class="app-btn app-btn-primary" type="submit">Apply</button>
         <a class="app-btn app-btn-secondary" href="/admin/master_logbook.php?tab=dispatch">Clear</a>
       </div>
       <div class="intake-muted">
         Showing <?= $legsTotal === 0 ? 0 : (($legsPage - 1) * $legsLimit + 1) ?>–<?= min($legsTotal, $legsPage * $legsLimit) ?>
         of <?= (int)$legsTotal ?> · 30 / page
+        <?php if ($legsShowRemoved): ?> · removed only<?php endif; ?>
       </div>
     </form>
     <?php if (!$dispatch['available']): ?>
       <div class="intake-notice"><?= cvr_intake_h($dispatch['message']) ?></div>
     <?php elseif ($dispatch['rows'] === array()): ?>
-      <div class="intake-empty">No Dispatch records match these filters.</div>
+      <div class="intake-empty"><?= $legsShowRemoved
+          ? 'No soft-removed Operational Legs match these filters.'
+          : 'No Dispatch records match these filters.' ?></div>
     <?php else: ?>
       <div class="legs-table-wrap">
         <table class="legs-table" data-operational-legs-table>
@@ -1707,6 +1741,7 @@ a.intake-refresh:hover{
                   'debrief_id' => $debriefId,
                   'recording_uid' => $recordingUid,
                   'has_garmin_csv' => $garminOn,
+                  'is_hidden' => !empty($row['is_hidden']),
                   'timezone' => cvr_intake_california_timezone($pdo, $tail),
               );
               if (!empty($row['off_block_utc'])) {
@@ -1727,12 +1762,15 @@ a.intake-refresh:hover{
                   };
               };
             ?>
-            <tr class="legs-row" data-leg="<?= cvr_intake_h(json_encode($legPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP)) ?>">
+            <tr class="legs-row<?= !empty($row['is_hidden']) ? ' is-removed' : '' ?>" data-leg="<?= cvr_intake_h(json_encode($legPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP)) ?>">
               <td>
                 <div class="legs-flight">
                   <div class="legs-flight-date"><?= cvr_intake_h($flightDate) ?></div>
                   <?= cvr_intake_aircraft_pill_html($tail) ?>
                   <div class="legs-flight-mission"><?= cvr_intake_h($missionCode !== '' ? $missionCode : '—') ?></div>
+                  <?php if (!empty($row['is_hidden'])): ?>
+                    <div class="legs-removed-badge">Removed</div>
+                  <?php endif; ?>
                 </div>
               </td>
               <td>
@@ -1833,6 +1871,21 @@ a.intake-refresh:hover{
                     </span>
                   <?php endif; ?>
                   <button type="button" class="app-btn app-btn-secondary" data-legs-details><span>Details</span></button>
+                  <?php if (!empty($row['is_hidden'])): ?>
+                    <form method="post" action="/admin/master_logbook.php?tab=dispatch&amp;legs_show_removed=1" data-legs-stop>
+                      <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                      <input type="hidden" name="action" value="restore_operational_leg">
+                      <input type="hidden" name="dispatch_id" value="<?= (int)($row['id'] ?? 0) ?>">
+                      <button class="app-btn app-btn-secondary" type="submit"><span>Restore</span></button>
+                    </form>
+                  <?php else: ?>
+                    <form method="post" action="/admin/master_logbook.php?tab=dispatch" data-legs-stop onsubmit="return confirm('Remove this leg from the Master Logbook list? Evidence stays on file and can be restored.');">
+                      <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                      <input type="hidden" name="action" value="hide_operational_leg">
+                      <input type="hidden" name="dispatch_id" value="<?= (int)($row['id'] ?? 0) ?>">
+                      <button class="app-btn app-btn-secondary legs-btn-remove" type="submit"><span>Remove</span></button>
+                    </form>
+                  <?php endif; ?>
                 </div>
               </td>
             </tr>
