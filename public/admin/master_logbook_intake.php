@@ -575,7 +575,7 @@ function cvr_intake_local_datetime(PDO $pdo, mixed $value, string $registration 
     if ($text === '') {
         return '—';
     }
-    $timezone = cw_aircraft_operational_timezone_by_registration($pdo, $registration);
+    $timezone = cvr_intake_california_timezone($pdo, $registration);
     return cw_logbook_datetime($text, $timezone);
 }
 
@@ -585,8 +585,9 @@ function cvr_intake_local_time(PDO $pdo, mixed $value, string $registration = ''
     if ($text === '') {
         return '—';
     }
-    $timezone = cw_aircraft_operational_timezone_by_registration($pdo, $registration);
-    // Table cells are tight; timezone context is shown in the section caption.
+    // Always display in the aircraft operational timezone; never leave UTC
+    // as the UI timezone when config is unset (shows 01:29 instead of 18:29 LT).
+    $timezone = cvr_intake_california_timezone($pdo, $registration);
     return cw_logbook_time($text, $timezone);
 }
 
@@ -799,9 +800,9 @@ function cvr_intake_local_date(PDO $pdo, mixed $value, string $registration = ''
     if ($text === '') {
         return '—';
     }
-    $timezone = cw_aircraft_operational_timezone_by_registration($pdo, $registration);
-    $dt = cw_dt_obj($text, $timezone !== 'UTC' ? $timezone : 'America/Los_Angeles');
-    return $dt instanceof DateTimeInterface ? $dt->format('M j, Y') : '—';
+    $timezone = cvr_intake_california_timezone($pdo, $registration);
+    $dt = cw_dt_obj($text, $timezone);
+    return $dt instanceof DateTimeInterface ? $dt->format('D, M j, Y') : '—';
 }
 
 function cvr_intake_legs_query(array $overrides = []): string
@@ -1170,10 +1171,9 @@ cw_header('Master Logbook');
 .ml-aircraft-pill{font-size:10px;padding:2px 7px;letter-spacing:.02em;line-height:1.2}
 .legs-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e2e8f0;border-radius:14px;background:#fff}
 .legs-table{width:100%;min-width:1180px;border-collapse:collapse;font-size:10px;table-layout:fixed}
-.legs-table col.legs-col-flight{width:108px}
-.legs-table col.legs-col-route{width:118px}
-.legs-table col.legs-col-crew{width:148px}
-.legs-table col.legs-col-times{width:118px}
+.legs-table col.legs-col-flight{width:118px}
+.legs-table col.legs-col-route{width:148px}
+.legs-table col.legs-col-times{width:138px}
 .legs-table col.legs-col-hobbs{width:108px}
 .legs-table col.legs-col-tacho{width:108px}
 .legs-table col.legs-col-fuel{width:148px}
@@ -1188,11 +1188,18 @@ cw_header('Master Logbook');
 .legs-flight{display:grid;gap:3px;min-width:0}
 .legs-flight-date{font-size:10px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .legs-flight-mission{font-size:9px;font-weight:700;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.legs-route-cell{display:grid;gap:2px}
-.legs-route{display:flex;align-items:baseline;gap:5px;font-weight:900;letter-spacing:.03em;color:#0f172a;font-size:11px;white-space:nowrap}
-.legs-route-arrow{color:#94a3b8;font-weight:800}
-.legs-route-places{display:flex;justify-content:space-between;gap:8px;font-size:8px;font-weight:650;color:#94a3b8}
-.legs-route-places span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legs-route-cell{display:grid;grid-template-columns:minmax(64px,1fr) 18px minmax(64px,1fr);column-gap:12px;align-items:start}
+.legs-route-end{display:grid;gap:2px;min-width:0;justify-items:start;text-align:left}
+.legs-route-icao{font-weight:900;letter-spacing:.04em;color:#0f172a;font-size:11px;line-height:1.15}
+.legs-route-place{font-size:8px;font-weight:650;color:#94a3b8;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legs-route-arrow{color:#94a3b8;font-weight:800;padding-top:1px;text-align:center}
+.legs-pair{display:grid;grid-template-columns:minmax(52px,1fr) 18px minmax(52px,1fr);column-gap:14px;align-items:start;font-variant-numeric:tabular-nums}
+.legs-pair-end{display:grid;gap:2px;min-width:0;justify-items:start;text-align:left}
+.legs-pair-time{font-size:11px;font-weight:850;color:#0f172a;line-height:1.15;white-space:nowrap}
+.legs-pair-label{font-size:8px;font-weight:700;color:#94a3b8;line-height:1.2;white-space:nowrap}
+.legs-pair-arrow{color:#94a3b8;font-weight:800;padding-top:1px;text-align:center}
+.legs-pair-main{font-size:11px;font-weight:850;color:#0f172a;white-space:nowrap}
+.legs-pair-sub{font-size:9px;font-weight:700;color:#64748b}
 .legs-crew{display:grid;gap:3px;min-width:0}
 .legs-crew-line{display:flex;gap:5px;align-items:center;min-width:0;line-height:1.2}
 .legs-crew-name{min-width:0;font-size:10px;font-weight:750;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1201,10 +1208,6 @@ cw_header('Master Logbook');
 .legs-role-student{background:#e0f2fe;color:#0369a1}
 .legs-role-instructor{background:#dcfce7;color:#166534}
 .legs-role-muted{background:#e2e8f0;color:#475569}
-.legs-pair{display:grid;gap:2px;font-variant-numeric:tabular-nums}
-.legs-pair-main{font-size:11px;font-weight:850;color:#0f172a;white-space:nowrap}
-.legs-pair-labels{display:flex;justify-content:space-between;gap:6px;font-size:8px;font-weight:700;color:#94a3b8}
-.legs-pair-sub{font-size:9px;font-weight:700;color:#64748b}
 .legs-fuel{display:grid;gap:4px;min-width:0}
 .legs-fuel-line{display:flex;align-items:center;gap:5px;min-width:0}
 .legs-fuel-vals{font-size:10px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -1556,7 +1559,6 @@ cw_header('Master Logbook');
               $burnLabel = cvr_intake_format_one_decimal($fuelBurn);
               $fuelGauge = cvr_intake_fuel_remaining_gauge($fuelLdg !== '' ? $fuelLdg : null, $acCfg);
               $oilGauge = cvr_intake_oil_gauge($row, $acCfg);
-              $durationLabel = cvr_intake_duration_minutes($engine, $offLocal, $onLocal);
               $depPlace = cvr_intake_airport_place($depAirport);
               $arrPlace = cvr_intake_airport_place($arrAirport);
               $legPayload = array(
@@ -1608,17 +1610,15 @@ cw_header('Master Logbook');
               </td>
               <td>
                 <div class="legs-route-cell">
-                  <div class="legs-route">
-                    <span><?= cvr_intake_h($depAirport !== '' ? $depAirport : '—') ?></span>
-                    <span class="legs-route-arrow">→</span>
-                    <span><?= cvr_intake_h($arrAirport !== '' ? $arrAirport : '—') ?></span>
+                  <div class="legs-route-end">
+                    <div class="legs-route-icao"><?= cvr_intake_h($depAirport !== '' ? $depAirport : '—') ?></div>
+                    <div class="legs-route-place" title="<?= cvr_intake_h($depPlace) ?>"><?= cvr_intake_h($depPlace !== '' ? $depPlace : '—') ?></div>
                   </div>
-                  <?php if ($depPlace !== '' || $arrPlace !== ''): ?>
-                    <div class="legs-route-places">
-                      <span><?= cvr_intake_h($depPlace !== '' ? $depPlace : '—') ?></span>
-                      <span><?= cvr_intake_h($arrPlace !== '' ? $arrPlace : '—') ?></span>
-                    </div>
-                  <?php endif; ?>
+                  <div class="legs-route-arrow">→</div>
+                  <div class="legs-route-end is-arr">
+                    <div class="legs-route-icao"><?= cvr_intake_h($arrAirport !== '' ? $arrAirport : '—') ?></div>
+                    <div class="legs-route-place" title="<?= cvr_intake_h($arrPlace) ?>"><?= cvr_intake_h($arrPlace !== '' ? $arrPlace : '—') ?></div>
+                  </div>
                 </div>
               </td>
               <td>
@@ -1642,9 +1642,15 @@ cw_header('Master Logbook');
               </td>
               <td>
                 <div class="legs-pair">
-                  <div class="legs-pair-main"><?= cvr_intake_h($offLocal) ?> → <?= cvr_intake_h($onLocal) ?></div>
-                  <div class="legs-pair-labels"><span>Off Block</span><span>On Block</span></div>
-                  <div class="legs-pair-sub"><?= cvr_intake_h($durationLabel) ?></div>
+                  <div class="legs-pair-end">
+                    <div class="legs-pair-time"><?= cvr_intake_h($offLocal) ?></div>
+                    <div class="legs-pair-label">Off Block</div>
+                  </div>
+                  <div class="legs-pair-arrow">→</div>
+                  <div class="legs-pair-end is-on">
+                    <div class="legs-pair-time"><?= cvr_intake_h($onLocal) ?></div>
+                    <div class="legs-pair-label">On Block</div>
+                  </div>
                 </div>
               </td>
               <td>
