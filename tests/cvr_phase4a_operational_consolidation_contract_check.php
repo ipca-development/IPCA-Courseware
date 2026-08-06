@@ -64,15 +64,16 @@ require_absent($flightLog, 'arrival_event.timestamp_utc', 'flight log must not p
 
 require_contains($page, 'Operational Legs', 'intake panel title', $failures);
 require_contains($page, 'Off Block', 'off block column', $failures);
-require_contains($page, 'Arrival', 'arrival time column', $failures);
+require_contains($page, 'On Block', 'on block label', $failures);
 require_contains($page, 'Oil Dep', 'oil departure column', $failures);
-require_contains($page, 'Flight Data', 'flight data / garmin column', $failures);
-require_contains($page, 'Debriefing', 'debriefing column', $failures);
+require_contains($page, 'Hobbs', 'hobbs column visible', $failures);
+require_contains($page, 'Tacho', 'tacho column visible', $failures);
+require_contains($page, 'legs-gauge-fuel', 'fuel remaining gauge', $failures);
+require_contains($page, 'legs-gauge-oil', 'oil departure gauge', $failures);
+require_contains($page, 'Evidence', 'evidence column', $failures);
+require_contains($page, 'Debriefing', 'debriefing action', $failures);
 require_contains($page, 'legs-route', 'dispatcher route strip', $failures);
-require_contains($page, 'legs-times', 'dispatcher times strip', $failures);
-require_contains($page, 'Click a row to correct details', 'detail fields deferred to edit modal', $failures);
-require_absent($page, '<th>Hobbs</th>', 'raw hobbs column removed from dispatch board', $failures);
-require_absent($page, '<th>Tacho</th>', 'raw tacho column removed from dispatch board', $failures);
+require_contains($page, 'Times (Local)', 'local times column', $failures);
 require_absent($page, '<th>Fuel Dep</th>', 'raw fuel-dep column removed from dispatch board', $failures);
 require_contains($page, 'legs_aircraft', 'aircraft filter', $failures);
 require_contains($page, '30 / page', 'pagination page size', $failures);

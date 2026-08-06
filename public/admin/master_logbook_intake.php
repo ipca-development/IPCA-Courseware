@@ -43,7 +43,9 @@ try {
         $aircraftUnitMap[$reg] = array(
             'id' => (int)($aircraftOption['id'] ?? 0),
             'fuel_unit' => strtoupper(trim((string)($cfg['fuel_unit'] ?? 'USG'))) ?: 'USG',
+            'fuel_capacity' => (float)($cfg['fuel_capacity'] ?? 13.0),
             'oil_unit' => trim((string)($cfg['oil_unit'] ?? '%')) ?: '%',
+            'oil_capacity' => (float)($cfg['oil_capacity'] ?? 100.0),
         );
     }
     // Assign distinct pill colors by sorted fleet order (not hash collisions).
@@ -424,6 +426,126 @@ function cvr_intake_format_one_decimal(mixed $value): string
     return number_format((float)$value, 1, '.', '');
 }
 
+function cvr_intake_airport_place(string $icao): string
+{
+    static $places = array(
+        'KTRM' => 'Thermal, CA',
+        'KPSP' => 'Palm Springs, CA',
+        'KHMT' => 'Hemet, CA',
+        'KUDD' => 'Bermuda Dunes, CA',
+        'KBNG' => 'Banning, CA',
+        'KRAL' => 'Riverside, CA',
+        'KSBD' => 'San Bernardino, CA',
+        'KBLH' => 'Blythe, CA',
+        'KCRQ' => 'Carlsbad, CA',
+        'KMYF' => 'San Diego, CA',
+        'KSAN' => 'San Diego, CA',
+        'KONT' => 'Ontario, CA',
+        'KLAX' => 'Los Angeles, CA',
+        'KBUR' => 'Burbank, CA',
+        'KVNY' => 'Van Nuys, CA',
+        'KSNA' => 'Santa Ana, CA',
+        'KLGB' => 'Long Beach, CA',
+        'EBAW' => 'Antwerp, BE',
+    );
+    $code = strtoupper(trim($icao));
+    return $places[$code] ?? '';
+}
+
+function cvr_intake_crew_role_pill(string $role): string
+{
+    $key = strtolower(trim(str_replace(array(' ', '-'), '_', $role)));
+    $label = match ($key) {
+        'pic', 'pilot_in_command' => 'PIC',
+        'student' => 'STUDENT',
+        'flight_instructor', 'instructor', 'cfi' => 'INSTRUCTOR',
+        'supervising_instructor', 'supervisor' => 'SUPERVISOR',
+        'pilot_flying', 'pf' => 'PF',
+        'pilot_monitoring', 'pm' => 'PM',
+        'examiner' => 'EXAMINER',
+        'safety_pilot' => 'SAFETY',
+        default => strtoupper($role !== '' ? $role : 'CREW'),
+    };
+    $tone = match ($label) {
+        'PIC' => 'pic',
+        'STUDENT' => 'student',
+        'INSTRUCTOR', 'SUPERVISOR', 'CFI' => 'instructor',
+        default => 'muted',
+    };
+    return '<span class="legs-role-pill legs-role-' . $tone . '">' . cvr_intake_h($label) . '</span>';
+}
+
+/**
+ * @return array{pct:float,label:string}
+ */
+function cvr_intake_oil_gauge(array $row, array $aircraftCfg): array
+{
+    $unit = strtoupper(trim((string)($aircraftCfg['oil_unit'] ?? $row['oil_unit'] ?? '%')));
+    $pct = null;
+    if (is_numeric($row['oil_percentage'] ?? null)) {
+        $pct = (float)$row['oil_percentage'];
+    } elseif (is_numeric($row['oil_quantity'] ?? null) && str_contains($unit, '%')) {
+        $pct = (float)$row['oil_quantity'];
+    } elseif (is_numeric($row['oil_quantity'] ?? null)) {
+        $cap = (float)($aircraftCfg['oil_capacity'] ?? 0);
+        if ($cap > 0) {
+            $pct = ((float)$row['oil_quantity'] / $cap) * 100.0;
+        }
+    }
+    if ($pct === null) {
+        return array('pct' => 0.0, 'label' => '—');
+    }
+    $pct = max(0.0, min(100.0, $pct));
+    return array('pct' => $pct, 'label' => (string)(int)round($pct) . '%');
+}
+
+/**
+ * Fuel remaining gauge from landing fuel vs aircraft capacity.
+ * @return array{pct:float,label:string}
+ */
+function cvr_intake_fuel_remaining_gauge(mixed $fuelLanding, array $aircraftCfg): array
+{
+    if (!is_numeric($fuelLanding)) {
+        return array('pct' => 0.0, 'label' => '—');
+    }
+    $cap = (float)($aircraftCfg['fuel_capacity'] ?? 0);
+    if ($cap <= 0) {
+        $cap = 13.0;
+    }
+    $pct = max(0.0, min(100.0, ((float)$fuelLanding / $cap) * 100.0));
+    return array('pct' => $pct, 'label' => cvr_intake_format_one_decimal($fuelLanding));
+}
+
+function cvr_intake_evidence_icon(string $state): string
+{
+    return match ($state) {
+        'ok' => '<span class="legs-ev-icon legs-ev-ok" title="Complete" aria-label="Complete">✓</span>',
+        'warn' => '<span class="legs-ev-icon legs-ev-warn" title="Pending" aria-label="Pending">○</span>',
+        'bad' => '<span class="legs-ev-icon legs-ev-bad" title="Issue" aria-label="Issue">!</span>',
+        default => '<span class="legs-ev-icon legs-ev-na" title="Not available" aria-label="Not available">–</span>',
+    };
+}
+
+function cvr_intake_duration_minutes(mixed $blockHours, string $offLocal, string $onLocal): string
+{
+    if (is_numeric($blockHours)) {
+        $mins = (int)round(((float)$blockHours) * 60);
+        if ($mins >= 0) {
+            return $mins . 'm';
+        }
+    }
+    if (preg_match('/^(\d{2}):(\d{2})$/', $offLocal, $a) && preg_match('/^(\d{2}):(\d{2})$/', $onLocal, $b)) {
+        $start = ((int)$a[1] * 60) + (int)$a[2];
+        $end = ((int)$b[1] * 60) + (int)$b[2];
+        $diff = $end - $start;
+        if ($diff < 0) {
+            $diff += 1440;
+        }
+        return $diff . 'm';
+    }
+    return '—';
+}
+
 function cvr_replay_share_base_url(): string
 {
     $configured = trim((string)(getenv('CW_PUBLIC_BASE_URL') ?: getenv('PUBLIC_BASE_URL') ?: getenv('APP_URL') ?: ''));
@@ -679,7 +801,7 @@ function cvr_intake_local_date(PDO $pdo, mixed $value, string $registration = ''
     }
     $timezone = cw_aircraft_operational_timezone_by_registration($pdo, $registration);
     $dt = cw_dt_obj($text, $timezone !== 'UTC' ? $timezone : 'America/Los_Angeles');
-    return $dt instanceof DateTimeInterface ? $dt->format('D M j') : '—';
+    return $dt instanceof DateTimeInterface ? $dt->format('M j, Y') : '—';
 }
 
 function cvr_intake_legs_query(array $overrides = []): string
@@ -1044,43 +1166,70 @@ cw_header('Master Logbook');
   .leg-edit-grid,.leg-edit-grid-3,.leg-edit-grid-4,.leg-edit-meter-row,.leg-edit-crew-row{grid-template-columns:1fr}
   .leg-edit-meter-arrow{display:none}
 }
-/* Dispatcher board — few scannable columns, details live in Edit modal */
-.ml-aircraft-pill{font-size:11px;padding:3px 8px;letter-spacing:.02em}
+/* Operational Legs — design board (Flight / Route / Crew / Times / Hobbs / Tacho / Fuel / Evidence) */
+.ml-aircraft-pill{font-size:10px;padding:2px 7px;letter-spacing:.02em;line-height:1.2}
 .legs-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e2e8f0;border-radius:14px;background:#fff}
-.legs-table{width:100%;min-width:960px;border-collapse:collapse;font-size:12px;table-layout:fixed}
-.legs-table col.legs-col-date{width:88px}
-.legs-table col.legs-col-acft{width:84px}
-.legs-table col.legs-col-route{width:132px}
+.legs-table{width:100%;min-width:1180px;border-collapse:collapse;font-size:10px;table-layout:fixed}
+.legs-table col.legs-col-flight{width:108px}
+.legs-table col.legs-col-route{width:118px}
+.legs-table col.legs-col-crew{width:148px}
 .legs-table col.legs-col-times{width:118px}
-.legs-table col.legs-col-crew{width:150px}
-.legs-table col.legs-col-block{width:88px}
-.legs-table col.legs-col-fuel{width:120px}
-.legs-table col.legs-col-status{width:118px}
+.legs-table col.legs-col-hobbs{width:108px}
+.legs-table col.legs-col-tacho{width:108px}
+.legs-table col.legs-col-fuel{width:148px}
+.legs-table col.legs-col-ops{width:64px}
+.legs-table col.legs-col-evidence{width:108px}
 .legs-table col.legs-col-actions{width:108px}
-.legs-table th,.legs-table td{padding:8px 10px;border-bottom:1px solid #e2e8f0;vertical-align:middle}
-.legs-table th{position:sticky;top:0;z-index:2;background:#f8fafc;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#475569;font-weight:800;white-space:nowrap;text-align:left}
+.legs-table th,.legs-table td{padding:7px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+.legs-table th{position:sticky;top:0;z-index:2;background:#f8fafc;font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:#64748b;font-weight:800;white-space:nowrap;text-align:left}
 .legs-table td{color:#102845;text-align:left}
 .legs-table tbody tr.legs-row{cursor:pointer;transition:background-color .12s ease,box-shadow .12s ease}
 .legs-table tbody tr.legs-row:hover{background:#eef6ff;box-shadow:inset 3px 0 0 #2563eb}
-.legs-date{font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums;white-space:nowrap}
-.legs-route{display:flex;align-items:center;gap:6px;font-weight:900;letter-spacing:.04em;color:#0f172a;font-size:13px;white-space:nowrap}
+.legs-flight{display:grid;gap:3px;min-width:0}
+.legs-flight-date{font-size:10px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.legs-flight-mission{font-size:9px;font-weight:700;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.legs-route-cell{display:grid;gap:2px}
+.legs-route{display:flex;align-items:baseline;gap:5px;font-weight:900;letter-spacing:.03em;color:#0f172a;font-size:11px;white-space:nowrap}
 .legs-route-arrow{color:#94a3b8;font-weight:800}
-.legs-times{display:grid;gap:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.legs-times-main{font-weight:850;color:#0f172a;font-size:13px}
-.legs-times-sub{font-size:11px;font-weight:700;color:#64748b}
-.legs-crew{display:grid;gap:2px;min-width:0}
-.legs-crew-line{display:flex;gap:5px;align-items:baseline;min-width:0;line-height:1.25}
-.legs-crew-role{flex:0 0 auto;font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#64748b}
-.legs-crew-name{min-width:0;font-size:12px;font-weight:750;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.legs-block{display:grid;gap:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.legs-block-main{font-size:14px;font-weight:900;color:#0f172a}
-.legs-block-sub{font-size:11px;font-weight:700;color:#64748b}
-.legs-fuel{display:grid;gap:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.legs-fuel-main{font-size:12px;font-weight:800;color:#0f172a}
-.legs-fuel-sub{font-size:11px;font-weight:700;color:#64748b}
-.legs-status{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
-.legs-status .ml-pill{font-size:9px;padding:3px 7px}
-.legs-actions{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.legs-route-places{display:flex;justify-content:space-between;gap:8px;font-size:8px;font-weight:650;color:#94a3b8}
+.legs-route-places span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legs-crew{display:grid;gap:3px;min-width:0}
+.legs-crew-line{display:flex;gap:5px;align-items:center;min-width:0;line-height:1.2}
+.legs-crew-name{min-width:0;font-size:10px;font-weight:750;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legs-role-pill{flex:0 0 auto;display:inline-flex;border-radius:999px;padding:1px 6px;font-size:8px;font-weight:900;letter-spacing:.03em}
+.legs-role-pic{background:#dbeafe;color:#1d4ed8}
+.legs-role-student{background:#e0f2fe;color:#0369a1}
+.legs-role-instructor{background:#dcfce7;color:#166534}
+.legs-role-muted{background:#e2e8f0;color:#475569}
+.legs-pair{display:grid;gap:2px;font-variant-numeric:tabular-nums}
+.legs-pair-main{font-size:11px;font-weight:850;color:#0f172a;white-space:nowrap}
+.legs-pair-labels{display:flex;justify-content:space-between;gap:6px;font-size:8px;font-weight:700;color:#94a3b8}
+.legs-pair-sub{font-size:9px;font-weight:700;color:#64748b}
+.legs-fuel{display:grid;gap:4px;min-width:0}
+.legs-fuel-line{display:flex;align-items:center;gap:5px;min-width:0}
+.legs-fuel-vals{font-size:10px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums;white-space:nowrap}
+.legs-fuel-burn{font-size:9px;font-weight:800;color:#0f172a}
+.legs-gauge{flex:1;min-width:36px;max-width:72px;height:7px;border-radius:999px;background:#e5e7eb;overflow:hidden}
+.legs-gauge > span{display:block;height:100%;border-radius:999px}
+.legs-gauge-fuel > span{background:linear-gradient(90deg,#16a34a 0%,#4ade80 55%,#a3e635 100%)}
+.legs-gauge-oil > span{background:linear-gradient(90deg,#c2410c 0%,#f59e0b 55%,#fbbf24 100%)}
+.legs-oil-pct{font-size:9px;font-weight:800;color:#92400e;font-variant-numeric:tabular-nums;min-width:2rem}
+.legs-ops{display:grid;gap:2px;justify-items:center;text-align:center}
+.legs-ops-main{font-size:12px;font-weight:900;color:#0f172a;font-variant-numeric:tabular-nums}
+.legs-ops-labels{display:flex;gap:10px;font-size:8px;font-weight:700;color:#94a3b8}
+.legs-evidence{display:grid;gap:3px}
+.legs-ev-row{display:flex;align-items:center;gap:5px;font-size:9px;font-weight:700;color:#475569}
+.legs-ev-icon{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;font-size:8px;font-weight:900;line-height:1}
+.legs-ev-ok{background:#dcfce7;color:#166534}
+.legs-ev-warn{background:#ffedd5;color:#c2410c}
+.legs-ev-bad{background:#fee2e2;color:#991b1b}
+.legs-ev-na{background:#f1f5f9;color:#94a3b8}
+.legs-actions{display:grid;gap:5px;justify-items:stretch}
+.legs-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:800;text-decoration:none;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#1e3a8a}
+.legs-btn-replay{border-color:#1d4ed8;background:#1d4ed8;color:#fff}
+.legs-btn:disabled,.legs-btn.is-disabled{opacity:.45;cursor:not-allowed;pointer-events:none}
+.legs-legend{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;font-size:10px;color:#64748b;font-weight:700}
+.legs-legend span{display:inline-flex;align-items:center;gap:4px}
 .legs-num{font-weight:750;color:#334155}
 .legs-blank{color:#cbd5e1;font-weight:700}
 .legs-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:12px}
@@ -1088,10 +1237,8 @@ cw_header('Master Logbook');
 .legs-pagination a{color:#1d4ed8}
 .legs-link-btn{border:0;background:transparent;color:#1d4ed8;font:inherit;font-weight:800;font-size:11px;cursor:pointer;padding:0;text-decoration:underline}
 .legs-link-btn:disabled{color:#94a3b8;cursor:not-allowed;text-decoration:none}
-@media (max-width:1100px){
-  .legs-table{min-width:900px;font-size:11px}
-  .legs-route{font-size:12px}
-  .legs-times-main,.legs-block-main{font-size:12px}
+@media (max-width:1200px){
+  .legs-table{min-width:1080px}
 }
 .legs-modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
 .legs-modal-grid label{display:grid;gap:4px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#64748b}
@@ -1289,7 +1436,7 @@ cw_header('Master Logbook');
     <div class="intake-panel-head">
       <div>
         <h2 class="intake-panel-title">Operational Legs</h2>
-        <div class="intake-muted">Dispatch board — one strip per checked-in leg. Times are local to the aircraft operational timezone. Click a row to correct details (Hobbs, Tacho, fuel, oil, crew).</div>
+        <div class="intake-muted">Logbook view — one row per checked-in Dispatch leg. Times use the aircraft operational timezone.</div>
       </div>
     </div>
     <form class="legs-toolbar" method="get" action="/admin/master_logbook.php">
@@ -1327,33 +1474,36 @@ cw_header('Master Logbook');
       <div class="legs-table-wrap">
         <table class="legs-table" data-operational-legs-table>
           <colgroup>
-            <col class="legs-col-date">
-            <col class="legs-col-acft">
+            <col class="legs-col-flight">
             <col class="legs-col-route">
-            <col class="legs-col-times">
             <col class="legs-col-crew">
-            <col class="legs-col-block">
+            <col class="legs-col-times">
+            <col class="legs-col-hobbs">
+            <col class="legs-col-tacho">
             <col class="legs-col-fuel">
-            <col class="legs-col-status">
+            <col class="legs-col-ops">
+            <col class="legs-col-evidence">
             <col class="legs-col-actions">
           </colgroup>
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Aircraft</th>
+              <th>Flight</th>
               <th>Route</th>
-              <th>Off Block / Arrival</th>
               <th>Crew</th>
-              <th>Block</th>
+              <th>Times (Local)</th>
+              <th>Hobbs</th>
+              <th>Tacho</th>
               <th>Fuel / Oil Dep</th>
-              <th>Flight Data</th>
+              <th>TO / LDG</th>
+              <th>Evidence</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
           <?php foreach ($dispatch['rows'] as $row): ?>
             <?php
-              $tail = (string)($row['aircraft_registration'] ?? '');
+              $tail = strtoupper(trim((string)($row['aircraft_registration'] ?? '')));
+              $acCfg = $aircraftUnitMap[$tail] ?? array('fuel_capacity' => 13.0, 'fuel_unit' => 'USG', 'oil_unit' => '%', 'oil_capacity' => 100.0);
               $startHobbs = $row['starting_hobbs'] ?? null;
               $endHobbs = $row['ending_hobbs'] ?? null;
               $startTacho = $row['starting_tacho'] ?? null;
@@ -1365,46 +1515,56 @@ cw_header('Master Logbook');
               $fuelDep = trim((string)($row['fuel_departure'] ?? $row['fuel_onboard'] ?? ''));
               $fuelLdg = trim((string)($row['fuel_landing'] ?? $row['fuel_remaining'] ?? ''));
               $fuelBurn = $row['fuel_consumption'] ?? null;
-              $oilDep = trim((string)($row['oil_departure_label'] ?? ''));
+              $fuelUnit = (string)($acCfg['fuel_unit'] ?? 'USG');
               $depAirport = strtoupper(trim((string)($row['departure_airport'] ?? '')));
               $arrAirport = strtoupper(trim((string)($row['arrival_airport'] ?? '')));
               $offLocal = cvr_intake_local_time($pdo, $row['off_block_utc'] ?? null, $tail);
               $onLocal = cvr_intake_local_time($pdo, $row['on_block_utc'] ?? null, $tail);
               $flightDate = cvr_intake_local_date($pdo, $row['off_block_utc'] ?? null, $tail);
+              $missionCode = trim((string)($row['mission_code'] ?? ''));
               $crewMembers = is_array($row['crew_members'] ?? null) ? $row['crew_members'] : array();
               $audioLabel = (string)($row['audio_status_label'] ?? 'Stored on Device');
               $audioLower = strtolower($audioLabel);
-              $audioTone = str_contains($audioLower, 'fail') ? 'bad'
-                  : (str_contains($audioLower, 'uploaded') ? 'ok' : 'muted');
-              $audioShort = str_contains($audioLower, 'uploaded') ? 'Audio'
-                  : (str_contains($audioLower, 'fail') ? 'Audio Fail'
-                  : (str_contains($audioLower, 'device') ? 'On Device' : 'Audio'));
+              $audioState = str_contains($audioLower, 'fail') ? 'bad'
+                  : (str_contains($audioLower, 'uploaded') ? 'ok'
+                  : (str_contains($audioLower, 'device') || str_contains($audioLower, 'pending') ? 'warn' : 'na'));
               $garminOn = !empty($row['has_garmin_csv']);
+              $garminState = $garminOn ? 'ok' : 'warn';
+              $transcriptRaw = strtolower(trim((string)($row['transcript_status'] ?? $row['transcript_status_label'] ?? '')));
+              $transcriptState = match (true) {
+                  str_contains($transcriptRaw, 'fail') => 'bad',
+                  str_contains($transcriptRaw, 'ready') || str_contains($transcriptRaw, 'complete') || str_contains($transcriptRaw, 'published') => 'ok',
+                  str_contains($transcriptRaw, 'transcrib') || str_contains($transcriptRaw, 'queued') || str_contains($transcriptRaw, 'pending') || str_contains($transcriptRaw, 'process') => 'warn',
+                  default => 'na',
+              };
               $recordingUid = trim((string)($row['recording_uid'] ?? ''));
               $replayReady = $recordingUid !== '';
               $debriefId = (int)($row['debrief_id'] ?? 0);
               $bundleId = (int)($row['bundle_id'] ?? 0);
               $toCount = (int)($row['takeoff_count'] ?? 0);
               $ldgCount = (int)($row['landing_count'] ?? 0);
-              $blockLabel = cvr_intake_format_one_decimal($engine);
-              $flightLabel = cvr_intake_format_one_decimal($flightTime);
+              $hobbsStartLabel = cvr_intake_format_one_decimal($startHobbs);
+              $hobbsEndLabel = cvr_intake_format_one_decimal($endHobbs);
+              $hobbsDelta = (is_numeric($startHobbs) && is_numeric($endHobbs))
+                  ? cvr_intake_format_one_decimal((float)$endHobbs - (float)$startHobbs)
+                  : (is_numeric($engine) ? cvr_intake_format_one_decimal($engine) : '');
+              $tachoStartLabel = cvr_intake_format_one_decimal($startTacho);
+              $tachoEndLabel = cvr_intake_format_one_decimal($endTacho);
+              $tachoDeltaLabel = (is_numeric($startTacho) && is_numeric($endTacho))
+                  ? cvr_intake_format_one_decimal((float)$endTacho - (float)$startTacho)
+                  : (is_numeric($flightTime) ? cvr_intake_format_one_decimal($flightTime) : '');
               $burnLabel = cvr_intake_format_one_decimal($fuelBurn);
-              $hobbsTitle = trim(
-                  (is_numeric($startHobbs) ? number_format((float)$startHobbs, 1) : '—')
-                  . ' → '
-                  . (is_numeric($endHobbs) ? number_format((float)$endHobbs, 1) : '—')
-              );
-              $tachoTitle = trim(
-                  (is_numeric($startTacho) ? number_format((float)$startTacho, 1) : '—')
-                  . ' → '
-                  . (is_numeric($endTacho) ? number_format((float)$endTacho, 1) : '—')
-              );
+              $fuelGauge = cvr_intake_fuel_remaining_gauge($fuelLdg !== '' ? $fuelLdg : null, $acCfg);
+              $oilGauge = cvr_intake_oil_gauge($row, $acCfg);
+              $durationLabel = cvr_intake_duration_minutes($engine, $offLocal, $onLocal);
+              $depPlace = cvr_intake_airport_place($depAirport);
+              $arrPlace = cvr_intake_airport_place($arrAirport);
               $legPayload = array(
                   'dispatch_id' => (int)($row['id'] ?? 0),
                   'dispatch_uuid' => (string)($row['dispatch_uuid'] ?? ''),
                   'workflow_flight_record_uuid' => (string)($row['workflow_flight_record_uuid'] ?? ''),
                   'aircraft_registration' => $tail,
-                  'mission_code' => (string)($row['mission_code'] ?? ''),
+                  'mission_code' => $missionCode,
                   'departure_airport' => $depAirport,
                   'arrival_airport' => $arrAirport,
                   'off_block_utc' => (string)($row['off_block_utc'] ?? ''),
@@ -1418,7 +1578,7 @@ cw_header('Master Logbook');
                   'fuel_remaining' => $fuelLdg,
                   'oil_percentage' => $row['oil_percentage'] ?? null,
                   'oil_quantity' => $row['oil_quantity'] ?? null,
-                  'oil_unit' => (string)($row['oil_unit'] ?? ''),
+                  'oil_unit' => (string)($row['oil_unit'] ?? ($acCfg['oil_unit'] ?? '')),
                   'takeoff_count' => $toCount,
                   'landing_count' => $ldgCount,
                   'crew' => $crewMembers,
@@ -1438,20 +1598,27 @@ cw_header('Master Logbook');
                   }
               }
             ?>
-            <tr class="legs-row" data-leg="<?= cvr_intake_h(json_encode($legPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP)) ?>" title="Hobbs <?= cvr_intake_h($hobbsTitle) ?> · Tacho <?= cvr_intake_h($tachoTitle) ?>">
-              <td class="legs-date"><?= cvr_intake_h($flightDate) ?></td>
-              <td><?= cvr_intake_aircraft_pill_html($tail) ?></td>
+            <tr class="legs-row" data-leg="<?= cvr_intake_h(json_encode($legPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP)) ?>">
               <td>
-                <div class="legs-route">
-                  <span><?= cvr_intake_h($depAirport !== '' ? $depAirport : '—') ?></span>
-                  <span class="legs-route-arrow">→</span>
-                  <span><?= cvr_intake_h($arrAirport !== '' ? $arrAirport : '—') ?></span>
+                <div class="legs-flight">
+                  <div class="legs-flight-date" title="<?= cvr_intake_h($flightDate) ?>"><?= cvr_intake_h($flightDate) ?></div>
+                  <?= cvr_intake_aircraft_pill_html($tail) ?>
+                  <div class="legs-flight-mission"><?= cvr_intake_h($missionCode !== '' ? ('Mission ' . $missionCode) : 'Mission —') ?></div>
                 </div>
               </td>
               <td>
-                <div class="legs-times">
-                  <div class="legs-times-main"><?= cvr_intake_h($offLocal) ?> – <?= cvr_intake_h($onLocal) ?></div>
-                  <div class="legs-times-sub"><?= $toCount ?>/<?= $ldgCount ?> TO/LDG</div>
+                <div class="legs-route-cell">
+                  <div class="legs-route">
+                    <span><?= cvr_intake_h($depAirport !== '' ? $depAirport : '—') ?></span>
+                    <span class="legs-route-arrow">→</span>
+                    <span><?= cvr_intake_h($arrAirport !== '' ? $arrAirport : '—') ?></span>
+                  </div>
+                  <?php if ($depPlace !== '' || $arrPlace !== ''): ?>
+                    <div class="legs-route-places">
+                      <span><?= cvr_intake_h($depPlace !== '' ? $depPlace : '—') ?></span>
+                      <span><?= cvr_intake_h($arrPlace !== '' ? $arrPlace : '—') ?></span>
+                    </div>
+                  <?php endif; ?>
                 </div>
               </td>
               <td>
@@ -1462,51 +1629,69 @@ cw_header('Master Logbook');
                       $shown = 0;
                       foreach ($crewMembers as $member) {
                           if ($shown >= 3) {
-                              $remaining = count($crewMembers) - $shown;
-                              echo '<div class="legs-crew-line"><span class="legs-crew-role">+' . (int)$remaining . '</span></div>';
+                              echo '<div class="legs-crew-line"><span class="legs-crew-name">+' . (count($crewMembers) - $shown) . ' more</span></div>';
                               break;
                           }
-                          $role = cvr_intake_crew_role_short((string)($member['role'] ?? 'crew'));
                           $name = trim((string)($member['name'] ?? ''));
-                          echo '<div class="legs-crew-line"><span class="legs-crew-role">' . cvr_intake_h($role) . '</span><span class="legs-crew-name" title="' . cvr_intake_h($name) . '">' . cvr_intake_h($name !== '' ? $name : '—') . '</span></div>';
+                          echo '<div class="legs-crew-line"><span class="legs-crew-name" title="' . cvr_intake_h($name) . '">' . cvr_intake_h($name !== '' ? $name : '—') . '</span>'
+                              . cvr_intake_crew_role_pill((string)($member['role'] ?? 'crew')) . '</div>';
                           $shown++;
                       }
                   }
                 ?></div>
               </td>
               <td>
-                <div class="legs-block" title="Hobbs <?= cvr_intake_h($hobbsTitle) ?> · Tacho <?= cvr_intake_h($tachoTitle) ?>">
-                  <div class="legs-block-main"><?= cvr_intake_h($blockLabel !== '' ? $blockLabel : '—') ?><span style="font-size:11px;font-weight:700;color:#64748b"> blk</span></div>
-                  <div class="legs-block-sub"><?= cvr_intake_h($flightLabel !== '' ? $flightLabel : '—') ?> flt</div>
+                <div class="legs-pair">
+                  <div class="legs-pair-main"><?= cvr_intake_h($offLocal) ?> → <?= cvr_intake_h($onLocal) ?></div>
+                  <div class="legs-pair-labels"><span>Off Block</span><span>On Block</span></div>
+                  <div class="legs-pair-sub"><?= cvr_intake_h($durationLabel) ?></div>
+                </div>
+              </td>
+              <td>
+                <div class="legs-pair">
+                  <div class="legs-pair-main"><?= cvr_intake_h($hobbsStartLabel !== '' ? $hobbsStartLabel : '—') ?> → <?= cvr_intake_h($hobbsEndLabel !== '' ? $hobbsEndLabel : '—') ?></div>
+                  <div class="legs-pair-sub">Δ <?= cvr_intake_h($hobbsDelta !== '' ? $hobbsDelta : '—') ?> h</div>
+                </div>
+              </td>
+              <td>
+                <div class="legs-pair">
+                  <div class="legs-pair-main"><?= cvr_intake_h($tachoStartLabel !== '' ? $tachoStartLabel : '—') ?> → <?= cvr_intake_h($tachoEndLabel !== '' ? $tachoEndLabel : '—') ?></div>
+                  <div class="legs-pair-sub">Δ <?= cvr_intake_h($tachoDeltaLabel !== '' ? $tachoDeltaLabel : '—') ?> h</div>
                 </div>
               </td>
               <td>
                 <div class="legs-fuel">
-                  <div class="legs-fuel-main"><?php
-                    if ($fuelDep === '' && $fuelLdg === '') {
-                        echo '<span class="legs-blank">—</span>';
-                    } else {
-                        echo cvr_intake_h(($fuelDep !== '' ? $fuelDep : '—') . ' → ' . ($fuelLdg !== '' ? $fuelLdg : '—'));
-                        if ($burnLabel !== '') {
-                            echo ' <span style="color:#64748b;font-weight:700">(' . cvr_intake_h($burnLabel) . ')</span>';
-                        }
-                    }
-                  ?></div>
-                  <div class="legs-fuel-sub"><?= cvr_intake_h($oilDep !== '' ? ('Oil Dep ' . $oilDep) : 'Oil Dep —') ?></div>
+                  <div class="legs-fuel-line">
+                    <div class="legs-gauge legs-gauge-fuel" title="Fuel remaining <?= cvr_intake_h($fuelGauge['label']) ?> <?= cvr_intake_h($fuelUnit) ?>"><span style="width:<?= (int)round($fuelGauge['pct']) ?>%"></span></div>
+                    <div class="legs-fuel-vals"><?= cvr_intake_h(($fuelDep !== '' ? $fuelDep : '—') . ' → ' . ($fuelLdg !== '' ? $fuelLdg : '—')) ?> <?= cvr_intake_h($fuelUnit) ?></div>
+                  </div>
+                  <div class="legs-fuel-burn">Burn <?= cvr_intake_h($burnLabel !== '' ? $burnLabel : '—') ?> <?= cvr_intake_h($fuelUnit) ?></div>
+                  <div class="legs-fuel-line">
+                    <div class="legs-gauge legs-gauge-oil" title="Oil Dep <?= cvr_intake_h($oilGauge['label']) ?>"><span style="width:<?= (int)round($oilGauge['pct']) ?>%"></span></div>
+                    <span class="legs-oil-pct"><?= cvr_intake_h($oilGauge['label']) ?></span>
+                  </div>
                 </div>
               </td>
               <td>
-                <div class="legs-status">
-                  <?= cvr_intake_pill($audioShort, $audioTone) ?>
-                  <?= cvr_intake_pill($garminOn ? 'Garmin' : 'No Garmin', $garminOn ? 'ok' : 'warn') ?>
+                <div class="legs-ops">
+                  <div class="legs-ops-main"><?= (int)$toCount ?> / <?= (int)$ldgCount ?></div>
+                  <div class="legs-ops-labels"><span>TO</span><span>LDG</span></div>
+                </div>
+              </td>
+              <td>
+                <div class="legs-evidence">
+                  <div class="legs-ev-row"><?= cvr_intake_evidence_icon($audioState) ?> Audio</div>
+                  <div class="legs-ev-row"><?= cvr_intake_evidence_icon($garminState) ?> Garmin</div>
+                  <div class="legs-ev-row"><?= cvr_intake_evidence_icon($transcriptState) ?> Transcript</div>
                 </div>
               </td>
               <td>
                 <div class="legs-actions">
+                  <button type="button" class="legs-btn" data-legs-details>Details</button>
                   <?php if ($replayReady): ?>
-                    <a class="legs-link-btn" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>" data-legs-stop>Replay</a>
+                    <a class="legs-btn legs-btn-replay" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>" data-legs-stop>▶ Replay</a>
                   <?php else: ?>
-                    <span class="legs-blank">Replay</span>
+                    <span class="legs-btn legs-btn-replay is-disabled" aria-disabled="true">▶ Replay</span>
                   <?php endif; ?>
                   <button type="button" class="legs-link-btn" data-legs-debrief data-debrief-id="<?= $debriefId ?>" data-bundle-id="<?= $bundleId ?>" data-legs-stop>Debriefing</button>
                 </div>
@@ -1515,6 +1700,12 @@ cw_header('Master Logbook');
           <?php endforeach; ?>
           </tbody>
         </table>
+      </div>
+      <div class="legs-legend">
+        <span><?= cvr_intake_evidence_icon('ok') ?> Complete</span>
+        <span><?= cvr_intake_evidence_icon('warn') ?> Pending</span>
+        <span><?= cvr_intake_evidence_icon('bad') ?> Issue</span>
+        <span><?= cvr_intake_evidence_icon('na') ?> Not available</span>
       </div>
       <div class="legs-pagination">
         <div class="intake-muted">Page <?= (int)$legsPage ?> of <?= (int)$legsPageCount ?></div>
