@@ -1,0 +1,62 @@
+{
+  "info" : {
+    "arguments" : [
+      "devicectl",
+      "device",
+      "copy",
+      "to",
+      "--device",
+      "F791FFCB-B65A-5C67-8493-A65878835834",
+      "--domain-type",
+      "appDataContainer",
+      "--domain-identifier",
+      "com.ipca.cvrunit",
+      "--source",
+      "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/tmp/n392ea_cvr_clear/Application Support/IPCACVRUnit/flight-workflow.json",
+      "--destination",
+      "Library/Application Support/IPCACVRUnit/flight-workflow.json",
+      "--timeout",
+      "60",
+      "--json-output",
+      "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/tmp/n392ea_cvr_clear/copy_flight-workflow.json.json"
+    ],
+    "commandType" : "devicectl.device.copy.to",
+    "environment" : {
+      "TERM" : "dumb"
+    },
+    "jsonVersion" : 3,
+    "outcome" : "success",
+    "version" : "518.33"
+  },
+  "result" : {
+    "destination" : "file:///private/var/mobile/Containers/Data/Application/D2F0985A-9972-47F0-A8D5-8C16EDAC9BCF/Library/Application%20Support/IPCACVRUnit/flight-workflow.json",
+    "deviceIdentifier" : "F791FFCB-B65A-5C67-8493-A65878835834",
+    "domain" : "appDataContainer",
+    "domainIdentifier" : "com.ipca.cvrunit",
+    "file" : {
+      "metadata" : {
+        "extendedAttributes" : {
+
+        },
+        "lastModDate" : "2026-08-06T14:25:47.000Z",
+        "ownerGid" : 501,
+        "ownerUid" : 501,
+        "permissions" : 420,
+        "size" : 268
+      },
+      "name" : "/private/var/mobile/Containers/Data/Application/D2F0985A-9972-47F0-A8D5-8C16EDAC9BCF/Library/Application Support/IPCACVRUnit/flight-workflow.json",
+      "relativePath" : "/private/var/mobile/Containers/Data/Application/D2F0985A-9972-47F0-A8D5-8C16EDAC9BCF/Library/Application Support/IPCACVRUnit/flight-workflow.json",
+      "resources" : {
+        "isDirectory" : false,
+        "isHidden" : false,
+        "isReadable" : true,
+        "isSymbolicLink" : false,
+        "isWritable" : true
+      }
+    },
+    "source" : "file:///Users/kayvereeken/EuroPilot%20Center%20Dropbox/Projects/IPCA-Courseware/tmp/n392ea_cvr_clear/Application%20Support/IPCACVRUnit/flight-workflow.json",
+    "sources" : [
+      "file:///Users/kayvereeken/EuroPilot%20Center%20Dropbox/Projects/IPCA-Courseware/tmp/n392ea_cvr_clear/Application%20Support/IPCACVRUnit/flight-workflow.json"
+    ]
+  }
+}

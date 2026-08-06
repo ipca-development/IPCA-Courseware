@@ -156,9 +156,9 @@ $createdReplayShare = null;
 $reconstructionError = trim((string)($_GET['reconstruction_error'] ?? ''));
 $reconstructionNotice = '';
 if ((string)($_GET['debrief_generation'] ?? '') === 'started') {
-    $reconstructionNotice = 'AI Debrief generation started in the background. Refresh this tab to see completion status.';
+    $reconstructionNotice = 'AI Debrief generation started in the background. Progress updates live below.';
 } elseif ((string)($_GET['debrief_generation'] ?? '') === 'running') {
-    $reconstructionNotice = 'AI Debrief generation is already running in the background.';
+    $reconstructionNotice = 'AI Debrief generation is already running. Progress updates live below.';
 }
 $reconstructionCsrf = (string)($_SESSION['cvr_reconstruction_csrf'] ?? '');
 if ($reconstructionCsrf === '') {
@@ -348,8 +348,8 @@ try {
             $job = is_array($result['debrief_job'] ?? null) ? $result['debrief_job'] : array();
             $already = !empty($job['skipped']) || (($job['reason'] ?? '') === 'already_running');
             $reconstructionNotice = $already
-                ? 'AI Debrief generation is already running in the background.'
-                : 'AI Debrief generation started in the background. Refresh this tab to see completion status.';
+                ? 'AI Debrief generation is already running. Progress updates live below.'
+                : 'AI Debrief generation started in the background. Progress updates live below.';
         }
     }
 } catch (Throwable $e) {
@@ -1792,6 +1792,22 @@ a.intake-refresh:hover{
               $replayReady = $recordingUid !== '';
               $debriefId = (int)($row['debrief_id'] ?? 0);
               $bundleId = (int)($row['bundle_id'] ?? 0);
+              $debriefJobStatus = strtolower(trim((string)($row['debrief_job_status'] ?? '')));
+              $debriefJobRunning = in_array($debriefJobStatus, array('pending', 'claimed', 'running', 'retry_wait'), true);
+              $debriefJobProgress = max(0, min(100, (int)($row['debrief_job_progress'] ?? 0)));
+              $debriefJobMessage = trim((string)($row['debrief_job_message'] ?? ''));
+              if ($debriefJobRunning && $debriefJobProgress <= 0) {
+                  $debriefJobProgress = 5;
+                  if ($debriefJobMessage === '') {
+                      $debriefJobMessage = 'Queued';
+                  }
+              }
+              $debriefState = match (true) {
+                  $debriefJobRunning => 'warn',
+                  $debriefJobStatus === 'failed' || $debriefJobStatus === 'dead_letter' => 'bad',
+                  $debriefId > 0 || $debriefJobStatus === 'succeeded' => 'ok',
+                  default => 'na',
+              };
               $toCount = (int)($row['takeoff_count'] ?? 0);
               $ldgCount = (int)($row['landing_count'] ?? 0);
               $hobbsStartLabel = cvr_intake_format_one_decimal($startHobbs);
@@ -1950,6 +1966,18 @@ a.intake-refresh:hover{
                   <div class="legs-ev legs-ev-<?= cvr_intake_h($audioState) ?>"><span class="legs-ev-mark"><?= $evMark($audioState) ?></span> Audio</div>
                   <div class="legs-ev legs-ev-<?= cvr_intake_h($garminState) ?>"><span class="legs-ev-mark"><?= $evMark($garminState) ?></span> Garmin</div>
                   <div class="legs-ev legs-ev-<?= cvr_intake_h($transcriptState) ?>"><span class="legs-ev-mark"><?= $evMark($transcriptState) ?></span> Transcript</div>
+                  <div
+                    class="legs-ev legs-ev-<?= cvr_intake_h($debriefState) ?>"
+                    data-debrief-bundle-id="<?= $bundleId > 0 ? (int)$bundleId : '' ?>"
+                    data-debrief-id="<?= $debriefId > 0 ? (int)$debriefId : '' ?>"
+                    data-debrief-status="<?= cvr_intake_h($debriefJobRunning ? $debriefJobStatus : ($debriefId > 0 ? 'ready' : $debriefJobStatus)) ?>"
+                  >
+                    <span class="legs-ev-mark" data-debrief-mark><?= $evMark($debriefState) ?></span> Debrief
+                    <div class="intake-progress" data-debrief-progress <?= $debriefJobRunning ? '' : 'hidden' ?> style="margin-top:4px;min-width:96px">
+                      <div class="intake-progress-bar"><div class="intake-progress-fill<?= $debriefJobRunning ? ' is-evidence-active' : '' ?>" data-debrief-progress-fill style="width:<?= (int)$debriefJobProgress ?>%"></div></div>
+                      <div class="intake-muted" data-debrief-progress-label style="font-size:10px"><?= cvr_intake_h($debriefJobRunning ? (($debriefJobMessage !== '' ? $debriefJobMessage . ' · ' : '') . $debriefJobProgress . '%') : '') ?></div>
+                    </div>
+                  </div>
                 </div>
               </td>
               <td>
@@ -2390,21 +2418,44 @@ a.intake-refresh:hover{
                   </form>
                 <?php endif; ?>
                 <?php $debriefJobRunning = in_array((string)($bundle['debrief_job_status'] ?? ''), array('pending','claimed','running','retry_wait'), true); ?>
+                <?php
+                  $bundleDebriefProgress = max(0, min(100, (int)($bundle['debrief_job_progress'] ?? 0)));
+                  $bundleDebriefMessage = trim((string)($bundle['debrief_job_message'] ?? ''));
+                  if ($debriefJobRunning && $bundleDebriefProgress <= 0) {
+                      $bundleDebriefProgress = 5;
+                      if ($bundleDebriefMessage === '') {
+                          $bundleDebriefMessage = 'Queued';
+                      }
+                  }
+                ?>
                 <form method="post" action="/admin/api/manual_bundle_debrief.php" style="margin-top:6px">
                   <input type="hidden" name="action" value="generate_bundle_debrief">
                   <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
                   <input type="hidden" name="bundle_id" value="<?= (int)$bundle['id'] ?>">
                   <button class="intake-button" type="submit" <?= (!$transcriptGate['ready'] || $debriefJobRunning) ? 'disabled title="' . cvr_intake_h($debriefJobRunning ? 'Debrief generation is running.' : $transcriptGate['reason']) . '"' : '' ?>><?= $debriefJobRunning ? 'Generating Debrief…' : ($latestDebrief ? 'Regenerate Debrief' : 'Generate Debrief') ?></button>
                 </form>
-                <?php if (!empty($bundle['debrief_job_id'])): ?>
-                  <div class="intake-muted" style="margin-top:4px">Debrief job #<?= (int)$bundle['debrief_job_id'] ?> · <?= cvr_intake_h(strtoupper((string)$bundle['debrief_job_status'])) ?></div>
-                <?php endif; ?>
-                <?php if (!empty($bundle['debrief_job_error'])): ?>
-                  <div class="intake-error" style="margin-top:4px"><?= cvr_intake_h($bundle['debrief_job_error']) ?></div>
-                <?php endif; ?>
-                <?php if (is_array($latestDebrief)): ?>
-                  <a class="intake-refresh" style="margin-top:6px" href="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$latestDebrief['id'] ?>">Review Debrief · <?= cvr_intake_h($latestDebrief['suggested_overall']) ?></a>
-                <?php endif; ?>
+                <div
+                  data-debrief-bundle-id="<?= (int)$bundle['id'] ?>"
+                  data-debrief-id="<?= is_array($latestDebrief) ? (int)$latestDebrief['id'] : '' ?>"
+                  data-debrief-status="<?= cvr_intake_h($debriefJobRunning ? (string)$bundle['debrief_job_status'] : (is_array($latestDebrief) ? 'ready' : (string)($bundle['debrief_job_status'] ?? ''))) ?>"
+                  style="margin-top:6px"
+                >
+                  <div class="intake-progress" data-debrief-progress <?= $debriefJobRunning ? '' : 'hidden' ?>>
+                    <div class="intake-progress-bar"><div class="intake-progress-fill<?= $debriefJobRunning ? ' is-evidence-active' : '' ?>" data-debrief-progress-fill style="width:<?= (int)$bundleDebriefProgress ?>%"></div></div>
+                    <div class="intake-muted" data-debrief-progress-label><?= cvr_intake_h($debriefJobRunning ? (($bundleDebriefMessage !== '' ? $bundleDebriefMessage . ' · ' : '') . $bundleDebriefProgress . '%') : '') ?></div>
+                  </div>
+                  <?php if (!empty($bundle['debrief_job_id'])): ?>
+                    <div class="intake-muted" style="margin-top:4px" data-debrief-job-meta>Debrief job #<?= (int)$bundle['debrief_job_id'] ?> · <span data-debrief-job-status><?= cvr_intake_h(strtoupper((string)$bundle['debrief_job_status'])) ?></span></div>
+                  <?php endif; ?>
+                  <?php if (!empty($bundle['debrief_job_error'])): ?>
+                    <div class="intake-error" style="margin-top:4px" data-debrief-job-error><?= cvr_intake_h($bundle['debrief_job_error']) ?></div>
+                  <?php endif; ?>
+                  <?php if (is_array($latestDebrief)): ?>
+                    <a class="intake-refresh" style="margin-top:6px" data-debrief-review-link href="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$latestDebrief['id'] ?>">Review Debrief · <?= cvr_intake_h($latestDebrief['suggested_overall']) ?></a>
+                  <?php else: ?>
+                    <a class="intake-refresh" style="margin-top:6px;display:none" data-debrief-review-link href="#">Review Debrief</a>
+                  <?php endif; ?>
+                </div>
                 <details class="intake-reassign">
                   <summary>Reassign sources &amp; create superseding bundle</summary>
                   <form method="post" action="/admin/master_logbook.php?tab=reconstruction">
@@ -3779,6 +3830,152 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       }
     });
   }
+
+  // Live Debrief generation progress (Operational Legs + Reconstruction). No page refresh required.
+  (function initDebriefProgressPoller() {
+    const nodes = () => Array.from(page.querySelectorAll('[data-debrief-bundle-id]')).filter((el) => {
+      const id = Number(el.getAttribute('data-debrief-bundle-id') || 0);
+      return id > 0;
+    });
+    if (nodes().length === 0) {
+      return;
+    }
+
+    const runningStatuses = new Set(['pending', 'claimed', 'running', 'retry_wait']);
+    const markHtml = {
+      ok: '<span class="legs-ev-icon legs-ev-ok" title="Complete" aria-label="Complete">✓</span>',
+      warn: '<span class="legs-ev-icon legs-ev-warn" title="Pending" aria-label="Pending">○</span>',
+      bad: '<span class="legs-ev-icon legs-ev-bad" title="Issue" aria-label="Issue">!</span>',
+      na: '<span class="legs-ev-icon legs-ev-na" title="Not available" aria-label="Not available">–</span>',
+    };
+
+    const applyJob = (el, job) => {
+      const status = String(job.status || '').toLowerCase();
+      const running = !!job.running || runningStatuses.has(status);
+      const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+      const message = String(job.progress_message || '').trim();
+      const error = String(job.error || '').trim();
+      const debriefId = Number(job.debrief_id || 0);
+      const progressWrap = el.querySelector('[data-debrief-progress]');
+      const fill = el.querySelector('[data-debrief-progress-fill]');
+      const label = el.querySelector('[data-debrief-progress-label]');
+      const mark = el.querySelector('[data-debrief-mark]');
+      const jobStatus = el.querySelector('[data-debrief-job-status]');
+      const jobError = el.querySelector('[data-debrief-job-error]');
+      const review = el.querySelector('[data-debrief-review-link]');
+
+      el.setAttribute('data-debrief-status', running ? status : (debriefId > 0 || status === 'succeeded' ? 'ready' : status));
+      if (debriefId > 0) {
+        el.setAttribute('data-debrief-id', String(debriefId));
+      }
+
+      let state = 'na';
+      if (running) {
+        state = 'warn';
+      } else if (status === 'failed' || status === 'dead_letter') {
+        state = 'bad';
+      } else if (debriefId > 0 || status === 'succeeded') {
+        state = 'ok';
+      }
+
+      el.classList.remove('legs-ev-ok', 'legs-ev-warn', 'legs-ev-bad', 'legs-ev-na');
+      if (el.classList.contains('legs-ev')) {
+        el.classList.add('legs-ev-' + state);
+      }
+      if (mark) {
+        mark.innerHTML = markHtml[state] || markHtml.na;
+      }
+      if (progressWrap) {
+        progressWrap.hidden = !running;
+      }
+      if (fill) {
+        fill.style.width = progress + '%';
+        fill.classList.toggle('is-evidence-active', running);
+      }
+      if (label) {
+        label.textContent = running
+          ? ((message !== '' ? message + ' · ' : '') + progress + '%')
+          : (status === 'failed' && error !== '' ? error : '');
+      }
+      if (jobStatus) {
+        jobStatus.textContent = status !== '' ? status.toUpperCase() : '';
+      }
+      if (jobError) {
+        jobError.textContent = error;
+        jobError.hidden = error === '';
+      }
+      if (review && debriefId > 0) {
+        review.style.display = '';
+        review.href = '/admin/master_logbook.php?tab=reconstruction&debrief_id=' + encodeURIComponent(String(debriefId));
+        if (!review.textContent || review.textContent.trim() === 'Review Debrief') {
+          review.textContent = 'Review Debrief';
+        }
+      }
+
+      const generateBtn = el.closest('td')?.querySelector('form[action*="manual_bundle_debrief"] button[type="submit"]');
+      if (generateBtn) {
+        if (running) {
+          generateBtn.disabled = true;
+          generateBtn.textContent = 'Generating Debrief…';
+          generateBtn.title = 'Debrief generation is running.';
+        } else if (status === 'succeeded' || debriefId > 0) {
+          generateBtn.disabled = false;
+          generateBtn.textContent = 'Regenerate Debrief';
+          generateBtn.removeAttribute('title');
+        }
+      }
+    };
+
+    let timer = null;
+    const poll = async () => {
+      const els = nodes();
+      if (els.length === 0) {
+        return;
+      }
+      const ids = Array.from(new Set(els.map((el) => Number(el.getAttribute('data-debrief-bundle-id') || 0)).filter((id) => id > 0)));
+      if (ids.length === 0) {
+        return;
+      }
+      try {
+        const response = await fetch('/admin/api/structured_debrief_job_status.php?bundle_ids=' + encodeURIComponent(ids.join(',')), {
+          credentials: 'same-origin',
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok || !Array.isArray(payload.jobs)) {
+          return;
+        }
+        const byBundle = new Map();
+        payload.jobs.forEach((job) => {
+          const bundleId = Number(job.bundle_id || 0);
+          if (bundleId > 0) {
+            byBundle.set(bundleId, job);
+          }
+        });
+        let anyRunning = false;
+        els.forEach((el) => {
+          const bundleId = Number(el.getAttribute('data-debrief-bundle-id') || 0);
+          const job = byBundle.get(bundleId);
+          if (!job) {
+            return;
+          }
+          applyJob(el, job);
+          if (job.running || runningStatuses.has(String(job.status || '').toLowerCase())) {
+            anyRunning = true;
+          }
+        });
+        if (timer) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+        timer = window.setInterval(poll, anyRunning ? 2000 : 5000);
+      } catch (error) {
+        // Ignore transient polling failures; retry on next tick.
+      }
+    };
+
+    poll();
+    timer = window.setInterval(poll, 2000);
+  })();
 
   // Operational Legs — structured edit modal + debrief copy panel
   (function initOperationalLegs() {

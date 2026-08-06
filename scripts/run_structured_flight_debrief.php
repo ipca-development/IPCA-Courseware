@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/AuditEventService.php';
 require_once __DIR__ . '/../src/FlightDebriefService.php';
+require_once __DIR__ . '/../src/CockpitRecorderDebriefQueueService.php';
 
 $bundleId = 0;
 $jobId = 0;
@@ -21,6 +22,8 @@ if ($bundleId <= 0 || $jobId <= 0) {
     fwrite(STDERR, "Usage: php scripts/run_structured_flight_debrief.php --bundle-id=N --job-id=N\n");
     exit(1);
 }
+
+$queue = CockpitRecorderDebriefQueueService::fromPdo($pdo);
 
 try {
     $jobStatement = $pdo->prepare(
@@ -40,12 +43,20 @@ try {
              heartbeat_at = CURRENT_TIMESTAMP(3), updated_at = CURRENT_TIMESTAMP(3)
          WHERE id = ?"
     )->execute(array($jobId));
+    $queue->updateJobProgress($jobId, 10, 'Starting generation');
 
-    $debrief = (new FlightDebriefService($pdo))->generateStructuredDebrief($bundleId, $actorUserId);
+    $debrief = (new FlightDebriefService($pdo))->generateStructuredDebrief(
+        $bundleId,
+        $actorUserId,
+        static function (int $progress, string $message) use ($queue, $jobId): void {
+            $queue->updateJobProgress($jobId, $progress, $message);
+        }
+    );
     $debriefId = (int)($debrief['id'] ?? 0);
     if ($debriefId <= 0) {
         throw new RuntimeException('Debrief generation did not create a draft.');
     }
+    $queue->updateJobProgress($jobId, 100, 'Ready');
     $pdo->prepare(
         "UPDATE ipca_async_jobs
          SET status = 'succeeded', result_json = ?, last_error = NULL,

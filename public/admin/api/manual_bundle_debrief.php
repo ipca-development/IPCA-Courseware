@@ -68,6 +68,8 @@ try {
             'bundle_id' => $bundleId,
             'transcript_snapshot_id' => (int)$bundle['transcript_snapshot_id'],
             'actor_user_id' => $actorUserId,
+            'progress' => 5,
+            'progress_message' => 'Queued',
         )),
     ));
     $jobId = (int)$pdo->lastInsertId();

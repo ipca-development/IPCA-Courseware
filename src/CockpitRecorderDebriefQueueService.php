@@ -58,6 +58,10 @@ final class CockpitRecorderDebriefQueueService
             return array('ok' => true, 'skipped' => true, 'reason' => 'waiting_for_pass4_readable');
         }
 
+        // If Pass 4 finished before a bundle existed, auto-freeze siblings first.
+        require_once __DIR__ . '/CvrAutoReconstructionOrchestrator.php';
+        CvrAutoReconstructionOrchestrator::safeConsider($this->pdo, null, $recordingId, null, null);
+
         $statement = $this->pdo->prepare(
             'SELECT id FROM ipca_manual_intake_bundles
              WHERE cockpit_recording_id = ? AND transcript_snapshot_id IS NULL
@@ -101,6 +105,144 @@ final class CockpitRecorderDebriefQueueService
             'bundle_id' => $bundleId,
             'transcript_snapshot_id' => $snapshotId,
             'debrief_job' => $queued,
+        );
+    }
+
+    /**
+     * Merge progress fields into an async debrief job payload (no schema migration).
+     */
+    public function updateJobProgress(int $jobId, int $progress, string $message): void
+    {
+        if ($jobId <= 0) {
+            return;
+        }
+        $progress = max(0, min(100, $progress));
+        $message = trim($message);
+        $statement = $this->pdo->prepare(
+            'SELECT payload_json FROM ipca_async_jobs WHERE id = ? LIMIT 1'
+        );
+        $statement->execute(array($jobId));
+        $raw = $statement->fetchColumn();
+        $payload = is_string($raw) && $raw !== ''
+            ? (json_decode($raw, true) ?: array())
+            : array();
+        if (!is_array($payload)) {
+            $payload = array();
+        }
+        $payload['progress'] = $progress;
+        $payload['progress_message'] = $message !== '' ? $message : (string)($payload['progress_message'] ?? '');
+        $this->pdo->prepare(
+            "UPDATE ipca_async_jobs
+             SET payload_json = ?, heartbeat_at = CURRENT_TIMESTAMP(3), updated_at = CURRENT_TIMESTAMP(3)
+             WHERE id = ?"
+        )->execute(array(AuditEventService::jsonEncode($payload), $jobId));
+    }
+
+    /**
+     * @param list<int> $bundleIds
+     * @return list<array<string,mixed>>
+     */
+    public function statusForBundles(array $bundleIds): array
+    {
+        $bundleIds = array_values(array_unique(array_filter(array_map('intval', $bundleIds), static fn(int $id): bool => $id > 0)));
+        if ($bundleIds === array()) {
+            return array();
+        }
+        $out = array();
+        foreach ($bundleIds as $bundleId) {
+            $out[] = $this->statusForBundle($bundleId);
+        }
+        return $out;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function statusForBundle(int $bundleId): array
+    {
+        if ($bundleId <= 0) {
+            return array(
+                'bundle_id' => 0,
+                'job_id' => null,
+                'status' => '',
+                'progress' => 0,
+                'progress_message' => '',
+                'error' => '',
+                'debrief_id' => null,
+                'running' => false,
+            );
+        }
+
+        $jobStatement = $this->pdo->prepare(
+            "SELECT id, status, payload_json, result_json, last_error
+             FROM ipca_async_jobs
+             WHERE job_type = 'generate_structured_debrief'
+               AND entity_type = 'ipca_manual_intake_bundles'
+               AND entity_id = ?
+             ORDER BY id DESC LIMIT 1"
+        );
+        $jobStatement->execute(array((string)$bundleId));
+        $job = $jobStatement->fetch(PDO::FETCH_ASSOC);
+
+        $debriefId = null;
+        if ($this->tableExists('ipca_structured_debriefs')) {
+            $debriefStatement = $this->pdo->prepare(
+                'SELECT id FROM ipca_structured_debriefs WHERE bundle_id = ? ORDER BY id DESC LIMIT 1'
+            );
+            $debriefStatement->execute(array($bundleId));
+            $debriefId = (int)$debriefStatement->fetchColumn() ?: null;
+        }
+
+        if (!is_array($job)) {
+            return array(
+                'bundle_id' => $bundleId,
+                'job_id' => null,
+                'status' => '',
+                'progress' => $debriefId ? 100 : 0,
+                'progress_message' => $debriefId ? 'Ready' : '',
+                'error' => '',
+                'debrief_id' => $debriefId,
+                'running' => false,
+            );
+        }
+
+        $status = strtolower(trim((string)($job['status'] ?? '')));
+        $payload = json_decode((string)($job['payload_json'] ?? ''), true);
+        if (!is_array($payload)) {
+            $payload = array();
+        }
+        $result = json_decode((string)($job['result_json'] ?? ''), true);
+        if (!is_array($result)) {
+            $result = array();
+        }
+        if ((int)($result['debrief_id'] ?? 0) > 0) {
+            $debriefId = (int)$result['debrief_id'];
+        }
+
+        $progress = max(0, min(100, (int)($payload['progress'] ?? 0)));
+        $message = trim((string)($payload['progress_message'] ?? ''));
+        $running = in_array($status, array('pending', 'claimed', 'running', 'retry_wait'), true);
+        if ($status === 'succeeded') {
+            $progress = 100;
+            if ($message === '') {
+                $message = 'Ready';
+            }
+        } elseif ($running && $progress <= 0) {
+            $progress = 5;
+            if ($message === '') {
+                $message = 'Queued';
+            }
+        }
+
+        return array(
+            'bundle_id' => $bundleId,
+            'job_id' => (int)$job['id'],
+            'status' => $status,
+            'progress' => $progress,
+            'progress_message' => $message,
+            'error' => trim((string)($job['last_error'] ?? '')),
+            'debrief_id' => $debriefId,
+            'running' => $running,
         );
     }
 
@@ -155,6 +297,8 @@ final class CockpitRecorderDebriefQueueService
                 'bundle_id' => $bundleId,
                 'transcript_snapshot_id' => $snapshotId,
                 'actor_user_id' => $actorUserId,
+                'progress' => 5,
+                'progress_message' => 'Queued',
             )),
         ));
         $jobId = (int)$this->pdo->lastInsertId();
@@ -168,6 +312,21 @@ final class CockpitRecorderDebriefQueueService
         }
 
         return array('ok' => true, 'job_id' => $jobId, 'spawned' => true);
+    }
+
+    private function tableExists(string $table): bool
+    {
+        static $cache = array();
+        if (array_key_exists($table, $cache)) {
+            return $cache[$table];
+        }
+        $statement = $this->pdo->prepare(
+            'SELECT 1 FROM information_schema.tables
+             WHERE table_schema = DATABASE() AND table_name = ? LIMIT 1'
+        );
+        $statement->execute(array($table));
+        $cache[$table] = (bool)$statement->fetchColumn();
+        return $cache[$table];
     }
 
     private function spawnDebriefWorker(int $bundleId, int $jobId, ?int $actorUserId): bool

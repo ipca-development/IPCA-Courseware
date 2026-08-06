@@ -405,6 +405,10 @@ final class CvrDataIntakeReadService
                 'bundle_id' => null,
                 'debrief_id' => null,
                 'reconstruction_status' => '',
+                'debrief_job_id' => null,
+                'debrief_job_status' => '',
+                'debrief_job_progress' => 0,
+                'debrief_job_message' => '',
             );
             $presentation = $this->blockTimes()->presentationStatuses(
                 trim((string)($row['server_receipt_id'] ?? '')) !== '',
@@ -426,6 +430,10 @@ final class CvrDataIntakeReadService
             $row['bundle_id'] = $bundle['bundle_id'];
             $row['debrief_id'] = $bundle['debrief_id'];
             $row['reconstruction_status'] = $bundle['reconstruction_status'];
+            $row['debrief_job_id'] = $bundle['debrief_job_id'] ?? null;
+            $row['debrief_job_status'] = (string)($bundle['debrief_job_status'] ?? '');
+            $row['debrief_job_progress'] = (int)($bundle['debrief_job_progress'] ?? 0);
+            $row['debrief_job_message'] = (string)($bundle['debrief_job_message'] ?? '');
             $row['crew_members'] = $this->blockTimes()->parseCrew($row['crew_json'] ?? null);
             $organizationId = (int)($row['organization_id'] ?? 0);
             $projection = $this->identityRead()->projectLegIdentity(
@@ -490,7 +498,15 @@ final class CvrDataIntakeReadService
 
     /**
      * @param list<string> $flightRecordUuids
-     * @return array<string,array{bundle_id:?int,debrief_id:?int,reconstruction_status:string}>
+     * @return array<string,array{
+     *   bundle_id:?int,
+     *   debrief_id:?int,
+     *   reconstruction_status:string,
+     *   debrief_job_id:?int,
+     *   debrief_job_status:string,
+     *   debrief_job_progress:int,
+     *   debrief_job_message:string
+     * }>
      */
     private function reconstructionMetaByFlightRecord(array $flightRecordUuids): array
     {
@@ -526,6 +542,10 @@ final class CvrDataIntakeReadService
                     'bundle_id' => isset($row['bundle_id']) ? (int)$row['bundle_id'] : null,
                     'debrief_id' => null,
                     'reconstruction_status' => trim((string)($row['reconstruction_status'] ?? '')),
+                    'debrief_job_id' => null,
+                    'debrief_job_status' => '',
+                    'debrief_job_progress' => 0,
+                    'debrief_job_message' => '',
                 );
             }
             if ($map !== array() && $this->tableExists('ipca_structured_debriefs')) {
@@ -553,6 +573,35 @@ final class CvrDataIntakeReadService
                         if ($bid > 0 && isset($debriefByBundle[$bid])) {
                             $map[$key]['debrief_id'] = $debriefByBundle[$bid];
                         }
+                    }
+                }
+            }
+            if ($map !== array() && $this->tableExists('ipca_async_jobs')) {
+                require_once __DIR__ . '/CockpitRecorderDebriefQueueService.php';
+                $queue = CockpitRecorderDebriefQueueService::fromPdo($this->pdo);
+                $bundleIds = array_values(array_filter(array_map(
+                    static fn(array $m): int => (int)($m['bundle_id'] ?? 0),
+                    $map
+                )));
+                $statusByBundle = array();
+                foreach ($queue->statusForBundles($bundleIds) as $status) {
+                    $bid = (int)($status['bundle_id'] ?? 0);
+                    if ($bid > 0) {
+                        $statusByBundle[$bid] = $status;
+                    }
+                }
+                foreach ($map as $key => $meta) {
+                    $bid = (int)($meta['bundle_id'] ?? 0);
+                    $status = $statusByBundle[$bid] ?? null;
+                    if (!is_array($status)) {
+                        continue;
+                    }
+                    $map[$key]['debrief_job_id'] = isset($status['job_id']) ? (int)$status['job_id'] : null;
+                    $map[$key]['debrief_job_status'] = (string)($status['status'] ?? '');
+                    $map[$key]['debrief_job_progress'] = (int)($status['progress'] ?? 0);
+                    $map[$key]['debrief_job_message'] = (string)($status['progress_message'] ?? '');
+                    if ((int)($status['debrief_id'] ?? 0) > 0 && empty($map[$key]['debrief_id'])) {
+                        $map[$key]['debrief_id'] = (int)$status['debrief_id'];
                     }
                 }
             }

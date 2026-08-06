@@ -119,6 +119,15 @@ final class CvrDispatchIntakeService
             throw $e;
         }
 
+        require_once __DIR__ . '/CvrAutoReconstructionOrchestrator.php';
+        CvrAutoReconstructionOrchestrator::safeConsider(
+            $this->pdo,
+            $normalized['flight_record_uuid'] ?? null,
+            null,
+            $dispatchId,
+            null
+        );
+
         return array(
             'ok' => true,
             'error_code' => $alreadyPresent ? 'DUPLICATE_ALREADY_VERIFIED' : null,

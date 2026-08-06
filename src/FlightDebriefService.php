@@ -131,8 +131,22 @@ final class FlightDebriefService
     }
 
     /** @return array<string,mixed> */
-    public function generateStructuredDebrief(int $bundleId, ?int $actorUserId = null): array
+    /**
+     * @param (callable(int,string):void)|null $onProgress
+     */
+    public function generateStructuredDebrief(int $bundleId, ?int $actorUserId = null, ?callable $onProgress = null): array
     {
+        $report = static function (int $progress, string $message) use ($onProgress): void {
+            if ($onProgress === null) {
+                return;
+            }
+            try {
+                $onProgress($progress, $message);
+            } catch (Throwable) {
+                // Progress reporting must never fail generation.
+            }
+        };
+
         $bundle = $this->structuredBundle($bundleId);
         if (!$bundle) {
             throw new RuntimeException('Reconstruction bundle not found.');
@@ -152,11 +166,13 @@ final class FlightDebriefService
             $usesGenericMissionRubric = true;
         }
         $evidence = $this->structuredEvidence($bundle, $snapshot);
+        $report(20, 'Preparing evidence');
         $encodedEvidence = AuditEventService::jsonEncode($evidence);
         if (str_contains(strtolower($encodedEvidence), 'flightcircle')) {
             throw new RuntimeException('FlightCircle evidence is prohibited from AI debrief generation.');
         }
         $prompt = $this->structuredPrompt($exercise, $evidence);
+        $report(35, 'Building prompt');
         $request = array(
             'model' => cw_openai_model(),
             'input' => array(
@@ -164,13 +180,16 @@ final class FlightDebriefService
                 array('role' => 'user', 'content' => array(array('type' => 'input_text', 'text' => $prompt))),
             ),
         );
+        $report(45, 'Calling AI model');
         $response = cw_openai_responses($request, 600);
+        $report(75, 'Normalizing draft');
         $rawText = $this->responseText($response);
         $decoded = $this->decodeModelJson($rawText);
         $normalized = $this->normalizeStructuredDebrief($decoded, $exercise['evaluation_rubric']);
         $overall = $this->calculateSuggestedOverall($normalized['evaluations']);
         $normalized['suggested_overall'] = $overall['result'];
 
+        $report(95, 'Saving draft');
         $this->pdo->beginTransaction();
         try {
             $previous = $this->pdo->prepare(

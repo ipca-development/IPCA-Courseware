@@ -412,6 +412,15 @@ final class CockpitRecorderService
             ));
         }
 
+        require_once __DIR__ . '/CvrAutoReconstructionOrchestrator.php';
+        CvrAutoReconstructionOrchestrator::safeConsider(
+            $this->pdo,
+            null,
+            (int)$recording['id'],
+            null,
+            null
+        );
+
         $workerSpawned = $this->spawnTranscriptionWorker((int)$recording['id']);
 
         return array(

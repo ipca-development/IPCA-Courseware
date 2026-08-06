@@ -106,6 +106,16 @@ final class GarminCsvEvidenceService
                 SET status = 'duplicate', assembled_path = ?, updated_at = CURRENT_TIMESTAMP(3)
                 WHERE id = ?
             ")->execute(array($assembled, (int)$request['id']));
+            if ($workflowFlightRecordUuid !== '') {
+                require_once __DIR__ . '/CvrAutoReconstructionOrchestrator.php';
+                CvrAutoReconstructionOrchestrator::safeConsider(
+                    $this->pdo,
+                    $workflowFlightRecordUuid,
+                    null,
+                    null,
+                    (int)($duplicate['id'] ?? 0)
+                );
+            }
             return array(
                 'ok' => true,
                 'status' => 'duplicate',
@@ -141,6 +151,17 @@ final class GarminCsvEvidenceService
             SET status = 'finalized', assembled_path = ?, updated_at = CURRENT_TIMESTAMP(3)
             WHERE id = ?
         ")->execute(array($storagePath, (int)$request['id']));
+
+        if ($workflowFlightRecordUuid !== '') {
+            require_once __DIR__ . '/CvrAutoReconstructionOrchestrator.php';
+            CvrAutoReconstructionOrchestrator::safeConsider(
+                $this->pdo,
+                $workflowFlightRecordUuid,
+                null,
+                null,
+                $csvFileId
+            );
+        }
 
         return array(
             'ok' => true,

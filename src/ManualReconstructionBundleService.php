@@ -307,6 +307,11 @@ final class ManualReconstructionBundleService
                       AND a.entity_type = \'ipca_manual_intake_bundles\'
                       AND CAST(a.entity_id AS UNSIGNED) = b.id
                     ORDER BY a.id DESC LIMIT 1) AS debrief_job_status
+                   ,(SELECT a.payload_json FROM ipca_async_jobs a
+                    WHERE a.job_type = \'generate_structured_debrief\'
+                      AND a.entity_type = \'ipca_manual_intake_bundles\'
+                      AND CAST(a.entity_id AS UNSIGNED) = b.id
+                    ORDER BY a.id DESC LIMIT 1) AS debrief_job_payload
                    ,(SELECT a.last_error FROM ipca_async_jobs a
                     WHERE a.job_type = \'generate_structured_debrief\'
                       AND a.entity_type = \'ipca_manual_intake_bundles\'
@@ -315,7 +320,31 @@ final class ManualReconstructionBundleService
             FROM ipca_manual_intake_bundles b
             INNER JOIN ipca_cockpit_recordings r ON r.id = b.cockpit_recording_id
             ORDER BY b.id DESC LIMIT ' . max(1, min(100, $limit));
-        return $this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $rows = $this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        foreach ($rows as &$row) {
+            $payload = json_decode((string)($row['debrief_job_payload'] ?? ''), true);
+            if (!is_array($payload)) {
+                $payload = array();
+            }
+            $status = strtolower(trim((string)($row['debrief_job_status'] ?? '')));
+            $progress = max(0, min(100, (int)($payload['progress'] ?? 0)));
+            $message = trim((string)($payload['progress_message'] ?? ''));
+            if ($status === 'succeeded') {
+                $progress = 100;
+                if ($message === '') {
+                    $message = 'Ready';
+                }
+            } elseif (in_array($status, array('pending', 'claimed', 'running', 'retry_wait'), true) && $progress <= 0) {
+                $progress = 5;
+                if ($message === '') {
+                    $message = 'Queued';
+                }
+            }
+            $row['debrief_job_progress'] = $progress;
+            $row['debrief_job_message'] = $message;
+        }
+        unset($row);
+        return $rows;
     }
 
     /** @return array{ready:bool,reason:string,snapshot_id:?int} */

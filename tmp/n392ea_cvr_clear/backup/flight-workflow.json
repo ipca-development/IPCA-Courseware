@@ -1,0 +1,167 @@
+{
+  "activeDispatch" : {
+    "aircraftID" : 3,
+    "configuredBeaconID" : "",
+    "configuredCVRUnitID" : "CVR UNIT 02",
+    "consentStatus" : "complete",
+    "createdAt" : "2026-08-01T18:38:34Z",
+    "creatorIdentity" : "local_cvr_unit",
+    "crew" : [
+      {
+        "id" : "B5608F72-F43F-4D72-9644-CD53118774EB",
+        "personID" : 34,
+        "personName" : "Tasha Welvis",
+        "role" : "pic"
+      },
+      {
+        "id" : "BA3677CF-3AA3-4E97-9600-CB7DC9B03EDE",
+        "personID" : 17,
+        "personName" : "Judson Graham",
+        "role" : "instructor"
+      }
+    ],
+    "dispatchSource" : "scheduled_session",
+    "fuelOnboard" : "13.0",
+    "id" : "5241B1EA-5867-4042-B606-C55671E9FAF9",
+    "missionCode" : "7-1-5",
+    "modifiedAt" : "2026-08-01T18:56:49Z",
+    "oilPercentage" : 50,
+    "oilServicedSincePreviousFlight" : false,
+    "organizationID" : 1,
+    "plannedDepartureAirport" : "KTRM",
+    "plannedDestinationAirport" : "KSNA",
+    "previousEndingHobbs" : 828.1,
+    "previousEndingOilUnit" : "%",
+    "previousEndingTacho" : 387.7,
+    "previousFlightRecordID" : "1A83FAFC-6417-471B-94DE-5EB4E30D9A46",
+    "previousFuelRemaining" : "8.9",
+    "refueledSincePreviousFlight" : true,
+    "scheduledDate" : "2026-08-01T07:00:00Z",
+    "scheduledEndTime" : "2026-08-01T20:00:00Z",
+    "scheduledStartTime" : "2026-08-01T18:30:00Z",
+    "schedulerRecordID" : "4dd47ce0-a982-4834-8822-a81e7c7ee6a3",
+    "serverDispatchID" : "18",
+    "startingHobbs" : 828.1,
+    "startingOilQuantity" : 50,
+    "startingOilUnit" : "%",
+    "startingTacho" : 387.7,
+    "status" : "flightRecordLoggingEnabled",
+    "tailNumber" : "N392EA",
+    "version" : 3
+  },
+  "activeFlightRecord" : {
+    "createdAt" : "2026-08-01T18:56:49Z",
+    "dispatchID" : "5241B1EA-5867-4042-B606-C55671E9FAF9",
+    "id" : "49CC5592-14AF-4826-B661-3A5B26D05957",
+    "status" : "standingByForAvionics",
+    "updatedAt" : "2026-08-01T18:56:52Z"
+  },
+  "consents" : [
+    {
+      "appVersion" : "1.0",
+      "consentResult" : true,
+      "consentTextVersion" : "cvr-recording-safety-training-v1",
+      "crewRole" : "pic",
+      "deviceID" : "6FB68682-33E6-4E3D-A843-92A9D0C0C5A2",
+      "dispatchID" : "5241B1EA-5867-4042-B606-C55671E9FAF9",
+      "dispatchVersion" : 3,
+      "id" : "4327F6C4-03B1-4A35-A1D4-66476297324E",
+      "personID" : 34,
+      "personName" : "Tasha Welvis",
+      "timestamp" : "2026-08-01T18:56:44Z"
+    },
+    {
+      "appVersion" : "1.0",
+      "consentResult" : true,
+      "consentTextVersion" : "cvr-recording-safety-training-v1",
+      "crewRole" : "instructor",
+      "deviceID" : "6FB68682-33E6-4E3D-A843-92A9D0C0C5A2",
+      "dispatchID" : "5241B1EA-5867-4042-B606-C55671E9FAF9",
+      "dispatchVersion" : 3,
+      "id" : "F358A8D9-E60E-4FDB-9919-8811EA3C4001",
+      "personID" : 17,
+      "personName" : "Judson Graham",
+      "timestamp" : "2026-08-01T18:56:46Z"
+    }
+  ],
+  "discrepancies" : [
+
+  ],
+  "flightEvents" : [
+
+  ],
+  "flightLegs" : [
+
+  ],
+  "recorderVerifications" : [
+    {
+      "acceptedNonblockingWarnings" : [
+
+      ],
+      "appVersion" : "1.0",
+      "audioRouteStatus" : "Audio source: USB-C audio input",
+      "batteryStatus" : "Unplugged 100%",
+      "beaconStatus" : "unknown",
+      "deviceID" : "6FB68682-33E6-4E3D-A843-92A9D0C0C5A2",
+      "dispatchID" : "5241B1EA-5867-4042-B606-C55671E9FAF9",
+      "fileWritingTestResult" : "deferred-to-recording-start",
+      "flightRecordID" : "49CC5592-14AF-4826-B661-3A5B26D05957",
+      "gpsStatus" : "ready",
+      "id" : "B1D92061-2E7F-486C-ACD6-0AE648EAAAE2",
+      "permissionStatus" : "app-level-checks-pending",
+      "storageStatus" : "229.42 GB",
+      "thermalStatus" : "SERIOUS",
+      "timestamp" : "2026-08-01T18:56:52Z",
+      "userIdentity" : "local_cvr_unit",
+      "warnings" : [
+
+      ]
+    }
+  ],
+  "selectedTab" : "log",
+  "updatedAt" : "2026-08-06T14:19:18Z",
+  "uploadComponents" : [
+    {
+      "attemptCount" : 1,
+      "authoritativePayloadSHA256" : "3cda2907fb8eea3cb5ec711faf7c22e67de4e86ed847fb07be394d963d94ed36",
+      "canonicalIdentifiers" : {
+        "dispatch_uuid" : "5241b1ea-5867-4042-b606-c55671e9faf9",
+        "dispatch_version" : "3",
+        "flight_record_uuid" : "49cc5592-14af-4826-b661-3a5b26d05957",
+        "server_dispatch_id" : "18"
+      },
+      "componentType" : "dispatch_metadata",
+      "flightRecordID" : "49CC5592-14AF-4826-B661-3A5B26D05957",
+      "id" : "dispatch-5241B1EA-5867-4042-B606-C55671E9FAF9-v3",
+      "lastAttemptAt" : "2026-08-05T14:03:40Z",
+      "lastError" : "",
+      "progress" : 1,
+      "reconciliationRequired" : false,
+      "requestPayloadSnapshot" : "eyJjb25zZW50cyI6W3siYXBwX3ZlcnNpb24iOiIxLjAiLCJjb25zZW50X3Jlc3VsdCI6dHJ1ZSwiY29uc2VudF90ZXh0X3ZlcnNpb24iOiJjdnItcmVjb3JkaW5nLXNhZmV0eS10cmFpbmluZy12MSIsImNyZXdfcm9sZSI6InBpYyIsImRldmljZV9pZCI6IjZGQjY4NjgyLTMzRTYtNEUzRC1BODQzLTkyQTlEMEMwQzVBMiIsImRpc3BhdGNoX2lkIjoiNTI0MWIxZWEtNTg2Ny00MDQyLWI2MDYtYzU1NjcxZTlmYWY5IiwiZGlzcGF0Y2hfdmVyc2lvbiI6MywiaWQiOiI0MzI3ZjZjNC0wM2IxLTRhMzUtYTFkNC02NjQ3NjI5NzMyNGUiLCJwZXJzb25faWQiOjM0LCJwZXJzb25fbmFtZSI6IlRhc2hhIFdlbHZpcyIsInRpbWVzdGFtcCI6IjIwMjYtMDgtMDFUMTg6NTY6NDQuMDAwWiJ9LHsiYXBwX3ZlcnNpb24iOiIxLjAiLCJjb25zZW50X3Jlc3VsdCI6dHJ1ZSwiY29uc2VudF90ZXh0X3ZlcnNpb24iOiJjdnItcmVjb3JkaW5nLXNhZmV0eS10cmFpbmluZy12MSIsImNyZXdfcm9sZSI6Imluc3RydWN0b3IiLCJkZXZpY2VfaWQiOiI2RkI2ODY4Mi0zM0U2LTRFM0QtQTg0My05MkE5RDBDMEM1QTIiLCJkaXNwYXRjaF9pZCI6IjUyNDFiMWVhLTU4NjctNDA0Mi1iNjA2LWM1NTY3MWU5ZmFmOSIsImRpc3BhdGNoX3ZlcnNpb24iOjMsImlkIjoiZjM1OGE4ZDktZTYwZS00ZmRiLTk5MTktODgxMWVhM2M0MDAxIiwicGVyc29uX2lkIjoxNywicGVyc29uX25hbWUiOiJKdWRzb24gR3JhaGFtIiwidGltZXN0YW1wIjoiMjAyNi0wOC0wMVQxODo1Njo0Ni4wMDBaIn1dLCJkaXNwYXRjaCI6eyJhaXJjcmFmdF9pZCI6MywiY29uZmlndXJlZF9iZWFjb25faWQiOiIiLCJjb25maWd1cmVkX2N2cl91bml0X2lkIjoiQ1ZSIFVOSVQgMDIiLCJjb25zZW50X3N0YXR1cyI6ImNvbXBsZXRlIiwiY3JlYXRlZF9hdCI6IjIwMjYtMDgtMDFUMTg6Mzg6MzQuMDAwWiIsImNyZWF0b3JfaWRlbnRpdHkiOiJsb2NhbF9jdnJfdW5pdCIsImNyZXciOlt7ImlkIjoiQjU2MDhGNzItRjQzRi00RDcyLTk2NDQtQ0Q1MzExODc3NEVCIiwicGVyc29uX2lkIjozNCwicGVyc29uX25hbWUiOiJUYXNoYSBXZWx2aXMiLCJyb2xlIjoicGljIn0seyJpZCI6IkJBMzY3N0NGLTNBQTMtNEU5Ny05NjAwLUNCN0RDOUIwM0VERSIsInBlcnNvbl9pZCI6MTcsInBlcnNvbl9uYW1lIjoiSnVkc29uIEdyYWhhbSIsInJvbGUiOiJpbnN0cnVjdG9yIn1dLCJkaXNwYXRjaF9zb3VyY2UiOiJzY2hlZHVsZWRfc2Vzc2lvbiIsImZ1ZWxfY2FwYWNpdHkiOjEzLCJmdWVsX29uYm9hcmQiOiIxMy4wIiwiZnVlbF91bml0IjoiVVNHIiwiaWQiOiI1MjQxYjFlYS01ODY3LTQwNDItYjYwNi1jNTU2NzFlOWZhZjkiLCJtaXNzaW9uX2NvZGUiOiI3LTEtNSIsIm1vZGlmaWVkX2F0IjoiMjAyNi0wOC0wMVQxODo1Njo0OS4wMDBaIiwib2lsX3BlcmNlbnRhZ2UiOjUwLCJvaWxfcXVhbnRpdHkiOjUwLCJvaWxfc2VydmljZWRfc2luY2VfcHJldmlvdXNfZmxpZ2h0IjpmYWxzZSwib2lsX3VuaXQiOiIlIiwib3JnYW5pemF0aW9uX2lkIjoxLCJwbGFubmVkX2RlcGFydHVyZV9haXJwb3J0IjoiS1RSTSIsInBsYW5uZWRfZGVzdGluYXRpb25fYWlycG9ydCI6IktTTkEiLCJwcmV2aW91c19lbmRpbmdfaG9iYnMiOjgyOC4xMDAwMDAwMDAwMDAwMiwicHJldmlvdXNfZW5kaW5nX3RhY2hvIjozODcuNjk5OTk5OTk5OTk5OTksInByZXZpb3VzX2ZsaWdodF9yZWNvcmRfaWQiOiIxYTgzZmFmYy02NDE3LTQ3MWItOTRkZS01ZWI0ZTMwZDlhNDYiLCJwcmV2aW91c19mdWVsX3JlbWFpbmluZyI6IjguOSIsInJlZnVlbGVkX3NpbmNlX3ByZXZpb3VzX2ZsaWdodCI6dHJ1ZSwic2NoZWR1bGVkX2RhdGUiOiIyMDI2LTA4LTAxIiwic2NoZWR1bGVkX2VuZF90aW1lIjoiMjAyNi0wOC0wMVQyMDowMDowMC4wMDBaIiwic2NoZWR1bGVkX3N0YXJ0X3RpbWUiOiIyMDI2LTA4LTAxVDE4OjMwOjAwLjAwMFoiLCJzY2hlZHVsZXJfcmVjb3JkX2lkIjoiNGRkNDdjZTAtYTk4Mi00ODM0LTg4MjItYTgxZTdjN2VlNmEzIiwic3RhcnRpbmdfaG9iYnMiOjgyOC4xMDAwMDAwMDAwMDAwMiwic3RhcnRpbmdfdGFjaG8iOjM4Ny42OTk5OTk5OTk5OTk5OSwic3RhdHVzIjoiZmxpZ2h0UmVjb3JkTG9nZ2luZ0VuYWJsZWQiLCJ0YWlsX251bWJlciI6Ik4zOTJFQSIsInZlcnNpb24iOjN9LCJmbGlnaHRfcmVjb3JkX3V1aWQiOiI0OWNjNTU5Mi0xNGFmLTQ4MjYtYjY2MS0zYTViMjZkMDU5NTcifQ==",
+      "retryable" : false,
+      "serverID" : "18",
+      "serverReceiptID" : "77a07c52-20d0-4b42-8d90-01f53a9c0bf0",
+      "serverVerificationAt" : "2026-08-01T18:56:49Z",
+      "state" : "serverVerified",
+      "userActionRequired" : false
+    },
+    {
+      "attemptCount" : 1,
+      "componentType" : "recorder_verification",
+      "errorCode" : "IMMUTABLE_CONFLICT",
+      "flightRecordID" : "49CC5592-14AF-4826-B661-3A5B26D05957",
+      "id" : "95652A07-F1A3-4A1B-8493-11CD3CE7CCFB",
+      "lastAttemptAt" : "2026-08-06T14:15:01Z",
+      "lastError" : "Evidence payload conflicts with the immutable stored component.",
+      "localFilePath" : "verification:B1D92061-2E7F-486C-ACD6-0AE648EAAAE2",
+      "progress" : 0,
+      "reconciliationRequired" : false,
+      "requestPayloadSnapshot" : "eyJjb21wb25lbnRfdHlwZSI6InJlY29yZGVyX3ZlcmlmaWNhdGlvbiIsImNvbXBvbmVudF91dWlkIjoiOTU2NTJhMDctZjFhMy00YTFiLTg0OTMtMTFjZDNjZTdjY2ZiIiwiZGlzcGF0Y2hfdXVpZCI6IjUyNDFiMWVhLTU4NjctNDA0Mi1iNjA2LWM1NTY3MWU5ZmFmOSIsImV2aWRlbmNlIjp7ImFjY2VwdGVkX25vbmJsb2NraW5nX3dhcm5pbmdzIjpbXSwiYXBwX3ZlcnNpb24iOiIxLjAiLCJhdWRpb19yb3V0ZV9zdGF0dXMiOiJBdWRpbyBzb3VyY2U6IFVTQi1DIGF1ZGlvIGlucHV0IiwiYmF0dGVyeV9zdGF0dXMiOiJVbnBsdWdnZWQgMTAwJSIsImJlYWNvbl9zdGF0dXMiOiJ1bmtub3duIiwiZGV2aWNlX2lkIjoiNkZCNjg2ODItMzNFNi00RTNELUE4NDMtOTJBOUQwQzBDNUEyIiwiZmlsZV93cml0aW5nX3Rlc3RfcmVzdWx0IjoiZGVmZXJyZWQtdG8tcmVjb3JkaW5nLXN0YXJ0IiwiZ3BzX3N0YXR1cyI6InJlYWR5IiwicGVybWlzc2lvbl9zdGF0dXMiOiJhcHAtbGV2ZWwtY2hlY2tzLXBlbmRpbmciLCJzdG9yYWdlX3N0YXR1cyI6IjIyOS40MiBHQiIsInRoZXJtYWxfc3RhdHVzIjoiU0VSSU9VUyIsInRpbWVzdGFtcCI6IjIwMjYtMDgtMDFUMTg6NTY6NTIuMDAwWiIsInVzZXJfaWRlbnRpdHkiOiJsb2NhbF9jdnJfdW5pdCIsInZlcmlmaWNhdGlvbl91dWlkIjoiYjFkOTIwNjEtMmU3Zi00ODZjLWFjZDYtMGFlNjQ4ZWFhYWUyIiwid2FybmluZ3MiOltdfSwiZmxpZ2h0X3JlY29yZF91dWlkIjoiNDljYzU1OTItMTRhZi00ODI2LWI2NjEtM2E1YjI2ZDA1OTU3Iiwic2NoZW1hX3ZlcnNpb24iOjF9",
+      "retryable" : false,
+      "serverReceiptID" : "45f5efb7-8dd7-4fc1-9e5a-99173ee13f77",
+      "serverVerificationAt" : "2026-08-01T18:56:56Z",
+      "state" : "failed",
+      "userActionRequired" : false
+    }
+  ]
+}
