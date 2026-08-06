@@ -1173,9 +1173,9 @@ cw_header('Master Logbook');
 .legs-table{width:100%;min-width:1180px;border-collapse:collapse;font-size:10px;table-layout:fixed}
 .legs-table col.legs-col-flight{width:118px}
 .legs-table col.legs-col-route{width:148px}
-.legs-table col.legs-col-times{width:138px}
-.legs-table col.legs-col-hobbs{width:108px}
-.legs-table col.legs-col-tacho{width:108px}
+.legs-table col.legs-col-times{width:168px}
+.legs-table col.legs-col-hobbs{width:118px}
+.legs-table col.legs-col-tacho{width:118px}
 .legs-table col.legs-col-fuel{width:148px}
 .legs-table col.legs-col-ops{width:64px}
 .legs-table col.legs-col-evidence{width:108px}
@@ -1188,16 +1188,17 @@ cw_header('Master Logbook');
 .legs-flight{display:grid;gap:3px;min-width:0}
 .legs-flight-date{font-size:10px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .legs-flight-mission{font-size:9px;font-weight:700;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.legs-route-cell{display:grid;grid-template-columns:minmax(64px,1fr) 18px minmax(64px,1fr);column-gap:12px;align-items:start}
+.legs-route-cell{display:grid;grid-template-columns:minmax(70px,1fr) 20px minmax(70px,1fr);column-gap:16px;align-items:start}
 .legs-route-end{display:grid;gap:2px;min-width:0;justify-items:start;text-align:left}
 .legs-route-icao{font-weight:900;letter-spacing:.04em;color:#0f172a;font-size:11px;line-height:1.15}
 .legs-route-place{font-size:8px;font-weight:650;color:#94a3b8;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .legs-route-arrow{color:#94a3b8;font-weight:800;padding-top:1px;text-align:center}
-.legs-pair{display:grid;grid-template-columns:minmax(52px,1fr) 18px minmax(52px,1fr);column-gap:14px;align-items:start;font-variant-numeric:tabular-nums}
-.legs-pair-end{display:grid;gap:2px;min-width:0;justify-items:start;text-align:left}
-.legs-pair-time{font-size:11px;font-weight:850;color:#0f172a;line-height:1.15;white-space:nowrap}
-.legs-pair-label{font-size:8px;font-weight:700;color:#94a3b8;line-height:1.2;white-space:nowrap}
-.legs-pair-arrow{color:#94a3b8;font-weight:800;padding-top:1px;text-align:center}
+.legs-times-pair{display:grid;grid-template-columns:max-content 20px max-content;column-gap:18px;align-items:start;justify-content:start;font-variant-numeric:tabular-nums}
+.legs-times-end{display:grid;gap:2px;justify-items:start;text-align:left}
+.legs-times-value{font-size:11px;font-weight:850;color:#0f172a;line-height:1.15;white-space:nowrap}
+.legs-times-label{font-size:8px;font-weight:700;color:#94a3b8;line-height:1.2;white-space:nowrap}
+.legs-times-arrow{color:#94a3b8;font-weight:800;padding-top:1px;text-align:center}
+.legs-pair{display:grid;gap:2px;font-variant-numeric:tabular-nums}
 .legs-pair-main{font-size:11px;font-weight:850;color:#0f172a;white-space:nowrap}
 .legs-pair-sub{font-size:9px;font-weight:700;color:#64748b}
 .legs-crew{display:grid;gap:3px;min-width:0}
@@ -1227,10 +1228,46 @@ cw_header('Master Logbook');
 .legs-ev-warn{background:#ffedd5;color:#c2410c}
 .legs-ev-bad{background:#fee2e2;color:#991b1b}
 .legs-ev-na{background:#f1f5f9;color:#94a3b8}
-.legs-actions{display:grid;gap:5px;justify-items:stretch}
-.legs-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:800;text-decoration:none;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#1e3a8a}
-.legs-btn-replay{border-color:#1d4ed8;background:#1d4ed8;color:#fff}
-.legs-btn:disabled,.legs-btn.is-disabled{opacity:.45;cursor:not-allowed;pointer-events:none}
+.legs-actions{display:grid;gap:6px;justify-items:stretch;min-width:0}
+.legs-actions .app-btn{
+  min-height:30px;
+  padding:0 10px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:800;
+  gap:6px;
+  width:100%;
+  box-shadow:0 6px 14px rgba(16,36,64,0.10);
+}
+.legs-actions .app-btn svg{width:12px;height:12px;flex:0 0 12px}
+.legs-actions .app-btn-primary{
+  background:linear-gradient(180deg,#17345d 0%,#102440 100%);
+  color:#fff;
+  border-color:transparent;
+  box-shadow:0 8px 16px rgba(16,36,64,0.14);
+}
+.legs-actions .app-btn-primary:hover{
+  background:linear-gradient(180deg,#1b3d6c 0%,#15304f 100%);
+  color:#fff;
+}
+.legs-actions .app-btn-secondary{
+  background:#fff;
+  color:#102440;
+  border-color:rgba(15,23,42,0.12);
+  box-shadow:none;
+}
+.legs-actions .app-btn-secondary:hover{
+  background:#f9fbfe;
+  color:#102440;
+}
+.legs-actions .app-btn.is-disabled,
+.legs-actions .app-btn:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+  pointer-events:none;
+  transform:none;
+  box-shadow:none;
+}
 .legs-legend{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;font-size:10px;color:#64748b;font-weight:700}
 .legs-legend span{display:inline-flex;align-items:center;gap:4px}
 .legs-num{font-weight:750;color:#334155}
@@ -1641,15 +1678,15 @@ cw_header('Master Logbook');
                 ?></div>
               </td>
               <td>
-                <div class="legs-pair">
-                  <div class="legs-pair-end">
-                    <div class="legs-pair-time"><?= cvr_intake_h($offLocal) ?></div>
-                    <div class="legs-pair-label">Off Block</div>
+                <div class="legs-times-pair">
+                  <div class="legs-times-end">
+                    <div class="legs-times-value"><?= cvr_intake_h($offLocal) ?></div>
+                    <div class="legs-times-label">Off Block</div>
                   </div>
-                  <div class="legs-pair-arrow">→</div>
-                  <div class="legs-pair-end is-on">
-                    <div class="legs-pair-time"><?= cvr_intake_h($onLocal) ?></div>
-                    <div class="legs-pair-label">On Block</div>
+                  <div class="legs-times-arrow">→</div>
+                  <div class="legs-times-end">
+                    <div class="legs-times-value"><?= cvr_intake_h($onLocal) ?></div>
+                    <div class="legs-times-label">On Block</div>
                   </div>
                 </div>
               </td>
@@ -1693,13 +1730,24 @@ cw_header('Master Logbook');
               </td>
               <td>
                 <div class="legs-actions">
-                  <button type="button" class="legs-btn" data-legs-details>Details</button>
+                  <button type="button" class="app-btn app-btn-secondary" data-legs-details>
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3h7v7M10 14L21 3M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Details</span>
+                  </button>
                   <?php if ($replayReady): ?>
-                    <a class="legs-btn legs-btn-replay" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>" data-legs-stop>▶ Replay</a>
+                    <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>" data-legs-stop>
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
+                      <span>Replay</span>
+                    </a>
                   <?php else: ?>
-                    <span class="legs-btn legs-btn-replay is-disabled" aria-disabled="true">▶ Replay</span>
+                    <span class="app-btn app-btn-primary is-disabled" aria-disabled="true">
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
+                      <span>Replay</span>
+                    </span>
                   <?php endif; ?>
-                  <button type="button" class="legs-link-btn" data-legs-debrief data-debrief-id="<?= $debriefId ?>" data-bundle-id="<?= $bundleId ?>" data-legs-stop>Debriefing</button>
+                  <button type="button" class="app-btn app-btn-secondary" data-legs-debrief data-debrief-id="<?= $debriefId ?>" data-bundle-id="<?= $bundleId ?>" data-legs-stop>
+                    <span>Debriefing</span>
+                  </button>
                 </div>
               </td>
             </tr>
