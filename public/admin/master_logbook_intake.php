@@ -959,15 +959,38 @@ function cvr_debrief_proposed_value(array $values, array $keys, mixed $fallback 
 cw_header('Master Logbook');
 ?>
 <style>
-.intake-page{display:grid;gap:14px}
-.intake-card{background:#fff;border:1px solid rgba(15,23,42,.12);border-radius:16px;padding:16px;box-shadow:0 10px 22px rgba(15,23,42,.05)}
-.intake-hero{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;flex-wrap:wrap}
-.intake-title{margin:0;color:#0f172a;font-size:26px}
-.intake-muted{color:#64748b;font-size:12px;line-height:1.45}
+.intake-page{display:grid;gap:16px}
+.intake-page .app-section-hero{margin-bottom:0}
+.intake-hero-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px}
+.intake-hero-copy{min-width:0}
+.intake-hero-title{margin:0;font-size:34px;line-height:1.02;letter-spacing:-0.04em;font-weight:760;color:#fff}
+.intake-hero-text{max-width:860px;margin:14px 0 0;color:rgba(255,255,255,.82);font-size:15px;line-height:1.65}
+.intake-hero-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}
+.intake-hero-actions .app-btn{
+  min-height:42px;
+  height:42px;
+  padding:0 16px;
+  border-radius:999px;
+  font-size:13px;
+  font-weight:680;
+  box-sizing:border-box;
+}
+.intake-hero-actions .app-btn-secondary{
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  border:1px solid rgba(255,255,255,.14);
+  box-shadow:none;
+}
+.intake-hero-actions .app-btn-secondary:hover{
+  background:rgba(255,255,255,.14);
+  color:#fff;
+}
+.intake-card{background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:18px;padding:18px 20px;box-shadow:0 10px 22px rgba(15,23,42,.05)}
+.intake-muted{color:#64748b;font-size:13px;line-height:1.5}
 .intake-tabs{display:flex;gap:8px;flex-wrap:wrap}
-.intake-tab{border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:999px;padding:8px 13px;font-size:12px;font-weight:850;cursor:pointer}
-.intake-tab.is-active{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
-.intake-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:999px;margin-left:5px;padding:0 5px;background:#e2e8f0;color:#334155;font-size:10px}
+.intake-tab{border:1px solid rgba(15,23,42,.10);background:#fff;color:#334155;border-radius:999px;min-height:42px;height:42px;padding:0 14px;font-size:12px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;box-sizing:border-box}
+.intake-tab.is-active{background:linear-gradient(180deg,#17345d 0%,#102440 100%);color:#fff;border-color:transparent;box-shadow:0 8px 16px rgba(16,36,64,.14)}
+.intake-count{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:999px;margin-left:6px;padding:0 6px;background:#e2e8f0;color:#334155;font-size:10px;font-weight:800}
 .intake-tab.is-active .intake-count{background:rgba(255,255,255,.2);color:#fff}
 .intake-panel{display:none}
 .intake-panel.is-active{display:block}
@@ -1113,8 +1136,115 @@ cw_header('Master Logbook');
 /* Operational Legs — IPCA Master Logbook visual language */
 .legs-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
 .legs-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-.legs-filters label{display:grid;gap:4px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#64748b}
-.legs-filters .intake-select{min-width:120px;padding:6px 8px;font-size:12px}
+.legs-filters label{display:grid;gap:6px;font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:#64748b}
+.legs-filters .intake-select,
+.legs-filters .app-input,
+.legs-filters .app-select{
+  min-width:140px;
+}
+.intake-refresh{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  height:42px;
+  min-height:42px;
+  padding:0 14px;
+  border:1px solid rgba(15,23,42,.10);
+  border-radius:12px;
+  background:#fff;
+  color:#102440;
+  text-decoration:none;
+  font-size:13px;
+  font-weight:700;
+  box-sizing:border-box;
+  cursor:pointer;
+}
+.intake-refresh:hover{background:#f9fbfe;color:#102440}
+.intake-field{display:grid;gap:6px;min-width:230px;align-content:start}
+.intake-field label,
+.intake-field > span{font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+.intake-select,
+.intake-page .app-input,
+.intake-page .app-select,
+.intake-enrollment .intake-select,
+.legs-filters .intake-select,
+.intake-upload-grid .intake-select,
+.reconstruction-grid .intake-select{
+  height:42px !important;
+  min-height:42px !important;
+  max-height:42px;
+  padding:0 12px !important;
+  border:1px solid rgba(15,23,42,.10);
+  border-radius:12px;
+  background:#fff;
+  color:#0f172a;
+  font-size:13px;
+  font-weight:600;
+  box-sizing:border-box;
+  line-height:1.2;
+}
+.intake-page textarea.intake-select,
+.intake-page textarea.app-input{
+  height:auto !important;
+  min-height:96px !important;
+  max-height:none;
+  padding:10px 12px !important;
+  line-height:1.4;
+}
+.intake-page input[type="file"].intake-select{
+  height:42px !important;
+  padding:8px 12px !important;
+}
+.intake-button,
+.intake-enrollment .app-btn,
+.legs-filters .app-btn,
+.intake-hero-actions .app-btn,
+.intake-upload-grid .app-btn,
+.reconstruction-actions .app-btn,
+.intake-upload-panel .app-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  height:42px !important;
+  min-height:42px !important;
+  padding:0 16px;
+  border:0;
+  border-radius:12px;
+  background:linear-gradient(180deg,#17345d 0%,#102440 100%);
+  color:#fff;
+  font-size:13px;
+  font-weight:700;
+  cursor:pointer;
+  box-sizing:border-box;
+  box-shadow:0 8px 16px rgba(16,36,64,.12);
+  text-decoration:none;
+  white-space:nowrap;
+}
+.intake-button:hover,
+.intake-enrollment .app-btn-primary:hover,
+.legs-filters .app-btn-primary:hover{
+  background:linear-gradient(180deg,#1b3d6c 0%,#15304f 100%);
+  color:#fff;
+}
+.intake-button:disabled{background:#94a3b8;box-shadow:none;cursor:not-allowed}
+.legs-filters .app-btn-secondary,
+.intake-hero-actions .app-btn-secondary,
+a.intake-refresh{
+  background:#fff;
+  color:#102440;
+  border:1px solid rgba(15,23,42,.10);
+  box-shadow:none;
+}
+.legs-filters .app-btn-secondary:hover,
+a.intake-refresh:hover{
+  background:#f9fbfe;
+  color:#102440;
+}
+.intake-enrollment{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+@media (max-width:900px){
+  .intake-hero-head{flex-direction:column}
+  .intake-hero-actions{justify-content:flex-start}
+}
 .ml-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 7px;font-size:9px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}
 .ml-pill-usable{background:#dcfce7;color:#166534}
 .ml-pill-present{background:#dbeafe;color:#1e40af}
@@ -1282,7 +1412,8 @@ cw_header('Master Logbook');
 }
 .legs-modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
 .legs-modal-grid label{display:grid;gap:4px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#64748b}
-.legs-modal-grid input,.legs-modal-grid select,.legs-modal-grid textarea{border:1px solid #cbd5e1;border-radius:9px;padding:7px 8px;font-size:12px;color:#0f172a;background:#fff}
+.legs-modal-grid input,.legs-modal-grid select{height:42px;min-height:42px;border:1px solid rgba(15,23,42,.10);border-radius:12px;padding:0 12px;font-size:13px;color:#0f172a;background:#fff;box-sizing:border-box}
+.legs-modal-grid textarea{border:1px solid rgba(15,23,42,.10);border-radius:12px;padding:10px 12px;font-size:13px;color:#0f172a;background:#fff;min-height:96px;box-sizing:border-box}
 .legs-crew-editor{display:grid;gap:8px}
 .legs-crew-row{display:grid;grid-template-columns:110px 1fr auto;gap:8px}
 .legs-copy-box{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:55vh;overflow:auto;font-size:12px;line-height:1.45;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
@@ -1313,13 +1444,7 @@ cw_header('Master Logbook');
 .intake-progress-fill.is-evidence-active{background:linear-gradient(90deg,#2563eb 0%,#7c3aed 50%,#2563eb 100%);background-size:200% 100%;animation:intake-evidence-progress 1.6s linear infinite}
 .intake-audio-evidence-step{display:block;font-size:10px;line-height:1.35;margin-top:2px}
 @keyframes intake-evidence-progress{0%{background-position:100% 0}100%{background-position:-100% 0}}
-.intake-refresh{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#334155;padding:7px 10px;text-decoration:none;font-size:11px;font-weight:800}
-.intake-enrollment{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
-.intake-field{display:grid;gap:5px;min-width:230px}
-.intake-field label{font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
-.intake-select{border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#0f172a;padding:8px 10px}
-.intake-button{border:0;border-radius:9px;background:#1d4ed8;color:#fff;padding:9px 12px;font-size:11px;font-weight:850;cursor:pointer}
-.intake-button:disabled{background:#94a3b8;cursor:not-allowed}
+.intake-select option{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px}
 .reconstruction-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .reconstruction-grid .intake-field{min-width:0}
 .reconstruction-grid .intake-select{width:100%}
@@ -1418,12 +1543,19 @@ cw_header('Master Logbook');
 </style>
 
 <div class="intake-page" data-intake-page>
-  <section class="intake-card intake-hero">
-    <div>
-      <h1 class="intake-title">Data Intake</h1>
-      <p class="intake-muted">Operational Legs are the authoritative per-leg CVR record (Reservation → Leg). Times display in America/Los_Angeles. Other tabs remain raw intake for audio, Garmin CSV, and reconstruction.</p>
+  <section class="app-section-hero" aria-label="Master Logbook">
+    <div class="hero-overline">Operations · CVR</div>
+    <div class="intake-hero-head">
+      <div class="intake-hero-copy">
+        <h2 class="intake-hero-title">Master Logbook</h2>
+        <p class="intake-hero-text">
+          Operational Legs are the authoritative per-leg CVR record (Reservation → Leg). Times use the aircraft operational timezone (America/Los_Angeles). Audio, Garmin CSV, and reconstruction remain available as supporting intake evidence.
+        </p>
+      </div>
+      <div class="intake-hero-actions">
+        <a class="app-btn app-btn-secondary" href="/admin/master_logbook.php">Refresh data</a>
+      </div>
     </div>
-    <a class="intake-refresh" href="/admin/master_logbook.php">Refresh data</a>
   </section>
 
   <section class="intake-card">
@@ -1445,7 +1577,7 @@ cw_header('Master Logbook');
           <?php endforeach; ?>
         </select>
       </div>
-      <button class="intake-button" type="submit">Generate Enrollment Code</button>
+      <button class="app-btn app-btn-primary" type="submit">Generate Enrollment Code</button>
     </form>
     <?php if (is_array($enrollmentResult)): ?>
       <div class="intake-code"><?= cvr_intake_h($enrollmentResult['enrollment_code'] ?? '') ?></div>
@@ -1498,8 +1630,8 @@ cw_header('Master Logbook');
         <label>To
           <input class="intake-select" type="date" name="legs_to" value="<?= cvr_intake_h($legsTo) ?>">
         </label>
-        <button class="intake-button" type="submit">Apply</button>
-        <a class="intake-refresh" href="/admin/master_logbook.php?tab=dispatch">Clear</a>
+        <button class="app-btn app-btn-primary" type="submit">Apply</button>
+        <a class="app-btn app-btn-secondary" href="/admin/master_logbook.php?tab=dispatch">Clear</a>
       </div>
       <div class="intake-muted">
         Showing <?= $legsTotal === 0 ? 0 : (($legsPage - 1) * $legsLimit + 1) ?>–<?= min($legsTotal, $legsPage * $legsLimit) ?>
