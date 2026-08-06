@@ -1004,6 +1004,24 @@ cw_header('Master Logbook');
   background:rgba(255,255,255,.14);
   color:#fff;
 }
+.intake-hero-actions .app-btn-primary{
+  background:#fff;
+  color:#102440;
+  border:1px solid transparent;
+  box-shadow:0 10px 22px rgba(15,23,42,.18);
+}
+.intake-hero-actions .app-btn-primary:hover{
+  background:#f8fafc;
+  color:#102440;
+}
+#enrollment-modal .intake-modal{max-width:520px;width:min(520px,96vw)}
+#enrollment-modal .intake-enrollment{display:grid;gap:14px;align-items:stretch}
+#enrollment-modal .intake-enrollment .intake-field{display:grid;gap:6px;min-width:0}
+#enrollment-modal .intake-enrollment .intake-field label{font-size:11px;font-weight:800;color:#334155;letter-spacing:.04em;text-transform:uppercase}
+#enrollment-modal .intake-enrollment .app-btn{width:100%;justify-content:center}
+#enrollment-modal .intake-code{display:flex;justify-content:center;margin-top:0;width:100%;box-sizing:border-box}
+#enrollment-modal .intake-enrollment-result{display:grid;gap:8px;margin-top:4px}
+#enrollment-modal .intake-enrollment-result-label{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#166534}
 .intake-card{background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:18px;padding:18px 20px;box-shadow:0 10px 22px rgba(15,23,42,.05)}
 .intake-muted{color:#64748b;font-size:13px;line-height:1.5}
 .intake-tabs{display:flex;gap:8px;flex-wrap:wrap}
@@ -1307,6 +1325,14 @@ a.intake-refresh:hover{
 .leg-edit-garmin{margin-top:8px;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px}
 .leg-edit-garmin h4{margin:0 0 6px;font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#475569}
 .leg-edit-garmin p{margin:0 0 10px;font-size:12px;color:#64748b;line-height:1.4}
+.leg-edit-briefing{margin-top:12px;border:1px solid #dbe3ee;border-radius:14px;background:#fff;padding:14px;box-shadow:0 4px 12px rgba(15,23,42,.04)}
+.leg-edit-briefing-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap}
+.leg-edit-briefing h4{margin:0;font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#0f3a6d}
+.leg-edit-briefing p{margin:0 0 10px;font-size:12px;color:#64748b;line-height:1.45}
+.leg-edit-briefing textarea{width:100%;min-height:220px;resize:vertical;border:1px solid #cbd5e1;border-radius:12px;padding:12px;background:#f8fafc;color:#0f172a;font:12px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif;box-sizing:border-box}
+.leg-edit-briefing-status{margin-top:8px;font-size:12px;font-weight:700;color:#64748b}
+.leg-edit-briefing-status.is-error{color:#991b1b}
+.leg-edit-briefing-status.is-ok{color:#166534}
 .leg-edit-tz{font-size:12px;font-weight:700;color:#64748b}
 .leg-edit-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#475569}
 .leg-edit-badge-staff{background:#dbeafe;color:#1e40af}
@@ -1533,38 +1559,10 @@ a.intake-refresh:hover{
         </p>
       </div>
       <div class="intake-hero-actions">
+        <button class="app-btn app-btn-primary" type="button" data-enrollment-open>Enroll CVR Unit</button>
         <a class="app-btn app-btn-secondary" href="/admin/master_logbook.php">Refresh data</a>
       </div>
     </div>
-  </section>
-
-  <section class="intake-card">
-    <div class="intake-panel-head">
-      <div>
-        <h2 class="intake-panel-title">CVR Unit Enrollment</h2>
-        <div class="intake-muted">Generate a one-time code, then enter it in the iOS app under CVR Unit Admin. The code expires after 60 minutes.</div>
-      </div>
-    </div>
-    <form method="post" action="/admin/master_logbook.php" class="intake-enrollment">
-      <input type="hidden" name="action" value="create_cvr_enrollment">
-      <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($enrollmentCsrf) ?>">
-      <div class="intake-field">
-        <label for="cvr-enrollment-aircraft">Dedicated aircraft</label>
-        <select class="intake-select" id="cvr-enrollment-aircraft" name="aircraft_id" required>
-          <option value="">Select aircraft</option>
-          <?php foreach ($aircraftOptions as $aircraftOption): ?>
-            <option value="<?= (int)($aircraftOption['id'] ?? 0) ?>"><?= cvr_intake_h($aircraftOption['registration'] ?? '') ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <button class="app-btn app-btn-primary" type="submit">Generate Enrollment Code</button>
-    </form>
-    <?php if (is_array($enrollmentResult)): ?>
-      <div class="intake-code"><?= cvr_intake_h($enrollmentResult['enrollment_code'] ?? '') ?></div>
-    <?php endif; ?>
-    <?php if ($enrollmentError !== ''): ?>
-      <div class="intake-notice" style="margin-top:10px"><?= cvr_intake_h($enrollmentError) ?></div>
-    <?php endif; ?>
   </section>
 
   <section class="intake-card">
@@ -2773,6 +2771,43 @@ a.intake-refresh:hover{
   </section>
 </div>
 
+<div class="intake-modal-backdrop" id="enrollment-modal"<?= (is_array($enrollmentResult) || $enrollmentError !== '') ? '' : ' hidden' ?>>
+  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="enrollment-modal-title">
+    <div class="intake-modal-head">
+      <div>
+        <h3 class="intake-modal-title" id="enrollment-modal-title">CVR Unit Enrollment</h3>
+        <div class="intake-muted">Generate a one-time code, then enter it in the iOS app under CVR Unit Admin. The code expires after 60 minutes.</div>
+      </div>
+      <button class="intake-modal-close" type="button" data-enrollment-close aria-label="Close">Close</button>
+    </div>
+    <div class="intake-modal-body">
+      <form method="post" action="/admin/master_logbook.php" class="intake-enrollment">
+        <input type="hidden" name="action" value="create_cvr_enrollment">
+        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($enrollmentCsrf) ?>">
+        <div class="intake-field">
+          <label for="cvr-enrollment-aircraft">Dedicated aircraft</label>
+          <select class="intake-select" id="cvr-enrollment-aircraft" name="aircraft_id" required>
+            <option value="">Select aircraft</option>
+            <?php foreach ($aircraftOptions as $aircraftOption): ?>
+              <option value="<?= (int)($aircraftOption['id'] ?? 0) ?>"><?= cvr_intake_h($aircraftOption['registration'] ?? '') ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <button class="app-btn app-btn-primary" type="submit">Generate Enrollment Code</button>
+      </form>
+      <?php if (is_array($enrollmentResult)): ?>
+        <div class="intake-enrollment-result">
+          <div class="intake-enrollment-result-label">Enrollment code</div>
+          <div class="intake-code"><?= cvr_intake_h($enrollmentResult['enrollment_code'] ?? '') ?></div>
+        </div>
+      <?php endif; ?>
+      <?php if ($enrollmentError !== ''): ?>
+        <div class="intake-notice" style="margin-top:10px"><?= cvr_intake_h($enrollmentError) ?></div>
+      <?php endif; ?>
+    </div>
+  </div>
+</div>
+
 <div class="intake-modal-backdrop" id="legs-edit-modal" hidden>
   <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="legs-edit-title">
     <div class="intake-modal-head">
@@ -2936,6 +2971,18 @@ a.intake-refresh:hover{
           <button class="intake-button" type="submit" style="margin-top:12px;background:#475569">Upload CSV</button>
         </form>
       </div>
+
+      <div class="leg-edit-briefing" data-leg-section="generic-briefing">
+        <div class="leg-edit-briefing-head">
+          <div>
+            <h4>Generic Briefing</h4>
+            <p>Copy-paste student-facing narrative from the debriefing generator (General + chronological review only). Grades and mission standards are excluded.</p>
+          </div>
+          <button class="app-btn app-btn-secondary" type="button" id="legs-briefing-copy" data-legs-stop disabled>Copy Briefing</button>
+        </div>
+        <textarea id="legs-briefing-copy-box" readonly placeholder="Open a leg with a generated debrief to load the Generic Briefing."></textarea>
+        <div class="leg-edit-briefing-status" id="legs-briefing-status"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -3033,6 +3080,23 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     const requestedTab = tabs.find((tab) => tab.getAttribute('data-intake-tab') === requested);
     if (requestedTab) requestedTab.click();
   }
+
+  (function initEnrollmentModal() {
+    const modal = document.getElementById('enrollment-modal');
+    if (!modal) return;
+    const open = () => { modal.hidden = false; };
+    const close = () => { modal.hidden = true; };
+    document.querySelectorAll('[data-enrollment-open]').forEach((btn) => {
+      btn.addEventListener('click', open);
+    });
+    modal.querySelectorAll('[data-enrollment-close]').forEach((btn) => {
+      btn.addEventListener('click', close);
+    });
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) close();
+    });
+  })();
+
   page.querySelectorAll('[data-copy-debrief]').forEach((button) => {
     button.addEventListener('click', async () => {
       const field = document.getElementById(button.getAttribute('data-copy-debrief'));
@@ -3765,6 +3829,51 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       });
     };
 
+    const briefingBox = document.getElementById('legs-briefing-copy-box');
+    const briefingStatus = document.getElementById('legs-briefing-status');
+    const briefingCopyBtn = document.getElementById('legs-briefing-copy');
+    let briefingLoadToken = 0;
+
+    const setBriefingStatus = (text, kind) => {
+      if (!briefingStatus) return;
+      briefingStatus.textContent = text || '';
+      briefingStatus.classList.toggle('is-error', kind === 'error');
+      briefingStatus.classList.toggle('is-ok', kind === 'ok');
+    };
+
+    const loadGenericBriefing = async (leg) => {
+      if (!briefingBox || !briefingCopyBtn) return;
+      const token = ++briefingLoadToken;
+      briefingBox.value = '';
+      briefingCopyBtn.disabled = true;
+      setBriefingStatus('Loading Generic Briefing…', '');
+      const debriefId = Number(leg?.debrief_id || 0);
+      const bundleId = Number(leg?.bundle_id || 0);
+      if (debriefId <= 0 && bundleId <= 0) {
+        setBriefingStatus('No debrief is linked to this leg yet. Generate one from Reconstruction.', 'error');
+        return;
+      }
+      try {
+        const url = '/admin/api/operational_leg_debrief_copy.php?format=generic_briefing'
+          + '&debrief_id=' + encodeURIComponent(String(debriefId || 0))
+          + '&bundle_id=' + encodeURIComponent(String(bundleId || 0));
+        const response = await fetch(url, { credentials: 'same-origin' });
+        const payload = await response.json();
+        if (token !== briefingLoadToken) return;
+        if (payload.ok && payload.copy_text) {
+          briefingBox.value = payload.copy_text;
+          briefingCopyBtn.disabled = false;
+          setBriefingStatus('Generic Briefing ready to copy.', 'ok');
+        } else {
+          briefingBox.value = '';
+          setBriefingStatus(payload.message || 'Generic Briefing is not available for this leg.', 'error');
+        }
+      } catch (error) {
+        if (token !== briefingLoadToken) return;
+        setBriefingStatus(error instanceof Error ? error.message : 'Could not load Generic Briefing.', 'error');
+      }
+    };
+
     const fillEditForm = (leg) => {
       currentLeg = leg;
       clearErrors();
@@ -3800,6 +3909,7 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       renderCrew(leg.crew || []);
       updateDerived();
       baselineSnapshot = serializeSnapshot();
+      loadGenericBriefing(leg);
     };
 
     const validate = () => {
@@ -4015,6 +4125,23 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
         document.getElementById('legs-debrief-message').textContent = 'Copied to clipboard.';
       } catch (error) {
         window.alert('Copy failed. Select the text manually.');
+      }
+    });
+
+    briefingCopyBtn?.addEventListener('click', async () => {
+      const text = briefingBox?.value || '';
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        setBriefingStatus('Copied to clipboard.', 'ok');
+        const original = briefingCopyBtn.textContent;
+        briefingCopyBtn.textContent = 'Copied';
+        window.setTimeout(() => { briefingCopyBtn.textContent = original || 'Copy Briefing'; }, 1800);
+      } catch (error) {
+        briefingBox.focus();
+        briefingBox.select();
+        document.execCommand('copy');
+        setBriefingStatus('Copied to clipboard.', 'ok');
       }
     });
   })();

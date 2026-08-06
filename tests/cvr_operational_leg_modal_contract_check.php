@@ -71,6 +71,19 @@ require_contains($service, 'Landing fuel cannot exceed departure fuel', 'fuel va
 
 require_contains($page, 'toFixed(1)', 'js one-decimal normalization', $failures);
 require_contains($page, 'Flight Instructor', 'approved crew roles', $failures);
+require_contains($page, 'Generic Briefing', 'generic briefing section in details modal', $failures);
+require_contains($page, 'legs-briefing-copy-box', 'briefing textarea', $failures);
+require_contains($page, 'format=generic_briefing', 'loads briefing-only copy', $failures);
+
+$copyApi = $root . '/public/admin/api/operational_leg_debrief_copy.php';
+require_contains($copyApi, 'generic_briefing', 'copy api supports generic briefing format', $failures);
+require_contains($copyApi, 'cvr_debrief_copy_generic_briefing', 'generic briefing builder', $failures);
+$copyApiContents = (string)@file_get_contents($copyApi);
+if (!preg_match('/function cvr_debrief_copy_generic_briefing.*?^\}/ms', $copyApiContents, $genericFn)) {
+    $failures[] = 'generic briefing function not found for content check';
+} elseif (str_contains($genericFn[0], 'MISSION STANDARDS') || str_contains($genericFn[0], 'SUMMARY / NEXT STEPS')) {
+    $failures[] = 'generic briefing must exclude grades/mission standards/summary sections';
+}
 
 if ($failures !== array()) {
     fwrite(STDERR, "Operational leg modal contract FAILED\n");
