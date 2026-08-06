@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AircraftFuelUpliftService.php';
 require_once __DIR__ . '/AircraftOperationalConfigService.php';
+require_once __DIR__ . '/AircraftFuelStateService.php';
 
 /**
  * Latest Hobbs / Tacho / Oil / Fuel snapshot per active aircraft for Master Logbook cards.
@@ -21,6 +22,7 @@ final class AircraftFleetStatusService
     public function cardsForAircraft(array $aircraftOptions, array $unitMap): array
     {
         $uplifts = new AircraftFuelUpliftService($this->pdo);
+        $fuelStateService = new AircraftFuelStateService($this->pdo);
         $cards = array();
         foreach ($aircraftOptions as $aircraft) {
             $registration = strtoupper(trim((string)($aircraft['registration'] ?? '')));
@@ -38,25 +40,24 @@ final class AircraftFleetStatusService
             $latest = $this->latestClosureState($registration);
             $latestUplift = $uplifts->latestForAircraft($registration);
             $upliftRows = $uplifts->listForAircraft($registration, 50, false);
+            $fuelState = $fuelStateService->stateForRegistration(
+                $registration,
+                $aircraftId > 0 ? $aircraftId : null
+            );
 
             $loggedAt = (string)($latest['logged_at'] ?? '');
-            $fuelQty = $this->numericOrNull($latest['fuel_remaining'] ?? null);
-            $fuelSource = 'closure';
-            if (is_array($latestUplift)) {
-                $upliftAt = (string)($latestUplift['uplifted_at'] ?? '');
-                $upliftFuel = $this->numericOrNull($latestUplift['fuel_after_usg'] ?? null);
-                if ($upliftFuel !== null && ($loggedAt === '' || strcmp($upliftAt, $loggedAt) >= 0)) {
-                    $fuelQty = $upliftFuel;
-                    $fuelSource = 'uplift';
-                }
+            $fuelQty = $this->numericOrNull($fuelState['quantity_usg'] ?? null);
+            $fuelSource = (string)($fuelState['source'] ?? 'none');
+            if ($fuelSource === 'none') {
+                $fuelSource = 'closure';
             }
 
             $oil = $this->oilPresentation($latest, $cfg);
-            $fuelCap = (float)($cfg['fuel_capacity'] ?? 13.0);
+            $fuelCap = (float)($fuelState['capacity'] ?? ($cfg['fuel_capacity'] ?? 13.0));
             if ($fuelCap <= 0) {
                 $fuelCap = 13.0;
             }
-            $fuelUnit = strtoupper(trim((string)($cfg['fuel_unit'] ?? 'USG'))) ?: 'USG';
+            $fuelUnit = strtoupper(trim((string)($fuelState['unit'] ?? ($cfg['fuel_unit'] ?? 'USG')))) ?: 'USG';
             $fuelPct = $fuelQty !== null ? max(0.0, min(100.0, ($fuelQty / $fuelCap) * 100.0)) : 0.0;
             $fuelBurn = null;
             $departureFuel = $this->numericOrNull($latest['dispatch_fuel_onboard'] ?? null);

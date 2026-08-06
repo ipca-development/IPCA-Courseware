@@ -58,7 +58,7 @@ final class AircraftFuelStateService
         if ($upliftQty !== null) {
             if ($closureAt === '' || $closureQty === null) {
                 $useUplift = true;
-            } elseif ($upliftAt !== '' && strcmp($upliftAt, $closureAt) >= 0) {
+            } elseif ($upliftAt !== '' && $this->timestampIsSameOrAfter($upliftAt, $closureAt)) {
                 $useUplift = true;
             }
         }
@@ -130,7 +130,7 @@ final class AircraftFuelStateService
             $latestAt = trim((string)($latest['uplifted_at'] ?? ''));
             $closure = $this->latestClosureFuel($registration);
             $closureAt = trim((string)($closure['logged_at'] ?? ''));
-            $noFlightSinceUplift = $closureAt === '' || ($latestAt !== '' && strcmp($latestAt, $closureAt) >= 0);
+            $noFlightSinceUplift = $closureAt === '' || ($latestAt !== '' && $this->timestampIsSameOrAfter($latestAt, $closureAt));
             if ($latestQty !== null && abs($latestQty - $fuelOnboard) < 0.05 && $noFlightSinceUplift) {
                 return null;
             }
@@ -227,6 +227,37 @@ final class AircraftFuelStateService
             return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
         } catch (Throwable) {
             return $value;
+        }
+    }
+
+    /**
+     * Compare mixed MySQL / ISO timestamps safely.
+     * Raw strcmp fails when one value uses a space and the other uses "T"
+     * (space < "T", so a later uplift can lose to an earlier closure).
+     */
+    private function timestampIsSameOrAfter(string $left, string $right): bool
+    {
+        $leftTs = $this->timestampToUnix($left);
+        $rightTs = $this->timestampToUnix($right);
+        if ($leftTs === null || $rightTs === null) {
+            return strcmp(
+                str_replace('T', ' ', $left),
+                str_replace('T', ' ', $right)
+            ) >= 0;
+        }
+        return $leftTs >= $rightTs;
+    }
+
+    private function timestampToUnix(string $value): ?int
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        try {
+            return (new DateTimeImmutable($value, new DateTimeZone('UTC')))->getTimestamp();
+        } catch (Throwable) {
+            return null;
         }
     }
 

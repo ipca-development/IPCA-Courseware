@@ -18,7 +18,8 @@ $checks = array(
         && str_contains($fuelState, 'source')
         && str_contains($fuelState, "'uplift'")
         && str_contains($fuelState, "'closure'")
-        && str_contains($fuelState, 'latestForAircraft'),
+        && str_contains($fuelState, 'latestForAircraft')
+        && str_contains($fuelState, 'timestampIsSameOrAfter'),
     'dispatch intake auto-creates uplift when full or refueled' =>
         str_contains($fuelState, 'function createUpliftFromDispatchIfNeeded(')
         && str_contains($fuelState, 'refueled_since_previous_flight')

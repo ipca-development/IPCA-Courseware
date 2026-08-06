@@ -24,7 +24,9 @@ $checks = array(
         && str_contains($fleetService, 'latestForAircraft')
         && str_contains($fleetService, 'cardsForAircraft')
         && str_contains($fleetService, 'dispatch_oil_percentage')
-        && str_contains($fleetService, 'oilPresentation'),
+        && str_contains($fleetService, 'oilPresentation')
+        && str_contains($fleetService, 'AircraftFuelStateService')
+        && str_contains($fleetService, 'stateForRegistration'),
     'Master Logbook renders compact fleet cards with hobbs oil fuel' =>
         str_contains($intake, 'fleet-status-grid')
         && str_contains($intake, 'fleet-status-meters')
