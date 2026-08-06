@@ -1,0 +1,24 @@
+{
+  "source": "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/CVROperationalDesign.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Aircraft %@, %@",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 94
+        }
+      },
+      {
+        "comment": "",
+        "key": "IPCA logo",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 59
+        }
+      }
+    ]
+  },
+  "version": 1
+}

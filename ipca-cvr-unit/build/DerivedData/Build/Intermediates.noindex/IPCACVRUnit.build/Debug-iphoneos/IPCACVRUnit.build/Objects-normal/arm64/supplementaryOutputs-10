@@ -1,0 +1,23 @@
+{
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRWorkflowStore.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRWorkflowStore.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRWorkflowStore.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRWorkflowStore.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRWorkflowStore.swiftdeps"
+  },
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/CVROperationalDesign.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVROperationalDesign.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVROperationalDesign.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVROperationalDesign.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVROperationalDesign.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVROperationalDesign.swiftdeps"
+  },
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/OperationalWorkflowViews.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/OperationalWorkflowViews.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/OperationalWorkflowViews.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/OperationalWorkflowViews.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/OperationalWorkflowViews.swiftdeps"
+  }
+}

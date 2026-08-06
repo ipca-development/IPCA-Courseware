@@ -878,7 +878,7 @@ private struct LocalMultiLegDispatchSheet: View {
     private var addLegButton: some View {
         Button {
             draft.addLeg()
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            CVRHaptics.impact(.medium)
             validationHint = ""
         } label: {
             HStack(spacing: 8) {
@@ -1031,7 +1031,7 @@ private struct LocalRouteEditorSheet: View {
                 Section {
                     Button {
                         draft.addLeg()
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        CVRHaptics.impact(.medium)
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "plus.circle.fill")
@@ -2064,6 +2064,7 @@ struct InFlightWorkflowView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var beacon: AvionicsBeaconManager
     @EnvironmentObject private var gps: GPSLocationManager
+    @EnvironmentObject private var audio: AudioRecorderManager
     @EnvironmentObject private var uploadManager: UploadManager
     @EnvironmentObject private var coordinator: CVRUnitCoordinator
     @Binding var showAdminUnlock: Bool
@@ -2078,7 +2079,7 @@ struct InFlightWorkflowView: View {
             } else if !workflow.isRecorderVerified {
                 LockedOperationalView(title: "LOCKED", subtitle: "RECORDER VERIFICATION REQUIRED", iconName: "lock.fill", color: CVROperationalPalette.standby, showAdminUnlock: $showAdminUnlock)
             } else {
-                TimelineView(.periodic(from: Date(), by: 1)) { timeline in
+                TimelineView(.periodic(from: Date(), by: 0.2)) { timeline in
                     GeometryReader { proxy in
                         let metrics = CVROperationalMetrics(size: proxy.size)
                         ZStack {
@@ -2086,10 +2087,23 @@ struct InFlightWorkflowView: View {
                             ScrollView {
                                 VStack(spacing: metrics.spacing) {
                                     CVROperationalStatusCard(title: inFlightTitle, subtitle: inFlightSubtitle, iconName: "airplane", color: inFlightColor, value: inFlightValue(now: timeline.date), caption: "IN-FLIGHT", metrics: metrics)
+                                    inFlightRecordingStrip(now: timeline.date)
                                     HStack(spacing: metrics.spacing) {
+                                        CVROperationalTile(
+                                            title: "HOBBS",
+                                            iconName: "gauge.with.dots.needle.67percent",
+                                            value: liveHobbsLabel(now: timeline.date),
+                                            color: engineRunning ? CVROperationalPalette.success : CVROperationalPalette.standby,
+                                            metrics: metrics
+                                        )
                                         CVROperationalTile(title: "DISPATCH", iconName: "checkmark.seal.fill", value: "Verified", color: CVROperationalPalette.success, metrics: metrics)
-                                        CVROperationalTile(title: "RECORDER", iconName: "waveform", value: "Verified", color: CVROperationalPalette.success, metrics: metrics)
-                                        CVROperationalTile(title: "BEACON", iconName: "dot.radiowaves.left.and.right", value: beacon.currentState.operationalStatus(secondsSinceLastAdvertisement: beacon.secondsSinceLastAdvertisement).label, color: avionicsReady ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
+                                        CVROperationalTile(
+                                            title: "REC",
+                                            iconName: audio.isRecording ? "record.circle" : "waveform",
+                                            value: audio.isRecording ? "ON" : "Idle",
+                                            color: audio.isRecording ? CVROperationalPalette.critical : CVROperationalPalette.standby,
+                                            metrics: metrics
+                                        )
                                         CVROperationalTile(title: "GPS", iconName: "location.fill", value: gps.state == .ready || gps.state == .recording ? "Ready" : "Acquiring", color: gps.state == .ready || gps.state == .recording ? CVROperationalPalette.success : CVROperationalPalette.standby, metrics: metrics)
                                     }
                                     inFlightControlPanel(metrics: metrics)
@@ -2124,6 +2138,51 @@ struct InFlightWorkflowView: View {
                 .environmentObject(coordinator)
                 .presentationDetents([.large])
         }
+    }
+
+    private func inFlightRecordingStrip(now: Date) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(audio.isRecording ? CVROperationalPalette.critical : CVROperationalPalette.standby)
+                .frame(width: 10, height: 10)
+                .opacity(audio.isRecording ? (Int(now.timeIntervalSince1970 * 2) % 2 == 0 ? 1 : 0.35) : 0.7)
+            Text(audio.isRecording ? "RECORDING" : "RECORDER IDLE")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(audio.isRecording ? CVROperationalPalette.critical : CVROperationalPalette.textSecondary)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(CVROperationalPalette.cardBorder.opacity(0.45))
+                    Capsule()
+                        .fill(audio.isRecording ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.standby)
+                        .frame(width: max(4, proxy.size.width * recordingLevelFraction))
+                }
+            }
+            .frame(height: 8)
+            Text(String(format: "%.0f dB", Double(audio.averagePowerDB)))
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+                .frame(width: 52, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+    }
+
+    private var recordingLevelFraction: CGFloat {
+        // Map typical mic dB (-60…0) into 0…1 for a compact bar.
+        let clamped = max(-60, min(0, Double(audio.averagePowerDB)))
+        return CGFloat((clamped + 60) / 60)
+    }
+
+    private func liveHobbsLabel(now: Date) -> String {
+        if let estimated = workflow.estimatedCheckInHobbs() {
+            return String(format: "%.1f", estimated)
+        }
+        if let start = workflow.state.activeDispatch?.startingHobbs {
+            return String(format: "%.1f", start)
+        }
+        return "—"
     }
 
     private var avionicsReady: Bool {
@@ -2270,7 +2329,6 @@ struct InFlightWorkflowView: View {
                     }
                 }
                 CVRHoldActionButton(title: "SAFETY EVENT", subtitle: "Hold 2 seconds", color: CVROperationalPalette.warning, minimumDuration: 2) {
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     workflow.recordInFlightAction(eventType: "safety_event", creationMethod: "two_second_hold", gpsSample: gps.latestSample)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                     return true
@@ -2278,7 +2336,6 @@ struct InFlightWorkflowView: View {
                 takeoffLandingControls(metrics: metrics)
                 if canOfferTransientStop {
                     CVRHoldActionButton(title: "TRANSIENT STOP", subtitle: "Hold 3 seconds — end leg, keep engine running", color: CVROperationalPalette.secondaryBlue) {
-                        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                         workflow.recordTransientStopOnBlock(gpsSample: gps.latestSample)
                         uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         Task {
@@ -2290,7 +2347,6 @@ struct InFlightWorkflowView: View {
                     }
                 }
                 CVRHoldActionButton(title: "ENGINE SHUTDOWN", subtitle: "Hold 3 seconds for ON Block", color: CVROperationalPalette.critical) {
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     workflow.recordEngineShutdownOnBlock(gpsSample: gps.latestSample)
                     uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                     workflow.beginEngineShutdownCheckIn()
@@ -2303,7 +2359,6 @@ struct InFlightWorkflowView: View {
                 // Persist Off Block before UI confirmation flash / haptic.
                 let saved = workflow.recordEngineStartOffBlock(gpsSample: gps.latestSample)
                 guard saved else { return false }
-                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                 uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 return true
             }
@@ -2325,13 +2380,12 @@ struct InFlightWorkflowView: View {
                 title: "TAKE OFFS",
                 iconName: "airplane.departure",
                 value: "\(operationCounts.displayTakeoffs)",
-                subtitle: "Hold 2s to +1",
+                subtitle: "Hold 1s to +1",
                 color: operationCounts.displayTakeoffs > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
                 metrics: metrics,
-                minimumDuration: 2,
+                minimumDuration: 1,
                 isEnabled: engineRunning && !hasLegBoundaryEvent
             ) {
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 workflow.recordManualTakeoffAdjustment(gpsSample: gps.latestSample)
                 uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
             }
@@ -2339,13 +2393,12 @@ struct InFlightWorkflowView: View {
                 title: "LANDINGS",
                 iconName: "airplane.arrival",
                 value: "\(operationCounts.displayLandings)",
-                subtitle: "Hold 2s to +1",
+                subtitle: "Hold 1s to +1",
                 color: operationCounts.displayLandings > 0 ? CVROperationalPalette.success : CVROperationalPalette.standby,
                 metrics: metrics,
-                minimumDuration: 2,
+                minimumDuration: 1,
                 isEnabled: engineRunning && !hasLegBoundaryEvent
             ) {
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 workflow.recordManualLandingAdjustment(gpsSample: gps.latestSample)
                 uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
             }
@@ -2457,6 +2510,7 @@ private struct CVRHoldActionButton: View {
                 if pressing {
                     confirmedFlash = false
                     holdProgress = 0
+                    CVRHaptics.prepare(.heavy)
                     withAnimation(.linear(duration: minimumDuration)) {
                         holdProgress = 1
                     }
@@ -2475,6 +2529,7 @@ private struct CVRHoldActionButton: View {
                     }
                     return
                 }
+                CVRHaptics.impact(.heavy)
                 confirmedFlash = true
                 holdProgress = 1
                 Task {
@@ -2637,9 +2692,15 @@ private struct CheckInView: View {
         } else if let start = dispatch?.startingTacho {
             endingTacho = String(format: "%.1f", start)
         }
-        let fuelText = flight?.fuelRemaining ?? dispatch?.fuelOnboard ?? ""
+        let fuelText = flight?.fuelRemaining ?? ""
         if let fuel = Self.quantity(from: fuelText, unit: operationalConfig.fuelUnit) {
             fuelGallons = min(max(fuel, 0), operationalConfig.fuelCapacity)
+            hasFuelSelection = true
+        } else if let estimatedFuel = estimatedFuelRemainingAfterHobbs() {
+            fuelGallons = estimatedFuel
+            hasFuelSelection = true
+        } else if let dispatchFuel = Self.quantity(from: dispatch?.fuelOnboard ?? "", unit: operationalConfig.fuelUnit) {
+            fuelGallons = min(max(dispatchFuel, 0), operationalConfig.fuelCapacity)
             hasFuelSelection = true
         } else {
             fuelGallons = 0
@@ -2657,6 +2718,22 @@ private struct CheckInView: View {
             verifiedLandings = flight.verifiedLandingCount ?? counts.displayLandings
         }
         comments = flight?.checkInComments ?? flight?.maintenanceRemark ?? ""
+    }
+
+    /// Fuel remaining ≈ fuel onboard − (Hobbs increment × aircraft burn rate).
+    private func estimatedFuelRemainingAfterHobbs() -> Double? {
+        let dispatch = workflow.state.activeDispatch
+        guard let startFuel = Self.quantity(from: dispatch?.fuelOnboard ?? "", unit: operationalConfig.fuelUnit) else {
+            return nil
+        }
+        let startHobbs = dispatch?.startingHobbs
+        let endHobbs = Double(endingHobbs.replacingOccurrences(of: ",", with: "."))
+            ?? workflow.estimatedCheckInHobbs()
+            ?? startHobbs
+        guard let startHobbs, let endHobbs else { return nil }
+        let hobbsDelta = max(0, endHobbs - startHobbs)
+        let burned = hobbsDelta * operationalConfig.fuelBurnUSGPerHobbsHour
+        return min(max(startFuel - burned, 0), operationalConfig.fuelCapacity)
     }
 
     private func save() {

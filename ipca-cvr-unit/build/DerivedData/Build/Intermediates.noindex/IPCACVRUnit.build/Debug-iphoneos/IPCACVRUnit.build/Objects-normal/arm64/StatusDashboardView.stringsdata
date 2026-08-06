@@ -1,0 +1,104 @@
+{
+  "source": "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/StatusDashboardView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Aircraft %@, %@",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 419
+        }
+      },
+      {
+        "comment": "",
+        "key": "IPCA logo",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 383
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recorder status %@. Elapsed recording time %@",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 461
+        }
+      },
+      {
+        "comment": "",
+        "key": "ELAPSED RECORDING TIME",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 451
+        }
+      },
+      {
+        "comment": "",
+        "key": "Audio input %@, %@",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 537
+        }
+      },
+      {
+        "comment": "",
+        "key": "AUDIO INPUT",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 490
+        }
+      },
+      {
+        "comment": "",
+        "key": "Input gain",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 735
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld percent",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 736
+        }
+      },
+      {
+        "comment": "",
+        "key": "Thermal load %@",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 783
+        }
+      },
+      {
+        "comment": "",
+        "key": "THERMAL LOAD",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 761
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@, %@",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 871
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@, %@",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 903
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -1,0 +1,512 @@
+{
+  "source": "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Completed workflows will be retained here before NEXT FLIGHT clears the active screen.",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 166
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Archived Flights",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 164
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %@",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 177
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld events · %@",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 183
+        }
+      },
+      {
+        "comment": "",
+        "key": "Flight",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 210
+        }
+      },
+      {
+        "comment": "",
+        "key": "Closure",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 219
+        }
+      },
+      {
+        "comment": "",
+        "key": "Event Timeline",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 232
+        }
+      },
+      {
+        "comment": "",
+        "key": "Export",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 250
+        }
+      },
+      {
+        "comment": "",
+        "key": "Aircraft",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 211
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mission",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 212
+        }
+      },
+      {
+        "comment": "",
+        "key": "Flight Record",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 213
+        }
+      },
+      {
+        "comment": "",
+        "key": "Archived",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 214
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recording Session",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 215
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ending Hobbs",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 220
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ending Tacho",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 221
+        }
+      },
+      {
+        "comment": "",
+        "key": "Fuel Remaining",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 222
+        }
+      },
+      {
+        "comment": "",
+        "key": "Oil",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 224
+        }
+      },
+      {
+        "comment": "",
+        "key": "Prepare JSON Export",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 251
+        }
+      },
+      {
+        "comment": "",
+        "key": "Share Archive",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 262
+        }
+      },
+      {
+        "comment": "",
+        "key": "Exit Admin Mode",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 287
+        }
+      },
+      {
+        "comment": "",
+        "key": "Lock admin tools and return to the public recorder status screen.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 290
+        }
+      },
+      {
+        "comment": "",
+        "key": "Exit Admin Mode",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 295
+        }
+      },
+      {
+        "comment": "",
+        "key": "Admin Access",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 321
+        }
+      },
+      {
+        "comment": "",
+        "key": "Admin PIN",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 325
+        }
+      },
+      {
+        "comment": "",
+        "key": "Unlock",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 333
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear the configured Garmin folder?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 650
+        }
+      },
+      {
+        "comment": "",
+        "key": "Allow 5G/cellular upload",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 378
+        }
+      },
+      {
+        "comment": "",
+        "key": "Generate the code on IPCA.training under Master Logbook → Data Intake.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 405
+        }
+      },
+      {
+        "comment": "",
+        "key": "Enroll CVR Unit",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 389
+        }
+      },
+      {
+        "comment": "",
+        "key": "Aircraft",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 418
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh Aircraft",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 428
+        }
+      },
+      {
+        "comment": "",
+        "key": "Not selected",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 419
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh Crew Users",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 445
+        }
+      },
+      {
+        "comment": "",
+        "key": "Garmin CSV files attached from Log / AirDrop are retained locally for retry and cleanup according to these limits.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 471
+        }
+      },
+      {
+        "comment": "",
+        "key": "Retain synced CSVs: %lld days",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 460
+        }
+      },
+      {
+        "comment": "",
+        "key": "Vault limit: %lld MB",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 465
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Garmin folder configured yet. Select it once here, or from the Log tab, to enable SD card imports.",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 491
+        }
+      },
+      {
+        "comment": "",
+        "key": "Access needs restoration — re-select the folder below.",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 486
+        }
+      },
+      {
+        "comment": "",
+        "key": "Change Folder",
+        "location": {
+          "startingColumn": 83,
+          "startingLine": 496
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose Folder",
+        "location": {
+          "startingColumn": 101,
+          "startingLine": 496
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 502
+        }
+      },
+      {
+        "comment": "",
+        "key": "Walk through Dispatch → Recorder → In-Flight → Garmin without audio logging or server uploads. Enabling simulation returns you to the operational tabs; use the bottom bar for avionics and takeoff/landing controls.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 515
+        }
+      },
+      {
+        "comment": "",
+        "key": "Simulation Mode",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 513
+        }
+      },
+      {
+        "comment": "",
+        "key": "Simulate Avionics ON",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 519
+        }
+      },
+      {
+        "comment": "",
+        "key": "Simulate Avionics OFF",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 523
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reset Simulation Workflow",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 527
+        }
+      },
+      {
+        "comment": "",
+        "key": "One-time setup for the avionics-power beacon. After connection is enabled, the iPhone listens for the assigned beacon identity and uses it to start and stop recording.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 540
+        }
+      },
+      {
+        "comment": "",
+        "key": "Beacon Connected",
+        "location": {
+          "startingColumn": 70,
+          "startingLine": 544
+        }
+      },
+      {
+        "comment": "",
+        "key": "Connect Beacon",
+        "location": {
+          "startingColumn": 91,
+          "startingLine": 544
+        }
+      },
+      {
+        "comment": "",
+        "key": "Disconnect Beacon Trigger",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 552
+        }
+      },
+      {
+        "comment": "",
+        "key": "Post recording gain makes finalized files louder after capture. It cannot recover clipped or noisy input.",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 601
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reset Audio Path",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 574
+        }
+      },
+      {
+        "comment": "",
+        "key": "Post recording gain",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 593
+        }
+      },
+      {
+        "comment": "",
+        "key": "Off",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 594
+        }
+      },
+      {
+        "comment": "",
+        "key": "+3 dB",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 595
+        }
+      },
+      {
+        "comment": "",
+        "key": "+6 dB",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 596
+        }
+      },
+      {
+        "comment": "",
+        "key": "+9 dB",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 597
+        }
+      },
+      {
+        "comment": "",
+        "key": "+12 dB",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 598
+        }
+      },
+      {
+        "comment": "",
+        "key": "Request GPS Permission",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 612
+        }
+      },
+      {
+        "comment": "",
+        "key": "Admin PIN",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 627
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear Folder",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 654
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 657
+        }
+      },
+      {
+        "comment": "",
+        "key": "IPCA will forget this folder. You will need to select it again before importing more Garmin CSV files.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 659
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -1,4 +1,200 @@
+import AVFoundation
+import CoreHaptics
+import OSLog
 import SwiftUI
+import UIKit
+
+/// Diagnosis-only haptic/audio probe. Enabled only via launch arg `-CVRHapticDiagnostics`
+/// or UserDefaults key `ipca.cvrUnit.hapticDiagnostics` (never on by default for production).
+enum CVRHapticDiagnostics {
+    static let launchArgument = "-CVRHapticDiagnostics"
+    static let userDefaultsKey = "ipca.cvrUnit.hapticDiagnostics"
+    private static let logger = Logger(subsystem: "com.ipca.cvrunit", category: "HapticDiagnostics")
+    private static let notificationGenerator = UINotificationFeedbackGenerator()
+
+    static var isEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(launchArgument)
+            || UserDefaults.standard.bool(forKey: userDefaultsKey)
+    }
+
+    static func snapshot(
+        recordingActive: Bool,
+        usbInputActive: Bool,
+        phase: String
+    ) -> [String: Any] {
+        let session = AVAudioSession.sharedInstance()
+        let options = session.categoryOptions
+        return [
+            "phase": phase,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "supportsHaptics": CHHapticEngine.capabilitiesForHardware().supportsHaptics,
+            "category": session.category.rawValue,
+            "mode": session.mode.rawValue,
+            "optionsRaw": options.rawValue,
+            "options": describeCategoryOptions(options),
+            "allowHapticsAndSystemSoundsDuringRecording": session.allowHapticsAndSystemSoundsDuringRecording,
+            "recordingActive": recordingActive,
+            "usbInputActive": usbInputActive,
+            "otherAudioPlaying": session.isOtherAudioPlaying,
+            "secondaryAudioShouldBeSilencedHint": session.secondaryAudioShouldBeSilencedHint
+        ]
+    }
+
+    static func logSnapshot(
+        recordingActive: Bool,
+        usbInputActive: Bool,
+        phase: String
+    ) {
+        guard isEnabled else { return }
+        let snap = snapshot(recordingActive: recordingActive, usbInputActive: usbInputActive, phase: phase)
+        logger.notice("HapticDiag snapshot \(String(describing: snap), privacy: .public)")
+    }
+
+    static func logHapticRequest(style: String, intensity: CGFloat) {
+        guard isEnabled else { return }
+        logger.notice("HapticDiag request style=\(style, privacy: .public) intensity=\(intensity, privacy: .public)")
+    }
+
+    static func logHapticCompletion(style: String) {
+        guard isEnabled else { return }
+        // UIKit does not expose a true hardware-completion callback; this marks API return.
+        logger.notice("HapticDiag api_return style=\(style, privacy: .public)")
+    }
+
+    /// Runs before / monitor / recording / after probes and writes JSON under Application Support.
+    @MainActor
+    static func runAutomatedProbe(audio: AudioRecorderManager) async -> URL? {
+        guard isEnabled else { return nil }
+        var phases: [[String: Any]] = []
+
+        func capture(_ phase: String, fireHaptic: Bool) {
+            let snap = snapshot(
+                recordingActive: audio.isRecording,
+                usbInputActive: audio.isUSBActive,
+                phase: phase
+            )
+            phases.append(snap)
+            logSnapshot(recordingActive: audio.isRecording, usbInputActive: audio.isUSBActive, phase: phase)
+            if fireHaptic {
+                logHapticRequest(style: "heavy", intensity: 1)
+                CVRHaptics.impact(.heavy)
+                logHapticCompletion(style: "heavy")
+                notificationGenerator.prepare()
+                notificationGenerator.notificationOccurred(.success)
+            }
+        }
+
+        // Phase 1: deactivate session if possible (true "before recording / before mic").
+        audio.stopInputMonitorForDiagnostics()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        try? await Task.sleep(for: .milliseconds(350))
+        capture("before_recording_session_inactive", fireHaptic: true)
+        try? await Task.sleep(for: .milliseconds(500))
+
+        // Phase 2: session active with passive input monitor (pre-record cockpit state).
+        await audio.refreshInputs(activateSession: true)
+        try? await Task.sleep(for: .milliseconds(400))
+        capture("passive_monitor_active", fireHaptic: true)
+        try? await Task.sleep(for: .milliseconds(500))
+
+        // Phase 3: AVAudioRecorder active.
+        let started = await audio.startRecording(language: "en")
+        try? await Task.sleep(for: .milliseconds(400))
+        var recordingSnap = snapshot(
+            recordingActive: audio.isRecording,
+            usbInputActive: audio.isUSBActive,
+            phase: "recording_active"
+        )
+        recordingSnap["startRecordingSucceeded"] = started
+        phases.append(recordingSnap)
+        logSnapshot(recordingActive: audio.isRecording, usbInputActive: audio.isUSBActive, phase: "recording_active")
+        if started {
+            logHapticRequest(style: "heavy", intensity: 1)
+            CVRHaptics.impact(.heavy)
+            logHapticCompletion(style: "heavy")
+            notificationGenerator.prepare()
+            notificationGenerator.notificationOccurred(.success)
+        }
+        try? await Task.sleep(for: .milliseconds(500))
+
+        // Phase 4: after stop (monitor typically restarts).
+        _ = await audio.stopRecording(language: "en", postGainDB: 0)
+        try? await Task.sleep(for: .milliseconds(500))
+        capture("after_recording", fireHaptic: true)
+
+        let report: [String: Any] = [
+            "deviceProbe": "CVRHapticDiagnostics",
+            "generatedAt": ISO8601DateFormatter().string(from: Date()),
+            "phases": phases,
+            "setAllowHapticsAndSystemSoundsDuringRecordingUsedInApp": AVAudioSession.sharedInstance().allowHapticsAndSystemSoundsDuringRecording,
+            "note": "Physical feel cannot be asserted by software; allowHaptics flag + recordingActive are the measurable root-cause signals."
+        ]
+
+        do {
+            let dir = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            ).appendingPathComponent("IPCACVRUnit", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent("haptic_diagnostics_report.json")
+            let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: url, options: .atomic)
+            logger.notice("HapticDiag report written \(url.path, privacy: .public)")
+            return url
+        } catch {
+            logger.error("HapticDiag report write failed \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    private static func describeCategoryOptions(_ options: AVAudioSession.CategoryOptions) -> [String] {
+        var names: [String] = []
+        if options.contains(.mixWithOthers) { names.append("mixWithOthers") }
+        if options.contains(.duckOthers) { names.append("duckOthers") }
+        if options.contains(.allowBluetooth) { names.append("allowBluetooth") }
+        if options.contains(.allowBluetoothA2DP) { names.append("allowBluetoothA2DP") }
+        if options.contains(.allowBluetoothHFP) { names.append("allowBluetoothHFP") }
+        if options.contains(.defaultToSpeaker) { names.append("defaultToSpeaker") }
+        if options.contains(.allowAirPlay) { names.append("allowAirPlay") }
+        return names
+    }
+}
+
+/// Retained feedback generators — ephemeral `UIImpactFeedbackGenerator()` instances are often
+/// deallocated before the Taptic Engine plays, which feels like "haptics don't work" on iPhone.
+enum CVRHaptics {
+    private static let light = UIImpactFeedbackGenerator(style: .light)
+    private static let medium = UIImpactFeedbackGenerator(style: .medium)
+    private static let heavy = UIImpactFeedbackGenerator(style: .heavy)
+    private static let soft = UIImpactFeedbackGenerator(style: .soft)
+    private static let rigid = UIImpactFeedbackGenerator(style: .rigid)
+
+    static func prepare(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
+        generator(style).prepare()
+    }
+
+    static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium, intensity: CGFloat = 1.0) {
+        let gen = generator(style)
+        gen.prepare()
+        let clamped = max(0.1, min(1.0, intensity))
+        CVRHapticDiagnostics.logHapticRequest(style: String(describing: style), intensity: clamped)
+        gen.impactOccurred(intensity: clamped)
+        CVRHapticDiagnostics.logHapticCompletion(style: String(describing: style))
+    }
+
+    private static func generator(_ style: UIImpactFeedbackGenerator.FeedbackStyle) -> UIImpactFeedbackGenerator {
+        switch style {
+        case .light: return light
+        case .medium: return medium
+        case .heavy: return heavy
+        case .soft: return soft
+        case .rigid: return rigid
+        @unknown default: return medium
+        }
+    }
+}
 
 enum CVROperationalPalette {
     static let background = Color(red: 0.005, green: 0.02, blue: 0.045)
@@ -265,6 +461,7 @@ struct CVROperationalHoldTile: View {
                 if pressing {
                     confirmedFlash = false
                     holdProgress = 0
+                    CVRHaptics.prepare(.medium)
                     withAnimation(.linear(duration: minimumDuration)) {
                         holdProgress = 1
                     }
@@ -278,6 +475,7 @@ struct CVROperationalHoldTile: View {
                 guard isEnabled else { return }
                 confirmedFlash = true
                 holdProgress = 1
+                CVRHaptics.impact(.medium)
                 action()
                 Task {
                     try? await Task.sleep(for: .milliseconds(450))
@@ -334,10 +532,16 @@ struct CVROperationalActionButton: View {
     var subtitle: String?
     var color: Color
     var isConfirmed: Bool = false
+    var hapticStyle: UIImpactFeedbackGenerator.FeedbackStyle? = .medium
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            if let hapticStyle {
+                CVRHaptics.impact(hapticStyle)
+            }
+            action()
+        } label: {
             VStack(spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.bold))

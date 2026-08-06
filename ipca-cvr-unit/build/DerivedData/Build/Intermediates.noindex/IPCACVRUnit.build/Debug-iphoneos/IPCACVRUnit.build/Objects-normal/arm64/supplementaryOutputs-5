@@ -1,0 +1,23 @@
+{
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/AdminRecordingsView.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/AdminRecordingsView.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/AdminRecordingsView.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/AdminRecordingsView.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/AdminRecordingsView.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/AdminRecordingsView.swiftdeps"
+  },
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/IPCATheme.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/IPCATheme.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/IPCATheme.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/IPCATheme.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/IPCATheme.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/IPCATheme.swiftdeps"
+  },
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/StatusDashboardView.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/StatusDashboardView.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/StatusDashboardView.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/StatusDashboardView.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/StatusDashboardView.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/StatusDashboardView.swiftdeps"
+  }
+}

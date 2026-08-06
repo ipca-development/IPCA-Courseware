@@ -85,24 +85,22 @@ struct FlightLandingCycleDetector {
         var enteredAt: Date
         var airportICAO: String
         var belowStopSpeedSince: Date?
-        var belowApproachSpeedSince: Date?
-        var pendingStopLandingAt: Date?
-        var pendingTouchGoLandingAt: Date?
         var takeoffCandidateAt: Date?
+        /// First time speed dropped to approach/landing range after entering the airport.
+        var landingMomentAt: Date?
     }
 
     private static let takeoffSpeedKnots = 40.0
     private static let takeoffConfirmationSeconds: TimeInterval = 6
-    private static let takeoffAfterRollConfirmationSeconds: TimeInterval = 4
+    private static let takeoffAfterRollConfirmationSeconds: TimeInterval = 3
     private static let nonPatternLandingSpeedKnots = 30.0
     private static let nonPatternLandingConfirmationSeconds: TimeInterval = 4
-    private static let approachEntrySpeedKnots = 35.0
-    private static let approachEntrySeconds: TimeInterval = 2
-    private static let stopSpeedKnots = 20.0
-    private static let stopHoldSeconds: TimeInterval = 8
-    private static let touchGoRollSeconds: TimeInterval = 10
-    private static let fullStopTimeoutSeconds: TimeInterval = 120
-    private static let groundAGLFeet = 40.0
+    private static let approachEntrySpeedKnots = 40.0
+    private static let approachEntrySeconds: TimeInterval = 1
+    private static let stopSpeedKnots = 25.0
+    private static let stopHoldSeconds: TimeInterval = 3
+    private static let touchGoArmSeconds: TimeInterval = 1.5
+    private static let groundAGLFeet = 120.0
 
     private var phase: Phase = .ground
     private var takeoffCandidateAt: Date?
@@ -137,10 +135,8 @@ struct FlightLandingCycleDetector {
                         enteredAt: sample.timestamp,
                         airportICAO: airport.icao,
                         belowStopSpeedSince: sample.speedKnots <= Self.stopSpeedKnots ? sample.timestamp : nil,
-                        belowApproachSpeedSince: sample.speedKnots <= Self.approachEntrySpeedKnots ? sample.timestamp : nil,
-                        pendingStopLandingAt: nil,
-                        pendingTouchGoLandingAt: nil,
-                        takeoffCandidateAt: nil
+                        takeoffCandidateAt: nil,
+                        landingMomentAt: sample.timestamp
                     ))
                     approachEntrySince = nil
                     landingCandidateAt = nil
@@ -197,16 +193,24 @@ struct FlightLandingCycleDetector {
 
     private mutating func evaluateAirportRoll(sample: GPSSample, roll: inout RollState) -> [GPSFlightTransition] {
         var transitions: [GPSFlightTransition] = []
-        guard let airport = airports.first(where: { $0.icao == roll.airportICAO }) else {
+        guard airports.contains(where: { $0.icao == roll.airportICAO }) else {
             phase = .airborne
             return transitions
         }
 
         if airportContext(for: sample)?.icao != roll.airportICAO {
-            if roll.pendingStopLandingAt == nil && roll.pendingTouchGoLandingAt == nil {
+            // Left airport after a landing moment without re-takeoff — treat as full stop.
+            if let landingAt = roll.landingMomentAt {
+                transitions.append(.landing(timestamp: landingAt, sample: sample, kind: .fullStop))
+                phase = .ground
+            } else {
                 phase = .airborne
             }
             return transitions
+        }
+
+        if sample.speedKnots <= Self.approachEntrySpeedKnots {
+            roll.landingMomentAt = roll.landingMomentAt ?? sample.timestamp
         }
 
         if sample.speedKnots <= Self.stopSpeedKnots {
@@ -215,64 +219,28 @@ struct FlightLandingCycleDetector {
             roll.belowStopSpeedSince = nil
         }
 
-        if sample.speedKnots <= Self.approachEntrySpeedKnots {
-            roll.belowApproachSpeedSince = roll.belowApproachSpeedSince ?? sample.timestamp
-        } else {
-            roll.belowApproachSpeedSince = nil
-        }
-
-        let onRunwaySurface = isOnRunwaySurface(sample: sample, airport: airport)
-
-        if roll.pendingStopLandingAt == nil,
-           roll.pendingTouchGoLandingAt == nil,
-           let belowStop = roll.belowStopSpeedSince,
+        // Full stop: commit quickly once slowed on the airport surface.
+        if let belowStop = roll.belowStopSpeedSince,
            sample.timestamp.timeIntervalSince(belowStop) >= Self.stopHoldSeconds {
-            roll.pendingStopLandingAt = belowStop
-            roll.pendingTouchGoLandingAt = nil
+            transitions.append(.landing(timestamp: belowStop, sample: sample, kind: .fullStop))
+            phase = .ground
+            return transitions
         }
 
-        if roll.pendingStopLandingAt == nil,
-           roll.pendingTouchGoLandingAt == nil,
-           onRunwaySurface,
-           sample.speedKnots > Self.stopSpeedKnots,
-           let belowApproach = roll.belowApproachSpeedSince,
-           sample.timestamp.timeIntervalSince(belowApproach) >= Self.touchGoRollSeconds {
-            roll.pendingTouchGoLandingAt = belowApproach
-        }
-
-        if let pendingStop = roll.pendingStopLandingAt {
-            if sample.speedKnots >= Self.takeoffSpeedKnots {
-                let candidate = roll.takeoffCandidateAt ?? sample.timestamp
-                roll.takeoffCandidateAt = candidate
-                if sample.timestamp.timeIntervalSince(candidate) >= Self.takeoffAfterRollConfirmationSeconds {
-                    transitions.append(.landing(timestamp: pendingStop, sample: sample, kind: .stopAndGo))
-                    transitions.append(.takeoff(timestamp: candidate, sample: sample, kind: .cycle))
-                    phase = .airborne
-                    return transitions
-                }
-            } else {
-                roll.takeoffCandidateAt = nil
-                if sample.timestamp.timeIntervalSince(pendingStop) >= Self.fullStopTimeoutSeconds {
-                    transitions.append(.landing(timestamp: pendingStop, sample: sample, kind: .fullStop))
-                    phase = .ground
-                    return transitions
-                }
+        // Touch-and-go: after a brief landing-speed period, accelerate again.
+        if let landingAt = roll.landingMomentAt,
+           sample.timestamp.timeIntervalSince(landingAt) >= Self.touchGoArmSeconds,
+           sample.speedKnots >= Self.takeoffSpeedKnots {
+            let candidate = roll.takeoffCandidateAt ?? sample.timestamp
+            roll.takeoffCandidateAt = candidate
+            if sample.timestamp.timeIntervalSince(candidate) >= Self.takeoffAfterRollConfirmationSeconds {
+                transitions.append(.landing(timestamp: landingAt, sample: sample, kind: .touchAndGo))
+                transitions.append(.takeoff(timestamp: candidate, sample: sample, kind: .cycle))
+                phase = .airborne
+                return transitions
             }
-        }
-
-        if let pendingTouchGo = roll.pendingTouchGoLandingAt {
-            if sample.speedKnots >= Self.takeoffSpeedKnots {
-                let candidate = roll.takeoffCandidateAt ?? sample.timestamp
-                roll.takeoffCandidateAt = candidate
-                if sample.timestamp.timeIntervalSince(candidate) >= Self.takeoffAfterRollConfirmationSeconds {
-                    transitions.append(.landing(timestamp: pendingTouchGo, sample: sample, kind: .touchAndGo))
-                    transitions.append(.takeoff(timestamp: candidate, sample: sample, kind: .cycle))
-                    phase = .airborne
-                    return transitions
-                }
-            } else {
-                roll.takeoffCandidateAt = nil
-            }
+        } else if sample.speedKnots < Self.takeoffSpeedKnots {
+            roll.takeoffCandidateAt = nil
         }
 
         return transitions
@@ -284,10 +252,5 @@ struct FlightLandingCycleDetector {
             longitude: sample.longitude,
             within: airports
         )
-    }
-
-    private func isOnRunwaySurface(sample: GPSSample, airport: AirportReference) -> Bool {
-        let aglFeet = sample.altitude * 3.28084 - airport.elevationFeet
-        return aglFeet <= Self.groundAGLFeet
     }
 }

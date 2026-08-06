@@ -1,0 +1,23 @@
+{
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Services/APIClient.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/APIClient.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/APIClient.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/APIClient.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/APIClient.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/APIClient.swiftdeps"
+  },
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Services/RecordingStore.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/RecordingStore.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/RecordingStore.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/RecordingStore.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/RecordingStore.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/RecordingStore.swiftdeps"
+  },
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/UploadManager.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/UploadManager.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/UploadManager.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/UploadManager.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/UploadManager.swiftdeps"
+  }
+}

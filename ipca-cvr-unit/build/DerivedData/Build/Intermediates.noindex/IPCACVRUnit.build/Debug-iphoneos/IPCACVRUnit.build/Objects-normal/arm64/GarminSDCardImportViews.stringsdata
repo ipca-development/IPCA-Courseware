@@ -1,0 +1,296 @@
+{
+  "source": "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/GarminSDCardImportViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Import Garmin CSV from SD card",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 17
+        }
+      },
+      {
+        "comment": "",
+        "key": "SD CARD",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 15
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear the configured Garmin folder?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 86
+        }
+      },
+      {
+        "comment": "",
+        "key": "Access Needs Restoration",
+        "location": {
+          "startingColumn": 66,
+          "startingLine": 98
+        }
+      },
+      {
+        "comment": "",
+        "key": "Garmin Folder Unavailable",
+        "location": {
+          "startingColumn": 95,
+          "startingLine": 98
+        }
+      },
+      {
+        "comment": "",
+        "key": "Garmin SD Card",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 39
+        }
+      },
+      {
+        "comment": "",
+        "key": "Checking Garmin folder…",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 121
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 43
+        }
+      },
+      {
+        "comment": "",
+        "key": "Change Folder…",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 47
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear Folder",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 48
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear Folder",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 90
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 93
+        }
+      },
+      {
+        "comment": "",
+        "key": "IPCA will forget this folder. Select it again before importing more Garmin CSV files.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 95
+        }
+      },
+      {
+        "comment": "",
+        "key": "Re-select Folder",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 101
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 105
+        }
+      },
+      {
+        "comment": "",
+        "key": "SELECT THE GARMIN FOLDER",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 141
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose the folder on the aircraft's Garmin SD card (usually the card's root, or a Data Log / FPL folder) using the Files browser. IPCA remembers this folder for future imports.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 144
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose Folder",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 151
+        }
+      },
+      {
+        "comment": "",
+        "key": "This folder reference is stale and must be selected again — reinserting the card alone will not restore access.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 177
+        }
+      },
+      {
+        "comment": "",
+        "key": "ACCESS NEEDS RESTORATION",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 167
+        }
+      },
+      {
+        "comment": "",
+        "key": "GARMIN FOLDER UNAVAILABLE",
+        "location": {
+          "startingColumn": 100,
+          "startingLine": 167
+        }
+      },
+      {
+        "comment": "",
+        "key": "Try Again",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 183
+        }
+      },
+      {
+        "comment": "",
+        "key": "Re-select Folder",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 187
+        }
+      },
+      {
+        "comment": "",
+        "key": "NO CSV FILES FOUND",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 205
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ is accessible but contains no CSV files yet.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 209
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rescan",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 214
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Garmin CSV files match the current filter.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 276
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld/%lld",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 257
+        }
+      },
+      {
+        "comment": "",
+        "key": "RESCAN FOLDER",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 294
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dismiss",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 359
+        }
+      },
+      {
+        "comment": "",
+        "key": "Filter",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 427
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show Excluded Files",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 433
+        }
+      },
+      {
+        "comment": "",
+        "key": "RECOMMENDED",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 455
+        }
+      },
+      {
+        "comment": "",
+        "key": "LINKED",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 512
+        }
+      },
+      {
+        "comment": "",
+        "key": "IMPORT",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 491
+        }
+      },
+      {
+        "comment": "",
+        "key": "RESUME",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 506
+        }
+      }
+    ]
+  },
+  "version": 1
+}

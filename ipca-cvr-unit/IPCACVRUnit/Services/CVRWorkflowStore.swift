@@ -1141,11 +1141,11 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     func recordManualTakeoffAdjustment(gpsSample: GPSSample?) {
-        recordInFlightAction(eventType: "manual_takeoff_adjustment", creationMethod: "two_second_hold", gpsSample: gpsSample)
+        recordInFlightAction(eventType: "manual_takeoff_adjustment", creationMethod: "one_second_hold", gpsSample: gpsSample)
     }
 
     func recordManualLandingAdjustment(gpsSample: GPSSample?) {
-        recordInFlightAction(eventType: "manual_landing_adjustment", creationMethod: "two_second_hold", gpsSample: gpsSample)
+        recordInFlightAction(eventType: "manual_landing_adjustment", creationMethod: "one_second_hold", gpsSample: gpsSample)
     }
 
     func operationCounts(for flightRecordID: String) -> (autoTakeoffs: Int, autoLandings: Int, manualTakeoffs: Int, manualLandings: Int, displayTakeoffs: Int, displayLandings: Int) {

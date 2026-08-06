@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>colors</key>
+	<array/>
+	<key>images</key>
+	<array>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIpcaCvrAppIconDark</string>
+			<key>relativePath</key>
+			<string>./ipca_cvr_app_icon_dark.imageset</string>
+			<key>swiftSymbol</key>
+			<string>ipcaCvrAppIconDark</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIpcaCvrAppIconFlat</string>
+			<key>relativePath</key>
+			<string>./ipca_cvr_app_icon_flat.imageset</string>
+			<key>swiftSymbol</key>
+			<string>ipcaCvrAppIconFlat</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIpcaCvrAppIconGlassy</string>
+			<key>relativePath</key>
+			<string>./ipca_cvr_app_icon_glassy.imageset</string>
+			<key>swiftSymbol</key>
+			<string>ipcaCvrAppIconGlassy</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIpcaCvrAppIconStandard</string>
+			<key>relativePath</key>
+			<string>./ipca_cvr_app_icon_standard.imageset</string>
+			<key>swiftSymbol</key>
+			<string>ipcaCvrAppIconStandard</string>
+		</dict>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameIpcaCvrLogoOfficial</string>
+			<key>relativePath</key>
+			<string>./ipca_cvr_logo_official.imageset</string>
+			<key>swiftSymbol</key>
+			<string>ipcaCvrLogoOfficial</string>
+		</dict>
+	</array>
+	<key>symbols</key>
+	<array/>
+</dict>
+</plist>

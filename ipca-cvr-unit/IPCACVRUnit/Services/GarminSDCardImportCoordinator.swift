@@ -825,15 +825,22 @@ final class GarminSDCardImportCoordinator: ObservableObject {
         }
 
         func overlaps(_ entry: CVRFlightLogEntry) -> Bool {
-            guard let start = candidate.startUtc else {
-                return isSameOperationalDay(entry.scheduledDate, referenceDate: candidate.modificationDate)
+            // Prefer operational-day match in Pacific — schedule slots and Garmin local days align here.
+            if let start = candidate.startUtc,
+               isSameOperationalDay(entry.scheduledDate, referenceDate: start) {
+                return true
             }
+            if isSameOperationalDay(entry.scheduledDate, referenceDate: candidate.modificationDate) {
+                return true
+            }
+            guard let start = candidate.startUtc else { return false }
             let end = candidate.endUtc ?? start
             guard let entryStart = parseEntryTimestamp(entry.departureTime) else {
-                return isSameOperationalDay(entry.scheduledDate, referenceDate: start)
+                return false
             }
-            let entryEnd = parseEntryTimestamp(entry.arrivalTime) ?? entryStart.addingTimeInterval(6 * 3600)
-            let window: TimeInterval = 3 * 3600
+            let entryEnd = parseEntryTimestamp(entry.arrivalTime) ?? entryStart.addingTimeInterval(8 * 3600)
+            // Wide operational window: training flights often start before / end after the booked slot.
+            let window: TimeInterval = 12 * 3600
             return start <= entryEnd.addingTimeInterval(window) && end >= entryStart.addingTimeInterval(-window)
         }
 
@@ -845,7 +852,8 @@ final class GarminSDCardImportCoordinator: ObservableObject {
                 let ident = candidate.aircraftIdent.isEmpty ? "unknown tail" : candidate.aircraftIdent
                 updated.matchWarning = "File reports tail \(ident); selected flight is \(target.aircraftRegistration)."
             } else if !overlaps(target) {
-                updated.matchWarning = "Recorded time does not overlap the selected flight's schedule."
+                // Soft warning — import remains allowed; crew can still proceed.
+                updated.matchWarning = "Recorded time may not match the selected flight's schedule. Confirm before importing."
             }
             return updated
         }

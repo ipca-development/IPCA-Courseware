@@ -144,21 +144,49 @@ enum G3XFlightStreamParser {
     }
 
     static func rowUtcDate(from row: [String: String]) -> Date? {
-        let date = (row["Date (yyyy-mm-dd)"] ?? row["Lcl Date"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let utcTime = (row["UTC Time (hh:mm:ss)"] ?? row["UTC Time"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let localTime = (row["Time (hh:mm:ss)"] ?? row["Lcl Time"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let utcOffset = (row["UTC Offset (hh:mm)"] ?? row["UTCOfst"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !date.isEmpty else { return nil }
-        if utcTime.isEmpty, !localTime.isEmpty, utcOffset.range(of: #"^[+-]\d{2}:\d{2}$"#, options: .regularExpression) != nil {
-            return localDateFormatter.date(from: "\(date) \(localTime) \(utcOffset)")
-        }
-        guard !utcTime.isEmpty else { return nil }
+        let utcDate = (row["UTC Date"] ?? row["UTC Date (yyyy-mm-dd)"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let localDate = (row["Lcl Date"] ?? row["Date (yyyy-mm-dd)"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let utcTime = (row["UTC Time (hh:mm:ss)"] ?? row["UTC Time"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let localTime = (row["Time (hh:mm:ss)"] ?? row["Lcl Time"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let utcOffset = (row["UTC Offset (hh:mm)"] ?? row["UTCOfst"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
+        // Prefer true UTC date+time when Garmin provides both.
+        if !utcDate.isEmpty, !utcTime.isEmpty, let date = utcComponentsDate(date: utcDate, time: utcTime) {
+            return date
+        }
+
+        // Prefer local date+time+offset — never mix Lcl Date with UTC Time.
+        if !localDate.isEmpty,
+           !localTime.isEmpty,
+           utcOffset.range(of: #"^[+-]\d{2}:\d{2}$"#, options: .regularExpression) != nil,
+           let date = localDateFormatter.date(from: "\(localDate) \(localTime) \(utcOffset)") {
+            return date
+        }
+
+        // Local date+time without offset: interpret in aircraft Pacific ops timezone.
+        if !localDate.isEmpty, !localTime.isEmpty, utcTime.isEmpty {
+            return pacificLocalDateFormatter.date(from: "\(localDate) \(localTime)")
+        }
+
+        // UTC time alone must use UTC date, not Lcl Date (midnight boundary bug).
+        if !utcTime.isEmpty, !utcDate.isEmpty {
+            return utcComponentsDate(date: utcDate, time: utcTime)
+        }
+
+        return nil
+    }
+
+    private static func utcComponentsDate(date: String, time: String) -> Date? {
         var components = DateComponents()
         components.timeZone = TimeZone(secondsFromGMT: 0)
         let parts = date.split(separator: "-").map(String.init)
-        let timeParts = utcTime.split(separator: ":").map(String.init)
-        guard parts.count == 3, timeParts.count == 3,
+        let timeParts = time.split(separator: ":").map(String.init)
+        guard parts.count == 3, timeParts.count >= 3,
               let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
               let hour = Int(timeParts[0]), let minute = Int(timeParts[1]), let second = Int(timeParts[2]) else {
             return nil
@@ -188,6 +216,15 @@ enum G3XFlightStreamParser {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss ZZZZZ"
+        return formatter
+    }()
+
+    private static let pacificLocalDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter
     }()
 

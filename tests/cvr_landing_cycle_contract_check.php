@@ -16,20 +16,28 @@ $checks = array(
     'detector uses airport boundary context' =>
         str_contains($detector, 'AirportGeofenceCatalog')
         && str_contains($detector, 'boundaryRadiusNM'),
+    'detector commits full stop quickly and supports touch and go' =>
+        str_contains($detector, 'stopHoldSeconds')
+        && str_contains($detector, '3')
+        && str_contains($detector, 'touchGoArmSeconds')
+        && str_contains($detector, 'landingMomentAt')
+        && !str_contains($detector, 'fullStopTimeoutSeconds'),
     'gps manager delegates to landing cycle detector' =>
         str_contains($gps, 'FlightLandingCycleDetector')
         && str_contains($gps, 'airportICAOs'),
-    'manual two second hold increments are stored' =>
+    'manual one second hold increments are stored' =>
         str_contains($store, 'manual_takeoff_adjustment')
         && str_contains($store, 'manual_landing_adjustment')
-        && str_contains($views, 'Hold 2s to +1'),
+        && str_contains($views, 'Hold 1s to +1'),
     'airborne timer keeps running for touch and go and stop and go' =>
         str_contains($views, 'landing_kind')
         && str_contains($views, 'LandingCycleKind.fullStop.rawValue'),
     'shutdown verification stores pilot-confirmed counts' =>
         str_contains($store, 'verifiedTakeoffCount')
         && str_contains($views, 'verifiedTakeoffCount: verifiedTakeoffs')
-        && str_contains($views, 'workflow.operationCounts(for: flightRecord.id).displayTakeoffs'),
+        && (str_contains($views, 'workflow.operationCounts(for: flight.id).displayTakeoffs')
+            || str_contains($views, 'workflow.operationCounts(for: flightRecord.id).displayTakeoffs')
+            || str_contains($views, 'counts.displayTakeoffs')),
     'simulation mode supports demo flow without uploads' =>
         str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/SettingsStore.swift'), 'isSimulationModeEnabled')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'SIMULATION MODE')

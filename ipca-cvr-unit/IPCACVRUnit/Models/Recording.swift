@@ -73,12 +73,15 @@ struct AircraftOperationalConfig: Codable, Equatable {
     var fuelUnit: String
     var oilCapacity: Double
     var oilUnit: String
+    /// US gallons burned per Hobbs hour (Check-In fuel estimate).
+    var fuelBurnUSGPerHobbsHour: Double
 
     static let safeDefaults = AircraftOperationalConfig(
         fuelCapacity: 13,
         fuelUnit: "USG",
         oilCapacity: 100,
-        oilUnit: "%"
+        oilUnit: "%",
+        fuelBurnUSGPerHobbsHour: 3.2
     )
 
     enum CodingKeys: String, CodingKey {
@@ -86,15 +89,25 @@ struct AircraftOperationalConfig: Codable, Equatable {
         case fuelUnit = "fuel_unit"
         case oilCapacity = "oil_capacity"
         case oilUnit = "oil_unit"
+        case fuelBurnUSGPerHobbsHour = "fuel_burn_usg_per_hobbs_hour"
     }
 
-    init(fuelCapacity: Double, fuelUnit: String, oilCapacity: Double, oilUnit: String) {
+    init(
+        fuelCapacity: Double,
+        fuelUnit: String,
+        oilCapacity: Double,
+        oilUnit: String,
+        fuelBurnUSGPerHobbsHour: Double = 3.2
+    ) {
         let normalizedFuelUnit = fuelUnit.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOilUnit = oilUnit.trimmingCharacters(in: .whitespacesAndNewlines)
         self.fuelCapacity = fuelCapacity > 0 ? fuelCapacity : Self.safeDefaults.fuelCapacity
         self.fuelUnit = normalizedFuelUnit.isEmpty ? Self.safeDefaults.fuelUnit : normalizedFuelUnit
         self.oilCapacity = oilCapacity > 0 ? oilCapacity : Self.safeDefaults.oilCapacity
         self.oilUnit = normalizedOilUnit.isEmpty ? Self.safeDefaults.oilUnit : normalizedOilUnit
+        self.fuelBurnUSGPerHobbsHour = fuelBurnUSGPerHobbsHour > 0
+            ? fuelBurnUSGPerHobbsHour
+            : Self.safeDefaults.fuelBurnUSGPerHobbsHour
     }
 
     init(from decoder: Decoder) throws {
@@ -103,7 +116,9 @@ struct AircraftOperationalConfig: Codable, Equatable {
             fuelCapacity: try container.decodeIfPresent(Double.self, forKey: .fuelCapacity) ?? Self.safeDefaults.fuelCapacity,
             fuelUnit: try container.decodeIfPresent(String.self, forKey: .fuelUnit) ?? Self.safeDefaults.fuelUnit,
             oilCapacity: try container.decodeIfPresent(Double.self, forKey: .oilCapacity) ?? Self.safeDefaults.oilCapacity,
-            oilUnit: try container.decodeIfPresent(String.self, forKey: .oilUnit) ?? Self.safeDefaults.oilUnit
+            oilUnit: try container.decodeIfPresent(String.self, forKey: .oilUnit) ?? Self.safeDefaults.oilUnit,
+            fuelBurnUSGPerHobbsHour: try container.decodeIfPresent(Double.self, forKey: .fuelBurnUSGPerHobbsHour)
+                ?? Self.safeDefaults.fuelBurnUSGPerHobbsHour
         )
     }
 }

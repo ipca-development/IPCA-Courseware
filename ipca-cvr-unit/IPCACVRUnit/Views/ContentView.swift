@@ -365,6 +365,7 @@ private struct AdminSettingsView: View {
     @EnvironmentObject private var garminSDCard: GarminSDCardImportCoordinator
     @State private var isShowingGarminSDCardFolderPicker = false
     @State private var isShowingGarminSDCardClearConfirmation = false
+    @State private var hapticProbeStatus = ""
 
     var body: some View {
         NavigationStack {
@@ -566,6 +567,54 @@ private struct AdminSettingsView: View {
                             )
                             adminLabeled("Beacon state", operationalBeaconStatus.label, valueColor: operationalBeaconStatusColor)
                             adminLabeled("Advertisements", "\(beacon.advertisementCount)")
+                        }
+                    }
+
+                    if CVRHapticDiagnostics.isEnabled {
+                        CVROperationalSectionCard(title: "Haptic Diagnostics", systemImage: "waveform.path") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Diagnosis only. Not shown unless launch arg \(CVRHapticDiagnostics.launchArgument) or UserDefaults flag is set.")
+                                    .font(.caption)
+                                    .foregroundStyle(CVROperationalPalette.textSecondary)
+                                let snap = CVRHapticDiagnostics.snapshot(
+                                    recordingActive: audio.isRecording,
+                                    usbInputActive: audio.isUSBActive,
+                                    phase: "admin_live"
+                                )
+                                adminLabeled("supportsHaptics", "\(snap["supportsHaptics"] ?? "?")")
+                                adminLabeled("allowHapticsDuringRecording", "\(snap["allowHapticsAndSystemSoundsDuringRecording"] ?? "?")")
+                                adminLabeled("category", "\(snap["category"] ?? "?")")
+                                adminLabeled("mode", "\(snap["mode"] ?? "?")")
+                                adminLabeled("options", "\((snap["options"] as? [String])?.joined(separator: ", ") ?? "?")")
+                                adminLabeled("recordingActive", "\(audio.isRecording)")
+                                adminLabeled("usbInputActive", "\(audio.isUSBActive)")
+                                Button("Fire Haptic Probe") {
+                                    CVRHapticDiagnostics.logSnapshot(
+                                        recordingActive: audio.isRecording,
+                                        usbInputActive: audio.isUSBActive,
+                                        phase: "admin_manual_probe"
+                                    )
+                                    CVRHaptics.impact(.heavy)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(CVROperationalPalette.warning)
+                                Button("Run Automated Before/During/After Probe") {
+                                    Task {
+                                        hapticProbeStatus = "Running…"
+                                        if let url = await CVRHapticDiagnostics.runAutomatedProbe(audio: audio) {
+                                            hapticProbeStatus = "Wrote \(url.lastPathComponent)"
+                                        } else {
+                                            hapticProbeStatus = "Probe failed or diagnostics disabled"
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                if !hapticProbeStatus.isEmpty {
+                                    Text(hapticProbeStatus)
+                                        .font(.caption)
+                                        .foregroundStyle(CVROperationalPalette.textSecondary)
+                                }
+                            }
                         }
                     }
 

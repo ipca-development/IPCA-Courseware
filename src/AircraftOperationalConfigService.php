@@ -93,6 +93,10 @@ final class AircraftOperationalConfigService
             'fuel_discrepancy_usg' => $this->floatValue($values['fuel_discrepancy_usg'] ?? null, (float)$current['fuel_discrepancy_usg']),
             'fuel_capacity' => $this->positiveFloatValue($values['fuel_capacity'] ?? null, (float)$current['fuel_capacity']),
             'fuel_unit' => $this->unitValue($values['fuel_unit'] ?? null, (string)$current['fuel_unit']),
+            'fuel_burn_usg_per_hobbs_hour' => $this->positiveFloatValue(
+                $values['fuel_burn_usg_per_hobbs_hour'] ?? null,
+                (float)($current['fuel_burn_usg_per_hobbs_hour'] ?? 3.2)
+            ),
             'oil_capacity' => $this->positiveFloatValue($values['oil_capacity'] ?? null, (float)$current['oil_capacity']),
             'oil_unit' => $this->unitValue($values['oil_unit'] ?? null, (string)$current['oil_unit']),
             'timezone_identifier' => trim((string)($values['timezone_identifier'] ?? $current['timezone_identifier'])) ?: 'UTC',
@@ -118,35 +122,69 @@ final class AircraftOperationalConfigService
             }
 
             $uuid = AuditEventService::uuid();
-            $insert = $this->pdo->prepare("
-                INSERT INTO ipca_aircraft_operational_config_versions
-                  (config_id, config_version_uuid, version_number, effective_from_utc,
-                   hobbs_engine_on_rpm_threshold, hobbs_start_confirm_ms, hobbs_stop_confirm_ms,
-                   tacho_rpm_threshold, movement_groundspeed_kt, movement_confirm_ms,
-                   fuel_discrepancy_usg, fuel_capacity, fuel_unit, oil_capacity, oil_unit,
-                   timezone_identifier, changed_by, change_reason)
-                VALUES
-                  (?, ?, ?, CURRENT_TIMESTAMP(3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            $insert->execute(array(
-                (int)$config['id'],
-                $uuid,
-                $nextVersionNumber,
-                (float)$next['hobbs_engine_on_rpm_threshold'],
-                (int)$next['hobbs_start_confirm_ms'],
-                (int)$next['hobbs_stop_confirm_ms'],
-                $next['tacho_rpm_threshold'],
-                (float)$next['movement_groundspeed_kt'],
-                (int)$next['movement_confirm_ms'],
-                (float)$next['fuel_discrepancy_usg'],
-                (float)$next['fuel_capacity'],
-                (string)$next['fuel_unit'],
-                (float)$next['oil_capacity'],
-                (string)$next['oil_unit'],
-                (string)$next['timezone_identifier'],
-                $changedBy,
-                (string)$next['change_reason'],
-            ));
+            $hasBurn = $this->columnExists('ipca_aircraft_operational_config_versions', 'fuel_burn_usg_per_hobbs_hour');
+            if ($hasBurn) {
+                $insert = $this->pdo->prepare("
+                    INSERT INTO ipca_aircraft_operational_config_versions
+                      (config_id, config_version_uuid, version_number, effective_from_utc,
+                       hobbs_engine_on_rpm_threshold, hobbs_start_confirm_ms, hobbs_stop_confirm_ms,
+                       tacho_rpm_threshold, movement_groundspeed_kt, movement_confirm_ms,
+                       fuel_discrepancy_usg, fuel_capacity, fuel_unit, fuel_burn_usg_per_hobbs_hour,
+                       oil_capacity, oil_unit, timezone_identifier, changed_by, change_reason)
+                    VALUES
+                      (?, ?, ?, CURRENT_TIMESTAMP(3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $insert->execute(array(
+                    (int)$config['id'],
+                    $uuid,
+                    $nextVersionNumber,
+                    (float)$next['hobbs_engine_on_rpm_threshold'],
+                    (int)$next['hobbs_start_confirm_ms'],
+                    (int)$next['hobbs_stop_confirm_ms'],
+                    $next['tacho_rpm_threshold'],
+                    (float)$next['movement_groundspeed_kt'],
+                    (int)$next['movement_confirm_ms'],
+                    (float)$next['fuel_discrepancy_usg'],
+                    (float)$next['fuel_capacity'],
+                    (string)$next['fuel_unit'],
+                    (float)$next['fuel_burn_usg_per_hobbs_hour'],
+                    (float)$next['oil_capacity'],
+                    (string)$next['oil_unit'],
+                    (string)$next['timezone_identifier'],
+                    $changedBy,
+                    (string)$next['change_reason'],
+                ));
+            } else {
+                $insert = $this->pdo->prepare("
+                    INSERT INTO ipca_aircraft_operational_config_versions
+                      (config_id, config_version_uuid, version_number, effective_from_utc,
+                       hobbs_engine_on_rpm_threshold, hobbs_start_confirm_ms, hobbs_stop_confirm_ms,
+                       tacho_rpm_threshold, movement_groundspeed_kt, movement_confirm_ms,
+                       fuel_discrepancy_usg, fuel_capacity, fuel_unit, oil_capacity, oil_unit,
+                       timezone_identifier, changed_by, change_reason)
+                    VALUES
+                      (?, ?, ?, CURRENT_TIMESTAMP(3), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $insert->execute(array(
+                    (int)$config['id'],
+                    $uuid,
+                    $nextVersionNumber,
+                    (float)$next['hobbs_engine_on_rpm_threshold'],
+                    (int)$next['hobbs_start_confirm_ms'],
+                    (int)$next['hobbs_stop_confirm_ms'],
+                    $next['tacho_rpm_threshold'],
+                    (float)$next['movement_groundspeed_kt'],
+                    (int)$next['movement_confirm_ms'],
+                    (float)$next['fuel_discrepancy_usg'],
+                    (float)$next['fuel_capacity'],
+                    (string)$next['fuel_unit'],
+                    (float)$next['oil_capacity'],
+                    (string)$next['oil_unit'],
+                    (string)$next['timezone_identifier'],
+                    $changedBy,
+                    (string)$next['change_reason'],
+                ));
+            }
             $versionId = (int)$this->pdo->lastInsertId();
             $this->pdo->prepare('UPDATE ipca_aircraft_operational_configs SET current_version_id = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?')
                 ->execute(array($versionId, (int)$config['id']));
@@ -176,6 +214,7 @@ final class AircraftOperationalConfigService
             'fuel_discrepancy_usg' => 1.0,
             'fuel_capacity' => 13.0,
             'fuel_unit' => 'USG',
+            'fuel_burn_usg_per_hobbs_hour' => 3.2,
             'oil_capacity' => 100.0,
             'oil_unit' => '%',
             'timezone_identifier' => 'UTC',
@@ -200,6 +239,9 @@ final class AircraftOperationalConfigService
             'fuel_discrepancy_usg' => (float)$row['fuel_discrepancy_usg'],
             'fuel_capacity' => (float)($row['fuel_capacity'] ?? 13.0),
             'fuel_unit' => trim((string)($row['fuel_unit'] ?? 'USG')) ?: 'USG',
+            'fuel_burn_usg_per_hobbs_hour' => isset($row['fuel_burn_usg_per_hobbs_hour']) && is_numeric($row['fuel_burn_usg_per_hobbs_hour'])
+                ? (float)$row['fuel_burn_usg_per_hobbs_hour']
+                : 3.2,
             'oil_capacity' => (float)($row['oil_capacity'] ?? 100.0),
             'oil_unit' => trim((string)($row['oil_unit'] ?? '%')) ?: '%',
             'timezone_identifier' => (string)($row['timezone_identifier'] ?? 'UTC'),
@@ -231,5 +273,15 @@ final class AircraftOperationalConfigService
     {
         $value = trim((string)($value ?? ''));
         return $value === '' || !is_numeric($value) ? null : (float)$value;
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT 1 FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1'
+        );
+        $stmt->execute(array($table, $column));
+        return (bool)$stmt->fetchColumn();
     }
 }

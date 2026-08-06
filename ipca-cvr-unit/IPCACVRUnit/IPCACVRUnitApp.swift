@@ -115,6 +115,11 @@ struct IPCACVRUnitApp: App {
                         workflow: workflowStore
                     )
                     coordinator.appBecameActive()
+                    if CVRHapticDiagnostics.isEnabled {
+                        // Diagnosis launch only — writes Application Support/IPCACVRUnit/haptic_diagnostics_report.json
+                        try? await Task.sleep(for: .milliseconds(800))
+                        _ = await CVRHapticDiagnostics.runAutomatedProbe(audio: audioRecorder)
+                    }
                 }
                 .onChange(of: scenePhase) {
                     switch scenePhase {

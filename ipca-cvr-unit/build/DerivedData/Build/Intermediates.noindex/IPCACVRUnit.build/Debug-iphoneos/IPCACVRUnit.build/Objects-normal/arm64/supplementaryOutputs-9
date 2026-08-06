@@ -1,0 +1,23 @@
+{
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Services/CVRDispatchRouteOverview.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRDispatchRouteOverview.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRDispatchRouteOverview.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRDispatchRouteOverview.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRDispatchRouteOverview.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRDispatchRouteOverview.swiftdeps"
+  },
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Services/CVRLocalDispatchDraft.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRLocalDispatchDraft.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRLocalDispatchDraft.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRLocalDispatchDraft.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRLocalDispatchDraft.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRLocalDispatchDraft.swiftdeps"
+  },
+  "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Services/CVRPendingGarminPersistence.swift" : {
+    "const-values" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRPendingGarminPersistence.swiftconstvalues",
+    "dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRPendingGarminPersistence.d",
+    "diagnostics" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRPendingGarminPersistence.dia",
+    "object" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRPendingGarminPersistence.o",
+    "swift-dependencies" : "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/build/DerivedData/Build/Intermediates.noindex/IPCACVRUnit.build/Debug-iphoneos/IPCACVRUnit.build/Objects-normal/arm64/CVRPendingGarminPersistence.swiftdeps"
+  }
+}

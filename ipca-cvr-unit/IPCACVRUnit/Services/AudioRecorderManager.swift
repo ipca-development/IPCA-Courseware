@@ -299,11 +299,15 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     }
 
     private func configureAudioSession() throws {
-        try AVAudioSession.sharedInstance().setCategory(
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(
             .playAndRecord,
             mode: .default,
             options: [.allowBluetoothHFP, .mixWithOthers]
         )
+        // Required for UIKit/Core Haptics while the mic/recorder owns the session.
+        // Default is false; without this, Engine Start / In-Flight holds are silent on iPhone.
+        try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
     }
 
     private func preferExternalInputIfAvailable() throws {
@@ -388,6 +392,11 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         monitorEngine.inputNode.removeTap(onBus: 0)
         monitorEngine.stop()
         self.monitorEngine = nil
+    }
+
+    /// Diagnosis only — stops the passive input monitor without changing recording configuration.
+    func stopInputMonitorForDiagnostics() {
+        stopInputMonitor()
     }
 
     private func startTimer() {

@@ -1,0 +1,680 @@
+{
+  "source": "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Save the current leg before opening another?",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 216
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open Scheduled Leg",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 224
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 229
+        }
+      },
+      {
+        "comment": "",
+        "key": "Complete Check-In for the current leg when possible. Pending evidence remains available in Log.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 233
+        }
+      },
+      {
+        "comment": "",
+        "key": "No reservations",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 331
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld LEG%@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 357
+        }
+      },
+      {
+        "comment": "",
+        "key": "LEG %lld",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 379
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create Local Dispatch",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 711
+        }
+      },
+      {
+        "comment": "",
+        "key": "ERASE",
+        "location": {
+          "startingColumn": 51,
+          "startingLine": 662
+        }
+      },
+      {
+        "comment": "",
+        "key": "Route",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 670
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 715
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 722
+        }
+      },
+      {
+        "comment": "",
+        "key": "CREATE LOCAL DISPATCH",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 747
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mission",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 751
+        }
+      },
+      {
+        "comment": "",
+        "key": "No flight missions are available on this device.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 780
+        }
+      },
+      {
+        "comment": "",
+        "key": "LEG %lld",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 798
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@, inherited",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 872
+        }
+      },
+      {
+        "comment": "",
+        "key": "ADD LEG",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 886
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Route",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1073
+        }
+      },
+      {
+        "comment": "",
+        "key": "LEG %lld",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 976
+        }
+      },
+      {
+        "comment": "",
+        "key": "ERASE",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 1017
+        }
+      },
+      {
+        "comment": "",
+        "key": "Route",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1025
+        }
+      },
+      {
+        "comment": "",
+        "key": "ADD LEG",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1038
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1077
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1081
+        }
+      },
+      {
+        "comment": "",
+        "key": "Route overview",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 1452
+        }
+      },
+      {
+        "comment": "",
+        "key": "Oil has been uploaded",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1607
+        }
+      },
+      {
+        "comment": "",
+        "key": "Tap EDIT ROUTE to change airports, add a leg, or swipe ERASE.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 1445
+        }
+      },
+      {
+        "comment": "",
+        "key": "ROUTE",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1356
+        }
+      },
+      {
+        "comment": "",
+        "key": "EDIT ROUTE",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1365
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add or edit legs",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1385
+        }
+      },
+      {
+        "comment": "",
+        "key": "LEG %lld — CURRENT LEG",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 1401
+        }
+      },
+      {
+        "comment": "",
+        "key": "LEG %lld",
+        "location": {
+          "startingColumn": 92,
+          "startingLine": 1401
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mission",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1467
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open a Dispatch to select a mission.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1472
+        }
+      },
+      {
+        "comment": "",
+        "key": "Quick Verification",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1534
+        }
+      },
+      {
+        "comment": "",
+        "key": "RECORDING",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 2149
+        }
+      },
+      {
+        "comment": "",
+        "key": "RECORDER IDLE",
+        "location": {
+          "startingColumn": 52,
+          "startingLine": 2149
+        }
+      },
+      {
+        "comment": "",
+        "key": "Check-In",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2645
+        }
+      },
+      {
+        "comment": "",
+        "key": "Leg stored safely on this device.",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 2657
+        }
+      },
+      {
+        "comment": "",
+        "key": "Estimates until verified. Tacho ≈ start + Hobbs increment × 0.70",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 2593
+        }
+      },
+      {
+        "comment": "",
+        "key": "Comments",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 2624
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2649
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 2653
+        }
+      },
+      {
+        "comment": "",
+        "key": "Continue",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 2658
+        }
+      },
+      {
+        "comment": "",
+        "key": "This leg is complete on the iPhone. You can continue the lesson.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2660
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 2830
+        }
+      },
+      {
+        "comment": "",
+        "key": "TIMES SHOWN IN CALIFORNIA LOCAL TIME (PT)",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3329
+        }
+      },
+      {
+        "comment": "",
+        "key": "Import Garmin CSV from SD card",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 3403
+        }
+      },
+      {
+        "comment": "",
+        "key": "FILES",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 3396
+        }
+      },
+      {
+        "comment": "",
+        "key": "SD CARD",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 3401
+        }
+      },
+      {
+        "comment": "",
+        "key": "Import Garmin CSV from SD card",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 3590
+        }
+      },
+      {
+        "comment": "",
+        "key": "RETRY",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 3572
+        }
+      },
+      {
+        "comment": "",
+        "key": "SYNC",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 3579
+        }
+      },
+      {
+        "comment": "",
+        "key": "SD CARD",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 3587
+        }
+      },
+      {
+        "comment": "",
+        "key": "ADJUST",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 3598
+        }
+      },
+      {
+        "comment": "",
+        "key": "Protected Adjustment",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3893
+        }
+      },
+      {
+        "comment": "",
+        "key": "ADMIN AUTHORIZATION",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3856
+        }
+      },
+      {
+        "comment": "",
+        "key": "Enter the CVR Unit Admin PIN to adjust Hobbs, Tacho, or fuel.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3859
+        }
+      },
+      {
+        "comment": "",
+        "key": "Admin PIN",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 3863
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 3897
+        }
+      },
+      {
+        "comment": "",
+        "key": "Assign Garmin CSV",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3952
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select the dispatched flight that belongs to this Garmin CSV.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 3915
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ %@ → %@ %@",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 3933
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 3956
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 3977
+        }
+      },
+      {
+        "comment": "",
+        "key": "SAVING LOG ADJUSTMENT",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 3973
+        }
+      },
+      {
+        "comment": "",
+        "key": "ATTACHING GARMIN CSV",
+        "location": {
+          "startingColumn": 73,
+          "startingLine": 3973
+        }
+      },
+      {
+        "comment": "",
+        "key": "Adjust Flight Log",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 4468
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 4472
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 4475
+        }
+      },
+      {
+        "comment": "",
+        "key": "Starting value: %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 4564
+        }
+      },
+      {
+        "comment": "",
+        "key": "EDIT",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 4697
+        }
+      },
+      {
+        "comment": "",
+        "key": "DELETE",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 4703
+        }
+      },
+      {
+        "comment": "",
+        "key": "Close",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 4801
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 4804
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 4814
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select Flight Mission",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 5253
+        }
+      },
+      {
+        "comment": "",
+        "key": "No flight missions are available on this device.",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 5218
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Flight Missions",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 5216
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search missions",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 5249
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 5257
+        }
+      },
+      {
+        "comment": "",
+        "key": "SIMULATION MODE",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 5398
+        }
+      },
+      {
+        "comment": "",
+        "key": "No logging · No uploads",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 5402
+        }
+      }
+    ]
+  },
+  "version": 1
+}

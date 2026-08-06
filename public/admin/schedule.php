@@ -13,7 +13,11 @@ $currentUser = cw_current_user($pdo) ?: array();
 $service = new FlightScheduleService($pdo);
 $notice = '';
 $error = '';
-$selectedDate = substr((string)($_GET['date'] ?? $_GET['from'] ?? date('Y-m-d')), 0, 10);
+$selectedDate = substr((string)($_GET['date'] ?? $_GET['from'] ?? ''), 0, 10);
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
+    // Operational "today" is Pacific — server UTC midnight must not advance the schedule day early.
+    $selectedDate = (new DateTimeImmutable('now', new DateTimeZone('America/Los_Angeles')))->format('Y-m-d');
+}
 $from = $selectedDate;
 $to = $selectedDate;
 $editId = strtolower(trim((string)($_GET['edit'] ?? '')));
@@ -192,7 +196,7 @@ $schedulerResources = array(
     ),
 );
 
-$today = date('Y-m-d');
+$today = (new DateTimeImmutable('now', new DateTimeZone('America/Los_Angeles')))->format('Y-m-d');
 $scheduledCount = count(array_filter($slots, static fn(array $slot): bool => (string)($slot['status'] ?? '') === 'scheduled'));
 $completedCount = count(array_filter($slots, static fn(array $slot): bool => (string)($slot['status'] ?? '') === 'completed'));
 $todayCount = count(array_filter($slots, static fn(array $slot): bool => (string)($slot['scheduled_date'] ?? '') === $today));

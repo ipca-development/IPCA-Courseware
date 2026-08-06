@@ -1,0 +1,144 @@
+{
+  "source": "/Users/kayvereeken/EuroPilot Center Dropbox/Projects/IPCA-Courseware/ipca-cvr-unit/IPCACVRUnit/Views/AdminRecordingsView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Delete recording from this iPhone?",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 117
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete selected recordings from this iPhone?",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 136
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear",
+        "location": {
+          "startingColumn": 52,
+          "startingLine": 29
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select All",
+        "location": {
+          "startingColumn": 62,
+          "startingLine": 29
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Selected",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 33
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld selected",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 21
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ will be freed from this iPhone",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 24
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 46
+        }
+      },
+      {
+        "comment": "",
+        "key": "Duration %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 65
+        }
+      },
+      {
+        "comment": "",
+        "key": "Retry Upload",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 86
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete from iPhone",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 91
+        }
+      },
+      {
+        "comment": "",
+        "key": "Upload Pending",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 111
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Local Recording",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 122
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 129
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete %lld Local Recordings",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 140
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 146
+        }
+      },
+      {
+        "comment": "",
+        "key": "Are you sure you want to delete %lld recording(s)? This action cannot be reversed. Estimated space freed: %@.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 148
+        }
+      }
+    ]
+  },
+  "version": 1
+}
