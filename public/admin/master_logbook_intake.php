@@ -12,6 +12,8 @@ require_once __DIR__ . '/../../src/CockpitAircraftService.php';
 require_once __DIR__ . '/../../src/ManualReconstructionBundleService.php';
 require_once __DIR__ . '/../../src/FlightDebriefService.php';
 require_once __DIR__ . '/../../src/ReplayShareService.php';
+require_once __DIR__ . '/../../src/CvrAdminLegCorrectionService.php';
+require_once __DIR__ . '/../../src/CockpitRecorderDebriefQueueService.php';
 
 cw_require_admin();
 
@@ -192,12 +194,47 @@ try {
             }
             $replayShareService->revoke((int)($_POST['debrief_id'] ?? 0), $actorUserId);
             $reconstructionNotice = 'Replay access revoked immediately.';
+        } elseif ($action === 'save_operational_leg') {
+            (new CvrAdminLegCorrectionService($pdo))->save(
+                (int)($_POST['dispatch_id'] ?? 0),
+                is_array($_POST['leg'] ?? null) ? $_POST['leg'] : $_POST,
+                $actorUserId > 0 ? $actorUserId : null
+            );
+            $reconstructionNotice = 'Operational leg updated.';
+        } elseif ($action === 'generate_bundle_debrief') {
+            $bundleId = (int)($_POST['bundle_id'] ?? 0);
+            if ($bundleId <= 0) {
+                throw new RuntimeException('bundle_id is required.');
+            }
+            $result = CockpitRecorderDebriefQueueService::fromPdo($pdo)
+                ->lockAndQueueDebrief($bundleId, $actorUserId > 0 ? $actorUserId : null);
+            $job = is_array($result['debrief_job'] ?? null) ? $result['debrief_job'] : array();
+            $already = !empty($job['skipped']) || (($job['reason'] ?? '') === 'already_running');
+            $reconstructionNotice = $already
+                ? 'AI Debrief generation is already running in the background.'
+                : 'AI Debrief generation started in the background. Refresh this tab to see completion status.';
         }
     }
 } catch (Throwable $e) {
     $reconstructionError = $e->getMessage();
 }
-$dispatch = $intake->dispatchRows();
+
+$legsAircraftFilter = strtoupper(trim((string)($_GET['legs_aircraft'] ?? '')));
+$legsFrom = trim((string)($_GET['legs_from'] ?? ''));
+$legsTo = trim((string)($_GET['legs_to'] ?? ''));
+$legsPage = max(1, (int)($_GET['legs_page'] ?? 1));
+$legsLimit = 30;
+$legsOffset = ($legsPage - 1) * $legsLimit;
+$dispatch = $intake->dispatchRows(
+    $legsLimit,
+    $legsOffset,
+    $legsAircraftFilter !== '' ? $legsAircraftFilter : null,
+    $legsFrom !== '' ? $legsFrom : null,
+    $legsTo !== '' ? $legsTo : null
+);
+$legsTotal = (int)($dispatch['total'] ?? count($dispatch['rows']));
+$legsPageCount = max(1, (int)($dispatch['page_count'] ?? 1));
+$legsPage = max(1, min($legsPageCount, (int)($dispatch['page'] ?? $legsPage)));
 $audio = $intake->audioRows();
 if ($audio['available'] && $audio['rows'] !== array()) {
     $audio['rows'] = (new CvrAudioIntakeMetricsService($pdo))->enrichRows($audio['rows']);
@@ -455,6 +492,50 @@ function cvr_intake_badge(mixed $value): string
         $text = 'Unknown';
     }
     return '<span class="intake-status ' . cvr_intake_status_class($text) . '">' . cvr_intake_h(strtoupper(str_replace('_', ' ', $text))) . '</span>';
+}
+
+function cvr_intake_pill(string $text, string $tone = 'muted'): string
+{
+    $text = trim($text);
+    if ($text === '') {
+        return '<span class="ml-pill">—</span>';
+    }
+    $class = match ($tone) {
+        'ok', 'usable' => 'ml-pill ml-pill-usable',
+        'present', 'info' => 'ml-pill ml-pill-present',
+        'warn', 'processing' => 'ml-pill ml-pill-processing',
+        'bad', 'failed' => 'ml-pill ml-pill-failed',
+        default => 'ml-pill',
+    };
+    return '<span class="' . $class . '">' . cvr_intake_h($text) . '</span>';
+}
+
+function cvr_intake_local_date(PDO $pdo, mixed $value, string $registration = ''): string
+{
+    $text = trim((string)$value);
+    if ($text === '') {
+        return '—';
+    }
+    $timezone = cw_aircraft_operational_timezone_by_registration($pdo, $registration);
+    $dt = cw_dt_obj($text, $timezone !== 'UTC' ? $timezone : 'America/Los_Angeles');
+    return $dt instanceof DateTimeInterface ? $dt->format('Y-m-d') : '—';
+}
+
+function cvr_intake_legs_query(array $overrides = []): string
+{
+    $params = array_merge(array(
+        'tab' => 'dispatch',
+        'legs_aircraft' => (string)($GLOBALS['legsAircraftFilter'] ?? ''),
+        'legs_from' => (string)($GLOBALS['legsFrom'] ?? ''),
+        'legs_to' => (string)($GLOBALS['legsTo'] ?? ''),
+        'legs_page' => (string)($GLOBALS['legsPage'] ?? '1'),
+    ), $overrides);
+    foreach ($params as $key => $value) {
+        if ($value === '' || $value === null) {
+            unset($params[$key]);
+        }
+    }
+    return '/admin/master_logbook.php?' . http_build_query($params);
 }
 
 function cvr_intake_short_hash(mixed $value): string
@@ -745,6 +826,43 @@ cw_header('Master Logbook');
 .intake-modal-transcript{max-height:48vh;overflow:auto;border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#f8fafc;font-size:12px;line-height:1.6;white-space:pre-wrap;color:#0f172a}
 .intake-modal-close{border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#334155;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer}
 .intake-panel-title{margin:0;color:#0f172a;font-size:17px}
+/* Operational Legs — IPCA Master Logbook visual language */
+.legs-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+.legs-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.legs-filters label{display:grid;gap:4px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#64748b}
+.legs-filters .intake-select{min-width:120px;padding:6px 8px;font-size:12px}
+.ml-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 7px;font-size:9px;font-weight:800;background:#e2e8f0;color:#334155;white-space:nowrap}
+.ml-pill-usable{background:#dcfce7;color:#166534}
+.ml-pill-present{background:#dbeafe;color:#1e40af}
+.ml-pill-processing{background:#fef3c7;color:#92400e}
+.ml-pill-failed{background:#fee2e2;color:#991b1b}
+.ml-aircraft-pill{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;border:1px solid #93c5fd;color:#1d4ed8;background:#eff6ff}
+.ml-crew{display:grid;gap:3px;font-size:10px;line-height:1.15;min-width:0;max-width:118px}
+.ml-crew-member{display:grid;gap:0}
+.ml-crew-role{font-size:8px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:800}
+.ml-crew-name{font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.legs-table-wrap{overflow-x:auto;border:1px solid #e2e8f0;border-radius:14px;background:#fff}
+.legs-table{width:100%;min-width:1480px;border-collapse:collapse;font-size:11px;table-layout:fixed}
+.legs-table th,.legs-table td{padding:4px 5px;border-bottom:1px solid #e2e8f0;vertical-align:middle;overflow:hidden}
+.legs-table th{position:sticky;top:0;z-index:2;background:#f8fafc;font-size:8px;letter-spacing:.04em;text-transform:uppercase;color:#475569;font-weight:800;white-space:nowrap;text-align:center}
+.legs-table td{color:#102845;white-space:nowrap;text-align:center;font-variant-numeric:tabular-nums}
+.legs-table td.legs-crew{text-align:left}
+.legs-table tbody tr.legs-row{cursor:pointer;transition:background-color .12s ease,box-shadow .12s ease}
+.legs-table tbody tr.legs-row:hover{background:#eef6ff;box-shadow:inset 3px 0 0 #2563eb}
+.legs-num{font-weight:750;color:#334155}
+.legs-blank{color:#cbd5e1;font-weight:700}
+.legs-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:12px}
+.legs-pagination a,.legs-pagination span{font-size:12px;font-weight:800;color:#334155;text-decoration:none}
+.legs-pagination a{color:#1d4ed8}
+.legs-link-btn{border:0;background:transparent;color:#1d4ed8;font:inherit;font-weight:800;font-size:9px;cursor:pointer;padding:0;text-decoration:underline}
+.legs-link-btn:disabled{color:#94a3b8;cursor:not-allowed;text-decoration:none}
+.legs-modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.legs-modal-grid label{display:grid;gap:4px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#64748b}
+.legs-modal-grid input,.legs-modal-grid select,.legs-modal-grid textarea{border:1px solid #cbd5e1;border-radius:9px;padding:7px 8px;font-size:12px;color:#0f172a;background:#fff}
+.legs-crew-editor{display:grid;gap:8px}
+.legs-crew-row{display:grid;grid-template-columns:110px 1fr auto;gap:8px}
+.legs-copy-box{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px;max-height:55vh;overflow:auto;font-size:12px;line-height:1.45;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+.intake-muted{color:#64748b;font-size:12px}
 .intake-table-wrap{overflow:auto;border:1px solid #e2e8f0;border-radius:12px}
 .intake-table{width:100%;min-width:1080px;border-collapse:collapse;font-size:12px}
 .intake-table th{padding:9px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;text-align:left;text-transform:uppercase;font-size:9px;letter-spacing:.06em;white-space:nowrap}
@@ -934,38 +1052,65 @@ cw_header('Master Logbook');
     <div class="intake-panel-head">
       <div>
         <h2 class="intake-panel-title">Operational Legs</h2>
-        <div class="intake-muted">One row per checked-in Dispatch leg received from the CVR app. Times are America/Los_Angeles local. On Block = Off Block + Hobbs increment.</div>
+        <div class="intake-muted">Logbook view — one row per checked-in Dispatch leg. Date = Off Block local calendar day. Times use the aircraft operational timezone.</div>
       </div>
     </div>
+    <form class="legs-toolbar" method="get" action="/admin/master_logbook.php">
+      <input type="hidden" name="tab" value="dispatch">
+      <div class="legs-filters">
+        <label>Aircraft
+          <select class="intake-select" name="legs_aircraft">
+            <option value="">All aircraft</option>
+            <?php foreach ($aircraftOptions as $aircraftOption): ?>
+              <?php $reg = strtoupper(trim((string)($aircraftOption['registration'] ?? ''))); ?>
+              <?php if ($reg === '') { continue; } ?>
+              <option value="<?= cvr_intake_h($reg) ?>" <?= $legsAircraftFilter === $reg ? 'selected' : '' ?>><?= cvr_intake_h($reg) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label>From
+          <input class="intake-select" type="date" name="legs_from" value="<?= cvr_intake_h($legsFrom) ?>">
+        </label>
+        <label>To
+          <input class="intake-select" type="date" name="legs_to" value="<?= cvr_intake_h($legsTo) ?>">
+        </label>
+        <button class="intake-button" type="submit">Apply</button>
+        <a class="intake-refresh" href="/admin/master_logbook.php?tab=dispatch">Clear</a>
+      </div>
+      <div class="intake-muted">
+        Showing <?= $legsTotal === 0 ? 0 : (($legsPage - 1) * $legsLimit + 1) ?>–<?= min($legsTotal, $legsPage * $legsLimit) ?>
+        of <?= (int)$legsTotal ?> · 30 / page
+      </div>
+    </form>
     <?php if (!$dispatch['available']): ?>
       <div class="intake-notice"><?= cvr_intake_h($dispatch['message']) ?></div>
     <?php elseif ($dispatch['rows'] === array()): ?>
-      <div class="intake-empty">No Dispatch records have been received.</div>
+      <div class="intake-empty">No Dispatch records match these filters.</div>
     <?php else: ?>
-      <div class="intake-table-wrap">
-        <table class="intake-table">
+      <div class="legs-table-wrap">
+        <table class="legs-table" data-operational-legs-table>
           <thead>
             <tr>
-              <th>Received (LT)</th>
+              <th>Date</th>
               <th>Aircraft</th>
-              <th>Reservation</th>
-              <th>Leg</th>
-              <th>Mission</th>
               <th>Crew</th>
               <th>Dep</th>
-              <th>Arr</th>
               <th>Off Block</th>
-              <th>On Block</th>
-              <th>Engine</th>
-              <th>Airborne</th>
+              <th>Arr</th>
+              <th>Arrival</th>
               <th>Hobbs</th>
+              <th>Block</th>
               <th>Tacho</th>
-              <th>Fuel</th>
-              <th>TO / LDG</th>
-              <th>Dispatch</th>
+              <th>Flight</th>
+              <th>Fuel Dep</th>
+              <th>Fuel Ldg</th>
+              <th>Fuel Burn</th>
+              <th>Oil Dep</th>
+              <th>TO/LDG</th>
               <th>Audio</th>
-              <th>Transcript</th>
-              <th>Sync</th>
+              <th>Flight Data</th>
+              <th>Replay</th>
+              <th>Debriefing</th>
             </tr>
           </thead>
           <tbody>
@@ -977,52 +1122,128 @@ cw_header('Master Logbook');
               $startTacho = $row['starting_tacho'] ?? null;
               $endTacho = $row['ending_tacho'] ?? null;
               $hobbsLabel = (is_numeric($startHobbs) || is_numeric($endHobbs))
-                  ? trim((is_numeric($startHobbs) ? number_format((float)$startHobbs, 1) : '—') . ' → ' . (is_numeric($endHobbs) ? number_format((float)$endHobbs, 1) : '—'))
+                  ? trim((is_numeric($startHobbs) ? number_format((float)$startHobbs, 1) : '—') . '→' . (is_numeric($endHobbs) ? number_format((float)$endHobbs, 1) : '—'))
                   : '—';
               $tachoLabel = (is_numeric($startTacho) || is_numeric($endTacho))
-                  ? trim((is_numeric($startTacho) ? number_format((float)$startTacho, 1) : '—') . ' → ' . (is_numeric($endTacho) ? number_format((float)$endTacho, 1) : '—'))
+                  ? trim((is_numeric($startTacho) ? number_format((float)$startTacho, 1) : '—') . '→' . (is_numeric($endTacho) ? number_format((float)$endTacho, 1) : '—'))
                   : '—';
               $engine = $row['engine_time_hours'] ?? null;
+              $tachoDelta = $row['tacho_delta_hours'] ?? null;
               $airborne = $row['airborne_time_hours'] ?? null;
-              $fuel = trim((string)($row['fuel_remaining'] ?? $row['fuel_onboard'] ?? ''));
-              $reservation = trim((string)($row['reservation_uuid'] ?? ''));
-              $leg = trim((string)($row['leg_uuid'] ?? ''));
+              $flightTime = is_numeric($tachoDelta) ? (float)$tachoDelta : (is_numeric($airborne) ? (float)$airborne : null);
+              $fuelDep = trim((string)($row['fuel_departure'] ?? $row['fuel_onboard'] ?? ''));
+              $fuelLdg = trim((string)($row['fuel_landing'] ?? $row['fuel_remaining'] ?? ''));
+              $fuelBurn = $row['fuel_consumption'] ?? null;
+              $oilDep = trim((string)($row['oil_departure_label'] ?? ''));
+              $flightDate = cvr_intake_local_date($pdo, $row['off_block_utc'] ?? null, $tail);
+              $crewMembers = is_array($row['crew_members'] ?? null) ? $row['crew_members'] : array();
+              $audioLabel = (string)($row['audio_status_label'] ?? 'Stored on Device');
+              $audioTone = str_contains(strtolower($audioLabel), 'fail') ? 'bad'
+                  : (str_contains(strtolower($audioLabel), 'uploaded') ? 'ok' : 'muted');
+              $garminOn = !empty($row['has_garmin_csv']);
+              $recordingUid = trim((string)($row['recording_uid'] ?? ''));
+              $replayReady = $recordingUid !== '' && strtolower((string)($row['reconstruction_status'] ?? '')) === 'ready';
+              if (!$replayReady && $recordingUid !== '') {
+                  $replayReady = true; // allow open when recording exists
+              }
+              $debriefId = (int)($row['debrief_id'] ?? 0);
+              $bundleId = (int)($row['bundle_id'] ?? 0);
+              $legPayload = array(
+                  'dispatch_id' => (int)($row['id'] ?? 0),
+                  'dispatch_uuid' => (string)($row['dispatch_uuid'] ?? ''),
+                  'workflow_flight_record_uuid' => (string)($row['workflow_flight_record_uuid'] ?? ''),
+                  'aircraft_registration' => $tail,
+                  'mission_code' => (string)($row['mission_code'] ?? ''),
+                  'departure_airport' => (string)($row['departure_airport'] ?? ''),
+                  'arrival_airport' => (string)($row['arrival_airport'] ?? ''),
+                  'off_block_utc' => (string)($row['off_block_utc'] ?? ''),
+                  'on_block_utc' => (string)($row['on_block_utc'] ?? ''),
+                  'off_block_local' => '',
+                  'starting_hobbs' => $startHobbs,
+                  'ending_hobbs' => $endHobbs,
+                  'starting_tacho' => $startTacho,
+                  'ending_tacho' => $endTacho,
+                  'fuel_onboard' => $fuelDep,
+                  'fuel_remaining' => $fuelLdg,
+                  'oil_percentage' => $row['oil_percentage'] ?? null,
+                  'oil_quantity' => $row['oil_quantity'] ?? null,
+                  'oil_unit' => (string)($row['oil_unit'] ?? ''),
+                  'takeoff_count' => (int)($row['takeoff_count'] ?? 0),
+                  'landing_count' => (int)($row['landing_count'] ?? 0),
+                  'crew' => $crewMembers,
+                  'bundle_id' => $bundleId,
+                  'debrief_id' => $debriefId,
+                  'recording_uid' => $recordingUid,
+                  'timezone' => cvr_intake_california_timezone($pdo, $tail),
+              );
+              if (!empty($row['off_block_utc'])) {
+                  $tzName = $legPayload['timezone'];
+                  try {
+                      $dt = new DateTimeImmutable((string)$row['off_block_utc'], new DateTimeZone('UTC'));
+                      $legPayload['off_block_local'] = $dt->setTimezone(new DateTimeZone($tzName))->format('Y-m-d\TH:i');
+                  } catch (Throwable) {
+                      $legPayload['off_block_local'] = '';
+                  }
+              }
             ?>
-            <tr>
-              <td><?= cvr_intake_h(cvr_intake_local_datetime($pdo, $row['received_at'] ?? null, $tail)) ?></td>
-              <td class="intake-primary"><?= cvr_intake_h($tail !== '' ? $tail : '—') ?></td>
-              <td class="intake-mono" title="<?= cvr_intake_h($reservation) ?>"><?= cvr_intake_h($reservation !== '' ? substr($reservation, 0, 8) . '…' : '—') ?></td>
-              <td class="intake-mono" title="<?= cvr_intake_h($leg) ?>"><?= cvr_intake_h($leg !== '' ? substr($leg, 0, 8) . '…' : '—') ?></td>
-              <td><?= cvr_intake_h($row['mission_code'] ?: '—') ?></td>
-              <td><?php
-                $crewMembers = is_array($row['crew_members'] ?? null) ? $row['crew_members'] : array();
-                if ($crewMembers !== array()) {
-                    echo cvr_intake_h(implode(', ', array_map(
-                        static fn(array $m): string => (string)($m['display'] ?? $m['name'] ?? ''),
-                        $crewMembers
-                    )));
+            <tr class="legs-row" data-leg="<?= cvr_intake_h(json_encode($legPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP)) ?>">
+              <td class="legs-num"><?= cvr_intake_h($flightDate) ?></td>
+              <td><span class="ml-aircraft-pill"><?= cvr_intake_h($tail !== '' ? $tail : '—') ?></span></td>
+              <td class="legs-crew"><div class="ml-crew"><?php
+                if ($crewMembers === array()) {
+                    echo '<span class="legs-blank">—</span>';
                 } else {
-                    echo cvr_intake_h(cvr_intake_crew($row['crew_json'] ?? null));
+                    foreach ($crewMembers as $member) {
+                        $role = strtoupper(trim((string)($member['role'] ?? '')));
+                        $name = trim((string)($member['name'] ?? ''));
+                        echo '<div class="ml-crew-member"><div class="ml-crew-role">' . cvr_intake_h($role !== '' ? $role : 'CREW') . '</div><div class="ml-crew-name" title="' . cvr_intake_h($name) . '">' . cvr_intake_h($name) . '</div></div>';
+                    }
                 }
-              ?></td>
-              <td class="intake-primary"><?= cvr_intake_h(trim((string)($row['departure_airport'] ?? '')) ?: '—') ?></td>
-              <td class="intake-primary"><?= cvr_intake_h(trim((string)($row['arrival_airport'] ?? '')) ?: '—') ?></td>
-              <td><?= cvr_intake_h(cvr_intake_local_time($pdo, $row['off_block_utc'] ?? null, $tail)) ?></td>
-              <td><?= cvr_intake_h(cvr_intake_local_time($pdo, $row['on_block_utc'] ?? null, $tail)) ?></td>
-              <td><?= cvr_intake_h(is_numeric($engine) ? number_format((float)$engine, 1) . ' h' : '—') ?></td>
-              <td><?= cvr_intake_h(is_numeric($airborne) && (float)$airborne > 0 ? number_format((float)$airborne, 1) . ' h' : '—') ?></td>
-              <td><?= cvr_intake_h($hobbsLabel) ?></td>
-              <td><?= cvr_intake_h($tachoLabel) ?></td>
-              <td><?= cvr_intake_h($fuel !== '' ? $fuel : '—') ?></td>
-              <td><?= cvr_intake_h(((int)($row['takeoff_count'] ?? 0)) . ' / ' . ((int)($row['landing_count'] ?? 0))) ?></td>
-              <td><?= cvr_intake_badge($row['dispatch_status_label'] ?? $row['status'] ?? '') ?></td>
-              <td><?= cvr_intake_badge($row['audio_status_label'] ?? 'Stored on Device') ?></td>
-              <td><?= cvr_intake_badge($row['transcript_status_label'] ?? 'Transcript Pending') ?></td>
-              <td><?= cvr_intake_badge($row['sync_status'] ?? 'Stored on Device') ?></td>
+              ?></div></td>
+              <td class="legs-num"><?= cvr_intake_h(trim((string)($row['departure_airport'] ?? '')) ?: '—') ?></td>
+              <td class="legs-num"><?= cvr_intake_h(cvr_intake_local_time($pdo, $row['off_block_utc'] ?? null, $tail)) ?></td>
+              <td class="legs-num"><?= cvr_intake_h(trim((string)($row['arrival_airport'] ?? '')) ?: '—') ?></td>
+              <td class="legs-num"><?= cvr_intake_h(cvr_intake_local_time($pdo, $row['on_block_utc'] ?? null, $tail)) ?></td>
+              <td class="legs-num"><?= cvr_intake_h($hobbsLabel) ?></td>
+              <td class="legs-num"><?= cvr_intake_h(is_numeric($engine) ? number_format((float)$engine, 1) : '—') ?></td>
+              <td class="legs-num"><?= cvr_intake_h($tachoLabel) ?></td>
+              <td class="legs-num"><?= cvr_intake_h(is_numeric($flightTime) ? number_format((float)$flightTime, 1) : '—') ?></td>
+              <td class="legs-num"><?= cvr_intake_h($fuelDep !== '' ? $fuelDep : '—') ?></td>
+              <td class="legs-num"><?= cvr_intake_h($fuelLdg !== '' ? $fuelLdg : '—') ?></td>
+              <td class="legs-num"><?= cvr_intake_h(is_numeric($fuelBurn) ? number_format((float)$fuelBurn, 1) : '—') ?></td>
+              <td class="legs-num"><?= cvr_intake_h($oilDep !== '' ? $oilDep : '—') ?></td>
+              <td class="legs-num"><?= cvr_intake_h(((int)($row['takeoff_count'] ?? 0)) . '/' . ((int)($row['landing_count'] ?? 0))) ?></td>
+              <td><?= cvr_intake_pill($audioLabel, $audioTone) ?></td>
+              <td><?= cvr_intake_pill($garminOn ? 'Garmin Uploaded' : 'Garmin Missing', $garminOn ? 'ok' : 'warn') ?></td>
+              <td>
+                <?php if ($replayReady): ?>
+                  <a class="legs-link-btn" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>" data-legs-stop>Replay</a>
+                <?php else: ?>
+                  <span class="legs-blank">—</span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <button type="button" class="legs-link-btn" data-legs-debrief data-debrief-id="<?= $debriefId ?>" data-bundle-id="<?= $bundleId ?>" data-legs-stop>Debriefing</button>
+              </td>
             </tr>
           <?php endforeach; ?>
           </tbody>
         </table>
+      </div>
+      <div class="legs-pagination">
+        <div class="intake-muted">Page <?= (int)$legsPage ?> of <?= (int)$legsPageCount ?></div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <?php if ($legsPage > 1): ?>
+            <a href="<?= cvr_intake_h(cvr_intake_legs_query(array('legs_page' => (string)($legsPage - 1)))) ?>">← Previous</a>
+          <?php else: ?>
+            <span class="legs-blank">← Previous</span>
+          <?php endif; ?>
+          <?php if ($legsPage < $legsPageCount): ?>
+            <a href="<?= cvr_intake_h(cvr_intake_legs_query(array('legs_page' => (string)($legsPage + 1)))) ?>">Next →</a>
+          <?php else: ?>
+            <span class="legs-blank">Next →</span>
+          <?php endif; ?>
+        </div>
       </div>
     <?php endif; ?>
   </section>
@@ -1889,6 +2110,104 @@ cw_header('Master Logbook');
   </section>
 </div>
 
+<div class="intake-modal-backdrop" id="legs-edit-modal" hidden>
+  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="legs-edit-title" style="max-width:920px">
+    <div class="intake-modal-head">
+      <div>
+        <h3 class="intake-modal-title" id="legs-edit-title">Edit Operational Leg</h3>
+        <div class="intake-muted">Admin correction of the online Dispatch / Check-In record. On Block recalculates from Off Block + Hobbs.</div>
+      </div>
+      <button class="intake-modal-close" type="button" data-legs-edit-close>Close</button>
+    </div>
+    <div class="intake-modal-body">
+      <form method="post" id="legs-edit-form">
+        <input type="hidden" name="action" value="save_operational_leg">
+        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+        <input type="hidden" name="dispatch_id" id="legs-edit-dispatch-id" value="">
+        <input type="hidden" name="leg[timezone]" id="legs-edit-timezone" value="America/Los_Angeles">
+        <div class="legs-modal-grid">
+          <label>Aircraft
+            <select name="leg[aircraft_registration]" id="legs-edit-aircraft">
+              <?php foreach ($aircraftOptions as $aircraftOption): ?>
+                <?php $reg = strtoupper(trim((string)($aircraftOption['registration'] ?? ''))); ?>
+                <?php if ($reg === '') { continue; } ?>
+                <option value="<?= cvr_intake_h($reg) ?>"><?= cvr_intake_h($reg) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+          <label>Mission <input name="leg[mission_code]" id="legs-edit-mission" type="text"></label>
+          <label>Departure <input name="leg[departure_airport]" id="legs-edit-dep" type="text" maxlength="8"></label>
+          <label>Arrival <input name="leg[arrival_airport]" id="legs-edit-arr" type="text" maxlength="8"></label>
+          <label>Off Block (local) <input name="leg[off_block_local]" id="legs-edit-off" type="datetime-local"></label>
+          <label>Hobbs Start <input name="leg[starting_hobbs]" id="legs-edit-hobbs-start" type="number" step="0.1"></label>
+          <label>Hobbs End <input name="leg[ending_hobbs]" id="legs-edit-hobbs-end" type="number" step="0.1"></label>
+          <label>Tacho Start <input name="leg[starting_tacho]" id="legs-edit-tacho-start" type="number" step="0.1"></label>
+          <label>Tacho End <input name="leg[ending_tacho]" id="legs-edit-tacho-end" type="number" step="0.1"></label>
+          <label>Fuel Departure <input name="leg[fuel_onboard]" id="legs-edit-fuel-dep" type="text"></label>
+          <label>Fuel Landing <input name="leg[fuel_remaining]" id="legs-edit-fuel-ldg" type="text"></label>
+          <label>Oil Qty <input name="leg[oil_quantity]" id="legs-edit-oil-qty" type="number" step="0.1"></label>
+          <label>Oil Unit <input name="leg[oil_unit]" id="legs-edit-oil-unit" type="text" maxlength="16"></label>
+          <label>Oil % <input name="leg[oil_percentage]" id="legs-edit-oil-pct" type="number" min="0" max="100"></label>
+          <label>Takeoffs <input name="leg[takeoff_count]" id="legs-edit-to" type="number" min="0"></label>
+          <label>Landings <input name="leg[landing_count]" id="legs-edit-ldg" type="number" min="0"></label>
+        </div>
+        <div style="margin-top:12px">
+          <div class="intake-muted" style="margin-bottom:6px">Crew</div>
+          <div class="legs-crew-editor" id="legs-edit-crew"></div>
+          <button class="intake-button" type="button" id="legs-edit-add-crew" style="margin-top:8px;background:#475569">Add crew</button>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+          <button class="intake-modal-close" type="button" data-legs-edit-close>Cancel</button>
+          <button class="intake-button" type="submit">Save Leg</button>
+        </div>
+      </form>
+      <form method="post" enctype="multipart/form-data" style="border-top:1px solid #e2e8f0;padding-top:14px;margin-top:4px">
+        <input type="hidden" name="action" value="upload_manual_garmin_csv">
+        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+        <input type="hidden" name="workflow_flight_record_uuid" id="legs-csv-flight-uuid" value="">
+        <input type="hidden" name="aircraft_registration" id="legs-csv-aircraft" value="">
+        <div class="intake-muted" style="margin-bottom:8px">Upload missing Garmin CSV for this leg</div>
+        <div class="legs-modal-grid">
+          <label>Aircraft ID
+            <select name="aircraft_id" id="legs-csv-aircraft-id">
+              <?php foreach ($aircraftOptions as $aircraftOption): ?>
+                <option value="<?= (int)($aircraftOption['id'] ?? 0) ?>" data-reg="<?= cvr_intake_h(strtoupper(trim((string)($aircraftOption['registration'] ?? '')))) ?>"><?= cvr_intake_h((string)($aircraftOption['registration'] ?? '')) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+          <label>Garmin CSV <input type="file" name="garmin_csv" accept=".csv,text/csv" required></label>
+        </div>
+        <button class="intake-button" type="submit" style="margin-top:10px">Upload CSV</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="intake-modal-backdrop" id="legs-debrief-modal" hidden>
+  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="legs-debrief-title" style="max-width:860px">
+    <div class="intake-modal-head">
+      <div>
+        <h3 class="intake-modal-title" id="legs-debrief-title">Debriefing</h3>
+        <div class="intake-muted" id="legs-debrief-meta">Structured chronological copy-paste</div>
+      </div>
+      <div class="intake-modal-actions">
+        <button class="intake-button" type="button" id="legs-debrief-copy">Copy all</button>
+        <button class="intake-modal-close" type="button" data-legs-debrief-close>Close</button>
+      </div>
+    </div>
+    <div class="intake-modal-body">
+      <div class="intake-muted" id="legs-debrief-message"></div>
+      <pre class="legs-copy-box" id="legs-debrief-copy-box">Loading…</pre>
+      <form method="post" id="legs-debrief-generate-form" hidden>
+        <input type="hidden" name="action" value="generate_bundle_debrief">
+        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+        <input type="hidden" name="bundle_id" id="legs-debrief-bundle-id" value="">
+        <button class="intake-button" type="submit">Generate Debrief</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 <div class="intake-modal-backdrop" id="intake-audio-transcript-modal" hidden>
   <div class="intake-modal intake-modal-transcript-review" role="dialog" aria-modal="true" aria-labelledby="intake-audio-transcript-title">
     <div class="intake-modal-head">
@@ -2507,6 +2826,175 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       }
     });
   }
+
+  // Operational Legs — edit modal + debrief copy panel
+  (function initOperationalLegs() {
+    const table = page.querySelector('[data-operational-legs-table]');
+    const editModal = document.getElementById('legs-edit-modal');
+    const debriefModal = document.getElementById('legs-debrief-modal');
+    const crewBox = document.getElementById('legs-edit-crew');
+    if (!table || !editModal || !debriefModal || !crewBox) {
+      return;
+    }
+
+    const openModal = (modal) => { modal.hidden = false; };
+    const closeModal = (modal) => { modal.hidden = true; };
+
+    const renderCrew = (crew) => {
+      crewBox.innerHTML = '';
+      const list = Array.isArray(crew) && crew.length ? crew : [{ role: 'pic', name: '' }];
+      list.forEach((member, index) => {
+        const row = document.createElement('div');
+        row.className = 'legs-crew-row';
+        row.innerHTML =
+          '<select name="leg[crew][' + index + '][role]">'
+          + '<option value="pic">PIC</option>'
+          + '<option value="sic">SIC</option>'
+          + '<option value="instructor">Instructor</option>'
+          + '<option value="student">Student</option>'
+          + '<option value="observer">Observer</option>'
+          + '</select>'
+          + '<input type="text" name="leg[crew][' + index + '][personName]" placeholder="Name" value="">'
+          + '<button type="button" class="intake-modal-close" data-legs-crew-remove>Remove</button>';
+        const role = String(member.role || '').toLowerCase();
+        const select = row.querySelector('select');
+        const input = row.querySelector('input');
+        if (select && role) {
+          select.value = role;
+        }
+        if (input) {
+          input.value = String(member.name || member.personName || '');
+        }
+        crewBox.appendChild(row);
+      });
+    };
+
+    const fillEditForm = (leg) => {
+      document.getElementById('legs-edit-dispatch-id').value = leg.dispatch_id || '';
+      document.getElementById('legs-edit-timezone').value = leg.timezone || 'America/Los_Angeles';
+      document.getElementById('legs-edit-aircraft').value = String(leg.aircraft_registration || '').toUpperCase();
+      document.getElementById('legs-edit-mission').value = leg.mission_code || '';
+      document.getElementById('legs-edit-dep').value = leg.departure_airport || '';
+      document.getElementById('legs-edit-arr').value = leg.arrival_airport || '';
+      document.getElementById('legs-edit-off').value = leg.off_block_local || '';
+      document.getElementById('legs-edit-hobbs-start').value = leg.starting_hobbs ?? '';
+      document.getElementById('legs-edit-hobbs-end').value = leg.ending_hobbs ?? '';
+      document.getElementById('legs-edit-tacho-start').value = leg.starting_tacho ?? '';
+      document.getElementById('legs-edit-tacho-end').value = leg.ending_tacho ?? '';
+      document.getElementById('legs-edit-fuel-dep').value = leg.fuel_onboard || '';
+      document.getElementById('legs-edit-fuel-ldg').value = leg.fuel_remaining || '';
+      document.getElementById('legs-edit-oil-qty').value = leg.oil_quantity ?? '';
+      document.getElementById('legs-edit-oil-unit').value = leg.oil_unit || '';
+      document.getElementById('legs-edit-oil-pct').value = leg.oil_percentage ?? '';
+      document.getElementById('legs-edit-to').value = leg.takeoff_count ?? 0;
+      document.getElementById('legs-edit-ldg').value = leg.landing_count ?? 0;
+      document.getElementById('legs-csv-flight-uuid').value = leg.workflow_flight_record_uuid || '';
+      document.getElementById('legs-csv-aircraft').value = String(leg.aircraft_registration || '').toUpperCase();
+      const csvSelect = document.getElementById('legs-csv-aircraft-id');
+      if (csvSelect) {
+        const reg = String(leg.aircraft_registration || '').toUpperCase();
+        Array.from(csvSelect.options).forEach((opt) => {
+          if (String(opt.getAttribute('data-reg') || '').toUpperCase() === reg) {
+            csvSelect.value = opt.value;
+          }
+        });
+      }
+      renderCrew(leg.crew || []);
+    };
+
+    table.addEventListener('click', (event) => {
+      const stop = event.target instanceof Element ? event.target.closest('[data-legs-stop]') : null;
+      if (stop) {
+        if (stop.matches('[data-legs-debrief]')) {
+          event.preventDefault();
+          event.stopPropagation();
+          const debriefId = stop.getAttribute('data-debrief-id') || '0';
+          const bundleId = stop.getAttribute('data-bundle-id') || '0';
+          openDebrief(debriefId, bundleId);
+        }
+        return;
+      }
+      const row = event.target instanceof Element ? event.target.closest('tr[data-leg]') : null;
+      if (!row) {
+        return;
+      }
+      try {
+        const leg = JSON.parse(row.getAttribute('data-leg') || '{}');
+        fillEditForm(leg);
+        openModal(editModal);
+      } catch (error) {
+        window.alert('Could not open leg editor.');
+      }
+    });
+
+    editModal.querySelectorAll('[data-legs-edit-close]').forEach((btn) => {
+      btn.addEventListener('click', () => closeModal(editModal));
+    });
+    debriefModal.querySelectorAll('[data-legs-debrief-close]').forEach((btn) => {
+      btn.addEventListener('click', () => closeModal(debriefModal));
+    });
+
+    document.getElementById('legs-edit-add-crew')?.addEventListener('click', () => {
+      const current = Array.from(crewBox.querySelectorAll('.legs-crew-row')).map((row) => ({
+        role: row.querySelector('select')?.value || 'student',
+        name: row.querySelector('input')?.value || '',
+      }));
+      current.push({ role: 'student', name: '' });
+      renderCrew(current);
+    });
+    crewBox.addEventListener('click', (event) => {
+      const btn = event.target instanceof Element ? event.target.closest('[data-legs-crew-remove]') : null;
+      if (!btn) {
+        return;
+      }
+      btn.closest('.legs-crew-row')?.remove();
+      const current = Array.from(crewBox.querySelectorAll('.legs-crew-row')).map((row) => ({
+        role: row.querySelector('select')?.value || 'student',
+        name: row.querySelector('input')?.value || '',
+      }));
+      renderCrew(current.length ? current : [{ role: 'pic', name: '' }]);
+    });
+
+    async function openDebrief(debriefId, bundleId) {
+      const box = document.getElementById('legs-debrief-copy-box');
+      const message = document.getElementById('legs-debrief-message');
+      const generateForm = document.getElementById('legs-debrief-generate-form');
+      const bundleInput = document.getElementById('legs-debrief-bundle-id');
+      box.textContent = 'Loading…';
+      message.textContent = '';
+      generateForm.hidden = true;
+      bundleInput.value = bundleId || '';
+      openModal(debriefModal);
+      try {
+        const url = '/admin/api/operational_leg_debrief_copy.php?debrief_id='
+          + encodeURIComponent(debriefId || '0')
+          + '&bundle_id=' + encodeURIComponent(bundleId || '0');
+        const response = await fetch(url, { credentials: 'same-origin' });
+        const payload = await response.json();
+        if (payload.copy_text) {
+          box.textContent = payload.copy_text;
+        } else {
+          box.textContent = payload.message || 'No debrief text available.';
+        }
+        message.textContent = payload.ok ? '' : (payload.message || '');
+        if (!payload.ok && Number(bundleId) > 0) {
+          generateForm.hidden = false;
+        }
+      } catch (error) {
+        box.textContent = error instanceof Error ? error.message : 'Could not load debrief.';
+      }
+    }
+
+    document.getElementById('legs-debrief-copy')?.addEventListener('click', async () => {
+      const text = document.getElementById('legs-debrief-copy-box')?.textContent || '';
+      try {
+        await navigator.clipboard.writeText(text);
+        document.getElementById('legs-debrief-message').textContent = 'Copied to clipboard.';
+      } catch (error) {
+        window.alert('Copy failed. Select the text manually.');
+      }
+    });
+  })();
 })();
 </script>
 <?php cw_footer(); ?>

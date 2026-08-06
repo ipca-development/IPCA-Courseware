@@ -30,17 +30,52 @@ final class CvrDataIntakeReadService
     }
 
     /**
-     * @return array{available:bool,rows:list<array<string,mixed>>,message:string}
+     * @return array{
+     *   available:bool,
+     *   rows:list<array<string,mixed>>,
+     *   message:string,
+     *   total:int,
+     *   limit:int,
+     *   offset:int,
+     *   page:int,
+     *   page_count:int
+     * }
      */
-    public function dispatchRows(int $limit = 100): array
-    {
+    public function dispatchRows(
+        int $limit = 30,
+        int $offset = 0,
+        ?string $aircraftRegistration = null,
+        ?string $dateFromLocal = null,
+        ?string $dateToLocal = null,
+        string $timezone = 'America/Los_Angeles'
+    ): array {
         $table = $this->firstExistingTable(array('ipca_cvr_dispatches', 'ipca_cvr_dispatch_records'));
         if ($table === null) {
             return array(
                 'available' => false,
                 'rows' => array(),
                 'message' => 'No Dispatch intake table is connected yet. Dispatch records created in the CVR app are still local-only.',
+                'total' => 0,
+                'limit' => $limit,
+                'offset' => 0,
+                'page' => 1,
+                'page_count' => 1,
             );
+        }
+
+        $limit = $this->normalizeLimit($limit);
+        $offset = max(0, $offset);
+        $aircraftRegistration = strtoupper(trim((string)$aircraftRegistration));
+        if ($aircraftRegistration === '') {
+            $aircraftRegistration = null;
+        }
+        $dateFromLocal = trim((string)$dateFromLocal);
+        $dateToLocal = trim((string)$dateToLocal);
+        if ($dateFromLocal === '') {
+            $dateFromLocal = null;
+        }
+        if ($dateToLocal === '') {
+            $dateToLocal = null;
         }
 
         $columns = $this->columns($table);
@@ -69,6 +104,9 @@ final class CvrDataIntakeReadService
             $this->prefixedColumnExpression($columns, $tableAlias, array('starting_hobbs'), 'starting_hobbs', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('starting_tacho'), 'starting_tacho', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('fuel_onboard'), 'fuel_onboard', "''"),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('oil_percentage'), 'oil_percentage', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('oil_quantity'), 'oil_quantity', 'NULL'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('oil_unit'), 'oil_unit', "''"),
         );
         if ($table === 'ipca_cvr_dispatches' && $this->tableExists('ipca_cvr_dispatch_versions')) {
             $select[] = "COALESCE((
@@ -220,19 +258,83 @@ final class CvrDataIntakeReadService
         } else {
             $select[] = "'' AS server_receipt_id";
         }
-        $orderColumn = $this->firstColumn($columns, array('last_received_at', 'received_at', 'created_at', 'updated_at', 'id')) ?? 'id';
+
+        $offBlockExpr = 'NULL';
+        foreach ($select as $selectExpr) {
+            if (str_contains($selectExpr, ' AS off_block_utc')) {
+                $offBlockExpr = preg_replace('/\s+AS\s+off_block_utc$/i', '', $selectExpr) ?? 'NULL';
+                break;
+            }
+        }
+
+        if ($this->tableExists('ipca_garmin_csv_files') && isset($columns['workflow_flight_record_uuid'])) {
+            $select[] = "EXISTS(
+                SELECT 1 FROM ipca_garmin_csv_files csv
+                WHERE LOWER(csv.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
+                LIMIT 1
+            ) AS has_garmin_csv";
+        } else {
+            $select[] = '0 AS has_garmin_csv';
+        }
+
+        $where = array('1=1');
+        $params = array();
+        if ($aircraftRegistration !== null) {
+            $regColumn = $this->firstColumn($columns, array('aircraft_registration', 'tail_number'));
+            if ($regColumn !== null) {
+                $where[] = "UPPER({$tableAlias}." . $this->quoteIdentifier($regColumn) . ') = ?';
+                $params[] = $aircraftRegistration;
+            }
+        }
+        $fromUtc = $this->localDateStartUtc($dateFromLocal, $timezone);
+        $toUtcExclusive = $this->localDateEndExclusiveUtc($dateToLocal, $timezone);
+        if ($fromUtc !== null && $offBlockExpr !== 'NULL') {
+            $where[] = "({$offBlockExpr}) >= ?";
+            $params[] = $fromUtc;
+        }
+        if ($toUtcExclusive !== null && $offBlockExpr !== 'NULL') {
+            $where[] = "({$offBlockExpr}) < ?";
+            $params[] = $toUtcExclusive;
+        }
+
+        $whereSql = implode(' AND ', $where);
+        $orderSql = $offBlockExpr !== 'NULL'
+            ? "({$offBlockExpr}) DESC, {$tableAlias}.id DESC"
+            : ($tableAlias . '.' . $this->quoteIdentifier(
+                $this->firstColumn($columns, array('last_received_at', 'received_at', 'created_at', 'updated_at', 'id')) ?? 'id'
+            ) . ' DESC');
+
+        $countSql = 'SELECT COUNT(*) FROM ' . $quotedTable . ' WHERE ' . $whereSql;
+        $total = 0;
+        try {
+            $countStmt = $this->pdo->prepare($countSql);
+            $countStmt->execute($params);
+            $total = (int)$countStmt->fetchColumn();
+        } catch (Throwable) {
+            $total = 0;
+        }
+
+        $pageCount = max(1, (int)ceil(max(0, $total) / $limit));
+        if ($offset >= $total && $total > 0) {
+            $offset = (int)(($pageCount - 1) * $limit);
+        }
+        $page = (int)floor($offset / $limit) + 1;
+
         $sql = 'SELECT ' . implode(', ', $select)
             . ' FROM ' . $quotedTable
-            . ' ORDER BY ' . $tableAlias . '.' . $this->quoteIdentifier($orderColumn) . ' DESC'
-            . ' LIMIT ' . $this->normalizeLimit($limit);
+            . ' WHERE ' . $whereSql
+            . ' ORDER BY ' . $orderSql
+            . ' LIMIT ' . $limit
+            . ' OFFSET ' . $offset;
 
-        $rows = $this->fetchAll($sql);
-        $audioByFlight = $this->audioStatusByFlightRecord(
-            array_values(array_filter(array_map(
-                static fn(array $row): string => strtolower(trim((string)($row['workflow_flight_record_uuid'] ?? ''))),
-                $rows
-            )))
-        );
+        $rows = $this->fetchAllPrepared($sql, $params);
+        $flightKeys = array_values(array_filter(array_map(
+            static fn(array $row): string => strtolower(trim((string)($row['workflow_flight_record_uuid'] ?? ''))),
+            $rows
+        )));
+        $audioByFlight = $this->audioStatusByFlightRecord($flightKeys);
+        $recordingByFlight = $this->recordingMetaByFlightRecord($flightKeys);
+        $bundleByFlight = $this->reconstructionMetaByFlightRecord($flightKeys);
         $projected = array();
         foreach ($rows as $row) {
             $row['on_block_utc'] = $this->blockTimes()->derivedOnBlockUtc($row);
@@ -240,10 +342,42 @@ final class CvrDataIntakeReadService
                 $row['starting_hobbs'] ?? null,
                 $row['ending_hobbs'] ?? null
             );
+            $row['tacho_delta_hours'] = $this->blockTimes()->engineTimeHours(
+                $row['starting_tacho'] ?? null,
+                $row['ending_tacho'] ?? null
+            );
+            $fuelDep = trim((string)($row['fuel_onboard'] ?? ''));
+            $fuelLdg = trim((string)($row['fuel_remaining'] ?? ''));
+            $row['fuel_departure'] = $fuelDep;
+            $row['fuel_landing'] = $fuelLdg;
+            $row['fuel_consumption'] = null;
+            if (is_numeric($fuelDep) && is_numeric($fuelLdg)) {
+                $row['fuel_consumption'] = round((float)$fuelDep - (float)$fuelLdg, 1);
+            }
+            $oilQty = $row['oil_quantity'] ?? null;
+            $oilPct = $row['oil_percentage'] ?? null;
+            $oilUnit = trim((string)($row['oil_unit'] ?? ''));
+            if (is_numeric($oilQty)) {
+                $row['oil_departure_label'] = rtrim(rtrim(number_format((float)$oilQty, 1, '.', ''), '0'), '.')
+                    . ($oilUnit !== '' ? ' ' . $oilUnit : '');
+            } elseif (is_numeric($oilPct)) {
+                $row['oil_departure_label'] = ((int)$oilPct) . '%';
+            } else {
+                $row['oil_departure_label'] = '';
+            }
             $flightKey = strtolower(trim((string)($row['workflow_flight_record_uuid'] ?? '')));
             $audio = $audioByFlight[$flightKey] ?? array(
                 'upload_status' => 'missing',
                 'transcription_status' => 'pending',
+            );
+            $recording = $recordingByFlight[$flightKey] ?? array(
+                'recording_id' => null,
+                'recording_uid' => '',
+            );
+            $bundle = $bundleByFlight[$flightKey] ?? array(
+                'bundle_id' => null,
+                'debrief_id' => null,
+                'reconstruction_status' => '',
             );
             $presentation = $this->blockTimes()->presentationStatuses(
                 trim((string)($row['server_receipt_id'] ?? '')) !== '',
@@ -258,6 +392,13 @@ final class CvrDataIntakeReadService
             $row['dispatch_status_label'] = $presentation['dispatch_status'];
             $row['audio_status_label'] = $presentation['audio_status'];
             $row['transcript_status_label'] = $presentation['transcript_status'];
+            $row['has_garmin_csv'] = !empty($row['has_garmin_csv']);
+            $row['flight_data_status_label'] = $row['has_garmin_csv'] ? 'Garmin Uploaded' : 'Garmin Missing';
+            $row['recording_id'] = $recording['recording_id'];
+            $row['recording_uid'] = $recording['recording_uid'];
+            $row['bundle_id'] = $bundle['bundle_id'];
+            $row['debrief_id'] = $bundle['debrief_id'];
+            $row['reconstruction_status'] = $bundle['reconstruction_status'];
             $row['crew_members'] = $this->blockTimes()->parseCrew($row['crew_json'] ?? null);
             $organizationId = (int)($row['organization_id'] ?? 0);
             $projection = $this->identityRead()->projectLegIdentity(
@@ -273,7 +414,156 @@ final class CvrDataIntakeReadService
             'available' => true,
             'rows' => $projected,
             'message' => '',
+            'total' => $total,
+            'limit' => $limit,
+            'offset' => $offset,
+            'page' => $page,
+            'page_count' => $pageCount,
         );
+    }
+
+    /**
+     * @param list<string> $flightRecordUuids
+     * @return array<string,array{recording_id:?int,recording_uid:string}>
+     */
+    private function recordingMetaByFlightRecord(array $flightRecordUuids): array
+    {
+        $flightRecordUuids = array_values(array_unique(array_filter($flightRecordUuids)));
+        if ($flightRecordUuids === array() || !$this->tableExists('ipca_cockpit_recordings')) {
+            return array();
+        }
+        $placeholders = implode(',', array_fill(0, count($flightRecordUuids), '?'));
+        $sql = "
+            SELECT LOWER(flight_session_uid) AS flight_key, id, recording_uid
+            FROM ipca_cockpit_recordings
+            WHERE flight_session_uid IS NOT NULL
+              AND flight_session_uid <> ''
+              AND LOWER(flight_session_uid) IN ({$placeholders})
+            ORDER BY id DESC
+        ";
+        try {
+            $statement = $this->pdo->prepare($sql);
+            $statement->execute($flightRecordUuids);
+            $map = array();
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $key = strtolower(trim((string)($row['flight_key'] ?? '')));
+                if ($key === '' || isset($map[$key])) {
+                    continue;
+                }
+                $map[$key] = array(
+                    'recording_id' => isset($row['id']) ? (int)$row['id'] : null,
+                    'recording_uid' => trim((string)($row['recording_uid'] ?? '')),
+                );
+            }
+            return $map;
+        } catch (Throwable) {
+            return array();
+        }
+    }
+
+    /**
+     * @param list<string> $flightRecordUuids
+     * @return array<string,array{bundle_id:?int,debrief_id:?int,reconstruction_status:string}>
+     */
+    private function reconstructionMetaByFlightRecord(array $flightRecordUuids): array
+    {
+        $flightRecordUuids = array_values(array_unique(array_filter($flightRecordUuids)));
+        $bundleTable = $this->firstExistingTable(array('ipca_manual_reconstruction_bundles', 'ipca_manual_intake_bundles'));
+        if ($flightRecordUuids === array() || $bundleTable === null) {
+            return array();
+        }
+        $placeholders = implode(',', array_fill(0, count($flightRecordUuids), '?'));
+        $statusCol = $this->tableExists($bundleTable) ? $this->columns($bundleTable) : array();
+        $statusExpr = isset($statusCol['reconstruction_status'])
+            ? 'COALESCE(b.reconstruction_status, \'\')'
+            : (isset($statusCol['status']) ? 'COALESCE(b.status, \'\')' : '\'\'');
+        $sql = "
+            SELECT LOWER(b.workflow_flight_record_uuid) AS flight_key,
+                   b.id AS bundle_id,
+                   {$statusExpr} AS reconstruction_status
+            FROM " . $this->quoteIdentifier($bundleTable) . " b
+            WHERE b.workflow_flight_record_uuid IS NOT NULL
+              AND LOWER(b.workflow_flight_record_uuid) IN ({$placeholders})
+            ORDER BY b.id DESC
+        ";
+        try {
+            $statement = $this->pdo->prepare($sql);
+            $statement->execute($flightRecordUuids);
+            $map = array();
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $key = strtolower(trim((string)($row['flight_key'] ?? '')));
+                if ($key === '' || isset($map[$key])) {
+                    continue;
+                }
+                $map[$key] = array(
+                    'bundle_id' => isset($row['bundle_id']) ? (int)$row['bundle_id'] : null,
+                    'debrief_id' => null,
+                    'reconstruction_status' => trim((string)($row['reconstruction_status'] ?? '')),
+                );
+            }
+            if ($map !== array() && $this->tableExists('ipca_structured_debriefs')) {
+                $bundleIds = array_values(array_filter(array_map(
+                    static fn(array $m): ?int => $m['bundle_id'],
+                    $map
+                )));
+                if ($bundleIds !== array()) {
+                    $bPlaceholders = implode(',', array_fill(0, count($bundleIds), '?'));
+                    $dStmt = $this->pdo->prepare(
+                        "SELECT bundle_id, id FROM ipca_structured_debriefs
+                         WHERE bundle_id IN ({$bPlaceholders})
+                         ORDER BY id DESC"
+                    );
+                    $dStmt->execute($bundleIds);
+                    $debriefByBundle = array();
+                    foreach ($dStmt->fetchAll(PDO::FETCH_ASSOC) as $dRow) {
+                        $bid = (int)($dRow['bundle_id'] ?? 0);
+                        if ($bid > 0 && !isset($debriefByBundle[$bid])) {
+                            $debriefByBundle[$bid] = (int)$dRow['id'];
+                        }
+                    }
+                    foreach ($map as $key => $meta) {
+                        $bid = (int)($meta['bundle_id'] ?? 0);
+                        if ($bid > 0 && isset($debriefByBundle[$bid])) {
+                            $map[$key]['debrief_id'] = $debriefByBundle[$bid];
+                        }
+                    }
+                }
+            }
+            return $map;
+        } catch (Throwable) {
+            return array();
+        }
+    }
+
+    private function localDateStartUtc(?string $localDate, string $timezone): ?string
+    {
+        if ($localDate === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $localDate)) {
+            return null;
+        }
+        try {
+            $tz = new DateTimeZone($timezone !== '' ? $timezone : 'America/Los_Angeles');
+            return (new DateTimeImmutable($localDate . ' 00:00:00', $tz))
+                ->setTimezone(new DateTimeZone('UTC'))
+                ->format('Y-m-d H:i:s');
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function localDateEndExclusiveUtc(?string $localDate, string $timezone): ?string
+    {
+        if ($localDate === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $localDate)) {
+            return null;
+        }
+        try {
+            $tz = new DateTimeZone($timezone !== '' ? $timezone : 'America/Los_Angeles');
+            return (new DateTimeImmutable($localDate . ' 00:00:00', $tz))
+                ->modify('+1 day')
+                ->setTimezone(new DateTimeZone('UTC'))
+                ->format('Y-m-d H:i:s');
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -620,5 +910,21 @@ final class CvrDataIntakeReadService
         $stmt = $this->pdo->query($sql);
         $rows = $stmt !== false ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
         return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @param list<mixed> $params
+     * @return list<array<string,mixed>>
+     */
+    private function fetchAllPrepared(string $sql, array $params): array
+    {
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            return is_array($rows) ? $rows : array();
+        } catch (Throwable) {
+            return array();
+        }
     }
 }

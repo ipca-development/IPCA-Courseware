@@ -64,11 +64,18 @@ require_absent($flightLog, 'arrival_event.timestamp_utc', 'flight log must not p
 
 require_contains($page, 'Operational Legs', 'intake panel title', $failures);
 require_contains($page, 'Off Block', 'off block column', $failures);
-require_contains($page, 'On Block', 'on block column', $failures);
-require_contains($page, 'Reservation', 'reservation column', $failures);
-require_contains($page, 'Engine', 'engine time column', $failures);
-require_contains($page, 'sync_status', 'sync column uses presentation field', $failures);
+require_contains($page, 'Arrival', 'arrival time column', $failures);
+require_contains($page, 'Oil Dep', 'oil departure column', $failures);
+require_contains($page, 'Flight Data', 'flight data / garmin column', $failures);
+require_contains($page, 'Debriefing', 'debriefing column', $failures);
+require_contains($page, 'legs_aircraft', 'aircraft filter', $failures);
+require_contains($page, '30 / page', 'pagination page size', $failures);
+require_contains($page, 'save_operational_leg', 'admin leg save action', $failures);
 require_absent($page, 'Server Receipt', 'technical receipt column removed from operational legs table', $failures);
+require_contains($intake, 'oil_quantity', 'intake exposes oil departure quantity', $failures);
+require_contains($intake, 'has_garmin_csv', 'intake exposes garmin flight data flag', $failures);
+require_contains($intake, 'dateFromLocal', 'intake supports date-range filter', $failures);
+require_contains($intake, 'recordingMetaByFlightRecord', 'intake batches recording ids for replay', $failures);
 
 require_contains($diag, 'Phase 4A operational discrepancy report', 'discrepancy diagnostic', $failures);
 require_contains($diag, 'proposed_correction', 'discrepancy proposes correction', $failures);
