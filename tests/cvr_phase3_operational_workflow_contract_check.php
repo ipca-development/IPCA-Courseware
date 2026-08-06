@@ -57,8 +57,11 @@ require_contains($store, 'previousLegCrewCarryover', 'apply previous crew on nex
 require_contains($store, 'resolvedLegCarryover', 'merged continuity+archive carryover', $failures);
 require_contains($store, 'session.carryoverOilQuantity', 'apply previous oil on continuity', $failures);
 require_contains($store, 'backfillDispatchCarryoverIfNeeded', 'dispatch on-appear carryover backfill', $failures);
+require_contains($store, 'serverFuelUSG', 'server fuel applied to dispatch carryover', $failures);
 require_contains($views, 'backfillDispatchCarryoverIfNeeded', 'dispatch page invokes carryover backfill', $failures);
-require_contains($views, 'Crew, Hobbs, Tacho, fuel, and oil carry forward', 'continuity carryover messaging', $failures);
+require_contains($views, 'refreshFuelState', 'dispatch page refreshes server fuel state', $failures);
+require_contains($views, 'ENGINE SESSION CONTINUING', 'continuity carryover messaging', $failures);
+require_contains($views, 'Engine Was Shut Down', 'continuity mistaken-stop recovery hint', $failures);
 require_contains($store, 'Phase 3 operational flight-test: no crew consent gate', 'phase3 consent gate off', $failures);
 require_contains($store, 'ensuredOperationalConsents', 'phase3 operational consent mint', $failures);
 require_contains($store, 'phase3_operational_flight_test_waiver', 'phase3 consent text version', $failures);
@@ -68,6 +71,14 @@ require_contains($store, 'requestPayloadSnapshot = nil', 'clear failed consent s
 require_contains($store, 'createLocalMultiLegReservation', 'local multi-leg create', $failures);
 require_contains($store, 'completeTransientStopLocally', 'transient stop complete', $failures);
 require_contains($store, 'completeEngineShutdownAfterAvionicsOff', 'engine shutdown complete', $failures);
+require_contains($store, 'endEngineContinuityPreservingUnusedLegs', 'end false continuity keep unused legs', $failures);
+require_contains($store, 'cancelUnusedPlannedLegsAndEndSession', 'cancel unused legs without blocking uploads', $failures);
+require_contains($store, 'convertTransientStopToEngineShutdown', 'convert mistaken transient stop', $failures);
+require_contains($store, 'clearFalseContinuityOnActiveLeg', 'clear synthesized continuity off block', $failures);
+require_contains($store, 'hasOpenPlannedLegs', 'preserve unused legs after engine shutdown', $failures);
+require_contains($views, 'ENGINE WAS SHUT DOWN', 'schedule recovery for mistaken transient', $failures);
+require_contains($views, 'CANCEL REMAINING LEGS', 'schedule cancel unused legs', $failures);
+require_contains($views, 'ACTUALLY ENGINE SHUTDOWN', 'in-flight convert transient', $failures);
 require_contains($store, 'saveCheckInValues', 'check-in save', $failures);
 require_contains($store, 'synthesizeEngineContinuityIfNeeded', 'continuity engine start', $failures);
 require_contains($store, 'transientStop', 'transient mode enum use', $failures);

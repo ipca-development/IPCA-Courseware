@@ -118,6 +118,19 @@ function cw_require_admin(): void {
     }
 }
 
+/**
+ * Staff roles allowed to open Cockpit Recorder flight replay (page + sample/audio APIs).
+ * Students and anonymous viewers must use a scoped replay-share grant instead.
+ */
+function cw_user_can_access_flight_replay(?array $user): bool
+{
+    if (!is_array($user)) {
+        return false;
+    }
+    $role = strtolower(trim((string)($user['role'] ?? '')));
+    return in_array($role, array('admin', 'supervisor', 'instructor', 'chief_instructor'), true);
+}
+
 function cw_require_student(): void {
     global $pdo;
     cw_require_login();

@@ -189,10 +189,11 @@ private struct ScheduledFlightsView: View {
                         scheduleTiles(metrics)
                         scheduleWarning
                         if workflow.state.engineSessionContinuityActive,
-                           workflow.hasRemainingPlannedLegAfterCurrent {
+                           !workflow.remainingOpenPlannedLegs.isEmpty,
+                           workflow.state.activeFlightRecord == nil {
                             CVROperationalWarningCard(
                                 title: "ENGINE SESSION CONTINUING",
-                                message: "Select the next leg. Engine Start is not required. Crew, Hobbs, Tacho, fuel, and oil carry forward.",
+                                message: "Select the next leg if the engine is still running. If Transient Stop was used by mistake and the engine is off, tap Engine Was Shut Down, then open the unused leg with Engine Start. Completed-leg uploads keep running in Log.",
                                 iconName: "flame.fill",
                                 color: CVROperationalPalette.secondaryBlue
                             )
@@ -468,6 +469,24 @@ private struct ScheduledFlightsView: View {
 
     private var actionButtons: some View {
         VStack(spacing: 8) {
+            if workflow.state.engineSessionContinuityActive,
+               !workflow.remainingOpenPlannedLegs.isEmpty,
+               workflow.state.activeFlightRecord == nil {
+                CVROperationalActionButton(
+                    title: "ENGINE WAS SHUT DOWN",
+                    subtitle: "End continuity — open remaining legs with Engine Start",
+                    color: CVROperationalPalette.warning
+                ) {
+                    _ = workflow.endEngineContinuityPreservingUnusedLegs()
+                }
+                CVROperationalActionButton(
+                    title: "CANCEL REMAINING LEGS",
+                    subtitle: "Keep completed-leg uploads; drop unused planned legs",
+                    color: CVROperationalPalette.standby
+                ) {
+                    _ = workflow.cancelUnusedPlannedLegsAndEndSession()
+                }
+            }
             CVROperationalActionButton(
                 title: sessionsStore.isRefreshing ? "REFRESHING SCHEDULE" : "REFRESH SCHEDULE",
                 subtitle: "Load flights assigned to \(settings.selectedAircraft?.registration ?? "this aircraft")",
@@ -1201,10 +1220,13 @@ struct DispatchWorkflowView: View {
     @EnvironmentObject private var beacon: AvionicsBeaconManager
     @EnvironmentObject private var missionCatalog: MissionCatalogStore
     @EnvironmentObject private var uploadManager: UploadManager
+    @EnvironmentObject private var sessionsStore: ScheduledSessionsStore
     @Binding var showAdminUnlock: Bool
     @State private var activeBlockEditor: DispatchBlockEditor?
     @State private var showRouteEditor = false
     @State private var showMissionPicker = false
+    @State private var showUndispatchConfirm = false
+    @State private var isUndispatching = false
     @State private var recoveryExportURL: URL?
     @State private var recoveryExportError = ""
     @State private var repairRefueledSincePreviousFlight = false
@@ -1240,13 +1262,39 @@ struct DispatchWorkflowView: View {
         .onAppear {
             syncContinuityRepairState()
             workflow.sanitizeRouteStatusesIfNeeded()
-            workflow.backfillDispatchCarryoverIfNeeded()
+            Task {
+                await settings.refreshFuelState()
+                await MainActor.run {
+                    workflow.backfillDispatchCarryoverIfNeeded(
+                        serverFuelUSG: settings.serverFuelState?.quantityUSG
+                    )
+                }
+            }
             if missionCatalog.missions.isEmpty {
                 missionCatalog.loadBundledFallback()
             }
         }
         .onChange(of: workflow.state.activeDispatch?.modifiedAt) {
             syncContinuityRepairState()
+        }
+        .confirmationDialog(
+            "Undispatch this flight?",
+            isPresented: $showUndispatchConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Undispatch", role: .destructive) {
+                Task {
+                    isUndispatching = true
+                    defer { isUndispatching = false }
+                    let released = await workflow.undispatchActiveFlight(settings: settings)
+                    if released {
+                        await sessionsStore.refresh(settings: settings)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Use this only when Dispatch was confirmed by mistake. It is blocked after Off Block, recording, or Check-In starts.")
         }
         .sheet(isPresented: $showMissionPicker) {
             CVRMissionPickerSheet(
@@ -1653,6 +1701,17 @@ struct DispatchWorkflowView: View {
                     }
                 }
             } else if workflow.isDispatchLocked {
+                if workflow.canUndispatchActiveFlight {
+                    CVROperationalActionButton(
+                        title: isUndispatching ? "UNDISPATCHING…" : "UNDISPATCH",
+                        subtitle: "Undo accidental Dispatch — only before Off Block",
+                        color: CVROperationalPalette.warning
+                    ) {
+                        showUndispatchConfirm = true
+                    }
+                    .disabled(isUndispatching)
+                    .opacity(isUndispatching ? 0.7 : 1)
+                }
                 CVROperationalActionButton(title: "Dispatch Confirmed", subtitle: "Open Recorder, then In-Flight", color: CVROperationalPalette.success) {}
             } else {
                 CVROperationalActionButton(
@@ -2280,7 +2339,7 @@ struct InFlightWorkflowView: View {
             VStack(spacing: 8) {
                 CVROperationalWarningCard(
                     title: "TRANSIENT STOP",
-                    message: "Engine may keep running. Complete Check-In, then open the next leg from Schedule.",
+                    message: "Engine may keep running. Complete Check-In, then open the next leg from Schedule. If this was actually a full stop, convert to Engine Shutdown first.",
                     iconName: "airplane.arrival",
                     color: CVROperationalPalette.secondaryBlue
                 )
@@ -2291,6 +2350,19 @@ struct InFlightWorkflowView: View {
                 ) {
                     workflow.beginTransientStopCheckIn()
                     isShowingCheckIn = true
+                }
+                if !hasShutdownVerificationEvent {
+                    CVROperationalActionButton(
+                        title: "ACTUALLY ENGINE SHUTDOWN",
+                        subtitle: "Convert mistaken Transient Stop before Check-In",
+                        color: CVROperationalPalette.critical
+                    ) {
+                        if workflow.convertTransientStopToEngineShutdown(gpsSample: gps.latestSample) {
+                            uploadManager.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                            workflow.beginEngineShutdownCheckIn()
+                            isShowingCheckIn = true
+                        }
+                    }
                 }
             }
         } else if hasEngineShutdownEvent {
@@ -2363,12 +2435,23 @@ struct InFlightWorkflowView: View {
                 return true
             }
         } else if workflow.state.engineSessionContinuityActive {
-            CVROperationalWarningCard(
-                title: "CONTINUE THIS LEG",
-                message: "Engine is already running from the previous leg. No Engine Start. Recording starts with avionics ON.",
-                iconName: "flame.fill",
-                color: CVROperationalPalette.secondaryBlue
-            )
+            VStack(spacing: 8) {
+                CVROperationalWarningCard(
+                    title: "CONTINUE THIS LEG",
+                    message: "Engine is already running from the previous leg. No Engine Start. Recording starts with avionics ON.",
+                    iconName: "flame.fill",
+                    color: CVROperationalPalette.secondaryBlue
+                )
+                if workflow.canClearFalseContinuityOnActiveLeg {
+                    CVROperationalActionButton(
+                        title: "ENGINE WAS SHUT DOWN",
+                        subtitle: "Clear false continuity and require Engine Start",
+                        color: CVROperationalPalette.warning
+                    ) {
+                        _ = workflow.clearFalseContinuityOnActiveLeg()
+                    }
+                }
+            }
         } else {
             CVROperationalWarningCard(title: "WAITING FOR AVIONICS POWER", message: "Engine Start will appear when the paired beacon reports avionics power.", iconName: "timer", color: CVROperationalPalette.standby)
         }
@@ -4993,9 +5076,14 @@ struct DispatchEditorView: View {
                 dispatch.startingOilQuantity = hasOilSelection ? oilPercent : nil
                 dispatch.startingOilUnit = hasOilSelection ? operationalConfig.oilUnit : nil
                 dispatch.oilPercentage = hasOilSelection && operationalConfig.oilUnit == "%" ? Int(oilPercent.rounded()) : nil
-                dispatch.refueledSincePreviousFlight = (requiresRefuelConfirmation || workflow.dispatchContinuityUploadIssue() == .refueling)
-                    ? refueledSincePreviousFlight
-                    : (dispatch.refueledSincePreviousFlight ?? false)
+                // Full tanks imply an uplift; server creates the uplift record on Dispatch sync.
+                if hasFuelSelection, fuelGallons >= (operationalConfig.fuelCapacity - 0.05) {
+                    dispatch.refueledSincePreviousFlight = true
+                } else {
+                    dispatch.refueledSincePreviousFlight = (requiresRefuelConfirmation || workflow.dispatchContinuityUploadIssue() == .refueling)
+                        ? refueledSincePreviousFlight
+                        : (dispatch.refueledSincePreviousFlight ?? false)
+                }
                 dispatch.oilServicedSincePreviousFlight = (requiresOilServiceConfirmation || workflow.dispatchContinuityUploadIssue() == .oilServicing)
                     ? oilServicedSincePreviousFlight
                     : (dispatch.oilServicedSincePreviousFlight ?? false)

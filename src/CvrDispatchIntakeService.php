@@ -31,6 +31,9 @@ final class CvrDispatchIntakeService
         try {
             $dispatch = $this->lockDispatch($normalized['dispatch_uuid']);
             if (is_array($dispatch)) {
+                if (strtolower(trim((string)($dispatch['status'] ?? ''))) === 'released') {
+                    throw new CvrUserCorrectionRequired('This Dispatch was undispatched. Create a new Dispatch on the device.');
+                }
                 if ((int)$dispatch['device_id'] !== $deviceId) {
                     throw new CvrTechnicalReviewRequired('Dispatch identity requires technical review.');
                 }
@@ -119,6 +122,22 @@ final class CvrDispatchIntakeService
             throw $e;
         }
 
+        $fuelUplift = null;
+        if (!$alreadyPresent) {
+            try {
+                require_once __DIR__ . '/AircraftFuelStateService.php';
+                $normalizedForFuel = $normalized;
+                if ((int)($normalizedForFuel['aircraft_id'] ?? 0) <= 0) {
+                    $normalizedForFuel['aircraft_id'] = (int)($device['aircraft_id'] ?? 0);
+                }
+                $rawDispatch = is_array($payload['dispatch'] ?? null) ? $payload['dispatch'] : array();
+                $fuelUplift = (new AircraftFuelStateService($this->pdo))
+                    ->createUpliftFromDispatchIfNeeded($normalizedForFuel, $rawDispatch);
+            } catch (Throwable $e) {
+                error_log('[CvrDispatchIntake] fuel uplift auto-create failed: ' . $e->getMessage());
+            }
+        }
+
         require_once __DIR__ . '/CvrAutoReconstructionOrchestrator.php';
         CvrAutoReconstructionOrchestrator::safeConsider(
             $this->pdo,
@@ -128,7 +147,7 @@ final class CvrDispatchIntakeService
             null
         );
 
-        return array(
+        $response = array(
             'ok' => true,
             'error_code' => $alreadyPresent ? 'DUPLICATE_ALREADY_VERIFIED' : null,
             'error' => null,
@@ -163,6 +182,14 @@ final class CvrDispatchIntakeService
                 'server_verified_at' => $receivedAt,
             ),
         );
+        if (is_array($fuelUplift)) {
+            $response['fuel_uplift'] = array(
+                'created' => true,
+                'uplift_uuid' => (string)($fuelUplift['uplift_uuid'] ?? ''),
+                'fuel_after_usg' => isset($fuelUplift['fuel_after_usg']) ? (float)$fuelUplift['fuel_after_usg'] : null,
+            );
+        }
+        return $response;
     }
 
     /**

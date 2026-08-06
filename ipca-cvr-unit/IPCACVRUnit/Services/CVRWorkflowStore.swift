@@ -237,6 +237,10 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "Finish Check-In for the current leg before creating another Dispatch."
             return
         }
+        if state.engineSessionContinuityActive || !remainingOpenPlannedLegs.isEmpty {
+            lastError = "Open the remaining planned leg, or Cancel Remaining Legs on Schedule, before creating a new Dispatch."
+            return
+        }
 
         let registration = selectedAircraft.registration
         let carryover = resolvedLegCarryover(for: registration)
@@ -472,7 +476,7 @@ final class CVRWorkflowStore: ObservableObject {
            let continuityReservation = state.operationalSession?.reservationUUID,
            let reservationUUID,
            continuityReservation.lowercased() != reservationUUID.lowercased() {
-            lastError = "Complete or abandon the current continuous engine session before opening a different reservation."
+            lastError = "End the continuous engine session on Schedule (Engine Was Shut Down or Cancel Remaining Legs) before opening a different reservation."
             return
         }
 
@@ -1633,6 +1637,7 @@ final class CVRWorkflowStore: ObservableObject {
             session.pendingCheckInMode = nil
             session.awaitingAvionicsOffConfirmation = false
             session.continuityEngineStartSynthesized = false
+            session.pendingSoftStartRecording = false
             $0.operationalSession = session
             $0.activeDispatch = nil
             $0.activeFlightRecord = nil
@@ -1655,7 +1660,17 @@ final class CVRWorkflowStore: ObservableObject {
         }
         guard archiveActiveWorkflow() else { return false }
         return mutate {
-            $0.operationalSession = nil
+            if var session = $0.operationalSession, Self.hasOpenPlannedLegs(in: session) {
+                session.engineSessionContinuityActive = false
+                session.pendingCheckInMode = nil
+                session.awaitingAvionicsOffConfirmation = false
+                session.continuityEngineStartSynthesized = false
+                session.pendingSoftStartRecording = false
+                Self.sanitizePlannedLegStatuses(in: &session)
+                $0.operationalSession = session
+            } else {
+                $0.operationalSession = nil
+            }
             $0.activeDispatch = nil
             $0.activeFlightRecord = nil
             $0.consents = []
@@ -1665,6 +1680,212 @@ final class CVRWorkflowStore: ObservableObject {
             $0.uploadComponents = []
             $0.discrepancies = []
             $0.selectedTab = .scheduled
+        }
+    }
+
+    /// Remaining unfinished planned legs in the current operational session (excluding the active Dispatch leg).
+    var remainingOpenPlannedLegs: [CVRPlannedLegRecord] {
+        let currentUUID = (state.activeDispatch?.operationalIdentity?.legUUID)
+            .flatMap { CVROperationalIdentityLocal.normalizeUUID($0) }
+        return state.plannedLegs.filter { leg in
+            let status = leg.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if status == "checked_in" || status == "cancelled" || status == "canceled" {
+                return false
+            }
+            let legUUID = CVROperationalIdentityLocal.normalizeUUID(leg.legUUID) ?? leg.legUUID.lowercased()
+            if let currentUUID, legUUID == currentUUID {
+                return false
+            }
+            return true
+        }
+    }
+
+    /// Continuity is on, no active flight — Schedule can recover a mistaken Transient Stop.
+    var canRecoverBrokenEngineContinuity: Bool {
+        state.engineSessionContinuityActive
+            && state.activeFlightRecord == nil
+            && state.activeDispatch == nil
+            && !remainingOpenPlannedLegs.isEmpty
+    }
+
+    /// Active next-leg Dispatch was opened under false continuity (engine actually off).
+    var canClearFalseContinuityOnActiveLeg: Bool {
+        guard state.engineSessionContinuityActive,
+              let flight = state.activeFlightRecord else { return false }
+        let hasSynthesized = state.flightEvents.contains {
+            $0.flightRecordID == flight.id
+                && $0.eventType == "engine_start_off_block"
+                && ($0.source == "engine_session_continuity" || $0.creationMethod == "transient_stop_carryover")
+        }
+        let hasRealOffBlock = state.flightEvents.contains {
+            $0.flightRecordID == flight.id
+                && $0.eventType == "engine_start_off_block"
+                && $0.source != "engine_session_continuity"
+                && $0.creationMethod != "transient_stop_carryover"
+        }
+        return hasSynthesized && !hasRealOffBlock && flight.endingHobbs == nil
+    }
+
+    /// Convert a mistaken Transient Stop into Engine Shutdown before Check-In is saved.
+    @discardableResult
+    func convertTransientStopToEngineShutdown(gpsSample: GPSSample? = nil) -> Bool {
+        guard var flightRecord = state.activeFlightRecord else { return false }
+        guard state.flightEvents.contains(where: {
+            $0.flightRecordID == flightRecord.id && $0.eventType == "transient_stop_on_block"
+        }) else {
+            lastError = "No Transient Stop is active to convert."
+            return false
+        }
+        guard !state.flightEvents.contains(where: {
+            $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
+        }) else {
+            return true
+        }
+        guard flightRecord.endingHobbs == nil else {
+            lastError = "Check-In already saved for Transient Stop. End continuity on Schedule, then open the next leg with Engine Start."
+            return false
+        }
+
+        let shutdown = makeFlightEvent(
+            flightRecord: flightRecord,
+            eventType: "engine_shutdown_on_block",
+            source: "manual_convert_transient_to_shutdown",
+            creationMethod: "operator_correction",
+            gpsSample: gpsSample
+        )
+        let persisted = mutate {
+            let transientIDs = Set($0.flightEvents.filter {
+                $0.flightRecordID == flightRecord.id && $0.eventType == "transient_stop_on_block"
+            }.map(\.id))
+            $0.flightEvents.removeAll { transientIDs.contains($0.id) }
+            $0.uploadComponents.removeAll { component in
+                guard component.flightRecordID == flightRecord.id,
+                      component.componentType == "flight_events",
+                      let path = component.localFilePath else { return false }
+                return transientIDs.contains { path == "event:\($0)" }
+            }
+            flightRecord.checkInMode = .engineShutdown
+            flightRecord.status = .shutdownVerificationRequired
+            flightRecord.updatedAt = shutdown.timestampUTC
+            $0.activeFlightRecord = flightRecord
+            $0.flightEvents.append(shutdown)
+            $0.uploadComponents.append(eventUploadComponent(shutdown))
+            var session = $0.operationalSession ?? .empty
+            session.pendingCheckInMode = .engineShutdown
+            session.engineSessionContinuityActive = false
+            session.pendingSoftStartRecording = false
+            session.continuityEngineStartSynthesized = false
+            $0.operationalSession = session
+        }
+        if !persisted {
+            lastError = "Could not convert Transient Stop to Engine Shutdown."
+        }
+        return persisted
+    }
+
+    /// After a mistaken Transient Check-In: keep unused legs, require Engine Start for the next Dispatch.
+    @discardableResult
+    func endEngineContinuityPreservingUnusedLegs() -> Bool {
+        guard state.engineSessionContinuityActive else {
+            lastError = "No continuous engine session is active."
+            return false
+        }
+        if canClearFalseContinuityOnActiveLeg {
+            return clearFalseContinuityOnActiveLeg()
+        }
+        guard state.activeFlightRecord == nil else {
+            lastError = "Finish or Undispatch the active leg before ending engine continuity."
+            return false
+        }
+        return mutate {
+            guard var session = $0.operationalSession else { return }
+            session.engineSessionContinuityActive = false
+            session.pendingCheckInMode = nil
+            session.awaitingAvionicsOffConfirmation = false
+            session.continuityEngineStartSynthesized = false
+            session.pendingSoftStartRecording = false
+            Self.sanitizePlannedLegStatuses(in: &session)
+            $0.operationalSession = session
+            $0.selectedTab = .scheduled
+        }
+    }
+
+    /// Remove a continuity-synthesized Off Block so the crew can use real Engine Start.
+    @discardableResult
+    func clearFalseContinuityOnActiveLeg() -> Bool {
+        guard canClearFalseContinuityOnActiveLeg,
+              let flightRecord = state.activeFlightRecord else {
+            lastError = "This leg does not have a continuity Off Block to clear."
+            return false
+        }
+        return mutate {
+            let synthesizedIDs = Set($0.flightEvents.filter {
+                $0.flightRecordID == flightRecord.id
+                    && $0.eventType == "engine_start_off_block"
+                    && ($0.source == "engine_session_continuity" || $0.creationMethod == "transient_stop_carryover")
+            }.map(\.id))
+            $0.flightEvents.removeAll { synthesizedIDs.contains($0.id) }
+            $0.uploadComponents.removeAll { component in
+                guard component.flightRecordID == flightRecord.id,
+                      component.componentType == "flight_events",
+                      let path = component.localFilePath else { return false }
+                return synthesizedIDs.contains { path == "event:\($0)" }
+            }
+            if var flight = $0.activeFlightRecord {
+                flight.status = .recorderVerificationRequired
+                flight.updatedAt = Date()
+                $0.activeFlightRecord = flight
+            }
+            if var session = $0.operationalSession {
+                session.engineSessionContinuityActive = false
+                session.continuityEngineStartSynthesized = false
+                session.pendingSoftStartRecording = false
+                $0.operationalSession = session
+            }
+        }
+    }
+
+    /// Cancel unused planned legs and end continuity so completed-leg uploads are not blocked by leftover route state.
+    @discardableResult
+    func cancelUnusedPlannedLegsAndEndSession() -> Bool {
+        guard state.activeFlightRecord == nil else {
+            lastError = "Finish or Undispatch the active leg before cancelling remaining legs."
+            return false
+        }
+        guard var session = state.operationalSession, Self.hasOpenPlannedLegs(in: session) || session.engineSessionContinuityActive else {
+            lastError = "There are no remaining planned legs to cancel."
+            return false
+        }
+        return mutate {
+            guard var session = $0.operationalSession else { return }
+            for index in session.plannedLegs.indices {
+                let status = session.plannedLegs[index].status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if status != "checked_in" && status != "cancelled" && status != "canceled" {
+                    session.plannedLegs[index].status = "cancelled"
+                }
+            }
+            session.engineSessionContinuityActive = false
+            session.pendingCheckInMode = nil
+            session.awaitingAvionicsOffConfirmation = false
+            session.continuityEngineStartSynthesized = false
+            session.pendingSoftStartRecording = false
+            session.currentLegIndex = nil
+            if session.plannedLegs.allSatisfy({
+                let status = $0.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return status == "checked_in" || status == "cancelled" || status == "canceled"
+            }) {
+                $0.operationalSession = nil
+            } else {
+                $0.operationalSession = session
+            }
+            $0.selectedTab = .scheduled
+        }
+    }
+
+    private static func hasOpenPlannedLegs(in session: CVROperationalSessionContext) -> Bool {
+        session.plannedLegs.contains { leg in
+            let status = leg.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return status != "checked_in" && status != "cancelled" && status != "canceled"
         }
     }
 
@@ -1680,6 +1901,91 @@ final class CVRWorkflowStore: ObservableObject {
                 $0.operationalSession = session
             }
         }
+    }
+
+    /// True when Dispatch is locked locally but no operational flight evidence has started yet.
+    var canUndispatchActiveFlight: Bool {
+        guard isDispatchLocked,
+              let flightRecord = state.activeFlightRecord else { return false }
+        if flightRecord.recordingStartedAt != nil { return false }
+        if flightRecord.endingHobbs != nil || flightRecord.endingTacho != nil { return false }
+        if state.flightEvents.contains(where: { $0.flightRecordID == flightRecord.id }) {
+            return false
+        }
+        return true
+    }
+
+    /// Undo accidental DISPATCH FLIGHT before Off Block / recording / Check-In.
+    /// Releases the schedule claim on the server when this Dispatch was synced or linked to a reservation.
+    @discardableResult
+    func undispatchActiveFlight(settings: SettingsStore) async -> Bool {
+        guard canUndispatchActiveFlight,
+              let dispatch = state.activeDispatch,
+              let flightRecord = state.activeFlightRecord else {
+            lastError = "Undispatch is only available before Off Block, recording, or Check-In."
+            return false
+        }
+
+        let needsServerRelease = dispatch.serverDispatchID != nil
+            || dispatchUploadVerified()
+            || !(dispatch.schedulerRecordID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        if needsServerRelease {
+            guard let url = settings.normalizedServerURL,
+                  let credential = settings.deviceCredential,
+                  !credential.isEmpty else {
+                lastError = "Connect and enroll this CVR Unit before Undispatching a synchronized Dispatch."
+                return false
+            }
+            do {
+                let response = try await APIClient(serverURL: url).releaseDispatch(
+                    dispatchUUID: dispatch.id,
+                    schedulerRecordID: dispatch.schedulerRecordID,
+                    credential: credential
+                )
+                if !response.ok {
+                    lastError = response.error ?? "Server could not Undispatch this flight."
+                    return false
+                }
+            } catch {
+                lastError = error.localizedDescription
+                return false
+            }
+        }
+
+        let clearEntirely = needsServerRelease
+            || !(dispatch.schedulerRecordID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let flightID = flightRecord.id
+        let dispatchID = dispatch.id
+
+        _ = mutate {
+            $0.uploadComponents.removeAll { $0.flightRecordID == flightID }
+            $0.flightEvents.removeAll { $0.flightRecordID == flightID }
+            $0.recorderVerifications.removeAll { $0.flightRecordID == flightID }
+            $0.consents.removeAll { $0.dispatchID == dispatchID }
+            $0.discrepancies.removeAll { $0.flightRecordID == flightID }
+            $0.activeFlightRecord = nil
+            if clearEntirely {
+                $0.activeDispatch = nil
+                $0.selectedTab = .scheduled
+                if var session = $0.operationalSession {
+                    Self.unmarkDispatchedPlannedLeg(in: &session, dispatchID: dispatchID, flightRecordID: flightID)
+                    $0.operationalSession = session
+                }
+            } else if var draft = $0.activeDispatch {
+                draft.status = Self.dispatchStatus(for: draft, consents: [])
+                draft.consentStatus = ""
+                draft.modifiedAt = Date()
+                draft.serverDispatchID = nil
+                $0.activeDispatch = draft
+                if var session = $0.operationalSession {
+                    Self.unmarkDispatchedPlannedLeg(in: &session, dispatchID: dispatchID, flightRecordID: flightID)
+                    $0.operationalSession = session
+                }
+            }
+        }
+        lastError = ""
+        return true
     }
 
     private func clearActiveLegStatePreservingSession(selectScheduled: Bool) {
@@ -1698,8 +2004,9 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     /// Fill empty Dispatch meters / fuel / oil from continuity or latest closed archive.
+    /// When `serverFuelUSG` is provided (admin uplift / server fuel state), prefer it over local carryover.
     /// Crew is only backfilled during an active continuous engine session (next leg), never for a brand-new local Dispatch.
-    func backfillDispatchCarryoverIfNeeded() {
+    func backfillDispatchCarryoverIfNeeded(serverFuelUSG: Double? = nil) {
         guard !isDispatchLocked,
               var dispatch = state.activeDispatch else { return }
 
@@ -1726,13 +2033,30 @@ final class CVRWorkflowStore: ObservableObject {
             dispatch.previousEndingTacho = tacho
             changed = true
         }
-        if dispatch.fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           let fuel = carryover?.fuelRemaining,
-           !fuel.isEmpty {
+
+        let fuelEmpty = dispatch.fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if let serverFuel = serverFuelUSG, serverFuel >= 0 {
+            let formatted = String(format: "%.1f", serverFuel)
+            let cleaned = dispatch.fuelOnboard
+                .replacingOccurrences(of: "USG", with: "", options: .caseInsensitive)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let current = Double(cleaned)
+            if fuelEmpty || current == nil || abs((current ?? -1) - serverFuel) > 0.05 {
+                dispatch.fuelOnboard = formatted
+                if dispatch.previousFuelRemaining == nil
+                    || dispatch.previousFuelRemaining?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+                    dispatch.previousFuelRemaining = formatted
+                }
+                changed = true
+            }
+        } else if fuelEmpty,
+                  let fuel = carryover?.fuelRemaining,
+                  !fuel.isEmpty {
             dispatch.fuelOnboard = fuel
             dispatch.previousFuelRemaining = fuel
             changed = true
         }
+
         if dispatch.effectiveStartingOilQuantity == nil,
            let oil = carryover?.oilQuantity {
             dispatch.startingOilQuantity = oil
@@ -2926,7 +3250,17 @@ final class CVRWorkflowStore: ObservableObject {
         }
 
         mutate {
-            $0.operationalSession = nil
+            if var session = $0.operationalSession, Self.hasOpenPlannedLegs(in: session) {
+                session.engineSessionContinuityActive = false
+                session.pendingCheckInMode = nil
+                session.awaitingAvionicsOffConfirmation = false
+                session.continuityEngineStartSynthesized = false
+                session.pendingSoftStartRecording = false
+                Self.sanitizePlannedLegStatuses(in: &session)
+                $0.operationalSession = session
+            } else {
+                $0.operationalSession = nil
+            }
             $0.activeDispatch = nil
             $0.activeFlightRecord = nil
             $0.consents = []
@@ -3913,6 +4247,22 @@ final class CVRWorkflowStore: ObservableObject {
                 session.currentLegIndex = leg.sequenceNumber
             } else if status == "active" || status == "dispatched" {
                 session.plannedLegs[index].status = "planned"
+            }
+        }
+        sanitizePlannedLegStatuses(in: &session)
+    }
+
+    private static func unmarkDispatchedPlannedLeg(
+        in session: inout CVROperationalSessionContext,
+        dispatchID: String,
+        flightRecordID: String
+    ) {
+        _ = dispatchID
+        _ = flightRecordID
+        for index in session.plannedLegs.indices {
+            let status = session.plannedLegs[index].status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if status == "dispatched" {
+                session.plannedLegs[index].status = "active"
             }
         }
         sanitizePlannedLegStatuses(in: &session)

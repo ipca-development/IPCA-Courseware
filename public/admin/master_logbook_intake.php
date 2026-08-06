@@ -19,6 +19,7 @@ require_once __DIR__ . '/../../src/MissionCatalogService.php';
 require_once __DIR__ . '/../../src/AircraftOperationalConfigService.php';
 require_once __DIR__ . '/../../src/AircraftFleetStatusService.php';
 require_once __DIR__ . '/../../src/AircraftFuelUpliftService.php';
+require_once __DIR__ . '/../../src/CvrFinancialDispatchService.php';
 
 if (!isset($cvrMasterLogbookContext) || !is_array($cvrMasterLogbookContext)) {
     $cvrMasterLogbookContext = array(
@@ -70,6 +71,7 @@ $aircraftOptions = array();
 $flightMissions = array();
 $crewCatalogUsers = array();
 $aircraftUnitMap = array();
+$customerBalanceMap = array();
 try {
     $aircraftService = new CockpitAircraftService($pdo);
     $aircraftOptions = $aircraftService->activeAircraft();
@@ -119,6 +121,15 @@ try {
         . ' ORDER BY display_name ASC, id ASC'
     );
     $crewCatalogUsers = $userStatement ? ($userStatement->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array();
+    $customerBalanceMap = array();
+    try {
+        $balanceStatement = $pdo->query('SELECT user_id, balance_usd FROM ipca_user_account_balances');
+        foreach (($balanceStatement ? $balanceStatement->fetchAll(PDO::FETCH_ASSOC) : array()) ?: array() as $balanceRow) {
+            $customerBalanceMap[(int)($balanceRow['user_id'] ?? 0)] = (float)($balanceRow['balance_usd'] ?? 0);
+        }
+    } catch (Throwable) {
+        $customerBalanceMap = array();
+    }
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'
         && (string)($_POST['action'] ?? '') === 'create_cvr_enrollment') {
         if (!$cvrMlCanEnroll) {
@@ -202,7 +213,7 @@ try {
             if ($action === 'save_operational_leg' && !$cvrMlCanEdit) {
                 throw new RuntimeException('Editing operational legs is not available in this view.');
             }
-            if ($action !== 'save_operational_leg') {
+            if (!in_array($action, array('save_operational_leg', 'unlock_financial_dispatch'), true)) {
                 throw new RuntimeException('This action is not available in the instructor Master Logbook.');
             }
         }
@@ -324,12 +335,40 @@ try {
             $replayShareService->revoke((int)($_POST['debrief_id'] ?? 0), $actorUserId);
             $reconstructionNotice = 'Replay access revoked immediately.';
         } elseif ($action === 'save_operational_leg') {
+            $dispatchId = (int)($_POST['dispatch_id'] ?? 0);
             (new CvrAdminLegCorrectionService($pdo))->save(
-                (int)($_POST['dispatch_id'] ?? 0),
+                $dispatchId,
                 is_array($_POST['leg'] ?? null) ? $_POST['leg'] : $_POST,
                 $actorUserId > 0 ? $actorUserId : null
             );
-            $reconstructionNotice = 'Operational leg updated.';
+            $lockFinancial = !empty($_POST['lock_financial']);
+            $financialInput = is_array($_POST['financial'] ?? null) ? $_POST['financial'] : array();
+            if ($financialInput !== array() || $lockFinancial) {
+                $financialService = new CvrFinancialDispatchService($pdo);
+                $existingFinancial = $financialService->forDispatch($dispatchId);
+                if (is_array($existingFinancial) && !empty($existingFinancial['is_locked']) && !$lockFinancial) {
+                    // Locked financial stays unchanged on normal Save Changes.
+                } else {
+                    $financialService->saveDraft(
+                        $dispatchId,
+                        $financialInput,
+                        $actorUserId > 0 ? $actorUserId : null,
+                        $lockFinancial
+                    );
+                }
+            }
+            $reconstructionNotice = $lockFinancial
+                ? 'Operational leg updated and financial dispatch locked.'
+                : 'Operational leg updated.';
+        } elseif ($action === 'unlock_financial_dispatch') {
+            (new CvrFinancialDispatchService($pdo))->unlock(
+                (int)($_POST['dispatch_id'] ?? 0),
+                $actorUserId > 0 ? $actorUserId : null,
+                $cvrMlAudience,
+                (string)($_POST['unlock_code'] ?? ''),
+                trim((string)($_POST['unlock_reason'] ?? ''))
+            );
+            $reconstructionNotice = 'Financial dispatch unlocked for editing.';
         } elseif ($action === 'hide_operational_leg') {
             (new CvrOperationalLegVisibilityService($pdo))->hide(
                 (int)($_POST['dispatch_id'] ?? 0),
@@ -416,11 +455,31 @@ $dispatch = $intake->dispatchRows(
 $legsTotal = (int)($dispatch['total'] ?? count($dispatch['rows']));
 $legsPageCount = max(1, (int)($dispatch['page_count'] ?? 1));
 $legsPage = max(1, min($legsPageCount, (int)($dispatch['page'] ?? $legsPage)));
+$instructionalRates = array();
+$aircraftRentalRateMap = array();
+$financialByDispatchId = array();
+$financialDispatchError = '';
+try {
+    $financialService = new CvrFinancialDispatchService($pdo);
+    $instructionalRates = $financialService->instructionalRates();
+    $aircraftRentalRateMap = $financialService->aircraftRentalRateMap();
+    $dispatchIds = array();
+    foreach (($dispatch['rows'] ?? array()) as $dispatchRow) {
+        $dispatchIds[] = (int)($dispatchRow['id'] ?? 0);
+    }
+    $financialByDispatchId = $financialService->mapForDispatchIds($dispatchIds);
+} catch (Throwable $e) {
+    $financialDispatchError = $e->getMessage();
+    error_log('[CvrFinancialDispatch] ' . $e->getMessage());
+}
 $fleetStatusCards = array();
+$fleetStatusError = '';
 try {
     $fleetStatusCards = (new AircraftFleetStatusService($pdo))->cardsForAircraft($aircraftOptions, $aircraftUnitMap);
-} catch (Throwable) {
+} catch (Throwable $e) {
     $fleetStatusCards = array();
+    $fleetStatusError = $e->getMessage();
+    error_log('[AircraftFleetStatus] ' . $e->getMessage());
 }
 $audioShortThresholdSeconds = 600;
 $audioShortRowCount = 0;
@@ -726,17 +785,153 @@ function cvr_intake_local_datetime(PDO $pdo, mixed $value, string $registration 
 /** Fleet card timestamp: "Thu Aug 6, 2026 - 10:20 LT" */
 function cvr_intake_fleet_logged_label(PDO $pdo, mixed $value, string $registration = ''): string
 {
+    $parts = cvr_intake_fleet_logged_parts($pdo, $value, $registration);
+    if ($parts['empty']) {
+        return 'No flight logged yet';
+    }
+    return trim($parts['date'] . ' - ' . $parts['time']);
+}
+
+/**
+ * Build financial dispatch payload for Edit Operational Leg modal.
+ *
+ * @param list<array<string,mixed>> $crewMembers
+ * @param array<string,mixed>|null $saved
+ * @param array<string,array<string,mixed>> $rentalMap
+ * @param list<array<string,mixed>> $rates
+ * @return array<string,mixed>
+ */
+function cvr_intake_financial_leg_payload(
+    PDO $pdo,
+    int $dispatchId,
+    string $registration,
+    array $crewMembers,
+    float $hobbsDelta,
+    ?array $saved,
+    array $rentalMap,
+    array $rates
+): array {
+    $customerId = 0;
+    $customerName = '';
+    $instructorId = 0;
+    $instructorName = '';
+    $firstPilotId = 0;
+    $firstPilotName = '';
+    $secondPilotId = 0;
+    $secondPilotName = '';
+    foreach ($crewMembers as $member) {
+        if (!is_array($member)) {
+            continue;
+        }
+        $name = trim((string)($member['name'] ?? $member['personName'] ?? $member['person_name'] ?? ''));
+        $role = strtolower(trim((string)($member['role'] ?? '')));
+        $personId = (int)($member['person_id'] ?? $member['id'] ?? 0);
+        if ($name === '' && $personId <= 0) {
+            continue;
+        }
+        if ($firstPilotId <= 0 && $firstPilotName === '' && ($role === '' || str_contains($role, 'student') || str_contains($role, 'pic') || str_contains($role, 'pilot'))) {
+            $firstPilotId = $personId;
+            $firstPilotName = $name;
+        } elseif ($secondPilotId <= 0 && $secondPilotName === '' && $personId !== $firstPilotId) {
+            $secondPilotId = $personId;
+            $secondPilotName = $name;
+        }
+        if (str_contains($role, 'student') && $customerId <= 0) {
+            $customerId = $personId;
+            $customerName = $name;
+        }
+        if ((str_contains($role, 'instructor') || str_contains($role, 'supervisor')) && $instructorId <= 0) {
+            $instructorId = $personId;
+            $instructorName = $name;
+        }
+    }
+    if ($customerId <= 0 && $customerName === '') {
+        $customerId = $firstPilotId;
+        $customerName = $firstPilotName;
+    }
+    if ($instructorId <= 0 && $instructorName === '') {
+        $instructorId = $secondPilotId;
+        $instructorName = $secondPilotName;
+    }
+
+    $defaultRate = $rates[0] ?? null;
+    $rental = $rentalMap[strtoupper($registration)] ?? array(
+        'display_label' => $registration,
+        'rate_usd_per_hour' => 0.0,
+    );
+    $balance = 0.0;
+    if ($customerId > 0) {
+        try {
+            $balance = (new CvrFinancialDispatchService($pdo))->balanceForUser($customerId);
+        } catch (Throwable) {
+            $balance = 0.0;
+        }
+    }
+
+    $base = array(
+        'dispatch_id' => $dispatchId,
+        'customer_user_id' => $customerId > 0 ? $customerId : null,
+        'customer_name' => $customerName,
+        'instructor_user_id' => $instructorId > 0 ? $instructorId : null,
+        'instructor_name' => $instructorName,
+        'aircraft_registration' => strtoupper($registration),
+        'aircraft_label' => (string)($rental['display_label'] ?? $registration),
+        'aircraft_rate_usd_per_hour' => (float)($rental['rate_usd_per_hour'] ?? 0),
+        'preflight_briefing_hours' => 0.0,
+        'flight_instruction_hours' => round(max(0.0, $hobbsDelta), 1),
+        'ground_instruction_hours' => CvrFinancialDispatchService::DEFAULT_GROUND_HOURS,
+        'instructional_rate_id' => is_array($defaultRate) ? (int)$defaultRate['id'] : null,
+        'existing_balance_usd' => $balance,
+        'status' => 'draft',
+        'is_locked' => false,
+        'overview' => null,
+    );
+    if (!is_array($saved)) {
+        return $base;
+    }
+    return array_merge($base, array(
+        'customer_user_id' => $saved['customer_user_id'] ?? $base['customer_user_id'],
+        'customer_name' => ($saved['customer_name'] ?? '') !== '' ? $saved['customer_name'] : $base['customer_name'],
+        'instructor_user_id' => $saved['instructor_user_id'] ?? $base['instructor_user_id'],
+        'instructor_name' => ($saved['instructor_name'] ?? '') !== '' ? $saved['instructor_name'] : $base['instructor_name'],
+        'aircraft_label' => ($saved['aircraft_label'] ?? '') !== '' ? $saved['aircraft_label'] : $base['aircraft_label'],
+        'aircraft_rate_usd_per_hour' => (float)($saved['aircraft_rate_usd_per_hour'] ?? $base['aircraft_rate_usd_per_hour']),
+        'preflight_briefing_hours' => (float)($saved['preflight_briefing_hours'] ?? 0),
+        'flight_instruction_hours' => (float)($saved['flight_instruction_hours'] ?? $base['flight_instruction_hours']),
+        'ground_instruction_hours' => (float)($saved['ground_instruction_hours'] ?? $base['ground_instruction_hours']),
+        'instructional_rate_id' => $saved['instructional_rate_id'] ?? $base['instructional_rate_id'],
+        'existing_balance_usd' => (float)($saved['existing_balance_usd'] ?? $base['existing_balance_usd']),
+        'status' => (string)($saved['status'] ?? 'draft'),
+        'is_locked' => !empty($saved['is_locked']),
+        'overview' => $saved['overview'] ?? null,
+        'grand_total_usd' => $saved['grand_total_usd'] ?? null,
+        'session_total_usd' => $saved['session_total_usd'] ?? null,
+    ));
+}
+
+/**
+ * Fleet card timestamp parts for fixed two-line instrument layout.
+ *
+ * @return array{empty:bool,date:string,time:string}
+ */
+function cvr_intake_fleet_logged_parts(PDO $pdo, mixed $value, string $registration = ''): array
+{
     $text = trim((string)$value);
     if ($text === '') {
-        return 'No flight logged yet';
+        return array('empty' => true, 'date' => 'No flight logged yet', 'time' => '');
     }
     $timezone = cvr_intake_california_timezone($pdo, $registration);
     try {
         $dt = new DateTimeImmutable($text, new DateTimeZone('UTC'));
         $local = $dt->setTimezone(new DateTimeZone($timezone));
-        return $local->format('D M j, Y - H:i') . ' LT';
+        return array(
+            'empty' => false,
+            'date' => $local->format('D M j, Y'),
+            'time' => $local->format('H:i') . ' LT',
+        );
     } catch (Throwable) {
-        return cvr_intake_local_datetime($pdo, $text, $registration);
+        $fallback = cvr_intake_local_datetime($pdo, $text, $registration);
+        return array('empty' => false, 'date' => $fallback, 'time' => '');
     }
 }
 
@@ -1464,6 +1659,28 @@ a.intake-refresh:hover{
 .leg-edit-crew-remove{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:9px;padding:8px 10px;font-size:11px;font-weight:800;cursor:pointer}
 .leg-edit-add-crew{border:1px solid #cbd5e1;background:#fff;color:#1d4ed8;border-radius:9px;padding:8px 12px;font-size:12px;font-weight:850;cursor:pointer}
 .leg-edit-footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:12px 0 4px;background:linear-gradient(180deg,rgba(255,255,255,0),#fff 28%);border-top:1px solid #e2e8f0;margin-top:8px}
+.leg-edit-fin-head{border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;padding:10px 12px;margin-bottom:12px;display:grid;gap:4px}
+.leg-edit-fin-head strong{color:#0f172a}
+.leg-edit-fin-row{display:grid;grid-template-columns:140px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:10px}
+.leg-edit-fin-row label{font-size:12px;font-weight:700;color:#334155;text-align:right}
+.leg-edit-fin-controls{display:flex;gap:8px;align-items:center;min-width:0}
+.leg-edit-fin-controls select,.leg-edit-fin-controls input{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:13px;background:linear-gradient(180deg,#fff,#f8fafc)}
+.leg-edit-fin-controls input[type=number]{max-width:88px;flex:0 0 88px}
+.leg-edit-fin-controls select[data-fin-rate],.leg-edit-fin-controls select[data-fin-ground-rate]{flex:1 1 auto}
+.leg-edit-fin-overview{margin-top:14px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden}
+.leg-edit-fin-table{width:100%;border-collapse:collapse;font-size:12px}
+.leg-edit-fin-table th,.leg-edit-fin-table td{padding:8px 10px;border-bottom:1px solid #eef2f7;text-align:left}
+.leg-edit-fin-table th{background:#f1f5f9;font-weight:800;color:#0f172a}
+.leg-edit-fin-table td.num,.leg-edit-fin-table th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.leg-edit-fin-table tr.is-section th{background:#e2e8f0}
+.leg-edit-fin-table tr.is-total td{font-weight:900;border-bottom:0}
+.leg-edit-fin-locked{display:none;margin:0 0 10px;padding:8px 10px;border-radius:8px;background:#ecfdf5;border:1px solid #86efac;color:#166534;font-size:12px;font-weight:700}
+.leg-edit-fin-locked.is-on{display:block}
+.leg-edit-fin-unlock{display:none;gap:8px;align-items:end;margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1}
+.leg-edit-fin-unlock.is-on{display:flex;flex-wrap:wrap}
+.leg-edit-save-lock{border:0;border-radius:10px;background:#0f766e;color:#fff;padding:10px 14px;font-size:12px;font-weight:900;cursor:pointer}
+.leg-edit-save-lock:disabled{opacity:.45;cursor:not-allowed}
+@media (max-width:720px){.leg-edit-fin-row{grid-template-columns:1fr}.leg-edit-fin-row label{text-align:left}}
 .leg-edit-save{border:0;border-radius:10px;background:#1d4ed8;color:#fff;padding:10px 16px;font-size:13px;font-weight:900;cursor:pointer}
 .leg-edit-cancel{border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#334155;padding:10px 14px;font-size:13px;font-weight:800;cursor:pointer}
 .leg-edit-garmin{margin-top:8px;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px}
@@ -1529,26 +1746,39 @@ a.intake-refresh:hover{
 .legs-fuel-vals{font-size:12px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums;white-space:nowrap}
 .legs-fuel-burn{font-size:11px;font-weight:700;color:#334155}
 .legs-oil{font-size:11px;font-weight:700;color:#92400e}
-.fleet-status-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin:0 0 18px}
-.fleet-status-card{border:1px solid #dbe3ee;border-radius:16px;background:#fff;padding:14px 14px 12px;box-shadow:0 8px 22px rgba(15,23,42,.05);display:grid;gap:10px}
-.fleet-status-reg{font-size:18px;font-weight:900;letter-spacing:.02em;color:#0f172a}
-.fleet-status-meter{display:grid;gap:2px}
-.fleet-status-meter-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
-.fleet-status-meter-value{font-size:20px;font-weight:900;color:#0f172a;font-variant-numeric:tabular-nums}
-.fleet-status-logged{font-size:11px;color:#94a3b8;font-weight:600}
-.fleet-status-bar-row{display:grid;gap:5px}
+.fleet-status-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin:0 0 16px;align-items:stretch}
+.fleet-status-card{border:1px solid #dbe3ee;border-radius:14px;background:#fff;padding:14px 14px 12px;box-shadow:0 4px 14px rgba(15,23,42,.04);display:grid;grid-template-rows:auto auto auto 1fr;gap:12px;min-height:210px;cursor:pointer;transition:border-color .15s ease,box-shadow .15s ease}
+.fleet-status-card:hover{border-color:#93c5fd;box-shadow:0 6px 16px rgba(37,99,235,.08)}
+.fleet-status-card:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+.fleet-status-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-height:22px}
+.fleet-status-reg{font-size:18px;font-weight:900;letter-spacing:.02em;color:#0f172a;line-height:1.1}
+.fleet-status-uplift-hint{font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;flex:0 0 auto}
+.fleet-status-instrument{display:grid;gap:6px}
+.fleet-status-meters{display:grid;grid-template-columns:1fr 1fr;gap:0;align-items:start}
+.fleet-status-meter{display:grid;gap:2px;min-width:0}
+.fleet-status-meter.is-tacho{padding-left:12px;border-left:1px solid #e2e8f0}
+.fleet-status-meter-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;line-height:1}
+.fleet-status-meter-value{font-size:22px;font-weight:900;color:#0f172a;font-variant-numeric:tabular-nums;line-height:1.1;white-space:nowrap}
+.fleet-status-logged{display:grid;gap:0;min-height:28px;align-content:start}
+.fleet-status-logged-date,.fleet-status-logged-time{font-size:11px;color:#94a3b8;font-weight:600;line-height:1.25;white-space:nowrap}
+.fleet-status-logged.is-empty .fleet-status-logged-date{white-space:normal}
+.fleet-status-bars{display:grid;gap:10px;align-content:start}
+.fleet-status-bar-row{display:grid;gap:4px}
 .fleet-status-bar-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
-.fleet-status-bar-title{font-size:11px;font-weight:800;color:#334155}
-.fleet-status-bar-value{font-size:12px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums}
-.fleet-status-bar{height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden}
+.fleet-status-bar-title{font-size:12px;font-weight:800;color:#334155}
+.fleet-status-bar-value{font-size:12px;font-weight:800;color:#0f172a;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fleet-status-bar{height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden}
 .fleet-status-bar>span{display:block;height:100%;border-radius:999px}
 .fleet-status-bar.is-oil>span{background:linear-gradient(90deg,#d97706,#fbbf24)}
 .fleet-status-bar.is-fuel>span{background:linear-gradient(90deg,#15803d,#4ade80)}
-.fleet-status-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.fleet-status-uplifts{border-top:1px solid #e2e8f0;padding-top:8px;display:grid;gap:6px}
-.fleet-status-uplift-row{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;font-size:11px;color:#475569}
-.fleet-status-uplift-meta{display:grid;gap:2px}
-.fleet-status-empty{font-size:11px;color:#94a3b8}
+.fleet-status-burn{font-size:11px;font-weight:600;color:#94a3b8;margin-top:2px;min-height:14px;line-height:1.2;white-space:nowrap}
+.fleet-uplift-history{margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px}
+.fleet-uplift-history h4{margin:0 0 8px;font-size:13px;font-weight:800;color:#0f172a}
+.fleet-uplift-table{width:100%;border-collapse:collapse;font-size:12px}
+.fleet-uplift-table th,.fleet-uplift-table td{padding:6px 8px;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:top}
+.fleet-uplift-table th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;font-weight:800}
+.fleet-uplift-table td{color:#334155;font-variant-numeric:tabular-nums}
+.fleet-uplift-empty{font-size:12px;color:#94a3b8;margin:0}
 .legs-evidence{display:grid;gap:4px}
 .legs-ev{font-size:11px;font-weight:700;color:#475569;white-space:nowrap}
 .legs-ev-mark{font-weight:900}
@@ -1768,8 +1998,11 @@ a.intake-refresh:hover{
       </div>
     </div>
 
+    <?php if ($fleetStatusError !== ''): ?>
+      <div class="intake-notice" style="margin-bottom:12px">Fleet status cards unavailable: <?= cvr_intake_h($fleetStatusError) ?></div>
+    <?php endif; ?>
     <?php if ($fleetStatusCards !== array()): ?>
-      <div class="fleet-status-grid" data-fleet-status>
+      <div class="fleet-status-grid" data-fleet-status data-fleet-can-manage="<?= $cvrMlCanManageFuelUplifts ? '1' : '0' ?>" data-fleet-csrf="<?= cvr_intake_h($reconstructionCsrf) ?>" data-fleet-action-url="<?= cvr_intake_h(cvr_intake_legs_query()) ?>">
         <?php foreach ($fleetStatusCards as $card): ?>
           <?php
             $reg = (string)($card['registration'] ?? '');
@@ -1778,75 +2011,81 @@ a.intake-refresh:hover{
             $oilPct = $card['oil_percentage'];
             $fuelQty = $card['fuel_quantity'];
             $fuelUnit = (string)($card['fuel_unit'] ?? 'USG');
+            $fuelBurn = $card['fuel_burn'] ?? null;
             $uplifts = is_array($card['uplifts'] ?? null) ? $card['uplifts'] : array();
+            $loggedParts = cvr_intake_fleet_logged_parts($pdo, $card['logged_at'] ?? null, $reg);
+            $upliftPayload = array();
+            foreach ($uplifts as $uplift) {
+                $upliftPayload[] = array(
+                    'id' => (int)($uplift['id'] ?? 0),
+                    'fuel' => cvr_intake_format_one_decimal($uplift['fuel_after_usg'] ?? null),
+                    'unit' => (string)($uplift['fuel_unit'] ?? $fuelUnit),
+                    'when' => cvr_intake_fleet_logged_label($pdo, $uplift['uplifted_at'] ?? null, $reg),
+                    'notes' => trim((string)($uplift['notes'] ?? '')),
+                );
+            }
+            $burnLabel = $fuelBurn !== null
+                ? ('Burn ' . cvr_intake_format_one_decimal($fuelBurn) . ' ' . $fuelUnit)
+                : 'Burn —';
           ?>
-          <article class="fleet-status-card" data-fleet-aircraft="<?= cvr_intake_h($reg) ?>">
-            <div class="fleet-status-reg"><?= cvr_intake_h($reg) ?></div>
-            <div class="fleet-status-meter">
-              <div class="fleet-status-meter-label">Latest Hobbs</div>
-              <div class="fleet-status-meter-value"><?= cvr_intake_h($hobbs !== null ? cvr_intake_format_one_decimal($hobbs) : '—') ?></div>
-              <div class="fleet-status-logged"><?= cvr_intake_h(cvr_intake_fleet_logged_label($pdo, $card['logged_at'] ?? null, $reg)) ?></div>
+          <article
+            class="fleet-status-card"
+            tabindex="0"
+            role="button"
+            aria-label="<?= cvr_intake_h($reg) ?> fuel uplift"
+            data-fleet-aircraft="<?= cvr_intake_h($reg) ?>"
+            data-fleet-uplift-open
+            data-aircraft-id="<?= (int)($card['aircraft_id'] ?? 0) ?>"
+            data-aircraft-registration="<?= cvr_intake_h($reg) ?>"
+            data-fuel-unit="<?= cvr_intake_h($fuelUnit) ?>"
+            data-fuel-capacity="<?= cvr_intake_h((string)($card['fuel_capacity'] ?? 13)) ?>"
+            data-uplift-count="<?= count($upliftPayload) ?>"
+            data-uplifts="<?= cvr_intake_h(json_encode($upliftPayload, JSON_UNESCAPED_SLASHES) ?: '[]') ?>"
+          >
+            <div class="fleet-status-head">
+              <div class="fleet-status-reg"><?= cvr_intake_h($reg) ?></div>
+              <div class="fleet-status-uplift-hint">Uplift · <?= (int)count($upliftPayload) ?></div>
             </div>
-            <div class="fleet-status-meter">
-              <div class="fleet-status-meter-label">Latest Tacho</div>
-              <div class="fleet-status-meter-value"><?= cvr_intake_h($tacho !== null ? cvr_intake_format_one_decimal($tacho) : '—') ?></div>
-            </div>
-            <div class="fleet-status-bar-row">
-              <div class="fleet-status-bar-head">
-                <span class="fleet-status-bar-title">Oil last logged</span>
-                <span class="fleet-status-bar-value"><?= cvr_intake_h((string)($card['oil_label'] ?? '—')) ?></span>
+            <div class="fleet-status-instrument">
+              <div class="fleet-status-meters" aria-label="Aircraft meters">
+                <div class="fleet-status-meter is-hobbs">
+                  <div class="fleet-status-meter-label">Hobbs</div>
+                  <div class="fleet-status-meter-value"><?= cvr_intake_h($hobbs !== null ? cvr_intake_format_one_decimal($hobbs) : '—') ?></div>
+                </div>
+                <div class="fleet-status-meter is-tacho">
+                  <div class="fleet-status-meter-label">Tacho</div>
+                  <div class="fleet-status-meter-value"><?= cvr_intake_h($tacho !== null ? cvr_intake_format_one_decimal($tacho) : '—') ?></div>
+                </div>
               </div>
-              <div class="fleet-status-bar is-oil" title="Oil <?= cvr_intake_h((string)($card['oil_label'] ?? '—')) ?>">
-                <span style="width:<?= (int)round((float)($oilPct ?? 0)) ?>%"></span>
+              <div class="fleet-status-logged<?= !empty($loggedParts['empty']) ? ' is-empty' : '' ?>">
+                <div class="fleet-status-logged-date"><?= cvr_intake_h((string)$loggedParts['date']) ?></div>
+                <?php if (empty($loggedParts['empty']) && (string)$loggedParts['time'] !== ''): ?>
+                  <div class="fleet-status-logged-time"><?= cvr_intake_h((string)$loggedParts['time']) ?></div>
+                <?php else: ?>
+                  <div class="fleet-status-logged-time">&nbsp;</div>
+                <?php endif; ?>
               </div>
             </div>
-            <div class="fleet-status-bar-row">
-              <div class="fleet-status-bar-head">
-                <span class="fleet-status-bar-title">Fuel</span>
-                <span class="fleet-status-bar-value"><?= cvr_intake_h($fuelQty !== null ? (cvr_intake_format_one_decimal($fuelQty) . ' ' . $fuelUnit) : '—') ?></span>
+            <div class="fleet-status-bars">
+              <div class="fleet-status-bar-row">
+                <div class="fleet-status-bar-head">
+                  <span class="fleet-status-bar-title">Oil</span>
+                  <span class="fleet-status-bar-value"><?= cvr_intake_h((string)($card['oil_label'] ?? '—')) ?></span>
+                </div>
+                <div class="fleet-status-bar is-oil" title="Oil <?= cvr_intake_h((string)($card['oil_label'] ?? '—')) ?>">
+                  <span style="width:<?= (int)round((float)($oilPct ?? 0)) ?>%"></span>
+                </div>
               </div>
-              <div class="fleet-status-bar is-fuel" title="Fuel <?= cvr_intake_h($fuelQty !== null ? (cvr_intake_format_one_decimal($fuelQty) . ' ' . $fuelUnit) : '—') ?>">
-                <span style="width:<?= (int)round((float)($card['fuel_pct'] ?? 0)) ?>%"></span>
+              <div class="fleet-status-bar-row">
+                <div class="fleet-status-bar-head">
+                  <span class="fleet-status-bar-title">Fuel</span>
+                  <span class="fleet-status-bar-value"><?= cvr_intake_h($fuelQty !== null ? (cvr_intake_format_one_decimal($fuelQty) . ' ' . $fuelUnit) : '—') ?></span>
+                </div>
+                <div class="fleet-status-bar is-fuel" title="Fuel <?= cvr_intake_h($fuelQty !== null ? (cvr_intake_format_one_decimal($fuelQty) . ' / ' . cvr_intake_format_one_decimal($card['fuel_capacity'] ?? null) . ' ' . $fuelUnit) : '—') ?>">
+                  <span style="width:<?= (int)round((float)($card['fuel_pct'] ?? 0)) ?>%"></span>
+                </div>
+                <div class="fleet-status-burn"><?= cvr_intake_h($burnLabel) ?></div>
               </div>
-            </div>
-            <div class="fleet-status-actions">
-              <?php if ($cvrMlCanManageFuelUplifts): ?>
-                <button
-                  type="button"
-                  class="app-btn app-btn-secondary"
-                  data-fleet-uplift-open
-                  data-aircraft-id="<?= (int)($card['aircraft_id'] ?? 0) ?>"
-                  data-aircraft-registration="<?= cvr_intake_h($reg) ?>"
-                  data-fuel-unit="<?= cvr_intake_h($fuelUnit) ?>"
-                  data-fuel-capacity="<?= cvr_intake_h((string)($card['fuel_capacity'] ?? 13)) ?>"
-                ><span>Log Fuel Uplift</span></button>
-              <?php endif; ?>
-              <button type="button" class="app-btn app-btn-secondary" data-fleet-uplift-toggle aria-expanded="false"><span>Uplifts (<?= count($uplifts) ?>)</span></button>
-            </div>
-            <div class="fleet-status-uplifts" data-fleet-uplift-list hidden>
-              <?php if ($uplifts === array()): ?>
-                <div class="fleet-status-empty">No fuel uplifts logged yet.</div>
-              <?php else: ?>
-                <?php foreach ($uplifts as $uplift): ?>
-                  <div class="fleet-status-uplift-row">
-                    <div class="fleet-status-uplift-meta">
-                      <strong><?= cvr_intake_h(cvr_intake_format_one_decimal($uplift['fuel_after_usg'] ?? null)) ?> <?= cvr_intake_h((string)($uplift['fuel_unit'] ?? 'USG')) ?></strong>
-                      <span><?= cvr_intake_h(cvr_intake_fleet_logged_label($pdo, $uplift['uplifted_at'] ?? null, $reg)) ?></span>
-                      <?php if (trim((string)($uplift['notes'] ?? '')) !== ''): ?>
-                        <span><?= cvr_intake_h((string)$uplift['notes']) ?></span>
-                      <?php endif; ?>
-                    </div>
-                    <?php if ($cvrMlCanManageFuelUplifts): ?>
-                      <form method="post" action="<?= cvr_intake_h(cvr_intake_legs_query()) ?>" onsubmit="return confirm('Delete this fuel uplift?');">
-                        <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-                        <input type="hidden" name="action" value="delete_fuel_uplift">
-                        <input type="hidden" name="uplift_id" value="<?= (int)($uplift['id'] ?? 0) ?>">
-                        <button class="app-btn app-btn-secondary legs-btn-remove" type="submit"><span>Delete</span></button>
-                      </form>
-                    <?php endif; ?>
-                  </div>
-                <?php endforeach; ?>
-              <?php endif; ?>
             </div>
           </article>
         <?php endforeach; ?>
@@ -1958,7 +2197,10 @@ a.intake-refresh:hover{
                   default => 'na',
               };
               $recordingUid = trim((string)($row['recording_uid'] ?? ''));
-              $replayReady = $recordingUid !== '';
+              $recordingId = (int)($row['recording_id'] ?? 0);
+              $reconstructionStatus = strtolower(trim((string)($row['reconstruction_status'] ?? '')));
+              $replayReady = $recordingUid !== '' && in_array($reconstructionStatus, array('ready', 'reconstruction_complete', 'complete'), true);
+              $replayProcessing = in_array($reconstructionStatus, array('processing', 'queued', 'running'), true);
               $debriefId = (int)($row['debrief_id'] ?? 0);
               $bundleId = (int)($row['bundle_id'] ?? 0);
               $debriefJobStatus = strtolower(trim((string)($row['debrief_job_status'] ?? '')));
@@ -2023,6 +2265,17 @@ a.intake-refresh:hover{
                   'has_garmin_csv' => $garminOn,
                   'is_hidden' => !empty($row['is_hidden']),
                   'timezone' => cvr_intake_california_timezone($pdo, $tail),
+                  'hobbs_delta' => $hobbsDelta !== '' ? (float)$hobbsDelta : null,
+                  'financial' => cvr_intake_financial_leg_payload(
+                      $pdo,
+                      (int)($row['id'] ?? 0),
+                      $tail,
+                      $crewMembers,
+                      $hobbsDelta !== '' ? (float)$hobbsDelta : 0.0,
+                      $financialByDispatchId[(int)($row['id'] ?? 0)] ?? null,
+                      $aircraftRentalRateMap,
+                      $instructionalRates
+                  ),
               );
               if (!empty($row['off_block_utc'])) {
                   $tzName = $legPayload['timezone'];
@@ -2155,14 +2408,28 @@ a.intake-refresh:hover{
                     $replayReturn = $cvrMlBasePath . '?tab=dispatch';
                   ?>
                   <?php if ($replayReady): ?>
-                    <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>&amp;return=<?= rawurlencode($replayReturn) ?>" data-legs-stop>
+                    <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>&amp;return=<?= rawurlencode($replayReturn) ?>" data-legs-stop title="Open reconstructed flight replay">
                       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
-                      <span>Replay</span>
+                      <span>Open Replay</span>
                     </a>
+                  <?php elseif ($replayProcessing && $recordingUid !== ''): ?>
+                    <a class="app-btn app-btn-primary" href="/admin/cockpit_recorder_replay.php?id=<?= rawurlencode($recordingUid) ?>&amp;return=<?= rawurlencode($replayReturn) ?>" data-legs-stop title="Flight reconstruction in progress">
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                      <span>Reconstructing…</span>
+                    </a>
+                  <?php elseif ($bundleId > 0 && $cvrMlCanEdit): ?>
+                    <form method="post" action="/admin/api/manual_bundle_reconstruct.php" data-legs-stop>
+                      <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+                      <input type="hidden" name="bundle_id" value="<?= (int)$bundleId ?>">
+                      <button class="app-btn app-btn-primary" type="submit" title="Start flight reconstruction from Garmin CSV">
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71L12 2z"/></svg>
+                        <span>Reconstruct Flight</span>
+                      </button>
+                    </form>
                   <?php else: ?>
-                    <span class="app-btn app-btn-primary is-disabled" aria-disabled="true">
-                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
-                      <span>Replay</span>
+                    <span class="app-btn app-btn-primary is-disabled" aria-disabled="true" title="Waiting for Dispatch + Audio + Garmin before reconstruction">
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71L12 2z"/></svg>
+                      <span>Reconstruct Flight</span>
                     </span>
                   <?php endif; ?>
                   <button type="button" class="app-btn app-btn-secondary" data-legs-details><span>Details</span></button>
@@ -3276,11 +3543,112 @@ a.intake-refresh:hover{
             <button class="leg-edit-add-crew" type="button" id="legs-edit-add-crew">+ Add Crew Member</button>
             <div class="leg-edit-error" data-error-for="crew"></div>
           </section>
+
+          <section class="leg-edit-card" data-leg-section="financial" id="legs-edit-financial">
+            <h4>Financial Dispatch</h4>
+            <?php if ($financialDispatchError !== ''): ?>
+              <div class="intake-notice" style="margin-bottom:10px"><?= cvr_intake_h($financialDispatchError) ?></div>
+            <?php endif; ?>
+            <div class="leg-edit-fin-locked" id="legs-fin-locked-banner">Financial dispatch is locked.</div>
+            <div class="leg-edit-fin-head">
+              <div><strong>Customer:</strong> <span id="legs-fin-head-customer">—</span></div>
+              <div><strong>Aircraft:</strong> <span id="legs-fin-head-aircraft">—</span></div>
+            </div>
+            <input type="hidden" name="financial[workflow_flight_record_uuid]" id="legs-fin-flight-uuid" value="">
+            <input type="hidden" name="financial[aircraft_registration]" id="legs-fin-aircraft-reg" value="">
+            <input type="hidden" name="financial[customer_name]" id="legs-fin-customer-name" value="">
+            <input type="hidden" name="financial[instructor_name]" id="legs-fin-instructor-name" value="">
+            <input type="hidden" name="lock_financial" id="legs-fin-lock-flag" value="">
+
+            <div class="leg-edit-fin-row">
+              <label for="legs-fin-customer">Customer</label>
+              <div class="leg-edit-fin-controls">
+                <select name="financial[customer_user_id]" id="legs-fin-customer" data-fin-field>
+                  <option value="">Select customer</option>
+                  <?php foreach ($crewCatalogUsers as $user): ?>
+                    <option value="<?= (int)$user['id'] ?>"><?= cvr_intake_h((string)$user['display_name']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </div>
+            <div class="leg-edit-fin-row">
+              <label for="legs-fin-instructor">Instructor</label>
+              <div class="leg-edit-fin-controls">
+                <select name="financial[instructor_user_id]" id="legs-fin-instructor" data-fin-field>
+                  <option value="">Select instructor</option>
+                  <?php foreach ($crewCatalogUsers as $user): ?>
+                    <?php
+                      $role = strtolower((string)($user['role'] ?? ''));
+                      if (!in_array($role, array('instructor', 'supervisor', 'chief_instructor'), true)) { continue; }
+                      $label = (string)$user['display_name'];
+                      if ($role === 'instructor') { $label .= ' (Instr)'; }
+                    ?>
+                    <option value="<?= (int)$user['id'] ?>"><?= cvr_intake_h($label) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </div>
+            <div class="leg-edit-fin-row">
+              <label for="legs-fin-preflight">Preflight Briefing</label>
+              <div class="leg-edit-fin-controls">
+                <input name="financial[preflight_briefing_hours]" id="legs-fin-preflight" type="number" min="0" step="0.1" value="0" data-fin-field>
+                <span class="intake-muted">hours</span>
+              </div>
+            </div>
+            <div class="leg-edit-fin-row">
+              <label for="legs-fin-flight-hours">Flight Instruction</label>
+              <div class="leg-edit-fin-controls">
+                <input name="financial[flight_instruction_hours]" id="legs-fin-flight-hours" type="number" min="0" step="0.1" value="0" data-fin-field>
+                <select name="financial[instructional_rate_id]" id="legs-fin-rate" data-fin-rate data-fin-field>
+                  <?php foreach ($instructionalRates as $rate): ?>
+                    <option value="<?= (int)$rate['id'] ?>" data-rate="<?= cvr_intake_h((string)$rate['rate_usd_per_hour']) ?>">
+                      <?= cvr_intake_h((string)$rate['option_label']) ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </div>
+            <div class="leg-edit-fin-row">
+              <label for="legs-fin-ground-hours">Ground Instruction</label>
+              <div class="leg-edit-fin-controls">
+                <input name="financial[ground_instruction_hours]" id="legs-fin-ground-hours" type="number" min="0" step="0.1" value="0.3" data-fin-field>
+                <select id="legs-fin-ground-rate" data-fin-ground-rate disabled aria-label="Ground instruction rate mirrors flight rate">
+                  <?php foreach ($instructionalRates as $rate): ?>
+                    <option value="<?= (int)$rate['id'] ?>"><?= cvr_intake_h((string)$rate['option_label']) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </div>
+
+            <div class="leg-edit-fin-overview">
+              <table class="leg-edit-fin-table" id="legs-fin-overview-table">
+                <thead>
+                  <tr class="is-section"><th>Aircraft Rental</th><th class="num">Hours</th><th class="num">Total</th></tr>
+                </thead>
+                <tbody id="legs-fin-overview-body">
+                  <tr><td colspan="3" class="intake-muted">Select customer and instructor to preview charges.</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="leg-edit-fin-unlock" id="legs-fin-unlock-box">
+              <?php if ($cvrMlAudience !== 'admin'): ?>
+                <label class="leg-edit-field" style="margin:0"><span>Unlock code</span>
+                  <input type="password" id="legs-fin-unlock-code" autocomplete="off" placeholder="Special unlock code">
+                </label>
+              <?php endif; ?>
+              <label class="leg-edit-field" style="margin:0;min-width:180px"><span>Reason</span>
+                <input type="text" id="legs-fin-unlock-reason" maxlength="500" placeholder="Optional">
+              </label>
+              <button class="app-btn app-btn-secondary" type="button" id="legs-fin-unlock-btn"><span>Unlock Financial</span></button>
+            </div>
+          </section>
         </div>
         <div class="leg-edit-footer">
           <button class="leg-edit-cancel" type="button" data-legs-edit-close>Cancel</button>
           <?php if ($cvrMlCanEdit): ?>
-            <button class="leg-edit-save" type="submit">Save Changes</button>
+            <button class="leg-edit-save" type="submit" id="legs-edit-save-btn">Save Changes</button>
+            <button class="leg-edit-save-lock" type="button" id="legs-edit-save-lock-btn" disabled>Save and LOCK</button>
           <?php endif; ?>
         </div>
       </form>
@@ -3337,6 +3705,9 @@ a.intake-refresh:hover{
         'kind' => in_array($role, array('instructor', 'supervisor', 'chief_instructor'), true) ? 'staff' : 'student',
     );
 }, $crewCatalogUsers), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script type="application/json" id="legs-financial-rates"><?= json_encode($instructionalRates, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script type="application/json" id="legs-aircraft-rental-rates"><?= json_encode($aircraftRentalRateMap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
+<script type="application/json" id="legs-customer-balances"><?= json_encode($customerBalanceMap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 <script type="application/json" id="legs-flight-missions"><?= json_encode($flightMissions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 
 <div class="intake-modal-backdrop" id="legs-debrief-modal" hidden>
@@ -3364,17 +3735,17 @@ a.intake-refresh:hover{
   </div>
 </div>
 
-<?php if ($cvrMlCanManageFuelUplifts): ?>
 <div class="intake-modal-backdrop" id="fleet-uplift-modal" hidden>
-  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="fleet-uplift-title" style="max-width:480px">
+  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="fleet-uplift-title" style="max-width:640px">
     <div class="intake-modal-head">
       <div>
-        <h3 class="intake-modal-title" id="fleet-uplift-title">Log Fuel Uplift</h3>
-        <div class="intake-muted">Enter fuel quantity <strong>after</strong> refueling.</div>
+        <h3 class="intake-modal-title" id="fleet-uplift-title">Fuel Uplift</h3>
+        <div class="intake-muted">Add an uplift and review historical fuel after refueling.</div>
       </div>
       <button class="intake-modal-close" type="button" data-fleet-uplift-close>Close</button>
     </div>
     <div class="intake-modal-body">
+      <?php if ($cvrMlCanManageFuelUplifts): ?>
       <form method="post" action="<?= cvr_intake_h(cvr_intake_legs_query()) ?>" id="fleet-uplift-form">
         <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
         <input type="hidden" name="action" value="create_fuel_uplift">
@@ -3399,10 +3770,22 @@ a.intake-refresh:hover{
         </div>
         <button class="intake-button" type="submit">Save Uplift</button>
       </form>
+      <?php else: ?>
+        <div class="intake-field" style="margin-bottom:12px">
+          <label>Aircraft</label>
+          <div class="intake-primary" id="fleet-uplift-aircraft-label">—</div>
+        </div>
+        <p class="intake-muted" style="margin:0 0 8px">Fuel uplift logging is only available to admins.</p>
+      <?php endif; ?>
+      <div class="fleet-uplift-history">
+        <h4>Uplift history</h4>
+        <div id="fleet-uplift-history-body">
+          <p class="fleet-uplift-empty">No fuel uplifts logged yet.</p>
+        </div>
+      </div>
     </div>
   </div>
 </div>
-<?php endif; ?>
 
 <div class="intake-modal-backdrop" id="intake-audio-transcript-modal" hidden>
   <div class="intake-modal intake-modal-transcript-review" role="dialog" aria-modal="true" aria-labelledby="intake-audio-transcript-title">
@@ -4040,50 +4423,123 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     });
   }
 
-  // Fleet status cards — uplift list toggle + log modal
+  // Fleet status cards — compact meters; uplift modal with add form + history table
   (function initFleetStatusCards() {
     const grid = page.querySelector('[data-fleet-status]');
     if (!grid) {
       return;
     }
-    grid.addEventListener('click', (event) => {
-      const toggle = event.target instanceof Element ? event.target.closest('[data-fleet-uplift-toggle]') : null;
-      if (toggle) {
-        const card = toggle.closest('.fleet-status-card');
-        const list = card ? card.querySelector('[data-fleet-uplift-list]') : null;
-        if (!list) {
-          return;
-        }
-        const open = list.hasAttribute('hidden');
-        if (open) {
-          list.removeAttribute('hidden');
-        } else {
-          list.setAttribute('hidden', '');
-        }
-        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    const canManage = grid.getAttribute('data-fleet-can-manage') === '1';
+    const csrf = grid.getAttribute('data-fleet-csrf') || '';
+    const actionUrl = grid.getAttribute('data-fleet-action-url') || '';
+    const escapeHtml = (value) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+    const renderHistory = (rows) => {
+      const body = document.getElementById('fleet-uplift-history-body');
+      if (!body) {
         return;
       }
-      const openBtn = event.target instanceof Element ? event.target.closest('[data-fleet-uplift-open]') : null;
-      if (!openBtn) {
+      if (!Array.isArray(rows) || rows.length === 0) {
+        body.innerHTML = '<p class="fleet-uplift-empty">No fuel uplifts logged yet.</p>';
         return;
       }
+      const head = '<table class="fleet-uplift-table"><thead><tr><th>When</th><th>Fuel after</th><th>Notes</th>'
+        + (canManage ? '<th></th>' : '')
+        + '</tr></thead><tbody>';
+      const cells = rows.map((row) => {
+        const fuel = escapeHtml((row.fuel || '—') + ' ' + (row.unit || 'USG'));
+        const when = escapeHtml(row.when || '—');
+        const notes = escapeHtml(row.notes || '—');
+        let action = '';
+        if (canManage && Number(row.id || 0) > 0) {
+          action = '<td><form method="post" action="' + escapeHtml(actionUrl) + '" onsubmit="return confirm(\'Delete this fuel uplift?\');">'
+            + '<input type="hidden" name="csrf_token" value="' + escapeHtml(csrf) + '">'
+            + '<input type="hidden" name="action" value="delete_fuel_uplift">'
+            + '<input type="hidden" name="uplift_id" value="' + escapeHtml(String(row.id)) + '">'
+            + '<button class="app-btn app-btn-secondary legs-btn-remove" type="submit"><span>Delete</span></button>'
+            + '</form></td>';
+        } else if (canManage) {
+          action = '<td></td>';
+        }
+        return '<tr><td>' + when + '</td><td>' + fuel + '</td><td>' + notes + '</td>' + action + '</tr>';
+      }).join('');
+      body.innerHTML = head + cells + '</tbody></table>';
+    };
+
+    const openModal = (openEl) => {
       const modal = document.getElementById('fleet-uplift-modal');
-      if (!modal) {
+      if (!modal || !openEl) {
         return;
       }
-      const reg = openBtn.getAttribute('data-aircraft-registration') || '';
-      const unit = openBtn.getAttribute('data-fuel-unit') || 'USG';
-      const capacity = openBtn.getAttribute('data-fuel-capacity') || '';
-      document.getElementById('fleet-uplift-aircraft-id').value = openBtn.getAttribute('data-aircraft-id') || '';
-      document.getElementById('fleet-uplift-aircraft-registration').value = reg;
-      document.getElementById('fleet-uplift-aircraft-label').textContent = reg || '—';
-      document.getElementById('fleet-uplift-unit').textContent = unit;
-      document.getElementById('fleet-uplift-capacity-hint').textContent = capacity !== ''
-        ? ('Aircraft capacity ≈ ' + capacity + ' ' + unit)
-        : '';
-      document.getElementById('fleet-uplift-fuel').value = '';
-      document.getElementById('fleet-uplift-notes').value = '';
+      const reg = openEl.getAttribute('data-aircraft-registration') || '';
+      const unit = openEl.getAttribute('data-fuel-unit') || 'USG';
+      const capacity = openEl.getAttribute('data-fuel-capacity') || '';
+      let rows = [];
+      try {
+        rows = JSON.parse(openEl.getAttribute('data-uplifts') || '[]');
+      } catch (_err) {
+        rows = [];
+      }
+      const label = document.getElementById('fleet-uplift-aircraft-label');
+      if (label) {
+        label.textContent = reg || '—';
+      }
+      const aircraftId = document.getElementById('fleet-uplift-aircraft-id');
+      const aircraftReg = document.getElementById('fleet-uplift-aircraft-registration');
+      const unitEl = document.getElementById('fleet-uplift-unit');
+      const hint = document.getElementById('fleet-uplift-capacity-hint');
+      const fuelInput = document.getElementById('fleet-uplift-fuel');
+      const notesInput = document.getElementById('fleet-uplift-notes');
+      const whenInput = document.getElementById('fleet-uplift-when');
+      if (aircraftId) {
+        aircraftId.value = openEl.getAttribute('data-aircraft-id') || '';
+      }
+      if (aircraftReg) {
+        aircraftReg.value = reg;
+      }
+      if (unitEl) {
+        unitEl.textContent = unit;
+      }
+      if (hint) {
+        hint.textContent = capacity !== '' ? ('Aircraft capacity ≈ ' + capacity + ' ' + unit) : '';
+      }
+      if (fuelInput) {
+        fuelInput.value = '';
+        if (capacity !== '') {
+          fuelInput.max = capacity;
+        }
+      }
+      if (notesInput) {
+        notesInput.value = '';
+      }
+      if (whenInput) {
+        whenInput.value = '';
+      }
+      renderHistory(rows);
       modal.hidden = false;
+    };
+
+    grid.addEventListener('click', (event) => {
+      const openEl = event.target instanceof Element ? event.target.closest('[data-fleet-uplift-open]') : null;
+      if (!openEl) {
+        return;
+      }
+      openModal(openEl);
+    });
+    grid.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+      }
+      const openEl = event.target instanceof Element ? event.target.closest('[data-fleet-uplift-open]') : null;
+      if (!openEl) {
+        return;
+      }
+      event.preventDefault();
+      openModal(openEl);
     });
     const modal = document.getElementById('fleet-uplift-modal');
     if (modal) {
@@ -4254,6 +4710,12 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
 
     const crewCatalog = JSON.parse(document.getElementById('legs-crew-catalog')?.textContent || '[]');
     const flightMissions = JSON.parse(document.getElementById('legs-flight-missions')?.textContent || '[]');
+    const instructionalRates = JSON.parse(document.getElementById('legs-financial-rates')?.textContent || '[]');
+    const aircraftRentalRates = JSON.parse(document.getElementById('legs-aircraft-rental-rates')?.textContent || '{}');
+    const customerBalances = JSON.parse(document.getElementById('legs-customer-balances')?.textContent || '{}');
+    const isAdminAudience = <?= json_encode($cvrMlAudience === 'admin') ?>;
+    let financialLocked = false;
+    let financialFlightHoursTouched = false;
     const roleOptions = [
       ['student', 'Student'],
       ['pic', 'PIC'],
@@ -4355,6 +4817,149 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       }
       document.getElementById('legs-edit-off-combined').value =
         date && time ? (date + ' ' + time) : '';
+      syncFinancialFlightHoursFromHobbs();
+      refreshFinancialOverview();
+    };
+
+    const money = (n) => {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return '$0.00';
+      return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    const selectedOptionLabel = (select) => {
+      const opt = select?.selectedOptions?.[0];
+      if (!opt) return '';
+      return String(opt.textContent || '').replace(/\s\(Instr\)$/, '').trim();
+    };
+
+    const setFinancialLockedState = (locked) => {
+      financialLocked = !!locked;
+      const banner = document.getElementById('legs-fin-locked-banner');
+      const unlockBox = document.getElementById('legs-fin-unlock-box');
+      banner?.classList.toggle('is-on', financialLocked);
+      unlockBox?.classList.toggle('is-on', financialLocked);
+      form.querySelectorAll('[data-fin-field]').forEach((el) => {
+        el.disabled = financialLocked;
+      });
+      const lockBtn = document.getElementById('legs-edit-save-lock-btn');
+      if (lockBtn) {
+        lockBtn.disabled = financialLocked || !isFinancialComplete();
+      }
+    };
+
+    const isFinancialComplete = () => {
+      const customer = Number(document.getElementById('legs-fin-customer')?.value || 0);
+      const instructor = Number(document.getElementById('legs-fin-instructor')?.value || 0);
+      const rate = Number(document.getElementById('legs-fin-rate')?.value || 0);
+      const flightHours = Number(document.getElementById('legs-fin-flight-hours')?.value);
+      return customer > 0 && instructor > 0 && rate > 0 && Number.isFinite(flightHours) && flightHours >= 0;
+    };
+
+    const syncFinancialFlightHoursFromHobbs = () => {
+      if (financialLocked || financialFlightHoursTouched) return;
+      const hs = Number(document.getElementById('legs-edit-hobbs-start').value);
+      const he = Number(document.getElementById('legs-edit-hobbs-end').value);
+      const flightInput = document.getElementById('legs-fin-flight-hours');
+      if (!flightInput) return;
+      if (Number.isFinite(hs) && Number.isFinite(he) && he >= hs) {
+        flightInput.value = oneDecimal(he - hs);
+      }
+    };
+
+    const refreshFinancialOverview = () => {
+      const body = document.getElementById('legs-fin-overview-body');
+      const lockBtn = document.getElementById('legs-edit-save-lock-btn');
+      if (!body) return;
+      const reg = String(document.getElementById('legs-fin-aircraft-reg')?.value || document.getElementById('legs-edit-aircraft')?.value || '').toUpperCase();
+      const rental = aircraftRentalRates[reg] || { display_label: reg || 'Aircraft', rate_usd_per_hour: 0 };
+      const rateSelect = document.getElementById('legs-fin-rate');
+      const groundRateSelect = document.getElementById('legs-fin-ground-rate');
+      if (groundRateSelect && rateSelect) {
+        groundRateSelect.value = rateSelect.value;
+      }
+      const rateOpt = rateSelect?.selectedOptions?.[0];
+      const instrRate = Number(rateOpt?.getAttribute('data-rate') || 0);
+      const aircraftRate = Number(rental.rate_usd_per_hour || 0);
+      const flightHours = Number(document.getElementById('legs-fin-flight-hours')?.value || 0);
+      const groundHours = Number(document.getElementById('legs-fin-ground-hours')?.value || 0);
+      const preflightHours = Number(document.getElementById('legs-fin-preflight')?.value || 0);
+      const customerSelect = document.getElementById('legs-fin-customer');
+      const instructorSelect = document.getElementById('legs-fin-instructor');
+      const customerId = Number(customerSelect?.value || 0);
+      const instructorName = selectedOptionLabel(instructorSelect) || 'Instructor';
+      const customerName = selectedOptionLabel(customerSelect) || '—';
+      const aircraftLabel = String(rental.display_label || reg || '—');
+      document.getElementById('legs-fin-head-customer').textContent = customerName;
+      document.getElementById('legs-fin-head-aircraft').textContent = aircraftLabel;
+      document.getElementById('legs-fin-customer-name').value = customerName === '—' ? '' : customerName;
+      document.getElementById('legs-fin-instructor-name').value = instructorName === 'Instructor' && !instructorSelect?.value ? '' : instructorName;
+      document.getElementById('legs-fin-aircraft-reg').value = reg;
+
+      const aircraftTotal = Math.round(flightHours * aircraftRate * 100) / 100;
+      const flightTotal = Math.round(flightHours * instrRate * 100) / 100;
+      const groundTotal = Math.round(groundHours * instrRate * 100) / 100;
+      const preflightTotal = Math.round(preflightHours * instrRate * 100) / 100;
+      const sessionTotal = Math.round((aircraftTotal + flightTotal + groundTotal + preflightTotal) * 100) / 100;
+      const existing = Number(customerBalances[String(customerId)] || customerBalances[customerId] || 0);
+      const grand = Math.round((existing + sessionTotal) * 100) / 100;
+
+      let html = '';
+      html += '<tr class="is-section"><th>Aircraft Rental</th><th class="num">Hours</th><th class="num">Total</th></tr>';
+      html += '<tr><td>#' + (reg || '—') + ' ' + aircraftLabel + '</td><td class="num">' + oneDecimal(flightHours || 0) + '</td><td class="num">' + money(aircraftTotal) + '</td></tr>';
+      html += '<tr class="is-section"><th>Instruction</th><th class="num">Hours</th><th class="num">Total</th></tr>';
+      if (flightHours > 0) {
+        html += '<tr><td>Flight Time (' + instructorName + ')</td><td class="num">' + oneDecimal(flightHours) + '</td><td class="num">' + money(flightTotal) + '</td></tr>';
+      }
+      if (groundHours > 0) {
+        html += '<tr><td>Ground Instruction (' + instructorName + ')</td><td class="num">' + oneDecimal(groundHours) + '</td><td class="num">' + money(groundTotal) + '</td></tr>';
+      }
+      if (preflightHours > 0) {
+        html += '<tr><td>Preflight Briefing (' + instructorName + ')</td><td class="num">' + oneDecimal(preflightHours) + '</td><td class="num">' + money(preflightTotal) + '</td></tr>';
+      }
+      if (!(flightHours > 0) && !(groundHours > 0) && !(preflightHours > 0)) {
+        html += '<tr><td colspan="3" class="intake-muted">No instruction hours yet.</td></tr>';
+      }
+      html += '<tr><td>Existing Balance</td><td class="num"></td><td class="num">' + money(existing) + '</td></tr>';
+      html += '<tr class="is-total"><td></td><td class="num">Grand total</td><td class="num">' + money(grand) + '</td></tr>';
+      body.innerHTML = html;
+      if (lockBtn) {
+        lockBtn.disabled = financialLocked || !isFinancialComplete();
+      }
+    };
+
+    const fillFinancial = (leg) => {
+      const fin = leg?.financial || {};
+      financialFlightHoursTouched = false;
+      document.getElementById('legs-fin-flight-uuid').value = leg?.workflow_flight_record_uuid || '';
+      document.getElementById('legs-fin-aircraft-reg').value = String(leg?.aircraft_registration || '').toUpperCase();
+      document.getElementById('legs-fin-lock-flag').value = '';
+      const customer = document.getElementById('legs-fin-customer');
+      const instructor = document.getElementById('legs-fin-instructor');
+      const rate = document.getElementById('legs-fin-rate');
+      if (customer) {
+        customer.value = fin.customer_user_id ? String(fin.customer_user_id) : '';
+        if (!customer.value && fin.customer_name) {
+          const match = Array.from(customer.options).find((o) => String(o.textContent || '').trim().toLowerCase() === String(fin.customer_name).toLowerCase());
+          if (match) customer.value = match.value;
+        }
+      }
+      if (instructor) {
+        instructor.value = fin.instructor_user_id ? String(fin.instructor_user_id) : '';
+        if (!instructor.value && fin.instructor_name) {
+          const target = String(fin.instructor_name).toLowerCase();
+          const match = Array.from(instructor.options).find((o) => String(o.textContent || '').replace(/\s\(Instr\)$/, '').trim().toLowerCase() === target);
+          if (match) instructor.value = match.value;
+        }
+      }
+      if (rate && fin.instructional_rate_id) rate.value = String(fin.instructional_rate_id);
+      document.getElementById('legs-fin-preflight').value = oneDecimal(fin.preflight_briefing_hours ?? 0) || '0.0';
+      document.getElementById('legs-fin-flight-hours').value = oneDecimal(fin.flight_instruction_hours ?? leg?.hobbs_delta ?? 0) || '0.0';
+      document.getElementById('legs-fin-ground-hours').value = oneDecimal(fin.ground_instruction_hours ?? 0.3) || '0.3';
+      if (fin.customer_name) document.getElementById('legs-fin-customer-name').value = fin.customer_name;
+      if (fin.instructor_name) document.getElementById('legs-fin-instructor-name').value = fin.instructor_name;
+      setFinancialLockedState(!!fin.is_locked);
+      refreshFinancialOverview();
     };
 
     const normalizeTimeInput = (input) => {
@@ -4489,6 +5094,7 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       document.getElementById('legs-csv-flight-label').textContent = leg.workflow_flight_record_uuid || '—';
       document.getElementById('legs-csv-status').textContent = leg.has_garmin_csv ? 'Garmin Uploaded' : 'Garmin Missing';
       renderCrew(leg.crew || []);
+      fillFinancial(leg);
       updateDerived();
       baselineSnapshot = serializeSnapshot();
       loadGenericBriefing(leg);
@@ -4584,6 +5190,7 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
 
     document.getElementById('legs-edit-aircraft')?.addEventListener('change', () => {
       applyAircraftUnits();
+      document.getElementById('legs-fin-aircraft-reg').value = String(document.getElementById('legs-edit-aircraft')?.value || '').toUpperCase();
       updateDerived();
     });
     ['legs-edit-hobbs-start','legs-edit-hobbs-end','legs-edit-tacho-start','legs-edit-tacho-end','legs-edit-fuel-dep','legs-edit-fuel-ldg','legs-edit-date','legs-edit-off-time']
@@ -4597,6 +5204,56 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     });
     document.getElementById('legs-edit-arr')?.addEventListener('input', (e) => {
       e.target.value = String(e.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+    });
+
+    document.getElementById('legs-fin-flight-hours')?.addEventListener('input', () => {
+      financialFlightHoursTouched = true;
+      refreshFinancialOverview();
+    });
+    ['legs-fin-customer','legs-fin-instructor','legs-fin-rate','legs-fin-preflight','legs-fin-ground-hours']
+      .forEach((id) => document.getElementById(id)?.addEventListener('input', refreshFinancialOverview));
+    ['legs-fin-customer','legs-fin-instructor','legs-fin-rate']
+      .forEach((id) => document.getElementById(id)?.addEventListener('change', refreshFinancialOverview));
+
+    document.getElementById('legs-edit-save-lock-btn')?.addEventListener('click', () => {
+      if (financialLocked) return;
+      if (!isFinancialComplete()) {
+        window.alert('Complete Customer, Instructor, rate, and flight hours before locking.');
+        return;
+      }
+      if (!window.confirm('Save and LOCK this financial dispatch?\n\nAfter lock, only an admin or an instructor with the unlock code can edit it.')) {
+        return;
+      }
+      document.getElementById('legs-fin-lock-flag').value = '1';
+      if (validate()) {
+        form.requestSubmit();
+      } else {
+        document.getElementById('legs-fin-lock-flag').value = '';
+      }
+    });
+
+    document.getElementById('legs-fin-unlock-btn')?.addEventListener('click', () => {
+      const dispatchId = document.getElementById('legs-edit-dispatch-id')?.value || '';
+      if (!dispatchId) return;
+      const unlockForm = document.createElement('form');
+      unlockForm.method = 'post';
+      unlockForm.style.display = 'none';
+      const fields = {
+        action: 'unlock_financial_dispatch',
+        csrf_token: form.querySelector('input[name="csrf_token"]')?.value || '',
+        dispatch_id: dispatchId,
+        unlock_code: document.getElementById('legs-fin-unlock-code')?.value || '',
+        unlock_reason: document.getElementById('legs-fin-unlock-reason')?.value || '',
+      };
+      Object.entries(fields).forEach(([name, value]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = String(value);
+        unlockForm.appendChild(input);
+      });
+      document.body.appendChild(unlockForm);
+      unlockForm.submit();
     });
 
     document.getElementById('legs-edit-add-crew')?.addEventListener('click', () => {
@@ -4632,8 +5289,13 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
           const el = document.getElementById(id);
           if (el && el.value !== '') el.value = oneDecimal(el.value);
         });
+      ['legs-fin-preflight','legs-fin-flight-hours','legs-fin-ground-hours'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el && el.value !== '') el.value = oneDecimal(el.value);
+      });
       syncCrewHiddenNames();
       updateDerived();
+      refreshFinancialOverview();
       // Map oil value into percentage or quantity via oil_unit already set
       const oilUnit = document.getElementById('legs-edit-oil-unit').value || '%';
       const oilVal = document.getElementById('legs-edit-oil-value').value;

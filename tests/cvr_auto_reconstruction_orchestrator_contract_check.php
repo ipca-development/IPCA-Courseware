@@ -20,6 +20,11 @@ $checks = array(
         str_contains($orchestrator, 'freezeAndPrepare(')
         && str_contains($orchestrator, 'require_once __DIR__ . \'/ManualReconstructionBundleService.php\'')
         && str_contains($bundleService, 'function freezeAndPrepare'),
+    'orchestrator auto-starts flight reconstruction worker' =>
+        str_contains($orchestrator, 'ensureFlightReconstructionStarted')
+        && str_contains($orchestrator, 'run_cockpit_recorder_reconstruction.php')
+        && str_contains($orchestrator, 'reconstruction_auto_started')
+        && str_contains($orchestrator, 'replay-source-mode=g3x_only'),
     'orchestrator queues debrief via existing Pass 4 path' =>
         str_contains($orchestrator, 'lockAndQueueDebrief(')
         && str_contains($orchestrator, 'hasReadableTranscript(')

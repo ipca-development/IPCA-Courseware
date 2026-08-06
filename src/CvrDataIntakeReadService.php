@@ -400,6 +400,7 @@ final class CvrDataIntakeReadService
             $recording = $recordingByFlight[$flightKey] ?? array(
                 'recording_id' => null,
                 'recording_uid' => '',
+                'reconstruction_status' => '',
             );
             $bundle = $bundleByFlight[$flightKey] ?? array(
                 'bundle_id' => null,
@@ -429,7 +430,9 @@ final class CvrDataIntakeReadService
             $row['recording_uid'] = $recording['recording_uid'];
             $row['bundle_id'] = $bundle['bundle_id'];
             $row['debrief_id'] = $bundle['debrief_id'];
-            $row['reconstruction_status'] = $bundle['reconstruction_status'];
+            $recordingRecon = strtolower(trim((string)($recording['reconstruction_status'] ?? '')));
+            $bundleRecon = strtolower(trim((string)($bundle['reconstruction_status'] ?? '')));
+            $row['reconstruction_status'] = $recordingRecon !== '' ? $recordingRecon : $bundleRecon;
             $row['debrief_job_id'] = $bundle['debrief_job_id'] ?? null;
             $row['debrief_job_status'] = (string)($bundle['debrief_job_status'] ?? '');
             $row['debrief_job_progress'] = (int)($bundle['debrief_job_progress'] ?? 0);
@@ -469,7 +472,7 @@ final class CvrDataIntakeReadService
         }
         $placeholders = implode(',', array_fill(0, count($flightRecordUuids), '?'));
         $sql = "
-            SELECT LOWER(flight_session_uid) AS flight_key, id, recording_uid
+            SELECT LOWER(flight_session_uid) AS flight_key, id, recording_uid, reconstruction_status
             FROM ipca_cockpit_recordings
             WHERE flight_session_uid IS NOT NULL
               AND flight_session_uid <> ''
@@ -488,6 +491,7 @@ final class CvrDataIntakeReadService
                 $map[$key] = array(
                     'recording_id' => isset($row['id']) ? (int)$row['id'] : null,
                     'recording_uid' => trim((string)($row['recording_uid'] ?? '')),
+                    'reconstruction_status' => strtolower(trim((string)($row['reconstruction_status'] ?? ''))),
                 );
             }
             return $map;

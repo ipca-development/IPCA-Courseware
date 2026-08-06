@@ -91,7 +91,11 @@ struct IPCACVRUnitApp: App {
                     systemMonitor.start()
                     gpsManager.prepare()
                     await settings.refreshAircraft()
+                    await settings.refreshFuelState()
                     await settings.refreshCrewUsers()
+                    workflowStore.backfillDispatchCarryoverIfNeeded(
+                        serverFuelUSG: settings.serverFuelState?.quantityUSG
+                    )
                     await scheduledSessions.refresh(settings: settings)
                     await flightLogs.refresh(settings: settings)
                     await missionCatalog.refreshFromServer(settings: settings)
@@ -142,6 +146,10 @@ struct IPCACVRUnitApp: App {
                             trigger: .appForeground
                         )
                         Task {
+                            await settings.refreshFuelState()
+                            workflowStore.backfillDispatchCarryoverIfNeeded(
+                                serverFuelUSG: settings.serverFuelState?.quantityUSG
+                            )
                             await scheduledSessions.refresh(settings: settings)
                             await flightLogs.refresh(settings: settings)
                             await garminSync.syncPending(

@@ -13,6 +13,7 @@ $currentUser = cw_current_user($pdo) ?: array();
 $service = new FlightScheduleService($pdo);
 $notice = '';
 $error = '';
+$undispatchCandidate = null;
 $selectedDate = substr((string)($_GET['date'] ?? $_GET['from'] ?? ''), 0, 10);
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
     // Operational "today" is Pacific — server UTC midnight must not advance the schedule day early.
@@ -39,6 +40,15 @@ try {
                 (int)($currentUser['id'] ?? 0)
             );
             $notice = 'Reservation deleted.';
+            $editId = '';
+        } elseif ($action === 'undispatch') {
+            require_once __DIR__ . '/../../src/CvrDispatchReleaseService.php';
+            (new CvrDispatchReleaseService($pdo))->releaseBySchedulerRecordId(
+                (string)($_POST['scheduler_record_id'] ?? ''),
+                (int)($currentUser['id'] ?? 0),
+                'admin'
+            );
+            $notice = 'Dispatch released. The reservation is available again.';
             $editId = '';
         } elseif ($action === 'reschedule') {
             $service->rescheduleSlot(
@@ -110,12 +120,19 @@ try {
         ? current(array_filter($slots, static fn(array $slot): bool => (string)$slot['scheduler_record_id'] === $editId))
         : null;
     $editing = is_array($editing) ? $editing : null;
+    $undispatchCandidate = null;
     if (is_array($editing) && empty($editing['editable'])) {
-        $error = (string)($editing['status'] ?? '') === 'completed'
-            ? 'Completed flights are locked and cannot be edited.'
-            : 'This reservation is locked because Dispatch has been activated.';
-        $editing = null;
-        $editId = '';
+        if (!empty($editing['can_undispatch'])) {
+            $undispatchCandidate = $editing;
+            $editing = null;
+            $editId = '';
+        } else {
+            $error = (string)($editing['status'] ?? '') === 'completed'
+                ? 'Completed flights are locked and cannot be edited.'
+                : 'This reservation is locked because Dispatch has been activated.';
+            $editing = null;
+            $editId = '';
+        }
     }
 } catch (Throwable $e) {
     $slots = $slots ?? array();
@@ -338,6 +355,29 @@ compliance_page_open(array(
   <?php endif; ?>
 <?php compliance_modal_close(); ?>
 
+<?php if (is_array($undispatchCandidate)): ?>
+<?php compliance_modal_open('flightUndispatchModal', 'Undispatch reservation'); ?>
+  <form method="post" id="flightUndispatchForm">
+    <input type="hidden" name="action" value="undispatch">
+    <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+    <input type="hidden" name="scheduler_record_id" value="<?= h((string)$undispatchCandidate['scheduler_record_id']) ?>">
+    <p class="fltsch-muted">
+      This reservation was claimed by Dispatch on the CVR Unit, but no flight events, audio, or Check-In evidence exist yet.
+      Undispatch releases the lock so the reservation appears again on the schedule and the device.
+    </p>
+    <dl class="fltsch-change-details">
+      <div><dt>Aircraft</dt><dd><?= h((string)($undispatchCandidate['aircraft']['registration'] ?? '')) ?></dd></div>
+      <div><dt>Mission</dt><dd><?= h((string)($undispatchCandidate['mission']['code'] ?? '')) ?></dd></div>
+      <div><dt>Dispatch</dt><dd><?= h((string)($undispatchCandidate['claimed_dispatch_uuid'] ?? '—')) ?></dd></div>
+    </dl>
+    <div class="compliance-modal__footer">
+      <button type="button" class="compliance-btn compliance-btn--secondary" data-compliance-modal-close>Cancel</button>
+      <button type="submit" class="compliance-btn compliance-btn--primary">Undispatch</button>
+    </div>
+  </form>
+<?php compliance_modal_close(); ?>
+<?php endif; ?>
+
 <?php compliance_modal_open('flightScheduleChangeModal', 'Confirm schedule change'); ?>
   <form method="post" id="flightScheduleChangeForm">
     <input type="hidden" name="action" value="reschedule">
@@ -392,7 +432,22 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
   if (deleteForm) deleteForm.addEventListener('submit', function() { modal.dataset.submitting = '1'; });
 })();
 <?php endif; ?>
+<?php if (is_array($undispatchCandidate)): ?>
+(function() {
+  var modal = document.getElementById('flightUndispatchModal');
+  var returnUrl = <?= json_encode(
+      '/admin/schedule.php?date=' . rawurlencode($selectedDate),
+      JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+  ) ?>;
+  if (modal && typeof modal.showModal === 'function') modal.showModal();
+  if (modal) modal.addEventListener('close', function() {
+    if (!modal.dataset.submitting) window.location.href = returnUrl;
+  });
+  var form = document.getElementById('flightUndispatchForm');
+  if (form) form.addEventListener('submit', function() { modal.dataset.submitting = '1'; });
+})();
+<?php endif; ?>
 </script>
-<script src="/admin/assets/flight_schedule.js?v=20260801.3"></script>
+<script src="/admin/assets/flight_schedule.js?v=20260806.1"></script>
 <?php compliance_page_close(); ?>
 <?php cw_footer(); ?>

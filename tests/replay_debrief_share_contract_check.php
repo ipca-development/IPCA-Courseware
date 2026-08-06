@@ -44,6 +44,11 @@ $checks = array(
         && str_contains($service, 'flight_session_uid')
         && str_contains($replayApi, 'mediaGrant($id)')
         && str_contains($audioApi, 'mediaGrant($id)'),
+    'instructor and supervisor roles can load replay samples and audio without share grant' =>
+        str_contains(file_get_contents($root . '/src/auth.php') ?: '', 'function cw_user_can_access_flight_replay')
+        && str_contains($replayApi, 'cw_user_can_access_flight_replay')
+        && str_contains($audioApi, 'cw_user_can_access_flight_replay')
+        && str_contains($replayPage, "'instructor', 'chief_instructor'"),
     'public audio supports inline streaming but not public attachment downloads' =>
         str_contains($audioApi, "\$isAdmin && (string)(\$_GET['download']")
         && str_contains($audioApi, "header('Content-Disposition: inline')")

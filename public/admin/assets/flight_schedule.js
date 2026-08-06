@@ -271,7 +271,9 @@
       ? 'Click to edit. Drag to move; drag either edge to resize.'
       : (reservation.status === 'completed'
         ? 'Completed flight. Schedule and evidence are locked.'
-        : 'Locked after Dispatch activation.');
+        : (reservation.can_undispatch
+          ? 'Dispatched · click to Undispatch if this was accidental.'
+          : 'Locked after Dispatch activation.'));
     var evidence = reservation.evidence || {};
     var evidenceHtml = reservation.editable ? '' : '<span class="fltsch-evidence">'
       + evidenceChip('D', 'Dispatch Data', evidence.dispatch)
@@ -282,6 +284,9 @@
     element.innerHTML =
       (reservation.editable ? '<span class="fltsch-resize-handle start"></span>' : '')
       + (reservation.editable ? '<button type="button" class="fltsch-event-edit" aria-label="Edit reservation">Edit</button>' : '')
+      + (!reservation.editable && reservation.can_undispatch
+        ? '<button type="button" class="fltsch-event-edit" aria-label="Undispatch reservation">Undispatch</button>'
+        : '')
       + '<span class="fltsch-event-title">' + escapeHtml(eventTitle(reservation)) + '</span>'
       + '<span class="fltsch-event-meta">' + escapeHtml(eventDetail(reservation, start, end)) + '</span>'
       + evidenceHtml

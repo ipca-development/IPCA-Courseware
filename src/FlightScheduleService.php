@@ -81,8 +81,11 @@ final class FlightScheduleService
             LEFT JOIN ipca_missions m ON m.id = s.mission_id
             LEFT JOIN cohorts c ON c.id = s.cohort_id
             LEFT JOIN ipca_cvr_dispatches d
-              ON d.scheduler_record_id = s.scheduler_record_id
-              OR (s.claimed_dispatch_uuid IS NOT NULL AND d.dispatch_uuid = s.claimed_dispatch_uuid)
+              ON (
+                   d.scheduler_record_id = s.scheduler_record_id
+                   OR (s.claimed_dispatch_uuid IS NOT NULL AND d.dispatch_uuid = s.claimed_dispatch_uuid)
+                 )
+              AND LOWER(TRIM(COALESCE(d.status, ''))) <> 'released'
             WHERE s.scheduled_date BETWEEN ? AND ?
         ";
         $params = array($fromDate, $toDate);
@@ -490,6 +493,11 @@ final class FlightScheduleService
         $hasClosure = (bool)($row['has_closure'] ?? false);
         $status = $hasClosure ? 'completed' : (string)$row['status'];
         $editable = $status === 'scheduled' && !$hasDispatch;
+        $canUndispatch = $status === 'claimed'
+            && $hasDispatch
+            && !$hasClosure
+            && !$hasFlightData
+            && empty($row['has_audio']);
         $payload = array(
             'scheduler_record_id' => (string)$row['scheduler_record_id'],
             'reservation_type' => (string)($row['reservation_type'] ?? 'flight_training'),
@@ -515,6 +523,7 @@ final class FlightScheduleService
             'crew' => $crew,
             'status' => $status,
             'editable' => $editable,
+            'can_undispatch' => $canUndispatch,
             'lock_reason' => $editable ? null : ($hasClosure ? 'completed' : 'dispatch_claimed'),
             'claimed_dispatch_uuid' => trim((string)($row['claimed_dispatch_uuid'] ?? '')) ?: null,
             'claimed_at' => isset($row['claimed_at'])

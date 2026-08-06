@@ -116,6 +116,64 @@ struct DeviceEnrollmentResponse: Codable {
     }
 }
 
+struct AircraftFuelStateResponse: Codable {
+    var quantityUSG: Double?
+    var unit: String?
+    var capacity: Double?
+    var source: String?
+    var asOfUTC: String?
+    var aircraftRegistration: String?
+    var upliftUUID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case quantityUSG = "quantity_usg"
+        case unit
+        case capacity
+        case source
+        case asOfUTC = "as_of_utc"
+        case aircraftRegistration = "aircraft_registration"
+        case upliftUUID = "uplift_uuid"
+    }
+}
+
+struct DeviceStatusResponse: Codable {
+    var ok: Bool
+    var fuelState: AircraftFuelStateResponse?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case fuelState = "fuel_state"
+        case error
+    }
+}
+
+struct DispatchReleaseResponse: Codable {
+    var ok: Bool
+    var alreadyReleased: Bool?
+    var schedulerRecordID: String?
+    var dispatchUUID: String?
+    var flightRecordUUID: String?
+    var errorCode: String?
+    var retryable: Bool?
+    var userActionRequired: Bool?
+    var requestID: String?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case alreadyReleased = "already_released"
+        case schedulerRecordID = "scheduler_record_id"
+        case dispatchUUID = "dispatch_uuid"
+        case flightRecordUUID = "flight_record_uuid"
+        case errorCode = "error_code"
+        case retryable
+        case userActionRequired = "user_action_required"
+        case requestID = "request_id"
+        case error
+    }
+}
+
 struct DispatchSyncResponse: Codable {
     struct ServerDispatch: Codable {
         var id: Int
@@ -652,6 +710,17 @@ struct APIClient {
         return try decode(DeviceEnrollmentResponse.self, from: data, response: response)
     }
 
+    func deviceStatus(credential: String) async throws -> DeviceStatusResponse {
+        let url = serverURL.appending(path: "api/cvr/device_status.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(DeviceStatusResponse.self, from: data, response: response)
+    }
+
     func syncDispatch(payload: [String: Any], credential: String) async throws -> DispatchSyncResponse {
         let url = serverURL.appending(path: "api/cvr/dispatch_sync.php")
         var request = URLRequest(url: url)
@@ -665,6 +734,30 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(DispatchSyncResponse.self, from: data, response: response)
+    }
+
+    func releaseDispatch(
+        dispatchUUID: String?,
+        schedulerRecordID: String?,
+        credential: String
+    ) async throws -> DispatchReleaseResponse {
+        let url = serverURL.appending(path: "api/cvr/dispatch_release.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        var body: [String: Any] = [:]
+        if let dispatchUUID, !dispatchUUID.isEmpty {
+            body["dispatch_uuid"] = dispatchUUID
+        }
+        if let schedulerRecordID, !schedulerRecordID.isEmpty {
+            body["scheduler_record_id"] = schedulerRecordID
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(DispatchReleaseResponse.self, from: data, response: response)
     }
 
     func syncWorkflowEvidence(payload: [String: Any], credential: String) async throws -> WorkflowEvidenceSyncResponse {

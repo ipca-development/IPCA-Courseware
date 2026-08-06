@@ -99,6 +99,8 @@ final class SettingsStore: ObservableObject {
     @Published var enrollmentCode: String = ""
     @Published private(set) var deviceEnrollmentStatus: String = "Not enrolled"
     @Published private(set) var deviceEnrollmentError: String = ""
+    /// Live tank quantity from Master Logbook (closure or admin/CVR uplift).
+    @Published private(set) var serverFuelState: AircraftFuelStateResponse?
 
     let supportedLanguages: [(code: String, label: String)] = [
         ("en", "English")
@@ -217,6 +219,32 @@ final class SettingsStore: ObservableObject {
             aircraft = []
             aircraftError = error.localizedDescription
         }
+        await refreshFuelState()
+    }
+
+    /// Pull authoritative fuel quantity (admin uplift or latest closure) for the enrolled aircraft.
+    @discardableResult
+    func refreshFuelState() async -> AircraftFuelStateResponse? {
+        guard let url = normalizedServerURL,
+              let credential = deviceCredential,
+              !credential.isEmpty else {
+            return serverFuelState
+        }
+        do {
+            let response = try await APIClient(serverURL: url).deviceStatus(credential: credential)
+            if response.ok {
+                serverFuelState = response.fuelState
+            }
+        } catch {
+            // Keep last known fuel state when offline.
+        }
+        return serverFuelState
+    }
+
+    /// Formatted USG string for Dispatch fuel onboard, if the server has a quantity.
+    var serverFuelOnboardText: String? {
+        guard let qty = serverFuelState?.quantityUSG else { return nil }
+        return String(format: "%.1f", qty)
     }
 
     func refreshCrewUsers() async {

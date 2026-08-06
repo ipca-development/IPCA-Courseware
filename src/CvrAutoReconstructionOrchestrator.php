@@ -141,6 +141,8 @@ final class CvrAutoReconstructionOrchestrator
             'froze' => $froze,
         );
 
+        $out['reconstruction'] = $this->ensureFlightReconstructionStarted($bundleId, $recordingId);
+
         require_once __DIR__ . '/CockpitRecorderDebriefQueueService.php';
         $debriefQueue = CockpitRecorderDebriefQueueService::fromPdo($this->pdo);
         if (!CockpitRecorderDebriefQueueService::autoDebriefEnabled()) {
@@ -164,6 +166,120 @@ final class CvrAutoReconstructionOrchestrator
         }
 
         return $out;
+    }
+
+    /**
+     * Spawn CockpitReplayPipeline reconstruction once the frozen triad exists.
+     *
+     * @return array<string,mixed>
+     */
+    private function ensureFlightReconstructionStarted(int $bundleId, int $recordingId): array
+    {
+        if ($bundleId <= 0 || $recordingId <= 0) {
+            return array('ok' => false, 'reason' => 'missing_ids');
+        }
+
+        $statement = $this->pdo->prepare(
+            'SELECT reconstruction_status FROM ipca_cockpit_recordings WHERE id = ? LIMIT 1'
+        );
+        $statement->execute(array($recordingId));
+        $status = strtolower(trim((string)$statement->fetchColumn()));
+        if (in_array($status, array('ready', 'processing', 'queued'), true)) {
+            return array('ok' => true, 'skipped' => true, 'reason' => 'already_' . ($status !== '' ? $status : 'started'), 'status' => $status);
+        }
+
+        try {
+            require_once __DIR__ . '/CockpitReconstructionService.php';
+            require_once __DIR__ . '/CockpitRecorderService.php';
+            require_once __DIR__ . '/AuditEventService.php';
+
+            $source = $this->bundles->reconstructionSource($bundleId);
+            $service = new CockpitReconstructionService($this->pdo);
+            $jobId = $service->createReconstructionJob($recordingId);
+
+            $this->pdo->prepare(
+                "UPDATE ipca_cockpit_recordings
+                 SET reconstruction_status = 'processing', timeline_status = 'processing',
+                     error_message = NULL, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?"
+            )->execute(array($recordingId));
+
+            $this->pdo->prepare(
+                "UPDATE ipca_manual_intake_bundles
+                 SET status = 'processing', replay_status = 'processing', reconstruction_job_id = ?,
+                     processing_error = NULL WHERE id = ?"
+            )->execute(array($jobId, $bundleId));
+
+            $php = $this->cliPhpBinary();
+            $script = realpath(__DIR__ . '/../scripts/run_cockpit_recorder_reconstruction.php');
+            if ($php === '' || $script === false || !function_exists('exec')) {
+                throw new RuntimeException('Reconstruction worker is unavailable.');
+            }
+
+            $logDir = CockpitRecorderService::projectRoot() . '/storage/logs';
+            if (!is_dir($logDir)) {
+                @mkdir($logDir, 0775, true);
+            }
+            $log = $logDir . '/auto_bundle_reconstruction_' . $bundleId . '.log';
+            $command = 'nohup '
+                . escapeshellarg($php) . ' '
+                . escapeshellarg($script) . ' '
+                . escapeshellarg('--recording-id=' . $recordingId) . ' '
+                . escapeshellarg('--job-id=' . $jobId) . ' '
+                . escapeshellarg('--bundle-id=' . $bundleId) . ' '
+                . escapeshellarg('--g3x-csv-path=' . (string)$source['g3x_csv_path']) . ' '
+                . escapeshellarg('--replay-source-mode=g3x_only')
+                . ' >> ' . escapeshellarg($log) . ' 2>&1 < /dev/null & echo $!';
+            $output = array();
+            $exitCode = 0;
+            exec($command, $output, $exitCode);
+            if ($exitCode !== 0) {
+                throw new RuntimeException('Could not start the Reconstruction worker.');
+            }
+
+            if ($this->tableExists('ipca_manual_intake_bundle_audit')) {
+                $this->pdo->prepare(
+                    'INSERT INTO ipca_manual_intake_bundle_audit
+                     (event_uuid, bundle_id, event_type, actor_user_id, detail_json)
+                     VALUES (?, ?, \'reconstruction_auto_started\', NULL, ?)'
+                )->execute(array(
+                    AuditEventService::uuid(),
+                    $bundleId,
+                    AuditEventService::jsonEncode(array(
+                        'job_id' => $jobId,
+                        'recording_id' => $recordingId,
+                        'pid' => trim((string)($output[0] ?? '')),
+                    )),
+                ));
+            }
+
+            return array(
+                'ok' => true,
+                'started' => true,
+                'job_id' => $jobId,
+                'status' => 'processing',
+            );
+        } catch (Throwable $e) {
+            error_log('[CvrAutoReconstructionOrchestrator] reconstruction start failed: ' . $e->getMessage());
+            return array('ok' => false, 'error' => $e->getMessage());
+        }
+    }
+
+    private function cliPhpBinary(): string
+    {
+        $candidates = array();
+        $bindir = trim((string)PHP_BINDIR);
+        if ($bindir !== '') {
+            $candidates[] = $bindir . DIRECTORY_SEPARATOR . 'php';
+        }
+        $candidates[] = '/usr/bin/php';
+        $candidates[] = '/usr/local/bin/php';
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate) && is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+        return '';
     }
 
     private function resolveFlightUuid(

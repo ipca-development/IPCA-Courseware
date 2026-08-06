@@ -69,8 +69,8 @@ if ($id === '') {
 
 try {
     $currentUser = cw_current_user($pdo);
-    $isAdmin = is_array($currentUser) && (string)($currentUser['role'] ?? '') === 'admin';
-    if (!$isAdmin) {
+    $canStaffReplay = cw_user_can_access_flight_replay(is_array($currentUser) ? $currentUser : null);
+    if (!$canStaffReplay) {
         $replayApiPublic = true;
         (new ReplayShareService($pdo))->mediaGrant($id);
     }

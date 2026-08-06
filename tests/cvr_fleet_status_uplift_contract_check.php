@@ -22,25 +22,33 @@ $checks = array(
         && str_contains($fleetService, 'ending_tacho')
         && str_contains($fleetService, 'fuel_remaining')
         && str_contains($fleetService, 'latestForAircraft')
-        && str_contains($fleetService, 'cardsForAircraft'),
-    'Master Logbook renders fleet cards with hobbs oil fuel uplift UI' =>
+        && str_contains($fleetService, 'cardsForAircraft')
+        && str_contains($fleetService, 'dispatch_oil_percentage')
+        && str_contains($fleetService, 'oilPresentation'),
+    'Master Logbook renders compact fleet cards with hobbs oil fuel' =>
         str_contains($intake, 'fleet-status-grid')
-        && str_contains($intake, 'Latest Hobbs')
-        && str_contains($intake, 'Latest Tacho')
-        && str_contains($intake, 'Oil last logged')
-        && str_contains($intake, 'Log Fuel Uplift')
-        && str_contains($intake, 'data-fleet-uplift-list')
-        && str_contains($intake, 'delete_fuel_uplift')
-        && str_contains($intake, 'cvr_intake_fleet_logged_label'),
+        && str_contains($intake, 'fleet-status-meters')
+        && str_contains($intake, 'fleet-status-instrument')
+        && str_contains($intake, '>Hobbs<')
+        && str_contains($intake, '>Tacho<')
+        && str_contains($intake, '>Oil<')
+        && str_contains($intake, 'fleet-status-burn')
+        && str_contains($intake, 'data-fleet-uplift-open')
+        && !str_contains($intake, 'data-fleet-uplift-list')
+        && !str_contains($intake, 'Log Fuel Uplift')
+        && str_contains($intake, 'cvr_intake_fleet_logged_parts'),
     'admin-only uplift create and delete actions' =>
         str_contains($intake, "'create_fuel_uplift'")
         && str_contains($intake, "'delete_fuel_uplift'")
         && str_contains($intake, '$cvrMlCanManageFuelUplifts')
         && str_contains($intake, 'Fuel uplift logging is only available to admins.'),
-    'live uplift modal and list toggle exist' =>
+    'uplift modal includes add form and history table' =>
         str_contains($intake, 'initFleetStatusCards')
         && str_contains($intake, 'fleet-uplift-modal')
-        && str_contains($intake, 'fuel_after_usg'),
+        && str_contains($intake, 'fleet-uplift-history')
+        && str_contains($intake, 'fleet-uplift-table')
+        && str_contains($intake, 'fuel_after_usg')
+        && str_contains($intake, 'renderHistory'),
 );
 
 $failed = array();
