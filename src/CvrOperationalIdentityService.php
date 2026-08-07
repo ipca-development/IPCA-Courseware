@@ -249,45 +249,78 @@ final class CvrOperationalIdentityService
 
         $legUuid = null;
         if ($activityDomain === 'flight') {
-            $existingLegs = $this->listLegsForReservation($reservationUuid);
-            $sequenceOne = null;
-            foreach ($existingLegs as $existingLeg) {
-                if ((int)($existingLeg['sequence_number'] ?? 0) === 1
-                    && (int)($existingLeg['organization_id'] ?? 0) === $organizationId) {
-                    $sequenceOne = $existingLeg;
-                    break;
-                }
-            }
             $startLocal = $this->normalizeScheduleLocalDateTime((string)($input['scheduled_start_time'] ?? ''));
             $endLocal = $this->normalizeScheduleLocalDateTime((string)($input['scheduled_end_time'] ?? ''));
-            $origin = $this->normalizeAirportCode((string)($input['planned_departure_airport'] ?? ''));
-            $destination = $this->normalizeAirportCode((string)($input['planned_destination_airport'] ?? ''));
-            if ($sequenceOne !== null) {
-                $this->assertReusableOnlineLegMatches(
-                    $sequenceOne,
-                    $organizationId,
-                    $reservationUuid,
-                    $origin,
-                    $destination,
-                    $startLocal,
-                    $endLocal,
-                    $timezone
-                );
-                $legUuid = (string)$sequenceOne['leg_uuid'];
-            } else {
+            $chain = array();
+            if (isset($input['airport_chain']) && is_array($input['airport_chain'])) {
+                foreach ($input['airport_chain'] as $airport) {
+                    $code = $this->normalizeAirportCode((string)$airport);
+                    if ($code !== '') {
+                        $chain[] = $code;
+                    }
+                }
+            }
+            if (count($chain) < 2) {
+                $origin = $this->normalizeAirportCode((string)($input['planned_departure_airport'] ?? ''));
+                $destination = $this->normalizeAirportCode((string)($input['planned_destination_airport'] ?? ''));
+                $chain = array_values(array_filter(array($origin, $destination), static fn(string $c): bool => $c !== ''));
+            }
+            if (count($chain) < 2) {
+                throw new InvalidArgumentException('Flight schedule identity requires departure and destination airports.');
+            }
+
+            $existingLegs = $this->listLegsForReservation($reservationUuid);
+            $legsBySequence = array();
+            foreach ($existingLegs as $existingLeg) {
+                if ((int)($existingLeg['organization_id'] ?? 0) !== $organizationId) {
+                    continue;
+                }
+                $seq = (int)($existingLeg['sequence_number'] ?? 0);
+                if ($seq >= 1) {
+                    $legsBySequence[$seq] = $existingLeg;
+                }
+            }
+
+            $legCount = count($chain) - 1;
+            for ($index = 0; $index < $legCount; $index++) {
+                $sequence = $index + 1;
+                $origin = $chain[$index];
+                $destination = $chain[$index + 1];
+                // Reservation time window applies to the whole multi-leg block.
+                $legStart = $startLocal;
+                $legEnd = $endLocal;
+                if (isset($legsBySequence[$sequence])) {
+                    $this->assertReusableOnlineLegMatches(
+                        $legsBySequence[$sequence],
+                        $organizationId,
+                        $reservationUuid,
+                        $origin,
+                        $destination,
+                        $legStart,
+                        $legEnd,
+                        $timezone,
+                        $sequence
+                    );
+                    if ($sequence === 1) {
+                        $legUuid = (string)$legsBySequence[$sequence]['leg_uuid'];
+                    }
+                    continue;
+                }
                 $leg = $this->createFlightLeg(array(
                     'reservation_uuid' => $reservationUuid,
                     'organization_id' => $organizationId,
-                    'sequence_number' => 1,
+                    'sequence_number' => $sequence,
                     'origin_airport' => $origin,
                     'destination_airport' => $destination,
-                    'planned_start_local' => $startLocal,
-                    'planned_end_local' => $endLocal,
+                    'planned_start_local' => $legStart,
+                    'planned_end_local' => $legEnd,
                     'organization_timezone_iana' => $timezone,
                     'status' => 'scheduled',
                     'source' => 'server_create',
                 ), true);
-                $legUuid = (string)$leg['leg_uuid'];
+                if ($sequence === 1) {
+                    $legUuid = (string)$leg['leg_uuid'];
+                }
             }
         }
 
@@ -1010,7 +1043,8 @@ final class CvrOperationalIdentityService
         string $destination,
         ?string $startLocal,
         ?string $endLocal,
-        string $timezone
+        string $timezone,
+        int $sequenceNumber = 1
     ): void {
         if ((string)($leg['leg_uuid'] ?? '') === '' || !self::isValidUuid((string)$leg['leg_uuid'])) {
             $this->logTechnicalDiagnostic('online_schedule_leg_immutable_conflict', array(
@@ -1028,7 +1062,7 @@ final class CvrOperationalIdentityService
 
         $matches = (int)($leg['organization_id'] ?? 0) === $organizationId
             && (string)($leg['reservation_uuid'] ?? '') === $reservationUuid
-            && (int)($leg['sequence_number'] ?? 0) === 1
+            && (int)($leg['sequence_number'] ?? 0) === $sequenceNumber
             && $this->normalizeAirportCode((string)($leg['origin_airport'] ?? '')) === $origin
             && $this->normalizeAirportCode((string)($leg['destination_airport'] ?? '')) === $destination
             && $this->normalizeComparableUtc((string)($leg['planned_start_at_utc'] ?? ''))

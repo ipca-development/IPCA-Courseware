@@ -56,9 +56,10 @@ try {
                 (string)($_POST['scheduled_start_time'] ?? ''),
                 (string)($_POST['scheduled_end_time'] ?? ''),
                 (int)($currentUser['id'] ?? 0),
-                (string)($_POST['expected_updated_at'] ?? '')
+                (string)($_POST['expected_updated_at'] ?? ''),
+                (int)($_POST['aircraft_id'] ?? 0) ?: null
             );
-            $notice = 'Reservation time updated.';
+            $notice = 'Reservation updated.';
             $editId = '';
         } else {
             $_POST['scheduled_date'] = (string)($_POST['scheduled_start_date'] ?? '');
@@ -158,6 +159,23 @@ $formEndClock = isset($editing['scheduled_end_time'])
     ? substr((string)$editing['scheduled_end_time'], 11, 5)
     : '12:00';
 $formCrew = is_array($editing['crew'] ?? null) ? array_values($editing['crew']) : array();
+$formAirportChain = array();
+if (is_array($editing) && is_array($editing['airport_chain'] ?? null)) {
+    foreach ($editing['airport_chain'] as $code) {
+        $code = strtoupper(trim((string)$code));
+        if ($code !== '') {
+            $formAirportChain[] = $code;
+        }
+    }
+}
+if (count($formAirportChain) < 2 && is_array($editing)) {
+    $dep = strtoupper(trim((string)($editing['planned_departure_airport'] ?? '')));
+    $arr = strtoupper(trim((string)($editing['planned_destination_airport'] ?? '')));
+    $formAirportChain = array_values(array_filter(array($dep, $arr), static fn(string $c): bool => $c !== ''));
+}
+if (count($formAirportChain) < 2) {
+    $formAirportChain = array('', '');
+}
 
 $staffIds = array_fill_keys(array_map(static fn(array $row): int => (int)$row['id'], $staff), true);
 $schedulerReservations = array();
@@ -321,6 +339,7 @@ compliance_page_open(array(
 
       <div class="fltsch-crew">
         <h3 class="fltsch-crew-title">Crew</h3>
+        <p class="fltsch-muted" style="margin:0 0 10px">One crew set for the whole reservation. Different crew or a PIC role swap requires a separate reservation.</p>
         <?php for ($i = 0; $i < 3; $i++): ?>
           <?php $assigned = is_array($formCrew[$i] ?? null) ? $formCrew[$i] : array(); ?>
           <div class="fltsch-crew-row">
@@ -336,8 +355,24 @@ compliance_page_open(array(
       <label class="cmpcal-field"><span>Depart time</span><input type="time" name="scheduled_start_clock" value="<?= h($formStartClock) ?>" required></label>
       <label class="cmpcal-field"><span>Return date</span><input type="date" name="scheduled_end_date" value="<?= h($formEndDate) ?>" required></label>
       <label class="cmpcal-field"><span>Return time</span><input type="time" name="scheduled_end_clock" value="<?= h($formEndClock) ?>" required></label>
-      <label class="cmpcal-field"><span>Departure airport</span><input name="planned_departure_airport" maxlength="8" value="<?= h((string)($editing['planned_departure_airport'] ?? '')) ?>"></label>
-      <label class="cmpcal-field"><span>Destination airport</span><input name="planned_destination_airport" maxlength="8" value="<?= h((string)($editing['planned_destination_airport'] ?? '')) ?>"></label>
+      <div class="fltsch-crew fltsch-field-full" id="flightAirportChain">
+        <h3 class="fltsch-crew-title">Route legs</h3>
+        <p class="fltsch-muted" style="margin:0 0 10px">Same crew for all legs. Add legs for a continuous airport chain (arrival of leg N = departure of leg N+1).</p>
+        <div id="flightAirportChainRows">
+          <?php foreach ($formAirportChain as $index => $code): ?>
+            <label class="cmpcal-field" style="margin-top:8px">
+              <span><?= $index === 0 ? 'Departure airport' : ($index === count($formAirportChain) - 1 ? 'Final destination' : 'Via / next airport') ?></span>
+              <input name="airport_chain[]" maxlength="8" value="<?= h($code) ?>" data-airport-chain-index="<?= $index ?>" <?= $index < 2 ? 'required' : '' ?>>
+            </label>
+          <?php endforeach; ?>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="compliance-btn compliance-btn--secondary" id="flightAddLegBtn">Add leg</button>
+          <button type="button" class="compliance-btn compliance-btn--secondary" id="flightRemoveLegBtn">Remove last leg</button>
+        </div>
+        <input type="hidden" name="planned_departure_airport" id="flightLegacyDeparture" value="<?= h((string)($formAirportChain[0] ?? '')) ?>">
+        <input type="hidden" name="planned_destination_airport" id="flightLegacyDestination" value="<?= h((string)($formAirportChain[count($formAirportChain) - 1] ?? '')) ?>">
+      </div>
       <label class="cmpcal-field fltsch-field-full"><span>Public notes</span><textarea name="notes" maxlength="1000"><?= h((string)($editing['notes'] ?? '')) ?></textarea></label>
     </div>
     <div class="compliance-modal__footer">
@@ -385,9 +420,10 @@ compliance_page_open(array(
     <input type="hidden" name="scheduler_record_id" id="flightChangeRecordId">
     <input type="hidden" name="scheduled_start_time" id="flightChangeStart">
     <input type="hidden" name="scheduled_end_time" id="flightChangeEnd">
+    <input type="hidden" name="aircraft_id" id="flightChangeAircraftId">
     <input type="hidden" name="expected_updated_at" id="flightChangeExpectedUpdatedAt">
     <dl class="fltsch-change-details" id="flightChangeDetails"></dl>
-    <div class="fltsch-change-note">The aircraft, crew, mission and cohort remain unchanged. Reservations already claimed by Dispatch cannot be moved.</div>
+    <div class="fltsch-change-note">Crew, mission and cohort remain unchanged. Drag onto another aircraft row to move the reservation. Claimed Dispatch reservations cannot be moved.</div>
     <div class="compliance-modal__footer">
       <button type="button" class="compliance-btn compliance-btn--secondary" data-compliance-modal-close>Cancel</button>
       <button type="submit" class="compliance-btn compliance-btn--primary">Apply Schedule Change</button>
@@ -415,6 +451,57 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
   select.addEventListener('change', function() { syncCrew(true); });
   syncCrew(false);
 });
+(function() {
+  var rows = document.getElementById('flightAirportChainRows');
+  var addBtn = document.getElementById('flightAddLegBtn');
+  var removeBtn = document.getElementById('flightRemoveLegBtn');
+  var legacyDep = document.getElementById('flightLegacyDeparture');
+  var legacyArr = document.getElementById('flightLegacyDestination');
+  if (!rows || !addBtn || !removeBtn) return;
+
+  function inputs() {
+    return Array.prototype.slice.call(rows.querySelectorAll('input[name="airport_chain[]"]'));
+  }
+
+  function relabel() {
+    var fields = inputs();
+    fields.forEach(function(input, index) {
+      var span = input.parentElement && input.parentElement.querySelector('span');
+      if (!span) return;
+      if (index === 0) span.textContent = 'Departure airport';
+      else if (index === fields.length - 1) span.textContent = 'Final destination';
+      else span.textContent = 'Via / next airport';
+      input.required = index < 2;
+    });
+    if (legacyDep && fields[0]) legacyDep.value = fields[0].value || '';
+    if (legacyArr && fields.length) legacyArr.value = fields[fields.length - 1].value || '';
+  }
+
+  rows.addEventListener('input', relabel);
+
+  addBtn.addEventListener('click', function() {
+    var label = document.createElement('label');
+    label.className = 'cmpcal-field';
+    label.style.marginTop = '8px';
+    label.innerHTML = '<span>Via / next airport</span><input name="airport_chain[]" maxlength="8" value="">';
+    rows.appendChild(label);
+    relabel();
+  });
+
+  removeBtn.addEventListener('click', function() {
+    var fields = inputs();
+    if (fields.length <= 2) return;
+    var last = fields[fields.length - 1];
+    if (last && last.parentElement) last.parentElement.remove();
+    relabel();
+  });
+
+  var saveForm = document.getElementById('flightReservationForm');
+  if (saveForm) {
+    saveForm.addEventListener('submit', function() { relabel(); });
+  }
+  relabel();
+})();
 <?php if ($editing): ?>
 (function() {
   var modal = document.getElementById('flightReservationModal');
@@ -448,6 +535,6 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
 })();
 <?php endif; ?>
 </script>
-<script src="/admin/assets/flight_schedule.js?v=20260806.1"></script>
+<script src="/admin/assets/flight_schedule.js?v=20260806.2"></script>
 <?php compliance_page_close(); ?>
 <?php cw_footer(); ?>

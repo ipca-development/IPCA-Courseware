@@ -24,7 +24,7 @@ final class CvrOperationalBlockTimeService
                 try {
                     $off = new DateTimeImmutable($offRaw, new DateTimeZone('UTC'));
                     $seconds = (int)round($deltaHours * 3600);
-                    return $off->modify(sprintf('+%d seconds', $seconds))->format('Y-m-d H:i:s.v');
+                    return $off->modify(sprintf('+%d seconds', $seconds))->format('Y-m-d H:i:s');
                 } catch (Throwable) {
                     // Fall through to closure-carried Hobbs-derived ON Block.
                 }
@@ -131,6 +131,24 @@ final class CvrOperationalBlockTimeService
         }
         $crew = array();
         foreach ($decoded as $member) {
+            if (is_string($member)) {
+                $display = trim($member);
+                if ($display === '') {
+                    continue;
+                }
+                $role = '';
+                $name = $display;
+                if (preg_match('/^(.*)\(([^)]+)\)\s*$/', $display, $matches) === 1) {
+                    $name = trim((string)$matches[1]);
+                    $role = trim((string)$matches[2]);
+                }
+                $crew[] = array(
+                    'name' => $name !== '' ? $name : $display,
+                    'role' => $role,
+                    'display' => $display,
+                );
+                continue;
+            }
             if (!is_array($member)) {
                 continue;
             }

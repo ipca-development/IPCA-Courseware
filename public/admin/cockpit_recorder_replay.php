@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/CockpitRecorderService.php';
 
 $isPublicReplay = defined('IPCA_PUBLIC_REPLAY') && IPCA_PUBLIC_REPLAY === true;
+$replayCanSaveCalibration = false;
 if (!$isPublicReplay) {
     require_once __DIR__ . '/../../src/layout.php';
     cw_require_login();
@@ -13,6 +14,7 @@ if (!$isPublicReplay) {
     if (!in_array($replayRole, array('admin', 'supervisor', 'instructor', 'chief_instructor'), true)) {
         redirect(cw_home_path_for_role($replayRole));
     }
+    $replayCanSaveCalibration = $replayRole === 'admin';
 }
 
 $id = $isPublicReplay
@@ -2421,7 +2423,12 @@ if ($isPublicReplay) {
             <option>Garmin SVT tuned cockpit</option>
           </select>
         </div>
-        <div class="replay-preset-note">Preset storage and admin lock hooks are reserved here for the next admin workflow.</div>
+        <?php if (!empty($replayCanSaveCalibration)): ?>
+        <button class="replay-calibration-button" type="button" id="saveAircraftCalibrationDefault">Save as aircraft default</button>
+        <div class="replay-preset-note">Saves this exact view for every device. Opening this page on the calibrated admin browser also auto-seeds the default once if the aircraft has none yet.</div>
+        <?php else: ?>
+        <div class="replay-preset-note">This replay uses the shared aircraft default view.</div>
+        <?php endif; ?>
       </div>
       <div class="replay-calibration-row">
         <label for="calibrationStep">Step</label>
@@ -2741,6 +2748,10 @@ if ($isPublicReplay) {
   const CAMERA_CALIBRATION_STORAGE_KEY = 'ipca.cockpitReplay.cameraCalibration.v6';
   const CAMERA_PRESET_SCHEMA_VERSION = 1;
   const CAMERA_PRESET_ADMIN_LOCKED = false;
+  const REPLAY_CAN_SAVE_CALIBRATION = <?= !empty($replayCanSaveCalibration) ? 'true' : 'false' ?>;
+  const saveAircraftCalibrationDefaultButton = document.getElementById('saveAircraftCalibrationDefault');
+  let serverCameraCalibrationApplied = false;
+  let cameraCalibrationSaveTimer = null;
   const INSTRUMENT_TOGGLE_IDS = [
     'airspeed_indicator',
     'trim_position_indicator',
@@ -3041,13 +3052,16 @@ if ($isPublicReplay) {
     }
   }
 
-  function loadCameraCalibration() {
-    let saved = {};
+  function readLocalCameraCalibrationRaw() {
     try {
-      saved = JSON.parse(localStorage.getItem(CAMERA_CALIBRATION_STORAGE_KEY) || '{}') || {};
+      return JSON.parse(localStorage.getItem(CAMERA_CALIBRATION_STORAGE_KEY) || '{}') || {};
     } catch (err) {
-      saved = {};
+      return {};
     }
+  }
+
+  function buildCameraCalibrationFromSource(source, fallbackLayoutMode = 'panel') {
+    const saved = source && typeof source === 'object' ? source : {};
     const savedInstruments = saved.instruments && typeof saved.instruments === 'object' ? saved.instruments : {};
     const instruments = {};
     INSTRUMENT_TOGGLE_IDS.forEach((key) => {
@@ -3058,6 +3072,9 @@ if ($isPublicReplay) {
         instruments[key] = true;
       });
     }
+    const explicitLayout = saved.layoutMode === 'panel' || saved.layoutMode === 'legacy'
+      ? saved.layoutMode
+      : (saved.layout_mode === 'panel' || saved.layout_mode === 'legacy' ? saved.layout_mode : null);
     return {
       forwardM: clamp(firstFinite(saved.forwardM, 0), -200, 200),
       rightM: clamp(firstFinite(saved.rightM, 0), -200, 200),
@@ -3071,12 +3088,17 @@ if ($isPublicReplay) {
       attitudeReferenceOffsetPx: clamp(firstFinite(saved.attitudeReferenceOffsetPx, 0), -240, 240),
       yellowPitchReferenceOffsetPx: clamp(firstFinite(saved.yellowPitchReferenceOffsetPx, 0), -240, 240),
       pitchLadderScale: clamp(firstFinite(saved.pitchLadderScale, 1), 0.6, 1.6),
-      layoutMode: saved.layoutMode === 'panel' ? 'panel' : 'legacy',
+      layoutMode: explicitLayout || (fallbackLayoutMode === 'legacy' ? 'legacy' : 'panel'),
       stepM: clamp(firstFinite(saved.stepM, 1), 0.1, 25),
       instruments,
       presetSchemaVersion: CAMERA_PRESET_SCHEMA_VERSION,
       presetAdminLocked: CAMERA_PRESET_ADMIN_LOCKED,
     };
+  }
+
+  function loadCameraCalibration() {
+    // Temporary until aircraft_settings arrive with the payload. Prefer panel so engines show.
+    return buildCameraCalibrationFromSource(readLocalCameraCalibrationRaw(), 'panel');
   }
 
   function replayDefaultInstrumentSettings() {
@@ -3091,31 +3113,147 @@ if ($isPublicReplay) {
 
   function replayDefaultLayoutMode() {
     const layout = replayLayoutSettings();
-    return layout.replay_layout_mode === 'panel' ? 'panel' : 'legacy';
+    if (layout.replay_layout_mode === 'legacy') return 'legacy';
+    if (layout.replay_layout_mode === 'panel') return 'panel';
+    return 'panel';
+  }
+
+  function replayServerCameraCalibrationRaw() {
+    const layout = replayLayoutSettings();
+    return layout.camera_calibration && typeof layout.camera_calibration === 'object'
+      ? layout.camera_calibration
+      : null;
+  }
+
+  function replayAircraftId() {
+    const fromPayload = firstFinite(
+      payload && payload.recording && payload.recording.aircraft_id,
+      payload && payload.aircraft_settings && payload.aircraft_settings.identity && payload.aircraft_settings.identity.aircraft_id,
+      payload && payload.aircraft_settings && payload.aircraft_settings.sources && payload.aircraft_settings.sources.aircraft_id
+    );
+    if (fromPayload) return Math.round(fromPayload);
+    const recordingAircraftId = <?= (int)(is_array($recording) ? ($recording['aircraft_id'] ?? 0) : 0) ?>;
+    return recordingAircraftId > 0 ? recordingAircraftId : 0;
+  }
+
+  function localCameraCalibrationLooksConfigured(saved) {
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return false;
+    if (saved.layoutMode === 'panel' || saved.layoutMode === 'legacy') return true;
+    const tunedKeys = [
+      'forwardM', 'rightM', 'upM', 'yawDeg', 'pitchDeg', 'rollDeg',
+      'horizonBarOffsetPx', 'attitudeReferenceOffsetPx', 'yellowPitchReferenceOffsetPx',
+    ];
+    return tunedKeys.some((key) => {
+      const value = Number(saved[key]);
+      return Number.isFinite(value) && Math.abs(value) > 0.0001;
+    }) || (Number.isFinite(Number(saved.fovDeg)) && Number(saved.fovDeg) !== SYNTHETIC_VISION_DEFAULTS.horizontalFovDeg)
+      || (Number.isFinite(Number(saved.pitchLadderScale)) && Math.abs(Number(saved.pitchLadderScale) - 1) > 0.0001)
+      || (saved.instruments && typeof saved.instruments === 'object');
+  }
+
+  function applyCameraCalibrationObject(next, { persistLocal = true, refresh = true } = {}) {
+    cameraCalibration = buildCameraCalibrationFromSource(next, replayDefaultLayoutMode());
+    if (persistLocal) saveCameraCalibration();
+    if (!refresh) return;
+    updateCalibrationPanel();
+    applyReplayLayoutMode();
+    applyInstrumentVisibility();
+  }
+
+  function applyServerCameraCalibration() {
+    const serverRaw = replayServerCameraCalibrationRaw();
+    const dbInstruments = replayDefaultInstrumentSettings();
+    if (serverRaw) {
+      const merged = { ...serverRaw };
+      if ((!merged.instruments || typeof merged.instruments !== 'object') && dbInstruments && Object.keys(dbInstruments).length > 0) {
+        merged.instruments = dbInstruments;
+      }
+      if (!merged.layoutMode) {
+        merged.layoutMode = replayDefaultLayoutMode();
+      }
+      applyCameraCalibrationObject(merged);
+      serverCameraCalibrationApplied = true;
+      return true;
+    }
+
+    // No shared aircraft calibration yet: keep local tuned view (admin laptop), else panel defaults.
+    const localRaw = readLocalCameraCalibrationRaw();
+    if (localCameraCalibrationLooksConfigured(localRaw)) {
+      const localBuilt = buildCameraCalibrationFromSource(localRaw, replayDefaultLayoutMode());
+      if (dbInstruments && Object.keys(dbInstruments).length > 0) {
+        INSTRUMENT_TOGGLE_IDS.forEach((key) => {
+          if (localRaw.instruments && localRaw.instruments[key] !== undefined) return;
+          if (dbInstruments[key] === undefined) return;
+          localBuilt.instruments[key] = dbInstruments[key] === true;
+        });
+      }
+      applyCameraCalibrationObject(localBuilt);
+    } else {
+      const defaults = buildCameraCalibrationFromSource({
+        layoutMode: replayDefaultLayoutMode(),
+        instruments: dbInstruments,
+      }, 'panel');
+      applyCameraCalibrationObject(defaults);
+    }
+    serverCameraCalibrationApplied = false;
+    return false;
+  }
+
+  async function persistAircraftCameraCalibration({ seedOnlyIfMissing = false, reason = 'Replay camera calibration default' } = {}) {
+    if (!REPLAY_CAN_SAVE_CALIBRATION || !cameraCalibration) return null;
+    const aircraftId = replayAircraftId();
+    if (!aircraftId) return null;
+    const response = await fetch('/admin/api/cockpit_recorder_replay_calibration.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        aircraft_id: aircraftId,
+        calibration: cameraCalibration,
+        seed_only_if_missing: seedOnlyIfMissing === true,
+        reason,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data || data.ok !== true) {
+      throw new Error((data && data.error) || `Calibration save failed (${response.status})`);
+    }
+    if (data.calibration && typeof data.calibration === 'object') {
+      applyCameraCalibrationObject(data.calibration);
+      serverCameraCalibrationApplied = true;
+    }
+    return data;
+  }
+
+  async function maybeSeedAircraftCameraCalibrationFromLocal() {
+    if (!REPLAY_CAN_SAVE_CALIBRATION || serverCameraCalibrationApplied) return;
+    if (replayServerCameraCalibrationRaw()) {
+      serverCameraCalibrationApplied = true;
+      return;
+    }
+    const localRaw = readLocalCameraCalibrationRaw();
+    if (!localCameraCalibrationLooksConfigured(localRaw)) return;
+    try {
+      await persistAircraftCameraCalibration({
+        seedOnlyIfMissing: true,
+        reason: 'Auto-seeded from admin browser calibration',
+      });
+    } catch (err) {
+      // Seeding is best-effort; replay continues with the local calibrated view.
+    }
+  }
+
+  function scheduleAircraftCameraCalibrationSave() {
+    if (!REPLAY_CAN_SAVE_CALIBRATION || !serverCameraCalibrationApplied) return;
+    if (cameraCalibrationSaveTimer) clearTimeout(cameraCalibrationSaveTimer);
+    cameraCalibrationSaveTimer = setTimeout(() => {
+      persistAircraftCameraCalibration({ reason: 'Admin updated shared replay calibration' }).catch(() => {});
+    }, 1200);
   }
 
   function applyReplayInstrumentDefaults() {
-    if (!cameraCalibration || !cameraCalibration.instruments) return;
-    const dbDefaults = replayDefaultInstrumentSettings();
-    let savedInstruments = {};
-    let savedLayoutMode = null;
-    try {
-      const saved = JSON.parse(localStorage.getItem(CAMERA_CALIBRATION_STORAGE_KEY) || '{}') || {};
-      savedInstruments = saved.instruments && typeof saved.instruments === 'object' ? saved.instruments : {};
-      savedLayoutMode = saved.layoutMode === 'panel' || saved.layoutMode === 'legacy' ? saved.layoutMode : null;
-    } catch (err) {
-      savedInstruments = {};
-    }
-    if (!savedLayoutMode) {
-      cameraCalibration.layoutMode = replayDefaultLayoutMode();
-    }
-    if (dbDefaults && Object.keys(dbDefaults).length > 0) {
-      INSTRUMENT_TOGGLE_IDS.forEach((key) => {
-        if (savedInstruments[key] !== undefined || dbDefaults[key] === undefined) return;
-        cameraCalibration.instruments[key] = dbDefaults[key] === true;
-      });
-    }
-    updateCalibrationPanel();
+    applyServerCameraCalibration();
+    maybeSeedAircraftCameraCalibrationFromLocal();
   }
 
   function saveCameraCalibration() {
@@ -3124,6 +3262,7 @@ if ($isPublicReplay) {
     } catch (err) {
       // Calibration is a local visual aid; replay should continue if storage is unavailable.
     }
+    scheduleAircraftCameraCalibrationSave();
   }
 
   function applyReplayLayoutMode() {
@@ -8182,6 +8321,27 @@ if ($isPublicReplay) {
   }
   if (calibrationFovInput) {
     calibrationFovInput.addEventListener('change', () => setSyntheticVisionFov(calibrationFovInput.value));
+  }
+  if (saveAircraftCalibrationDefaultButton) {
+    saveAircraftCalibrationDefaultButton.addEventListener('click', async () => {
+      const original = saveAircraftCalibrationDefaultButton.textContent;
+      saveAircraftCalibrationDefaultButton.disabled = true;
+      saveAircraftCalibrationDefaultButton.textContent = 'Saving…';
+      try {
+        await persistAircraftCameraCalibration({ reason: 'Admin saved shared replay calibration' });
+        saveAircraftCalibrationDefaultButton.textContent = 'Saved for all devices';
+        setTimeout(() => {
+          saveAircraftCalibrationDefaultButton.textContent = original || 'Save as aircraft default';
+          saveAircraftCalibrationDefaultButton.disabled = false;
+        }, 1600);
+      } catch (err) {
+        saveAircraftCalibrationDefaultButton.textContent = 'Save failed';
+        setTimeout(() => {
+          saveAircraftCalibrationDefaultButton.textContent = original || 'Save as aircraft default';
+          saveAircraftCalibrationDefaultButton.disabled = false;
+        }, 2200);
+      }
+    });
   }
   if (altimeterSettingValue) {
     altimeterSettingValue.addEventListener('click', (event) => {

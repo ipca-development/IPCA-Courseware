@@ -114,10 +114,54 @@ final class FlightScheduleService
         if ($aircraftId <= 0) {
             throw new RuntimeException('The authenticated CVR device is not assigned to an aircraft.');
         }
-        return array_values(array_filter(
+        $slots = array_values(array_filter(
             $this->listSlots($fromDate, $toDate, $aircraftId),
             static fn(array $slot): bool => (string)$slot['status'] === 'scheduled'
         ));
+        $sessions = array();
+        foreach ($slots as $slot) {
+            foreach ($this->expandSlotToDeviceSessions($slot) as $session) {
+                $sessions[] = $session;
+            }
+        }
+        return $sessions;
+    }
+
+    /**
+     * One schedule slot may mint N flight legs under one reservation / one crew.
+     * Device Schedule shows one row per leg, sharing reservation_uuid.
+     *
+     * @param array<string,mixed> $slot
+     * @return list<array<string,mixed>>
+     */
+    private function expandSlotToDeviceSessions(array $slot): array
+    {
+        $legs = is_array($slot['legs'] ?? null) ? $slot['legs'] : array();
+        if (count($legs) <= 1) {
+            return array($slot);
+        }
+        $sessions = array();
+        foreach ($legs as $leg) {
+            if (!is_array($leg)) {
+                continue;
+            }
+            $session = $slot;
+            $origin = strtoupper(trim((string)($leg['origin_airport'] ?? '')));
+            $destination = strtoupper(trim((string)($leg['destination_airport'] ?? '')));
+            if ($origin !== '') {
+                $session['planned_departure_airport'] = $origin;
+            }
+            if ($destination !== '') {
+                $session['planned_destination_airport'] = $destination;
+            }
+            $legUuid = strtolower(trim((string)($leg['leg_uuid'] ?? '')));
+            if ($legUuid !== '') {
+                $session['leg_uuid'] = $legUuid;
+            }
+            $session['leg_sequence_number'] = (int)($leg['sequence_number'] ?? 0) ?: null;
+            $sessions[] = $session;
+        }
+        return $sessions !== array() ? $sessions : array($slot);
     }
 
     /** @return array<string,string> */
@@ -161,11 +205,20 @@ final class FlightScheduleService
             $missionStatement->execute(array($missionId));
             $missionCode = substr(strtoupper(trim((string)$missionStatement->fetchColumn())), 0, 64);
         }
-        $departure = $this->airport($values['planned_departure_airport'] ?? '');
-        $destination = $this->airport($values['planned_destination_airport'] ?? '');
+        $airportChain = $this->normalizeAirportChain($values);
+        $this->assertReservationScopedCrew($values, $crew, count($airportChain) - 1);
+        $departure = $airportChain[0];
+        $destination = $airportChain[count($airportChain) - 1];
         $status = strtolower(trim((string)($values['status'] ?? 'scheduled')));
         if (!in_array($status, array('scheduled', 'cancelled', 'completed'), true)) {
             $status = 'scheduled';
+        }
+        $legCount = count($airportChain) - 1;
+        $canonicalWrite = $this->identityWrite()->isFlagEnabled(CvrOperationalIdentityService::FLAG_CANONICAL_WRITE);
+        if ($legCount > 1 && !$canonicalWrite) {
+            throw new RuntimeException(
+                'Multi-leg reservations require operational identity. Create separate single-leg reservations, or enable canonical schedule write.'
+            );
         }
 
         $this->pdo->beginTransaction();
@@ -218,7 +271,7 @@ final class FlightScheduleService
                 $slotId = (int)$this->pdo->lastInsertId();
 
                 // Phase 2C: canonical identity for NEW online creates only, same transaction.
-                if ($this->identityWrite()->isFlagEnabled(CvrOperationalIdentityService::FLAG_CANONICAL_WRITE)) {
+                if ($canonicalWrite) {
                     try {
                         $this->identityWrite()->createOnlineScheduleReservationIdentity(array(
                             'organization_id' => $organizationId,
@@ -228,6 +281,7 @@ final class FlightScheduleService
                             'status' => $status,
                             'planned_departure_airport' => $departure,
                             'planned_destination_airport' => $destination,
+                            'airport_chain' => $airportChain,
                             'scheduled_start_time' => $start,
                             'scheduled_end_time' => $end,
                         ));
@@ -286,7 +340,8 @@ final class FlightScheduleService
         string $scheduledStartTime,
         string $scheduledEndTime,
         ?int $actorUserId = null,
-        ?string $expectedUpdatedAt = null
+        ?string $expectedUpdatedAt = null,
+        ?int $aircraftId = null
     ): void {
         $schedulerRecordId = strtolower(trim($schedulerRecordId));
         if (!$this->isUuid($schedulerRecordId)) {
@@ -320,6 +375,21 @@ final class FlightScheduleService
                     throw new RuntimeException('This reservation changed in another session. Reload the schedule and try again.');
                 }
             }
+            $targetAircraftId = $aircraftId !== null && $aircraftId > 0
+                ? $aircraftId
+                : (int)$slot['aircraft_id'];
+            if ($targetAircraftId <= 0) {
+                throw new RuntimeException('Aircraft is required.');
+            }
+            if ($targetAircraftId !== (int)$slot['aircraft_id']) {
+                $aircraftExists = $this->pdo->prepare(
+                    'SELECT id FROM ipca_aircraft_devices WHERE id = ? AND active = 1 LIMIT 1'
+                );
+                $aircraftExists->execute(array($targetAircraftId));
+                if ($aircraftExists->fetchColumn() === false) {
+                    throw new RuntimeException('The selected aircraft was not found.');
+                }
+            }
             $crewStatement = $this->pdo->prepare(
                 'SELECT user_id FROM ipca_flight_schedule_crew'
                 . ' WHERE schedule_slot_id = ? AND user_id IS NOT NULL'
@@ -327,7 +397,7 @@ final class FlightScheduleService
             $crewStatement->execute(array((int)$slot['id']));
             $this->assertNoResourceConflicts(
                 $schedulerRecordId,
-                (int)$slot['aircraft_id'],
+                $targetAircraftId,
                 (int)($slot['cohort_id'] ?? 0) ?: null,
                 array_map('intval', $crewStatement->fetchAll(PDO::FETCH_COLUMN) ?: array()),
                 $start,
@@ -335,9 +405,16 @@ final class FlightScheduleService
             );
             $this->pdo->prepare(
                 'UPDATE ipca_flight_schedule_slots'
-                . ' SET scheduled_date = ?, scheduled_start_time = ?, scheduled_end_time = ?, updated_by = ?'
+                . ' SET scheduled_date = ?, scheduled_start_time = ?, scheduled_end_time = ?, aircraft_id = ?, updated_by = ?'
                 . ' WHERE id = ?'
-            )->execute(array(substr($start, 0, 10), $start, $end, $actorUserId, (int)$slot['id']));
+            )->execute(array(
+                substr($start, 0, 10),
+                $start,
+                $end,
+                $targetAircraftId,
+                $actorUserId,
+                (int)$slot['id'],
+            ));
             $this->pdo->commit();
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
@@ -520,6 +597,11 @@ final class FlightScheduleService
             ),
             'planned_departure_airport' => (string)$row['planned_departure_airport'],
             'planned_destination_airport' => (string)$row['planned_destination_airport'],
+            'airport_chain' => array(
+                (string)$row['planned_departure_airport'],
+                (string)$row['planned_destination_airport'],
+            ),
+            'legs' => array(),
             'crew' => $crew,
             'status' => $status,
             'editable' => $editable,
@@ -545,12 +627,206 @@ final class FlightScheduleService
         // Phase 2B dual-read: additive only when flag enabled; never mutates legacy rows.
         $organizationId = (int)($row['organization_id'] ?? 0);
         $slotId = isset($row['id']) ? (string)$row['id'] : null;
-        $projection = $this->identityRead()->projectScheduleIdentity(
-            $organizationId,
-            (string)$row['scheduler_record_id'],
-            $slotId
+        try {
+            $projection = $this->identityRead()->projectScheduleIdentity(
+                $organizationId,
+                (string)$row['scheduler_record_id'],
+                $slotId
+            );
+            $payload = $this->identityRead()->mergeProjection($payload, $projection);
+            $legs = $this->scheduleLegsForPayload($organizationId, (string)($payload['reservation_uuid'] ?? ''));
+            if ($legs !== array()) {
+                $payload['legs'] = $legs;
+                $chain = array();
+                foreach ($legs as $index => $leg) {
+                    $origin = strtoupper(trim((string)($leg['origin_airport'] ?? '')));
+                    $destination = strtoupper(trim((string)($leg['destination_airport'] ?? '')));
+                    if ($index === 0 && $origin !== '') {
+                        $chain[] = $origin;
+                    }
+                    if ($destination !== '') {
+                        $chain[] = $destination;
+                    }
+                }
+                if (count($chain) >= 2) {
+                    $payload['airport_chain'] = $chain;
+                    $payload['planned_departure_airport'] = $chain[0];
+                    $payload['planned_destination_airport'] = $chain[count($chain) - 1];
+                }
+            } else {
+                $dep = strtoupper(trim((string)$payload['planned_departure_airport']));
+                $arr = strtoupper(trim((string)$payload['planned_destination_airport']));
+                $payload['airport_chain'] = array_values(array_filter(array($dep, $arr), static fn(string $code): bool => $code !== ''));
+                if ($dep !== '' && $arr !== '') {
+                    $payload['legs'] = array(array(
+                        'sequence_number' => 1,
+                        'leg_uuid' => $payload['leg_uuid'] ?? null,
+                        'origin_airport' => $dep,
+                        'destination_airport' => $arr,
+                    ));
+                }
+            }
+        } catch (Throwable) {
+            $dep = strtoupper(trim((string)$payload['planned_departure_airport']));
+            $arr = strtoupper(trim((string)$payload['planned_destination_airport']));
+            $payload['airport_chain'] = array_values(array_filter(array($dep, $arr), static fn(string $code): bool => $code !== ''));
+            if ($dep !== '' && $arr !== '') {
+                $payload['legs'] = array(array(
+                    'sequence_number' => 1,
+                    'leg_uuid' => null,
+                    'origin_airport' => $dep,
+                    'destination_airport' => $arr,
+                ));
+            }
+        }
+        return $payload;
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function scheduleLegsForPayload(int $organizationId, string $reservationUuid): array
+    {
+        $reservationUuid = strtolower(trim($reservationUuid));
+        if ($organizationId < 1 || !$this->isUuid($reservationUuid)) {
+            return array();
+        }
+        if (!$this->identityRead()->isDualReadEnabled()) {
+            return array();
+        }
+        try {
+            $legs = $this->identityWrite()->listLegsForReservation($reservationUuid);
+        } catch (Throwable) {
+            return array();
+        }
+        $payloadLegs = array();
+        foreach ($legs as $leg) {
+            if ((int)($leg['organization_id'] ?? 0) !== $organizationId) {
+                continue;
+            }
+            $payloadLegs[] = array(
+                'sequence_number' => (int)($leg['sequence_number'] ?? 0),
+                'leg_uuid' => (string)($leg['leg_uuid'] ?? ''),
+                'origin_airport' => strtoupper(trim((string)($leg['origin_airport'] ?? ''))),
+                'destination_airport' => strtoupper(trim((string)($leg['destination_airport'] ?? ''))),
+                'status' => (string)($leg['status'] ?? 'scheduled'),
+            );
+        }
+        usort(
+            $payloadLegs,
+            static fn(array $a, array $b): int => ((int)$a['sequence_number']) <=> ((int)$b['sequence_number'])
         );
-        return $this->identityRead()->mergeProjection($payload, $projection);
+        return $payloadLegs;
+    }
+
+    /**
+     * Normalize an airport chain for one reservation.
+     * Accepts airport_chain[], legs[][{origin,destination}], or legacy departure/destination.
+     *
+     * @param array<string,mixed> $values
+     * @return list<string>
+     */
+    public function normalizeAirportChain(array $values): array
+    {
+        $chain = array();
+        if (isset($values['airport_chain']) && is_array($values['airport_chain'])) {
+            foreach ($values['airport_chain'] as $airport) {
+                $code = $this->airport($airport);
+                if ($code !== '') {
+                    $chain[] = $code;
+                }
+            }
+        } elseif (isset($values['legs']) && is_array($values['legs'])) {
+            foreach ($values['legs'] as $index => $leg) {
+                if (!is_array($leg)) {
+                    continue;
+                }
+                $origin = $this->airport($leg['origin'] ?? $leg['origin_airport'] ?? $leg['departure'] ?? '');
+                $destination = $this->airport(
+                    $leg['destination'] ?? $leg['destination_airport'] ?? $leg['arrival'] ?? ''
+                );
+                if ($index === 0 && $origin !== '') {
+                    $chain[] = $origin;
+                } elseif ($index > 0 && $origin !== '' && ($chain === array() || $chain[count($chain) - 1] !== $origin)) {
+                    throw new RuntimeException(
+                        'Multi-leg airports must form a continuous chain (arrival of leg N = departure of leg N+1).'
+                    );
+                }
+                if ($destination !== '') {
+                    $chain[] = $destination;
+                }
+            }
+        } else {
+            $departure = $this->airport($values['planned_departure_airport'] ?? '');
+            $destination = $this->airport($values['planned_destination_airport'] ?? '');
+            if ($departure !== '') {
+                $chain[] = $departure;
+            }
+            if ($destination !== '') {
+                $chain[] = $destination;
+            }
+        }
+        $chain = array_values($chain);
+        if (count($chain) < 2) {
+            throw new RuntimeException('Departure and destination airports are required.');
+        }
+        for ($i = 0; $i < count($chain) - 1; $i++) {
+            // Allow same-airport legs (e.g. KPSP → KPSP training patterns).
+            if ($chain[$i] === '') {
+                throw new RuntimeException('Airport codes cannot be blank.');
+            }
+        }
+        return $chain;
+    }
+
+    /**
+     * Crew is reservation-scoped. Reject per-leg crew payloads that diverge (PIC swap / different people).
+     *
+     * @param array<string,mixed> $values
+     * @param list<array<string,mixed>> $crew
+     */
+    public function assertReservationScopedCrew(array $values, array $crew, int $legCount): void
+    {
+        if (isset($values['crew_per_leg']) && is_array($values['crew_per_leg']) && $values['crew_per_leg'] !== array()) {
+            $normalizedReservation = $this->normalizeCrewFingerprint($crew);
+            foreach ($values['crew_per_leg'] as $legCrew) {
+                if (!is_array($legCrew)) {
+                    continue;
+                }
+                if ($this->normalizeCrewFingerprint($legCrew) !== $normalizedReservation) {
+                    throw new RuntimeException(
+                        'Different crew or a PIC role swap requires a separate reservation. One multi-leg reservation must keep the same crew and roles.'
+                    );
+                }
+            }
+        }
+        if ($legCount > 1 && isset($values['allow_crew_swap']) && (string)$values['allow_crew_swap'] === '1') {
+            throw new RuntimeException(
+                'Different crew or a PIC role swap requires a separate reservation. One multi-leg reservation must keep the same crew and roles.'
+            );
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $crew
+     */
+    private function normalizeCrewFingerprint(array $crew): string
+    {
+        $parts = array();
+        foreach ($crew as $member) {
+            if (!is_array($member)) {
+                continue;
+            }
+            $personId = (int)($member['user_id'] ?? $member['person_id'] ?? 0);
+            $name = strtolower(trim((string)($member['person_name'] ?? $member['name'] ?? '')));
+            $role = strtolower(trim((string)($member['role'] ?? $member['crew_role'] ?? '')));
+            if ($personId <= 0 && $name === '') {
+                continue;
+            }
+            $parts[] = $personId . ':' . $name . ':' . $role;
+        }
+        sort($parts);
+        return implode('|', $parts);
     }
 
     /** @param list<int> $crewUserIds */

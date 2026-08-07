@@ -94,9 +94,13 @@ try {
             foreach ($instrumentChoices as $key => $meta) {
                 $instrumentDefaults[$key] = in_array($key, $enabledDefaults, true);
             }
+            $existingResolved = $selectedAircraftId > 0 ? $settingsService->resolvedForAircraftId($selectedAircraftId) : array();
+            $existingLayout = is_array($existingResolved['presentation']['layout'] ?? null)
+                ? $existingResolved['presentation']['layout']
+                : array();
             $layoutPayload = array(
                 'schema_version' => 1,
-                'replay_layout_mode' => (string)($_POST['replay_layout_mode'] ?? 'legacy'),
+                'replay_layout_mode' => (string)($_POST['replay_layout_mode'] ?? 'panel'),
                 'system_warning_box' => array(
                     'anchor' => (string)($_POST['warning_box_anchor'] ?? 'inset_altitude_profile'),
                     'left_offset_px' => aircraft_settings_int($_POST['warning_box_left_offset_px'] ?? 0, 0),
@@ -105,6 +109,9 @@ try {
                     'grow_direction' => 'up',
                 ),
             );
+            if (isset($existingLayout['camera_calibration']) && is_array($existingLayout['camera_calibration'])) {
+                $layoutPayload['camera_calibration'] = $existingLayout['camera_calibration'];
+            }
             $instrumentPayload = array(
                 'schema_version' => 1,
                 'default_enabled_instruments' => $instrumentDefaults,
@@ -333,12 +340,12 @@ cw_header('Aircraft Settings');
           </div>
           <div class="settings-field">
             <label for="replay_layout_mode">Default replay layout</label>
-            <?php $layoutMode = (string)($layout['replay_layout_mode'] ?? 'legacy'); ?>
+            <?php $layoutMode = (string)($layout['replay_layout_mode'] ?? 'panel'); ?>
             <select id="replay_layout_mode" name="replay_layout_mode">
               <option value="legacy" <?= $layoutMode === 'legacy' ? 'selected' : '' ?>>Legacy full-window replay</option>
               <option value="panel" <?= $layoutMode === 'panel' ? 'selected' : '' ?>>Panel layout with engine and compass space</option>
             </select>
-            <span class="settings-help">Used when a replay has no personal view override.</span>
+            <span class="settings-help">Shared default for every device. Camera/attitude calibration saved from the replay player is kept with this profile.</span>
           </div>
           <div class="settings-info-tile">
             <strong>Aircraft type</strong>

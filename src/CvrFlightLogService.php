@@ -352,10 +352,7 @@ final class CvrFlightLogService
         $ownership->execute($ownershipParameters);
         $dispatch = $ownership->fetch(PDO::FETCH_ASSOC);
         if (!is_array($dispatch)) {
-            $payloadRegistration = strtoupper(trim((string)($payload['aircraft_registration'] ?? '')));
-            if ($registration === '' || $payloadRegistration !== $registration) {
-                throw new RuntimeException('The selected Flight Record does not belong to this CVR Unit aircraft.');
-            }
+            throw new RuntimeException('The selected Flight Record was not found on the server for this CVR Unit aircraft. Refresh the Log, then adjust again.');
         }
 
         $departure = $this->airport($payload['departure_airport'] ?? null, 'departure_airport');
@@ -529,12 +526,21 @@ final class CvrFlightLogService
         if ($timestamp === '') {
             return null;
         }
-        $date = DateTimeImmutable::createFromFormat(
-            '!Y-m-d H:i:s',
-            $timestamp,
-            new DateTimeZone('UTC')
-        );
-        return $date instanceof DateTimeImmutable ? $date : null;
+        $timestamp = str_replace('T', ' ', $timestamp);
+        if (preg_match('/^(.+?)(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/', $timestamp, $matches) === 1) {
+            $timestamp = trim((string)$matches[1]);
+        }
+        foreach (array('!Y-m-d H:i:s.v', '!Y-m-d H:i:s.u', '!Y-m-d H:i:s') as $format) {
+            $date = DateTimeImmutable::createFromFormat($format, $timestamp, new DateTimeZone('UTC'));
+            if ($date instanceof DateTimeImmutable) {
+                return $date;
+            }
+        }
+        try {
+            return new DateTimeImmutable($timestamp, new DateTimeZone('UTC'));
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function californiaIso(?DateTimeImmutable $date): ?string

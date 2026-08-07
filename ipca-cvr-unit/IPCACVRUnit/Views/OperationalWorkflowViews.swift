@@ -197,6 +197,14 @@ private struct ScheduledFlightsView: View {
                                 iconName: "flame.fill",
                                 color: CVROperationalPalette.secondaryBlue
                             )
+                        } else if !workflow.remainingOpenPlannedLegs.isEmpty,
+                                  workflow.state.activeFlightRecord == nil {
+                            CVROperationalWarningCard(
+                                title: "LOCAL PLANNED LEGS REMAIN",
+                                message: "These legs are stored on this CVR Unit, not on the online schedule. Open one to continue, or tap Cancel Remaining Legs to clear them.",
+                                iconName: "point.3.connected.trianglepath.dotted",
+                                color: CVROperationalPalette.warning
+                            )
                         }
                         ForEach(daySections, id: \.title) { section in
                             reservationSection(section.title, groups: section.groups, metrics: metrics)
@@ -467,11 +475,14 @@ private struct ScheduledFlightsView: View {
         value.uppercased().filter { $0.isLetter || $0.isNumber }
     }
 
+    private var canCancelLeftoverPlannedLegs: Bool {
+        !workflow.remainingOpenPlannedLegs.isEmpty
+            && workflow.state.activeFlightRecord == nil
+    }
+
     private var actionButtons: some View {
         VStack(spacing: 8) {
-            if workflow.state.engineSessionContinuityActive,
-               !workflow.remainingOpenPlannedLegs.isEmpty,
-               workflow.state.activeFlightRecord == nil {
+            if workflow.state.engineSessionContinuityActive, canCancelLeftoverPlannedLegs {
                 CVROperationalActionButton(
                     title: "ENGINE WAS SHUT DOWN",
                     subtitle: "End continuity — open remaining legs with Engine Start",
@@ -479,9 +490,13 @@ private struct ScheduledFlightsView: View {
                 ) {
                     _ = workflow.endEngineContinuityPreservingUnusedLegs()
                 }
+            }
+            // Always offer cancel when unused local planned legs remain (empty online
+            // schedule / after Undispatch). Do not require engine continuity.
+            if canCancelLeftoverPlannedLegs {
                 CVROperationalActionButton(
                     title: "CANCEL REMAINING LEGS",
-                    subtitle: "Keep completed-leg uploads; drop unused planned legs",
+                    subtitle: "Drop unused local planned legs — online schedule is unchanged",
                     color: CVROperationalPalette.standby
                 ) {
                     _ = workflow.cancelUnusedPlannedLegsAndEndSession()
@@ -1356,7 +1371,11 @@ struct DispatchWorkflowView: View {
                 color: crewTileColor,
                 metrics: metrics,
                 caption: crewTileCaption,
-                action: workflow.state.activeDispatch == nil || workflow.isDispatchLocked ? nil : {
+                action: workflow.state.activeDispatch == nil
+                    || workflow.isDispatchLocked
+                    || workflow.isReservationCrewLocked
+                    ? nil
+                    : {
                     activeBlockEditor = .crew
                 }
             )
@@ -1886,6 +1905,9 @@ struct DispatchWorkflowView: View {
 
     private var crewTileCaption: String? {
         guard workflow.state.activeDispatch != nil, !workflow.isDispatchLocked else { return nil }
+        if workflow.isReservationCrewLocked {
+            return "Reservation crew locked — new crew needs a new reservation"
+        }
         return crewNeedsEntry ? "Tap to add crew" : "Tap to edit crew"
     }
 
@@ -3493,6 +3515,9 @@ private struct FlightLogView: View {
                 .refreshable {
                     syncPendingLogUploads()
                     await flightLogs.refresh(settings: settings)
+                    _ = workflow.pruneServerVerifiedArchives(
+                        keepingFlightRecordIDs: Set(flightLogs.entries.map(\.flightRecordID))
+                    )
                 }
                 if flightLogs.isUploading || flightLogs.isAdjusting {
                     uploadOverlay
@@ -3502,6 +3527,9 @@ private struct FlightLogView: View {
         .task {
             flightLogs.preparePendingGarminImportForLog()
             await flightLogs.refresh(settings: settings)
+            _ = workflow.pruneServerVerifiedArchives(
+                keepingFlightRecordIDs: Set(flightLogs.entries.map(\.flightRecordID))
+            )
             // Only open assignment when a new file needs a flight pick.
             // Restored pending with an existing flight association must not reopen the picker.
             if flightLogs.pendingGarminCSV != nil
@@ -4066,6 +4094,7 @@ private struct FlightLogView: View {
 
     private var displayEntries: [CVRFlightLogEntry] {
         var byIdentity: [String: CVRFlightLogEntry] = [:]
+        let remoteLoaded = !flightLogs.entries.isEmpty || !flightLogs.isRefreshing
         for remote in flightLogs.entries {
             let identity = logIdentity(remote)
             if let existing = byIdentity[identity] {
@@ -4086,9 +4115,14 @@ private struct FlightLogView: View {
             let identity = logIdentity(local)
             if let existing = byIdentity[identity] {
                 byIdentity[identity] = mergeLogEntries(existing, local)
-            } else {
+            } else if archive.status != .serverVerified {
+                // Still needs sync — keep visible even if the server list omitted it.
+                byIdentity[identity] = local
+            } else if !remoteLoaded || flightLogs.entries.isEmpty {
+                // Offline / empty remote refresh — fall back to local History.
                 byIdentity[identity] = local
             }
+            // Else: server-verified archive absent from the live server Log — hide (purged online).
         }
         if let dispatch = workflow.state.activeDispatch,
            let flightRecord = workflow.state.activeFlightRecord {
@@ -4157,8 +4191,12 @@ private struct FlightLogView: View {
         if (merged.departureTime ?? "").isEmpty {
             merged.departureTime = existing.departureTime ?? candidate.departureTime
         }
-        if (merged.arrivalTime ?? "").isEmpty {
-            merged.arrivalTime = existing.arrivalTime ?? candidate.arrivalTime
+        // Prefer a non-empty server arrival (Hobbs-derived) over a later local fill.
+        // displayEntries merges remote first, then local — so existing is usually the server row.
+        if !(existing.arrivalTime ?? "").isEmpty {
+            merged.arrivalTime = existing.arrivalTime
+        } else if (merged.arrivalTime ?? "").isEmpty {
+            merged.arrivalTime = candidate.arrivalTime
         }
         merged.startingHobbs = merged.startingHobbs ?? existing.startingHobbs ?? candidate.startingHobbs
         merged.startingTacho = merged.startingTacho ?? existing.startingTacho ?? candidate.startingTacho
@@ -4757,10 +4795,19 @@ struct DispatchEditorView: View {
                     switch focus {
                     case .crew:
                         editorSection("CREW") {
+                            if workflow.isReservationCrewLocked {
+                                CVROperationalWarningCard(
+                                    title: "RESERVATION CREW LOCKED",
+                                    message: "This multi-leg reservation keeps one crew set. Different crew or a PIC role swap requires a new reservation.",
+                                    iconName: "lock.fill",
+                                    color: CVROperationalPalette.warning
+                                )
+                            }
                             crewUserPicker
                             roleButtons
 
-                            CVROperationalActionButton(title: editingCrewAssignmentID == nil ? "ADD CREW MEMBER" : "UPDATE CREW MEMBER", subtitle: selectedCrewRole.label, color: selectedCrewUserID > 0 ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.textSecondary) {
+                            CVROperationalActionButton(title: editingCrewAssignmentID == nil ? "ADD CREW MEMBER" : "UPDATE CREW MEMBER", subtitle: selectedCrewRole.label, color: selectedCrewUserID > 0 && !workflow.isReservationCrewLocked ? CVROperationalPalette.secondaryBlue : CVROperationalPalette.textSecondary) {
+                                guard !workflow.isReservationCrewLocked else { return }
                                 addCrew()
                             }
 
@@ -4773,18 +4820,20 @@ struct DispatchEditorView: View {
                                     Text(assignment.role.label.uppercased())
                                         .font(.caption.weight(.bold))
                                         .foregroundStyle(CVROperationalPalette.secondaryBlue)
-                                    Button("EDIT") {
-                                        editCrew(assignment)
+                                    if !workflow.isReservationCrewLocked {
+                                        Button("EDIT") {
+                                            editCrew(assignment)
+                                        }
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(CVROperationalPalette.secondaryBlue)
+                                        .buttonStyle(.plain)
+                                        Button("DELETE") {
+                                            deleteCrew(assignment)
+                                        }
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(CVROperationalPalette.critical)
+                                        .buttonStyle(.plain)
                                     }
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(CVROperationalPalette.secondaryBlue)
-                                    .buttonStyle(.plain)
-                                    Button("DELETE") {
-                                        deleteCrew(assignment)
-                                    }
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(CVROperationalPalette.critical)
-                                    .buttonStyle(.plain)
                                 }
                                 .padding(10)
                                 .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))

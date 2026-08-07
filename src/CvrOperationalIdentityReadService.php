@@ -136,21 +136,26 @@ final class CvrOperationalIdentityReadService
                     $orgLegs[] = $leg;
                 }
             }
-            if (count($orgLegs) === 1) {
-                return $this->projection(
-                    $reservationUuid,
-                    (string)$orgLegs[0]['leg_uuid'],
-                    self::IDENTITY_SOURCE_CANONICAL_ALIAS
-                );
+            if ($orgLegs === array()) {
+                $this->logIntegrityDiagnostic('schedule_flight_leg_count_unexpected', array(
+                    'organization_id' => $organizationId,
+                    'scheduler_record_id' => $schedulerRecordId,
+                    'reservation_uuid' => $reservationUuid,
+                    'leg_count' => 0,
+                ));
+                return $this->projection(null, null, self::IDENTITY_SOURCE_CANONICAL_CONFLICT);
             }
 
-            $this->logIntegrityDiagnostic('schedule_flight_leg_count_unexpected', array(
-                'organization_id' => $organizationId,
-                'scheduler_record_id' => $schedulerRecordId,
-                'reservation_uuid' => $reservationUuid,
-                'leg_count' => count($orgLegs),
-            ));
-            return $this->projection(null, null, self::IDENTITY_SOURCE_CANONICAL_CONFLICT);
+            usort(
+                $orgLegs,
+                static fn(array $a, array $b): int => ((int)($a['sequence_number'] ?? 0)) <=> ((int)($b['sequence_number'] ?? 0))
+            );
+            // Multi-leg is valid: project reservation + primary (sequence 1) leg_uuid.
+            return $this->projection(
+                $reservationUuid,
+                (string)$orgLegs[0]['leg_uuid'],
+                self::IDENTITY_SOURCE_CANONICAL_ALIAS
+            );
         } catch (Throwable $e) {
             $this->logIntegrityDiagnostic('schedule_dual_read_unavailable', array(
                 'organization_id' => $organizationId,

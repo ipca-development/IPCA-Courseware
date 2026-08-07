@@ -149,6 +149,20 @@ final class CvrAdminLegCorrectionService
                 if ($offBlockUtc !== null) {
                     $this->ensureEngineStartEvent($flightUuid, $offBlockUtc);
                 }
+
+                // iOS Flight Log prefers this adjustment row over planned dispatch airports.
+                $this->upsertFlightLogAdjustment(
+                    $beforeDispatch,
+                    $flightUuid,
+                    $departure,
+                    $arrival,
+                    $crew,
+                    $startingHobbs,
+                    $startingTacho,
+                    $endingHobbs,
+                    $endingTacho,
+                    $fuelRemaining
+                );
             }
 
             $afterStmt = $this->pdo->prepare('SELECT * FROM ipca_cvr_dispatches WHERE id = ? LIMIT 1');
@@ -204,6 +218,158 @@ final class CvrAdminLegCorrectionService
         $payload['planned_destination_airport'] = $arrival;
         $update = $this->pdo->prepare('UPDATE ipca_cvr_dispatch_versions SET payload_json = ? WHERE id = ?');
         $update->execute(array(AuditEventService::jsonEncode($payload), (int)$row['id']));
+    }
+
+    /**
+     * Append a Flight Log adjustment so the iOS Log API projects the same airports/meters
+     * that Master Logbook just saved (it prefers adjustment rows over planned dispatch airports).
+     *
+     * @param array<string,mixed> $dispatch
+     * @param list<array{role:string,personName:string}> $crew
+     */
+    private function upsertFlightLogAdjustment(
+        array $dispatch,
+        string $flightUuid,
+        string $departure,
+        string $arrival,
+        array $crew,
+        ?float $startingHobbs,
+        ?float $startingTacho,
+        ?float $endingHobbs,
+        ?float $endingTacho,
+        string $fuelRemaining
+    ): void {
+        $deviceId = (int)($dispatch['device_id'] ?? 0);
+        $organizationId = max(1, (int)($dispatch['organization_id'] ?? 1));
+        $dispatchUuid = strtolower(trim((string)($dispatch['dispatch_uuid'] ?? '')));
+        if ($deviceId <= 0 || $dispatchUuid === '' || $departure === '' || $arrival === '') {
+            return;
+        }
+
+        $latest = null;
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT * FROM ipca_cvr_flight_log_adjustments
+                 WHERE LOWER(workflow_flight_record_uuid) = ?
+                 ORDER BY id DESC LIMIT 1'
+            );
+            $stmt->execute(array($flightUuid));
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $latest = is_array($row) ? $row : null;
+        } catch (Throwable) {
+            return;
+        }
+
+        $closure = null;
+        try {
+            $closureStmt = $this->pdo->prepare(
+                'SELECT ending_hobbs, ending_tacho, fuel_remaining
+                 FROM ipca_cvr_flight_closures
+                 WHERE LOWER(workflow_flight_record_uuid) = ?
+                 ORDER BY id DESC LIMIT 1'
+            );
+            $closureStmt->execute(array($flightUuid));
+            $closureRow = $closureStmt->fetch(PDO::FETCH_ASSOC);
+            $closure = is_array($closureRow) ? $closureRow : null;
+        } catch (Throwable) {
+            $closure = null;
+        }
+
+        $startHobbs = $startingHobbs
+            ?? (isset($latest['starting_hobbs']) && is_numeric($latest['starting_hobbs']) ? (float)$latest['starting_hobbs'] : null)
+            ?? (isset($dispatch['starting_hobbs']) && is_numeric($dispatch['starting_hobbs']) ? (float)$dispatch['starting_hobbs'] : null);
+        $startTacho = $startingTacho
+            ?? (isset($latest['starting_tacho']) && is_numeric($latest['starting_tacho']) ? (float)$latest['starting_tacho'] : null)
+            ?? (isset($dispatch['starting_tacho']) && is_numeric($dispatch['starting_tacho']) ? (float)$dispatch['starting_tacho'] : null);
+        $endHobbs = $endingHobbs
+            ?? (isset($latest['ending_hobbs']) && is_numeric($latest['ending_hobbs']) ? (float)$latest['ending_hobbs'] : null)
+            ?? (isset($closure['ending_hobbs']) && is_numeric($closure['ending_hobbs']) ? (float)$closure['ending_hobbs'] : null);
+        $endTacho = $endingTacho
+            ?? (isset($latest['ending_tacho']) && is_numeric($latest['ending_tacho']) ? (float)$latest['ending_tacho'] : null)
+            ?? (isset($closure['ending_tacho']) && is_numeric($closure['ending_tacho']) ? (float)$closure['ending_tacho'] : null);
+        $fuel = $fuelRemaining !== ''
+            ? $fuelRemaining
+            : trim((string)($latest['fuel_remaining'] ?? $closure['fuel_remaining'] ?? ''));
+
+        if ($startHobbs === null || $startTacho === null || $endHobbs === null || $endTacho === null || $fuel === '') {
+            return;
+        }
+
+        $crewNames = array();
+        foreach ($crew as $member) {
+            $name = trim((string)($member['personName'] ?? ''));
+            $role = trim((string)($member['role'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $crewNames[] = $role !== '' ? ($name . ' (' . $role . ')') : $name;
+        }
+        if ($crewNames === array() && is_array($latest) && trim((string)($latest['crew_json'] ?? '')) !== '') {
+            $decoded = json_decode((string)$latest['crew_json'], true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $name) {
+                    $name = trim((string)$name);
+                    if ($name !== '') {
+                        $crewNames[] = $name;
+                    }
+                }
+            }
+        }
+        if ($crewNames === array()) {
+            $crewNames[] = 'Crew';
+        }
+
+        try {
+            $this->pdo->prepare(
+                'INSERT INTO ipca_cvr_flight_log_adjustments
+                 (adjustment_uuid, organization_id, device_id, workflow_flight_record_uuid, dispatch_uuid,
+                  departure_airport, arrival_airport, crew_json, starting_hobbs, starting_tacho,
+                  ending_hobbs, ending_tacho, fuel_remaining, reason)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            )->execute(array(
+                AuditEventService::uuid(),
+                $organizationId,
+                $deviceId,
+                $flightUuid,
+                $dispatchUuid,
+                $departure,
+                $arrival,
+                AuditEventService::jsonEncode(array_values($crewNames)),
+                $startHobbs,
+                $startTacho,
+                $endHobbs,
+                $endTacho,
+                $fuel,
+                'Master Logbook admin operational leg correction',
+            ));
+        } catch (Throwable) {
+            // Older schemas may omit reason; retry without it.
+            try {
+                $this->pdo->prepare(
+                    'INSERT INTO ipca_cvr_flight_log_adjustments
+                     (adjustment_uuid, organization_id, device_id, workflow_flight_record_uuid, dispatch_uuid,
+                      departure_airport, arrival_airport, crew_json, starting_hobbs, starting_tacho,
+                      ending_hobbs, ending_tacho, fuel_remaining)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                )->execute(array(
+                    AuditEventService::uuid(),
+                    $organizationId,
+                    $deviceId,
+                    $flightUuid,
+                    $dispatchUuid,
+                    $departure,
+                    $arrival,
+                    AuditEventService::jsonEncode(array_values($crewNames)),
+                    $startHobbs,
+                    $startTacho,
+                    $endHobbs,
+                    $endTacho,
+                    $fuel,
+                ));
+            } catch (Throwable) {
+                // Adjustment projection is best-effort relative to dispatch/closure writes.
+            }
+        }
     }
 
     private function upsertClosureEvidence(

@@ -3233,6 +3233,31 @@ final class CVRWorkflowStore: ObservableObject {
         return url
     }
 
+    /// After a successful server Log refresh, drop fully verified local archives that no longer exist online.
+    /// Keeps upload-pending archives so unfinished sync work remains visible.
+    @discardableResult
+    func pruneServerVerifiedArchives(keepingFlightRecordIDs remoteFlightRecordIDs: Set<String>) -> Int {
+        let keep = Set(remoteFlightRecordIDs.map { $0.lowercased() })
+        let before = archives.count
+        let retained = archives.filter { archive in
+            if archive.status != .serverVerified {
+                return true
+            }
+            return keep.contains(archive.flightRecordID.lowercased())
+        }
+        let removed = before - retained.count
+        guard removed > 0 else { return 0 }
+        do {
+            try saveArchives(retained)
+            archives = retained
+            lastError = ""
+        } catch {
+            lastError = "Could not clear removed flights from local History."
+            return 0
+        }
+        return removed
+    }
+
     func resetForNextFlightIfComplete(archiveCompletedWorkflow: Bool = true) {
         guard let flightRecord = state.activeFlightRecord,
               flightRecord.endingHobbs != nil,
@@ -3366,6 +3391,26 @@ final class CVRWorkflowStore: ObservableObject {
     var isDispatchLocked: Bool {
         guard let dispatch = state.activeDispatch else { return false }
         return state.activeFlightRecord?.dispatchID == dispatch.id
+    }
+
+    /// Reservation-scoped crew: after leg 1 is checked in / later legs opened, people and roles cannot change.
+    /// Different crew or a PIC role swap requires a new reservation (same rule as online schedule).
+    var isReservationCrewLocked: Bool {
+        guard let session = state.operationalSession else { return false }
+        if session.plannedLegs.contains(where: {
+            let status = $0.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return status == "checked_in"
+        }) {
+            return true
+        }
+        if (session.currentLegIndex ?? 1) > 1 {
+            return true
+        }
+        if let carryover = session.carryoverCrew, !carryover.isEmpty,
+           (session.currentLegIndex ?? 1) > 1 {
+            return true
+        }
+        return false
     }
 
     var isRecorderVerified: Bool {

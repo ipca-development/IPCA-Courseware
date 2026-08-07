@@ -129,10 +129,10 @@ $checks['resource scheduler exposes devices staff cohorts and drag resize'] = st
     && str_contains($scheduleJs, 'flightScheduleChangeModal');
 $checks['editable reservations support click edit and drag without false concurrency conflicts'] = static fn(): bool =>
     !str_contains($scheduleJs, "if (pointerEvent.target.closest('.fltsch-resize-handle')) return;\n    pointerEvent.preventDefault();")
-    && str_contains($scheduleJs, 'if (!moved && Math.abs(event.clientX - originX) < 5) return;')
+    && str_contains($scheduleJs, 'if (!moved && Math.abs(event.clientX - originX) < 5')
     && str_contains($scheduleJs, "class=\"fltsch-event-edit\"")
     && str_contains($scheduleJs, '} else if (moved) {')
-    && str_contains($scheduleAdmin, 'flight_schedule.js?v=20260801.3')
+    && str_contains($scheduleAdmin, 'flight_schedule.js?v=')
     && str_contains($scheduleSource, "substr((string)(\$slot['updated_at'] ?? ''), 0, 19)")
     && str_contains($scheduleSource, 'isoPrecise');
 $checks['dispatched and completed reservations remain locked with evidence indicators'] = static fn(): bool =>
@@ -145,12 +145,24 @@ $checks['dispatched and completed reservations remain locked with evidence indic
     && str_contains($scheduleJs, "evidenceChip('F'")
     && str_contains($scheduleJs, "evidenceChip('A'")
     && str_contains($scheduleJs, "evidenceChip('B'");
+$checks['resource rescheduling can move unclaimed reservations across aircraft'] = static fn(): bool =>
+    str_contains($scheduleSource, 'function rescheduleSlot(')
+    && str_contains($scheduleSource, '?int $aircraftId = null')
+    && str_contains($scheduleSource, 'aircraft_id = ?, updated_by = ?')
+    && str_contains($scheduleJs, 'proposedAircraftId')
+    && str_contains($scheduleJs, 'timelineAtPoint')
+    && str_contains($scheduleAdmin, 'flightChangeAircraftId');
 $checks['resource rescheduling retains dispatch lock'] = static fn(): bool =>
     str_contains($scheduleSource, 'function rescheduleSlot(')
     && str_contains($scheduleSource, 'FOR UPDATE')
     && str_contains($scheduleSource, 'A reservation cannot move after Dispatch is activated.')
     && str_contains($scheduleSource, 'This reservation changed in another session.')
     && str_contains($scheduleSource, 'assertNoResourceConflicts');
+$checks['online multi-leg schedule uses one reservation crew and airport chain'] = static fn(): bool =>
+    str_contains($scheduleSource, 'normalizeAirportChain')
+    && str_contains($scheduleSource, 'assertReservationScopedCrew')
+    && str_contains($scheduleAdmin, 'airport_chain[]')
+    && str_contains($scheduleAdmin, 'flightAddLegBtn');
 $checks['resource scheduler migration adds cohort assignment'] = static fn(): bool =>
     str_contains($resourceMigration, "COLUMN_NAME = 'cohort_id'")
     && str_contains($resourceMigration, 'idx_ipca_flight_schedule_slots_cohort')

@@ -62,7 +62,7 @@ final class AircraftSettingsService
         $layout = $this->decodeInputJson((string)($payload['layout_config_json'] ?? '{}'), 'Replay layout JSON');
         $instrument = $this->decodeInputJson((string)($payload['instrument_override_json'] ?? '{}'), 'Instrument override JSON');
         $trim = $this->decodeInputJson((string)($payload['trim_config_json'] ?? '{}'), 'Trim config JSON');
-        $layout = $this->ensureSchemaVersion($layout);
+        $layout = $this->normalizeLayoutConfig($layout);
         $instrument = $this->ensureSchemaVersion($instrument);
         $trim = $this->normalizeTrimConfig($this->ensureSchemaVersion($trim));
         $reason = substr(trim((string)($payload['change_reason'] ?? 'Aircraft settings update')), 0, 512);
@@ -102,6 +102,92 @@ final class AircraftSettingsService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Persist the shared cockpit-replay camera/layout calibration for an aircraft.
+     * This becomes the authoritative default for every device.
+     *
+     * @param array<string,mixed> $calibration
+     * @return array<string,mixed>
+     */
+    public function saveCameraCalibrationDefault(int $aircraftId, array $calibration, ?int $actorUserId = null, string $reason = 'Replay camera calibration default'): array
+    {
+        $aircraft = $this->aircraftById($aircraftId);
+        if ($aircraft === null) {
+            throw new RuntimeException('Aircraft not found.');
+        }
+
+        $active = $this->activeReplayProfile($aircraftId);
+        $layout = is_array($active)
+            ? $this->decodeJson((string)($active['layout_config_json'] ?? '{}'))
+            : array();
+        $instrument = is_array($active)
+            ? $this->decodeJson((string)($active['instrument_override_json'] ?? '{}'))
+            : array();
+        $trim = is_array($active)
+            ? $this->decodeJson((string)($active['trim_config_json'] ?? '{}'))
+            : array();
+
+        $normalized = $this->normalizeCameraCalibration($calibration);
+        $layout['schema_version'] = self::SCHEMA_VERSION;
+        $layout['replay_layout_mode'] = (string)$normalized['layoutMode'];
+        $layout['camera_calibration'] = $normalized;
+        if (is_array($normalized['instruments'] ?? null)) {
+            $instrument['schema_version'] = self::SCHEMA_VERSION;
+            $instrument['default_enabled_instruments'] = $normalized['instruments'];
+        }
+
+        $this->saveReplayProfile($aircraftId, array(
+            'profile_name' => is_array($active) ? ((string)($active['profile_name'] ?? 'Default') ?: 'Default') : 'Default',
+            'layout_config_json' => json_encode($layout, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'instrument_override_json' => json_encode($instrument, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'trim_config_json' => json_encode($trim, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'change_reason' => $reason,
+        ), $actorUserId);
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<string,mixed> $raw
+     * @return array<string,mixed>
+     */
+    public function normalizeCameraCalibration(array $raw): array
+    {
+        $instrumentsIn = is_array($raw['instruments'] ?? null) ? $raw['instruments'] : array();
+        $instruments = array();
+        foreach ($instrumentsIn as $key => $enabled) {
+            $name = trim((string)$key);
+            if ($name === '') {
+                continue;
+            }
+            $instruments[$name] = $enabled === true || $enabled === 1 || $enabled === '1';
+        }
+
+        $layoutMode = strtolower(trim((string)($raw['layoutMode'] ?? $raw['layout_mode'] ?? 'panel')));
+        if ($layoutMode !== 'legacy') {
+            $layoutMode = 'panel';
+        }
+
+        return array(
+            'schema_version' => self::SCHEMA_VERSION,
+            'forwardM' => $this->clampFloat($this->numericOr($raw['forwardM'] ?? null, 0.0), -200.0, 200.0),
+            'rightM' => $this->clampFloat($this->numericOr($raw['rightM'] ?? null, 0.0), -200.0, 200.0),
+            'upM' => $this->clampFloat($this->numericOr($raw['upM'] ?? null, 0.0), -200.0, 200.0),
+            'yawDeg' => $this->clampFloat($this->numericOr($raw['yawDeg'] ?? null, 0.0), -90.0, 90.0),
+            'pitchDeg' => $this->clampFloat($this->numericOr($raw['pitchDeg'] ?? null, 0.0), -45.0, 45.0),
+            'rollDeg' => $this->clampFloat($this->numericOr($raw['rollDeg'] ?? null, 0.0), -45.0, 45.0),
+            'fovDeg' => $this->clampFloat($this->numericOr($raw['fovDeg'] ?? null, 80.0), 35.0, 100.0),
+            'smoothness' => $this->clampFloat($this->numericOr($raw['smoothness'] ?? null, 10.0), 0.0, 20.0),
+            'horizonBarOffsetPx' => $this->clampFloat($this->numericOr($raw['horizonBarOffsetPx'] ?? null, 0.0), -240.0, 240.0),
+            'attitudeReferenceOffsetPx' => $this->clampFloat($this->numericOr($raw['attitudeReferenceOffsetPx'] ?? null, 0.0), -240.0, 240.0),
+            'yellowPitchReferenceOffsetPx' => $this->clampFloat($this->numericOr($raw['yellowPitchReferenceOffsetPx'] ?? null, 0.0), -240.0, 240.0),
+            'pitchLadderScale' => $this->clampFloat($this->numericOr($raw['pitchLadderScale'] ?? null, 1.0), 0.6, 1.6),
+            'layoutMode' => $layoutMode,
+            'stepM' => $this->clampFloat($this->numericOr($raw['stepM'] ?? null, 1.0), 0.1, 25.0),
+            'instruments' => $instruments,
+        );
     }
 
     public function saveAlertSeverity(int $id, string $severity, string $displayText, string $notes): void
@@ -617,7 +703,7 @@ final class AircraftSettingsService
         $trim = $this->normalizeTrimConfig(
             is_array($replayProfile) ? $this->decodeJson((string)($replayProfile['trim_config_json'] ?? '{}')) : array()
         );
-        $layout = $this->ensureSchemaVersion(
+        $layout = $this->normalizeLayoutConfig(
             is_array($replayProfile) ? $this->decodeJson((string)($replayProfile['layout_config_json'] ?? '{}')) : array()
         );
         $instrumentOverride = $this->ensureSchemaVersion(
@@ -849,6 +935,30 @@ final class AircraftSettingsService
     private function numericOr(mixed $value, float $fallback): float
     {
         return is_numeric($value) ? (float)$value : $fallback;
+    }
+
+    private function clampFloat(float $value, float $min, float $max): float
+    {
+        return max($min, min($max, $value));
+    }
+
+    /**
+     * @param array<string,mixed> $layout
+     * @return array<string,mixed>
+     */
+    private function normalizeLayoutConfig(array $layout): array
+    {
+        $layout = $this->ensureSchemaVersion($layout);
+        $mode = strtolower(trim((string)($layout['replay_layout_mode'] ?? '')));
+        if ($mode !== 'legacy' && $mode !== 'panel') {
+            $mode = 'panel';
+        }
+        $layout['replay_layout_mode'] = $mode;
+        if (isset($layout['camera_calibration']) && is_array($layout['camera_calibration'])) {
+            $layout['camera_calibration'] = $this->normalizeCameraCalibration($layout['camera_calibration']);
+            $layout['replay_layout_mode'] = (string)$layout['camera_calibration']['layoutMode'];
+        }
+        return $layout;
     }
 
     /**

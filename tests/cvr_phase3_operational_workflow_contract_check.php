@@ -78,6 +78,10 @@ require_contains($store, 'clearFalseContinuityOnActiveLeg', 'clear synthesized c
 require_contains($store, 'hasOpenPlannedLegs', 'preserve unused legs after engine shutdown', $failures);
 require_contains($views, 'ENGINE WAS SHUT DOWN', 'schedule recovery for mistaken transient', $failures);
 require_contains($views, 'CANCEL REMAINING LEGS', 'schedule cancel unused legs', $failures);
+require_contains($views, 'canCancelLeftoverPlannedLegs', 'cancel leftover legs without requiring continuity', $failures);
+require_contains($views, 'LOCAL PLANNED LEGS REMAIN', 'warn when local planned legs outlive online schedule', $failures);
+require_contains($store, 'isReservationCrewLocked', 'reservation-scoped crew lock', $failures);
+require_contains($views, 'RESERVATION CREW LOCKED', 'crew lock messaging', $failures);
 require_contains($views, 'ACTUALLY ENGINE SHUTDOWN', 'in-flight convert transient', $failures);
 require_contains($store, 'saveCheckInValues', 'check-in save', $failures);
 require_contains($store, 'synthesizeEngineContinuityIfNeeded', 'continuity engine start', $failures);

@@ -20,16 +20,18 @@ $recordingStore = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services
 $derivation = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
 $debrief = file_get_contents($root . '/src/FlightDebriefService.php') ?: '';
 $startingMeterMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_flight_log_starting_meter_adjustments.sql') ?: '';
+$adminCorrection = file_get_contents($root . '/src/CvrAdminLegCorrectionService.php') ?: '';
 
 $checks = array(
     'flight log API is device authenticated and aircraft scoped' =>
         str_contains($api, 'requireDevice()')
         && str_contains($service, 'd.aircraft_id = :aircraft_id')
         && str_contains($service, 'd.organization_id = :organization_id'),
-    'flight log adjustment uses the same aircraft identity fallback as listing' =>
+    'flight log adjustment requires an existing aircraft-owned Dispatch' =>
         str_contains($service, '$aircraftOwnershipPredicate = $aircraftId > 0')
         && str_contains($service, 'aircraft_id = :aircraft_id OR UPPER(aircraft_registration) = :registration')
-        && str_contains($service, '$payloadRegistration !== $registration')
+        && str_contains($service, 'was not found on the server for this CVR Unit aircraft')
+        && !str_contains($service, '$payloadRegistration !== $registration')
         && str_contains($models, '"aircraft_registration": entry.aircraftRegistration.uppercased()')
         && !str_contains($service, 'aircraft_id IS NULL AND UPPER(aircraft_registration)'),
     'flight log includes route times Hobbs and Garmin completeness' =>
@@ -41,6 +43,12 @@ $checks = array(
         && str_contains($service, "'has_garmin_csv'")
         && str_contains($service, 'mission_code')
         && str_contains($service, "$.evidence.off_block_utc"),
+    'Master Logbook leg edits write flight-log adjustments for iOS Log sync' =>
+        str_contains($adminCorrection, 'function upsertFlightLogAdjustment')
+        && str_contains($adminCorrection, 'Master Logbook admin operational leg correction')
+        && str_contains($adminCorrection, 'INSERT INTO ipca_cvr_flight_log_adjustments')
+        && str_contains($adminCorrection, '$this->upsertFlightLogAdjustment(')
+        && str_contains($service, 'LEFT JOIN ipca_cvr_flight_log_adjustments adjustment'),
     'Check-In closure payload carries OFF/ON block times for admin intake' =>
         str_contains($uploads, 'item["off_block_utc"]')
         && str_contains($uploads, 'item["on_block_utc"]')
@@ -103,6 +111,7 @@ $checks = array(
         str_contains($service, 'CvrOperationalBlockTimeService')
         && str_contains($service, 'derivedOnBlockUtc')
         && str_contains($service, 'off_block_plus_hobbs_increment')
+        && str_contains($service, "'!Y-m-d H:i:s.v'")
         && !str_contains($service, 'arrival_event.timestamp_utc'),
     'flight log times are explicit California local time with daylight saving support' =>
         str_contains($service, 'departure_event.timestamp_utc')
@@ -116,6 +125,7 @@ $checks = array(
         && str_contains($models, 'var crewNames: [String]?')
         && str_contains($models, 'func adjustFlightLog(')
         && str_contains($service, 'adjustForDeviceAircraft')
+        && str_contains($service, 'was not found on the server for this CVR Unit aircraft')
         && str_contains($adjustmentApi, 'requireDevice()')
         && str_contains($adjustmentMigration, 'ipca_cvr_flight_log_adjustments')
         && str_contains($views, 'ADMIN AUTHORIZATION')

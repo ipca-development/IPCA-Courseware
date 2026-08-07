@@ -124,18 +124,49 @@
     window.location.href = String(config.editBaseUrl || '') + encodeURIComponent(reservation.scheduler_record_id);
   }
 
-  function openChangeConfirmation(reservation, proposedStart, proposedEnd) {
+  function openChangeConfirmation(reservation, proposedStart, proposedEnd, proposedAircraftId) {
     var currentStart = parseLocal(reservation.scheduled_start_time);
     var currentEnd = parseLocal(reservation.scheduled_end_time);
+    var currentAircraftId = reservation.aircraft && reservation.aircraft.id ? Number(reservation.aircraft.id) : 0;
+    var nextAircraftId = proposedAircraftId ? Number(proposedAircraftId) : currentAircraftId;
+    var currentAircraft = reservation.aircraft && reservation.aircraft.registration
+      ? reservation.aircraft.registration
+      : ('#' + currentAircraftId);
+    var nextAircraftLabel = currentAircraft;
+    if (nextAircraftId && nextAircraftId !== currentAircraftId) {
+      var targetTimeline = document.querySelector('.fltsch-resource-timeline[data-resource-key="device:' + nextAircraftId + '"]');
+      var rowLabel = targetTimeline && targetTimeline.closest('.fltsch-resource-row');
+      var title = rowLabel ? rowLabel.querySelector('.fltsch-resource-label') : null;
+      nextAircraftLabel = title ? title.textContent.trim() : ('#' + nextAircraftId);
+    }
     document.getElementById('flightChangeRecordId').value = reservation.scheduler_record_id;
     document.getElementById('flightChangeStart').value = postDateTime(proposedStart);
     document.getElementById('flightChangeEnd').value = postDateTime(proposedEnd);
+    document.getElementById('flightChangeAircraftId').value = String(nextAircraftId || currentAircraftId || '');
     document.getElementById('flightChangeExpectedUpdatedAt').value = reservation.updated_at || '';
     document.getElementById('flightChangeDetails').innerHTML =
       '<dt>Reservation</dt><dd>' + escapeHtml(eventTitle(reservation)) + '</dd>'
-      + '<dt>Current</dt><dd>' + escapeHtml(formatDateTime(currentStart) + ' – ' + formatTime(currentEnd)) + '</dd>'
-      + '<dt>Proposed</dt><dd>' + escapeHtml(formatDateTime(proposedStart) + ' – ' + formatTime(proposedEnd)) + '</dd>';
+      + '<dt>Current</dt><dd>' + escapeHtml(formatDateTime(currentStart) + ' – ' + formatTime(currentEnd) + ' · ' + currentAircraft) + '</dd>'
+      + '<dt>Proposed</dt><dd>' + escapeHtml(formatDateTime(proposedStart) + ' – ' + formatTime(proposedEnd) + ' · ' + nextAircraftLabel) + '</dd>';
     showDialog('flightScheduleChangeModal');
+  }
+
+  function aircraftIdFromTimeline(timeline) {
+    if (!timeline || !timeline.dataset) return 0;
+    var parts = String(timeline.dataset.resourceKey || '').split(':');
+    if (parts[0] !== 'device') return 0;
+    return Number(parts[1] || 0) || 0;
+  }
+
+  function timelineAtPoint(clientX, clientY) {
+    var nodes = document.querySelectorAll('.fltsch-resource-timeline');
+    for (var i = 0; i < nodes.length; i++) {
+      var rect = nodes[i].getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom && clientX >= rect.left && clientX <= rect.right) {
+        return nodes[i];
+      }
+    }
+    return null;
   }
 
   function startMove(pointerEvent, reservation, timeline, eventElement, start, end) {
@@ -148,6 +179,9 @@
     var duration = Math.max(snap, originalEnd - originalStart);
     var nextStart = originalStart;
     var moved = false;
+    var originAircraftId = aircraftIdFromTimeline(timeline);
+    var proposedAircraftId = originAircraftId;
+    var activeTimeline = timeline;
     var rect = timeline.getBoundingClientRect();
     if (typeof eventElement.setPointerCapture === 'function') {
       try { eventElement.setPointerCapture(pointerEvent.pointerId); } catch (error) {}
@@ -155,7 +189,7 @@
 
     function move(event) {
       var delta = snapMinutes((event.clientX - originX) / rect.width * totalMinutes);
-      if (!moved && Math.abs(event.clientX - originX) < 5) return;
+      if (!moved && Math.abs(event.clientX - originX) < 5 && Math.abs(event.clientY - pointerEvent.clientY) < 8) return;
       event.preventDefault();
       moved = true;
       suppressClick = true;
@@ -168,6 +202,21 @@
       eventElement.style.width = position.width + '%';
       eventElement.querySelector('.fltsch-event-meta').textContent = eventDetail(reservation, proposedStart, proposedEnd);
       timeline.classList.add('is-drop-target');
+
+      var over = timelineAtPoint(event.clientX, event.clientY);
+      if (over && over !== activeTimeline) {
+        var overAircraftId = aircraftIdFromTimeline(over);
+        if (overAircraftId > 0) {
+          if (activeTimeline) activeTimeline.classList.remove('is-drop-target');
+          activeTimeline = over;
+          proposedAircraftId = overAircraftId;
+          over.appendChild(eventElement);
+          over.classList.add('is-drop-target');
+          rect = over.getBoundingClientRect();
+        }
+      } else if (activeTimeline) {
+        activeTimeline.classList.add('is-drop-target');
+      }
     }
 
     function up() {
@@ -177,13 +226,16 @@
       if (typeof eventElement.releasePointerCapture === 'function') {
         try { eventElement.releasePointerCapture(pointerEvent.pointerId); } catch (error) {}
       }
+      if (activeTimeline) activeTimeline.classList.remove('is-drop-target');
       timeline.classList.remove('is-drop-target');
       eventElement.classList.remove('is-resizing');
-      if (moved && nextStart !== originalStart) {
+      var aircraftChanged = proposedAircraftId > 0 && proposedAircraftId !== originAircraftId;
+      if (moved && (nextStart !== originalStart || aircraftChanged)) {
         openChangeConfirmation(
           reservation,
           withMinutes(start, nextStart),
-          withMinutes(start, nextStart + duration)
+          withMinutes(start, nextStart + duration),
+          proposedAircraftId || originAircraftId
         );
       } else if (moved) {
         renderReservations();

@@ -138,7 +138,10 @@ $checks['online create helper and atomic create wiring exist'] =
     && str_contains($scheduleSource, 'requireOrganizationIdForCreate')
     && str_contains($scheduleSource, 'operational identity could not be recorded')
     && preg_match('/INSERT INTO ipca_flight_schedule_slots\s*\([^)]*organization_id/s', $scheduleSource) === 1
-    && str_contains($scheduleSource, 'if ($this->identityWrite()->isFlagEnabled(CvrOperationalIdentityService::FLAG_CANONICAL_WRITE))');
+    && (
+        str_contains($scheduleSource, 'if ($this->identityWrite()->isFlagEnabled(CvrOperationalIdentityService::FLAG_CANONICAL_WRITE))')
+        || str_contains($scheduleSource, 'if ($canonicalWrite)')
+    );
 
 $checks['updates do not call online create helper'] =
     preg_match(
@@ -151,9 +154,10 @@ $checks['updates do not call online create helper'] =
         && substr_count($scheduleSource, 'createOnlineScheduleReservationIdentity') === 1
     );
 
-$checks['dual-read projects single flight leg_uuid'] =
-    str_contains($readSource, 'schedule_flight_leg_count_unexpected')
-    && str_contains($readSource, 'listLegsForReservation');
+$checks['dual-read projects flight reservation with one or more legs'] =
+    str_contains($readSource, 'Multi-leg is valid')
+    && str_contains($readSource, 'listLegsForReservation')
+    && str_contains($readSource, 'schedule_flight_leg_count_unexpected');
 
 $checks['dry-run counts server_dispatch_id'] =
     str_contains($backfillSource, 'dispatch_uuid + dispatch_uuid_version + server_dispatch_id')
@@ -396,11 +400,12 @@ $identity->createFlightLeg(array(
     'source' => 'manual',
 ), false);
 $multiLegProjection = $reader->projectScheduleIdentity(7, $newFlightId, $slotId);
-$checks['unexpected multi-leg schedule projection falls back with conflict'] =
+$checks['intentional multi-leg schedule projection succeeds with primary leg'] =
     is_array($multiLegProjection)
-    && $multiLegProjection['reservation_uuid'] === null
-    && $multiLegProjection['leg_uuid'] === null
-    && $multiLegProjection['identity_source'] === 'canonical_conflict';
+    && $multiLegProjection['reservation_uuid'] === $newFlightId
+    && is_string($multiLegProjection['leg_uuid'])
+    && $multiLegProjection['leg_uuid'] !== ''
+    && $multiLegProjection['identity_source'] === 'canonical_alias';
 
 $failId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 $identity->createReservation(array(
