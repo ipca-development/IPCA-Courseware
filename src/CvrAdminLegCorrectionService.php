@@ -439,14 +439,16 @@ final class CvrAdminLegCorrectionService
             return;
         }
 
+        $batchId = $this->createAdminClosureEvidenceBatch($flightUuid, $hash, $json);
         $insert = $this->pdo->prepare(
             'INSERT INTO ipca_cvr_flight_closures
              (closure_uuid, batch_id, workflow_flight_record_uuid, ending_hobbs, ending_tacho,
               fuel_remaining, oil_percentage, oil_quantity, oil_unit, maintenance_remark, payload_sha256, payload_json)
-             VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insert->execute(array(
             AuditEventService::uuid(),
+            $batchId,
             $flightUuid,
             $endingHobbs,
             $endingTacho,
@@ -458,6 +460,48 @@ final class CvrAdminLegCorrectionService
             $hash,
             $json,
         ));
+    }
+
+    /**
+     * Closures require a non-null evidence batch FK. Admin corrections mint a synthetic batch.
+     */
+    private function createAdminClosureEvidenceBatch(string $flightUuid, string $hash, string $json): int
+    {
+        $dispatchStmt = $this->pdo->prepare(
+            'SELECT dispatch_uuid, device_id
+             FROM ipca_cvr_dispatches
+             WHERE LOWER(workflow_flight_record_uuid) = ?
+             ORDER BY id DESC LIMIT 1'
+        );
+        $dispatchStmt->execute(array($flightUuid));
+        $dispatch = $dispatchStmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($dispatch)) {
+            throw new RuntimeException('Unable to create closure evidence: Dispatch linkage was not found.');
+        }
+        $dispatchUuid = strtolower(trim((string)($dispatch['dispatch_uuid'] ?? '')));
+        $deviceId = (int)($dispatch['device_id'] ?? 0);
+        if ($dispatchUuid === '' || $deviceId <= 0) {
+            throw new RuntimeException('Unable to create closure evidence: Dispatch device linkage is incomplete.');
+        }
+
+        $componentUuid = 'admin-closure-' . AuditEventService::uuid();
+        $this->pdo->prepare(
+            'INSERT INTO ipca_cvr_workflow_evidence_batches
+             (batch_uuid, component_uuid, workflow_flight_record_uuid, dispatch_uuid, device_id,
+              component_type, payload_sha256, payload_json, receipt_uuid)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute(array(
+            AuditEventService::uuid(),
+            $componentUuid,
+            $flightUuid,
+            $dispatchUuid,
+            $deviceId,
+            'flight_record_closure',
+            $hash,
+            $json,
+            AuditEventService::uuid(),
+        ));
+        return (int)$this->pdo->lastInsertId();
     }
 
     private function ensureEngineStartEvent(string $flightUuid, string $offBlockUtc): void

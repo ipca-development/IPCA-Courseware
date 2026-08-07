@@ -281,7 +281,7 @@ compliance_page_open(array(
   #flightReservationModal{width:min(860px,calc(100vw - 32px));}
   @media(max-width:760px){.cmpcal-form-grid,.fltsch-crew-row{grid-template-columns:1fr}.fltsch-filters,.fltsch-filters .cmpcal-field{width:100%}.fltsch-filters .compliance-btn{width:100%}.fltsch-card{padding:14px}}
 </style>
-<link rel="stylesheet" href="/admin/assets/flight_schedule.css?v=20260801.3">
+<link rel="stylesheet" href="/admin/assets/flight_schedule.css?v=20260807.1">
 
 <section class="fltsch-card fltsch-scheduler-card">
   <div class="fltsch-day-toolbar">
@@ -294,7 +294,7 @@ compliance_page_open(array(
       <input type="date" name="date" value="<?= h($selectedDate) ?>" aria-label="Schedule date" onchange="this.form.submit()">
     </form>
     <div class="fltsch-day-title"><?= h(date('l, F j, Y', strtotime($selectedDate))) ?></div>
-    <div class="fltsch-toolbar-note">Click to edit · drag to move · drag edges to resize · 15-minute increments</div>
+    <div class="fltsch-toolbar-note">Hover for details · click to open · drag to move · drag edges to resize · 15-minute increments</div>
   </div>
   <div class="fltsch-legend" aria-label="Schedule status legend">
     <span><i class="is-scheduled"></i> Scheduled · editable</span>
@@ -431,6 +431,13 @@ compliance_page_open(array(
   </form>
 <?php compliance_modal_close(); ?>
 
+<?php compliance_modal_open('flightCompletedModal', 'Completed flight'); ?>
+  <div id="flightCompletedModalBody"></div>
+  <div class="compliance-modal__footer">
+    <button type="button" class="compliance-btn compliance-btn--secondary" data-compliance-modal-close>Close</button>
+  </div>
+<?php compliance_modal_close(); ?>
+
 <script>
 window.IPCAFlightSchedule = <?= json_encode(array(
     'date' => $selectedDate,
@@ -535,6 +542,6 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
 })();
 <?php endif; ?>
 </script>
-<script src="/admin/assets/flight_schedule.js?v=20260806.2"></script>
+<script src="/admin/assets/flight_schedule.js?v=20260807.1"></script>
 <?php compliance_page_close(); ?>
 <?php cw_footer(); ?>

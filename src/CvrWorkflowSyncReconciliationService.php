@@ -183,6 +183,23 @@ final class CvrWorkflowSyncReconciliationService
         $statement->execute(array($componentUuid));
         $stored = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($stored)) {
+            // Restored/admin closures mint a different component_uuid than the device.
+            // Accept an existing flight-scoped closure so the App can clear a stuck upload.
+            if ($componentType === 'flight_record_closure') {
+                $existingClosure = $this->existingFlightClosureBatch($dispatchUuid, $flightUuid, $deviceId);
+                if (is_array($existingClosure)) {
+                    $typedIdentifiers = $this->typedIdentifiers((int)$existingClosure['id'], $componentType);
+                    return $this->verifiedResult($item, $existingClosure, array_merge(array(
+                        'server_evidence_batch_id' => (string)$existingClosure['id'],
+                        'server_batch_uuid' => (string)$existingClosure['batch_uuid'],
+                        'component_uuid' => strtolower((string)$existingClosure['component_uuid']),
+                        'component_type' => $componentType,
+                        'dispatch_uuid' => $dispatchUuid,
+                        'flight_record_uuid' => $flightUuid,
+                        'flight_scoped_closure_match' => '1',
+                    ), $typedIdentifiers, $this->closureMeterIdentifiers($existingClosure)));
+                }
+            }
             $this->assertMissingEvidenceDependency($dispatchUuid, $flightUuid, $deviceId);
             return $this->statusResult($item, 'NOT_FOUND', true);
         }
@@ -232,6 +249,50 @@ final class CvrWorkflowSyncReconciliationService
             || strtolower((string)$dispatch['workflow_flight_record_uuid']) !== $flightUuid) {
             throw new CvrImmutableConflict('Evidence Dispatch ownership or Flight Record linkage conflicts.');
         }
+    }
+
+    /**
+     * @return array<string,mixed>|false
+     */
+    private function existingFlightClosureBatch(string $dispatchUuid, string $flightUuid, int $deviceId): array|false
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT id, batch_uuid, component_uuid, workflow_flight_record_uuid, dispatch_uuid,
+                    device_id, component_type, payload_sha256, payload_json, receipt_uuid, received_at
+             FROM ipca_cvr_workflow_evidence_batches
+             WHERE component_type = ?
+               AND LOWER(dispatch_uuid) = ?
+               AND LOWER(workflow_flight_record_uuid) = ?
+               AND device_id = ?
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $statement->execute(array('flight_record_closure', $dispatchUuid, $flightUuid, $deviceId));
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : false;
+    }
+
+    /**
+     * @param array<string,mixed> $batch
+     * @return array<string,string>
+     */
+    private function closureMeterIdentifiers(array $batch): array
+    {
+        $payload = json_decode((string)($batch['payload_json'] ?? ''), true);
+        $evidence = is_array($payload) && is_array($payload['evidence'] ?? null)
+            ? $payload['evidence']
+            : array();
+        $identifiers = array();
+        foreach (array('ending_hobbs', 'ending_tacho', 'fuel_remaining', 'verified_destination_airport') as $key) {
+            if (!array_key_exists($key, $evidence) || $evidence[$key] === null || $evidence[$key] === '') {
+                continue;
+            }
+            $identifiers[$key] = is_scalar($evidence[$key]) ? (string)$evidence[$key] : '';
+            if ($identifiers[$key] === '') {
+                unset($identifiers[$key]);
+            }
+        }
+        return $identifiers;
     }
 
     /** @return array<string,string> */

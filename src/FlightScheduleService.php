@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
 require_once __DIR__ . '/CvrOperationalIdentityService.php';
+require_once __DIR__ . '/CvrOperationalBlockTimeService.php';
 
 final class FlightScheduleService
 {
@@ -101,10 +102,11 @@ final class FlightScheduleService
             return array();
         }
         $crewBySlot = $this->crewBySlotIds(array_map(static fn(array $row): int => (int)$row['id'], $rows));
-        return array_map(
+        $payloads = array_map(
             fn(array $row): array => $this->payload($row, $crewBySlot[(int)$row['id']] ?? array()),
             $rows
         );
+        return $this->attachOperationalLegDetails($payloads);
     }
 
     /** @return list<array<string,mixed>> */
@@ -680,6 +682,233 @@ final class FlightScheduleService
             }
         }
         return $payload;
+    }
+
+    /**
+     * Attach completed-leg operational meters/times for hover + locked completed modal.
+     *
+     * @param list<array<string,mixed>> $payloads
+     * @return list<array<string,mixed>>
+     */
+    private function attachOperationalLegDetails(array $payloads): array
+    {
+        $schedulerIds = array();
+        foreach ($payloads as $payload) {
+            $id = strtolower(trim((string)($payload['scheduler_record_id'] ?? '')));
+            if ($id !== '') {
+                $schedulerIds[$id] = true;
+            }
+        }
+        if ($schedulerIds === array()) {
+            return $payloads;
+        }
+        $opsByScheduler = $this->operationalLegsBySchedulerRecordIds(array_keys($schedulerIds));
+        foreach ($payloads as &$payload) {
+            $id = strtolower(trim((string)($payload['scheduler_record_id'] ?? '')));
+            $ops = $opsByScheduler[$id] ?? array();
+            $legs = is_array($payload['legs'] ?? null) ? $payload['legs'] : array();
+            if ($legs === array() && $ops !== array()) {
+                $legs = array_map(static function (array $op): array {
+                    return array(
+                        'sequence_number' => (int)($op['sequence_number'] ?? 1),
+                        'origin_airport' => (string)($op['origin_airport'] ?? ''),
+                        'destination_airport' => (string)($op['destination_airport'] ?? ''),
+                    );
+                }, $ops);
+            }
+            $payload['legs'] = $this->mergeLegOperationalDetails($legs, $ops);
+        }
+        unset($payload);
+        return $payloads;
+    }
+
+    /**
+     * @param list<string> $schedulerRecordIds
+     * @return array<string,list<array<string,mixed>>>
+     */
+    private function operationalLegsBySchedulerRecordIds(array $schedulerRecordIds): array
+    {
+        $schedulerRecordIds = array_values(array_filter(array_map(
+            static fn(string $id): string => strtolower(trim($id)),
+            $schedulerRecordIds
+        )));
+        if ($schedulerRecordIds === array()) {
+            return array();
+        }
+        $placeholders = implode(',', array_fill(0, count($schedulerRecordIds), '?'));
+        $sql = "
+            SELECT
+                LOWER(d.scheduler_record_id) AS scheduler_record_id,
+                d.workflow_flight_record_uuid,
+                CAST(d.starting_hobbs AS DECIMAL(12,2)) AS starting_hobbs,
+                CAST(d.starting_tacho AS DECIMAL(12,2)) AS starting_tacho,
+                d.fuel_onboard,
+                CAST(COALESCE(adj.ending_hobbs, fc.ending_hobbs) AS DECIMAL(12,2)) AS ending_hobbs,
+                CAST(COALESCE(adj.ending_tacho, fc.ending_tacho) AS DECIMAL(12,2)) AS ending_tacho,
+                COALESCE(adj.fuel_remaining, fc.fuel_remaining) AS fuel_remaining,
+                COALESCE(
+                    NULLIF(adj.departure_airport, ''),
+                    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.verified_departure_airport')), 'null'),
+                    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(dv.payload_json, '$.dispatch.planned_departure_airport')), 'null')
+                ) AS departure_airport,
+                COALESCE(
+                    NULLIF(adj.arrival_airport, ''),
+                    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.verified_destination_airport')), 'null'),
+                    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(dv.payload_json, '$.dispatch.planned_destination_airport')), 'null')
+                ) AS arrival_airport,
+                (
+                    SELECT e.timestamp_utc
+                    FROM ipca_cvr_flight_events e
+                    WHERE e.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+                      AND e.event_type = 'engine_start_off_block'
+                    ORDER BY e.timestamp_utc ASC
+                    LIMIT 1
+                ) AS off_block_utc,
+                CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.on_block_utc')), 'null') AS DATETIME) AS closure_on_block_utc
+            FROM ipca_cvr_dispatches d
+            LEFT JOIN ipca_cvr_dispatch_versions dv
+              ON dv.dispatch_id = d.id AND dv.dispatch_version = d.current_version
+            LEFT JOIN ipca_cvr_flight_closures fc
+              ON fc.id = (
+                   SELECT fc2.id FROM ipca_cvr_flight_closures fc2
+                   WHERE fc2.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+                   ORDER BY fc2.id DESC LIMIT 1
+                 )
+            LEFT JOIN ipca_cvr_flight_log_adjustments adj
+              ON adj.id = (
+                   SELECT a2.id FROM ipca_cvr_flight_log_adjustments a2
+                   WHERE a2.workflow_flight_record_uuid = d.workflow_flight_record_uuid
+                   ORDER BY a2.id DESC LIMIT 1
+                 )
+            WHERE LOWER(d.scheduler_record_id) IN ({$placeholders})
+              AND LOWER(TRIM(COALESCE(d.status, ''))) <> 'released'
+            ORDER BY off_block_utc ASC, d.id ASC
+        ";
+        try {
+            $statement = $this->pdo->prepare($sql);
+            $statement->execute($schedulerRecordIds);
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable) {
+            return array();
+        }
+        if (!is_array($rows) || $rows === array()) {
+            return array();
+        }
+
+        $blockTimes = new CvrOperationalBlockTimeService();
+        $grouped = array();
+        foreach ($rows as $row) {
+            $schedulerId = strtolower(trim((string)($row['scheduler_record_id'] ?? '')));
+            if ($schedulerId === '') {
+                continue;
+            }
+            $offUtc = trim((string)($row['off_block_utc'] ?? ''));
+            $onUtc = $blockTimes->derivedOnBlockUtc(array(
+                'off_block_utc' => $offUtc !== '' ? $offUtc : null,
+                'starting_hobbs' => $row['starting_hobbs'] ?? null,
+                'ending_hobbs' => $row['ending_hobbs'] ?? null,
+                'closure_on_block_utc' => $row['closure_on_block_utc'] ?? null,
+            ));
+            $hobbsHours = $blockTimes->engineTimeHours($row['starting_hobbs'] ?? null, $row['ending_hobbs'] ?? null);
+            $grouped[$schedulerId][] = array(
+                'sequence_number' => count($grouped[$schedulerId] ?? array()) + 1,
+                'workflow_flight_record_uuid' => (string)($row['workflow_flight_record_uuid'] ?? ''),
+                'origin_airport' => strtoupper(trim((string)($row['departure_airport'] ?? ''))),
+                'destination_airport' => strtoupper(trim((string)($row['arrival_airport'] ?? ''))),
+                'off_block_local' => $this->californiaClock($offUtc !== '' ? $offUtc : null),
+                'on_block_local' => $this->californiaClock($onUtc),
+                'starting_hobbs' => is_numeric($row['starting_hobbs'] ?? null) ? (float)$row['starting_hobbs'] : null,
+                'ending_hobbs' => is_numeric($row['ending_hobbs'] ?? null) ? (float)$row['ending_hobbs'] : null,
+                'starting_tacho' => is_numeric($row['starting_tacho'] ?? null) ? (float)$row['starting_tacho'] : null,
+                'ending_tacho' => is_numeric($row['ending_tacho'] ?? null) ? (float)$row['ending_tacho'] : null,
+                'fuel_onboard' => $row['fuel_onboard'] !== null && $row['fuel_onboard'] !== ''
+                    ? (string)$row['fuel_onboard']
+                    : null,
+                'fuel_remaining' => $row['fuel_remaining'] !== null && $row['fuel_remaining'] !== ''
+                    ? (string)$row['fuel_remaining']
+                    : null,
+                'hobbs_hours' => $hobbsHours,
+            );
+        }
+        return $grouped;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $legs
+     * @param list<array<string,mixed>> $ops
+     * @return list<array<string,mixed>>
+     */
+    private function mergeLegOperationalDetails(array $legs, array $ops): array
+    {
+        if ($legs === array()) {
+            return $ops;
+        }
+        $used = array();
+        foreach ($legs as $index => $leg) {
+            if (!is_array($leg)) {
+                continue;
+            }
+            $match = null;
+            $origin = strtoupper(trim((string)($leg['origin_airport'] ?? '')));
+            $destination = strtoupper(trim((string)($leg['destination_airport'] ?? '')));
+            foreach ($ops as $opIndex => $op) {
+                if (isset($used[$opIndex])) {
+                    continue;
+                }
+                $opOrigin = strtoupper(trim((string)($op['origin_airport'] ?? '')));
+                $opDestination = strtoupper(trim((string)($op['destination_airport'] ?? '')));
+                if ($origin !== '' && $destination !== ''
+                    && $opOrigin === $origin && $opDestination === $destination) {
+                    $match = $op;
+                    $used[$opIndex] = true;
+                    break;
+                }
+            }
+            if ($match === null && isset($ops[$index]) && !isset($used[$index])) {
+                $match = $ops[$index];
+                $used[$index] = true;
+            }
+            if (is_array($match)) {
+                foreach (array(
+                    'workflow_flight_record_uuid',
+                    'off_block_local',
+                    'on_block_local',
+                    'starting_hobbs',
+                    'ending_hobbs',
+                    'starting_tacho',
+                    'ending_tacho',
+                    'fuel_onboard',
+                    'fuel_remaining',
+                    'hobbs_hours',
+                ) as $key) {
+                    if (array_key_exists($key, $match) && $match[$key] !== null && $match[$key] !== '') {
+                        $leg[$key] = $match[$key];
+                    }
+                }
+                if ($origin === '' && !empty($match['origin_airport'])) {
+                    $leg['origin_airport'] = $match['origin_airport'];
+                }
+                if ($destination === '' && !empty($match['destination_airport'])) {
+                    $leg['destination_airport'] = $match['destination_airport'];
+                }
+            }
+            $legs[$index] = $leg;
+        }
+        return array_values($legs);
+    }
+
+    private function californiaClock(?string $utcDateTime): ?string
+    {
+        $raw = trim((string)$utcDateTime);
+        if ($raw === '') {
+            return null;
+        }
+        try {
+            $utc = new DateTimeImmutable($raw, new DateTimeZone('UTC'));
+            return $utc->setTimezone(new DateTimeZone('America/Los_Angeles'))->format('H:i');
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

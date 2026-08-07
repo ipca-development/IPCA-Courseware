@@ -11,6 +11,7 @@ $dispatchSource = file_get_contents(__DIR__ . '/../src/CvrDispatchIntakeService.
 $scheduleSource = file_get_contents(__DIR__ . '/../src/FlightScheduleService.php') ?: '';
 $scheduleAdmin = file_get_contents(__DIR__ . '/../public/admin/schedule.php') ?: '';
 $scheduleJs = file_get_contents(__DIR__ . '/../public/admin/assets/flight_schedule.js') ?: '';
+$scheduleCss = file_get_contents(__DIR__ . '/../public/admin/assets/flight_schedule.css') ?: '';
 $aircraftSource = file_get_contents(__DIR__ . '/../src/CockpitAircraftService.php') ?: '';
 $apiSource = file_get_contents(__DIR__ . '/../public/api/cvr/scheduled_sessions.php') ?: '';
 $iosModels = file_get_contents(__DIR__ . '/../ipca-cvr-unit/IPCACVRUnit/Models/CVRCatalogModels.swift') ?: '';
@@ -130,11 +131,22 @@ $checks['resource scheduler exposes devices staff cohorts and drag resize'] = st
 $checks['editable reservations support click edit and drag without false concurrency conflicts'] = static fn(): bool =>
     !str_contains($scheduleJs, "if (pointerEvent.target.closest('.fltsch-resize-handle')) return;\n    pointerEvent.preventDefault();")
     && str_contains($scheduleJs, 'if (!moved && Math.abs(event.clientX - originX) < 5')
-    && str_contains($scheduleJs, "class=\"fltsch-event-edit\"")
+    && str_contains($scheduleJs, 'openReservation(')
+    && !str_contains($scheduleJs, 'aria-label="Edit reservation"')
+    && str_contains($scheduleJs, 'fltsch-hover-tip')
+    && str_contains($scheduleJs, 'openCompletedModal(')
     && str_contains($scheduleJs, '} else if (moved) {')
     && str_contains($scheduleAdmin, 'flight_schedule.js?v=')
+    && str_contains($scheduleAdmin, 'flightCompletedModal')
     && str_contains($scheduleSource, "substr((string)(\$slot['updated_at'] ?? ''), 0, 19)")
     && str_contains($scheduleSource, 'isoPrecise');
+$checks['schedule hover and completed modal expose reservation and leg details'] = static fn(): bool =>
+    str_contains($scheduleJs, 'Type of Reservation')
+    && str_contains($scheduleJs, 'Public Notes')
+    && str_contains($scheduleJs, 'completedLegLine(')
+    && str_contains($scheduleSource, 'attachOperationalLegDetails')
+    && str_contains($scheduleSource, 'off_block_local')
+    && str_contains($scheduleCss, 'fltsch-hover-tip');
 $checks['dispatched and completed reservations remain locked with evidence indicators'] = static fn(): bool =>
     str_contains($scheduleSource, "'lock_reason'")
     && str_contains($scheduleSource, "'evidence'")

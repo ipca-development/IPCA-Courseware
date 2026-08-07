@@ -3774,6 +3774,7 @@ private struct FlightLogView: View {
         case "uploaded", "complete": return "UPLOADED"
         case "failed": return "FAILED"
         case "uploading": return "UPLOADING"
+        case "missing", nil, "": return "NONE"
         default: return "PENDING"
         }
     }
@@ -3783,6 +3784,7 @@ private struct FlightLogView: View {
         case "uploaded", "complete": return CVROperationalPalette.success
         case "failed": return CVROperationalPalette.critical
         case "uploading": return CVROperationalPalette.secondaryBlue
+        case "missing", nil, "": return CVROperationalPalette.textSecondary
         default: return CVROperationalPalette.standby
         }
     }
@@ -4321,16 +4323,20 @@ private struct FlightLogView: View {
                 ? "complete"
                 : (relevantComponents.contains { $0.state == .uploading } ? "uploading" : "pending"))
         let linkedRecordings = linkedRecordings(forFlightRecordID: flightRecord.id)
-        let audioUploadStatus = linkedRecordings.contains { $0.uploadStatus == .failed }
-            ? "failed"
-            : (!linkedRecordings.isEmpty && linkedRecordings.allSatisfy { $0.uploadStatus == .uploaded }
-                ? "uploaded"
-                : (linkedRecordings.contains { $0.uploadStatus == .uploading } ? "uploading" : "pending"))
-        let transcriptStatus = linkedRecordings.contains { $0.transcriptStatus == .failed }
-            ? "failed"
-            : (!linkedRecordings.isEmpty && linkedRecordings.allSatisfy { $0.transcriptStatus == .ready }
-                ? "ready"
-                : (linkedRecordings.contains { $0.transcriptStatus == .transcribing } ? "transcribing" : "pending"))
+        let audioUploadStatus: String? = {
+            guard !linkedRecordings.isEmpty else { return nil }
+            if linkedRecordings.contains(where: { $0.uploadStatus == .failed }) { return "failed" }
+            if linkedRecordings.allSatisfy({ $0.uploadStatus == .uploaded }) { return "uploaded" }
+            if linkedRecordings.contains(where: { $0.uploadStatus == .uploading }) { return "uploading" }
+            return "pending"
+        }()
+        let transcriptStatus: String? = {
+            guard !linkedRecordings.isEmpty else { return nil }
+            if linkedRecordings.contains(where: { $0.transcriptStatus == .failed }) { return "failed" }
+            if linkedRecordings.allSatisfy({ $0.transcriptStatus == .ready }) { return "ready" }
+            if linkedRecordings.contains(where: { $0.transcriptStatus == .transcribing }) { return "transcribing" }
+            return "pending"
+        }()
         let transcriptProgress = linkedRecordings.isEmpty
             ? 0
             : linkedRecordings.map(\.transcriptProgress).min() ?? 0

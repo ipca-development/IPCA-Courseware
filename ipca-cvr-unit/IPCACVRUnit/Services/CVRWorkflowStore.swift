@@ -1298,10 +1298,6 @@ final class CVRWorkflowStore: ObservableObject {
               let endingTacho = flightRecord.endingTacho else {
             return false
         }
-        let fuel = (flightRecord.fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !fuel.isEmpty else { return false }
-        let destination = (flightRecord.verifiedDestinationAirport ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !destination.isEmpty else { return false }
         let dispatch = explicitDispatch ?? (
             state.activeFlightRecord?.id == flightRecord.id ? state.activeDispatch : nil
         )
@@ -2428,7 +2424,7 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "Server verification metadata is incomplete."
             return false
         }
-        return updateComponentAtomically(id: componentID) { component in
+        let persisted = updateComponentAtomically(id: componentID) { component in
             component.serverReceiptID = serverReceiptID
             component.authoritativePayloadSHA256 = authoritativePayloadSHA256
             component.serverVerificationAt = serverVerificationAt
@@ -2447,6 +2443,91 @@ final class CVRWorkflowStore: ObservableObject {
             component.lastAttemptAt = Date()
         } validation: {
             Self.hasCompleteVerificationMetadata($0)
+        }
+        if persisted {
+            hydrateFlightClosureMetersIfNeeded(
+                componentID: componentID,
+                canonicalIdentifiers: canonicalIdentifiers
+            )
+        }
+        return persisted
+    }
+
+    /// When a restored/admin closure is flight-scoped reconciled, copy meters onto the local Flight Record
+    /// so Log/Check-In no longer treat the leg as missing Ending Hobbs/Tacho.
+    private func hydrateFlightClosureMetersIfNeeded(
+        componentID: String,
+        canonicalIdentifiers: [String: String]
+    ) {
+        guard let endingHobbs = Double(canonicalIdentifiers["ending_hobbs"] ?? ""),
+              let endingTacho = Double(canonicalIdentifiers["ending_tacho"] ?? "") else {
+            return
+        }
+        let fuel = canonicalIdentifiers["fuel_remaining"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = canonicalIdentifiers["verified_destination_airport"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let component = state.uploadComponents.first(where: { $0.id == componentID }),
+           component.componentType == "flight_record_closure",
+           var flight = state.activeFlightRecord,
+           flight.id == component.flightRecordID {
+            var changed = false
+            if flight.endingHobbs == nil {
+                flight.endingHobbs = endingHobbs
+                changed = true
+            }
+            if flight.endingTacho == nil {
+                flight.endingTacho = endingTacho
+                changed = true
+            }
+            if (flight.fuelRemaining ?? "").isEmpty, let fuel, !fuel.isEmpty {
+                flight.fuelRemaining = fuel
+                changed = true
+            }
+            if (flight.verifiedDestinationAirport ?? "").isEmpty, let destination, !destination.isEmpty {
+                flight.verifiedDestinationAirport = destination
+                changed = true
+            }
+            if changed {
+                _ = mutate {
+                    $0.activeFlightRecord = flight
+                }
+            }
+            return
+        }
+
+        guard let archiveIndex = archives.firstIndex(where: {
+            $0.uploadComponents.contains(where: { $0.id == componentID && $0.componentType == "flight_record_closure" })
+        }) else {
+            return
+        }
+        var updated = archives
+        var flight = updated[archiveIndex].flightRecord
+        var changed = false
+        if flight.endingHobbs == nil {
+            flight.endingHobbs = endingHobbs
+            changed = true
+        }
+        if flight.endingTacho == nil {
+            flight.endingTacho = endingTacho
+            changed = true
+        }
+        if (flight.fuelRemaining ?? "").isEmpty, let fuel, !fuel.isEmpty {
+            flight.fuelRemaining = fuel
+            changed = true
+        }
+        if (flight.verifiedDestinationAirport ?? "").isEmpty, let destination, !destination.isEmpty {
+            flight.verifiedDestinationAirport = destination
+            changed = true
+        }
+        guard changed else { return }
+        updated[archiveIndex].flightRecord = flight
+        do {
+            try saveArchives(updated)
+            archives = updated
+        } catch {
+            lastError = "Could not hydrate Flight Closure meters from server reconciliation: \(error.localizedDescription)"
         }
     }
 

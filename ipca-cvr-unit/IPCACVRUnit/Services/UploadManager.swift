@@ -161,6 +161,7 @@ final class UploadManager: ObservableObject {
             supportedTypes.contains($0.componentType)
         }
         guard !components.isEmpty else { return }
+        var rescanForClosureReconciliation = false
         guard let baseURL = settings.normalizedServerURL else {
             for component in components where component.componentType == "dispatch_metadata" {
                 workflow.updateUploadComponent(
@@ -238,12 +239,22 @@ final class UploadManager: ObservableObject {
             guard let context = workflow.workflowUploadContext(componentID: component.id) else { continue }
             if component.componentType == "flight_record_closure",
                !workflow.flightClosureIsComplete(context.flightRecord, dispatch: context.dispatch) {
-                workflow.updateUploadComponent(
-                    id: component.id,
-                    state: .needsUserAction,
-                    progress: component.progress ?? 0,
-                    lastError: "Ending Hobbs and Ending Tacho are required before closure upload."
-                )
+                // Restored/admin closures may already exist under a different component_uuid.
+                // Reconcile against the flight-scoped server closure before demanding meters.
+                if component.reconciliationRequired == false {
+                    workflow.updateUploadComponent(
+                        id: component.id,
+                        state: .needsUserAction,
+                        progress: component.progress ?? 0,
+                        lastError: "Ending Hobbs and Ending Tacho are required before closure upload."
+                    )
+                } else if component.reconciliationRequired != true {
+                    _ = workflow.markReconciliationRequired(
+                        id: component.id,
+                        message: "Checking whether Flight Closure already exists on the server..."
+                    )
+                    rescanForClosureReconciliation = true
+                }
                 continue
             }
             if component.componentType != "dispatch_metadata",
@@ -419,6 +430,12 @@ final class UploadManager: ObservableObject {
                         }
                     }
                 }
+            }
+        }
+
+        if rescanForClosureReconciliation, !workflowReconciliationScanInFlight {
+            Task { @MainActor in
+                self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings, trigger: trigger)
             }
         }
     }

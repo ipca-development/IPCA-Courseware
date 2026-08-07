@@ -10,6 +10,16 @@
   var snap = Number(config.snapMinutes || 15);
   var totalMinutes = dayEnd - dayStart;
   var suppressClick = false;
+  var hoverTip = null;
+  var hoverHideTimer = null;
+
+  var ROLE_LABELS = {
+    student: 'Student',
+    instructor: 'Instructor',
+    pic: 'PIC',
+    safetypilot: 'Safety Pilot',
+    observer: 'Observer'
+  };
 
   function pad(value) {
     return String(value).padStart(2, '0');
@@ -56,6 +66,15 @@
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
+  function formatWeekdayTime(date) {
+    return date.toLocaleDateString([], { weekday: 'short' }) + ' ' + formatTime(date);
+  }
+
+  function formatReservationWindow(start, end) {
+    if (!start || !end) return '—';
+    return formatWeekdayTime(start) + ' – ' + formatWeekdayTime(end);
+  }
+
   function formatDateTime(date) {
     return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
       + ', ' + formatTime(date);
@@ -72,6 +91,162 @@
     if (!dialog) return;
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open', 'open');
+  }
+
+  function roleLabel(role) {
+    var key = String(role || '').toLowerCase();
+    return ROLE_LABELS[key] || (role ? String(role) : '');
+  }
+
+  function meterTriplet(hobbs, tacho, fuel) {
+    var parts = [];
+    if (hobbs != null && hobbs !== '') parts.push('H ' + Number(hobbs).toFixed(1));
+    if (tacho != null && tacho !== '') parts.push('T ' + Number(tacho).toFixed(1));
+    if (fuel != null && fuel !== '') parts.push('F ' + String(fuel));
+    return parts.length ? '(' + parts.join(' / ') + ')' : '';
+  }
+
+  function reservationLegs(reservation) {
+    if (Array.isArray(reservation.legs) && reservation.legs.length) return reservation.legs;
+    var chain = Array.isArray(reservation.airport_chain) ? reservation.airport_chain.filter(Boolean) : [];
+    if (chain.length >= 2) {
+      var legs = [];
+      for (var i = 0; i < chain.length - 1; i++) {
+        legs.push({
+          sequence_number: i + 1,
+          origin_airport: chain[i],
+          destination_airport: chain[i + 1]
+        });
+      }
+      return legs;
+    }
+    var dep = reservation.planned_departure_airport || '';
+    var arr = reservation.planned_destination_airport || '';
+    if (dep || arr) {
+      return [{ sequence_number: 1, origin_airport: dep, destination_airport: arr }];
+    }
+    return [];
+  }
+
+  function plannedLegLine(leg, index) {
+    var seq = leg.sequence_number || (index + 1);
+    var origin = leg.origin_airport || '—';
+    var destination = leg.destination_airport || '—';
+    return 'Leg ' + seq + ' — ' + origin + ' – ' + destination;
+  }
+
+  function completedLegLine(leg, index) {
+    var seq = leg.sequence_number || (index + 1);
+    var origin = leg.origin_airport || '—';
+    var destination = leg.destination_airport || '—';
+    var off = leg.off_block_local || '—';
+    var on = leg.on_block_local || '—';
+    var startMeters = meterTriplet(leg.starting_hobbs, leg.starting_tacho, leg.fuel_onboard);
+    var endMeters = meterTriplet(leg.ending_hobbs, leg.ending_tacho, leg.fuel_remaining);
+    var hours = leg.hobbs_hours != null ? Number(leg.hobbs_hours).toFixed(1) + 'h' : '—';
+    return 'Leg ' + seq + ': '
+      + origin + ' ' + off + (startMeters ? ' ' + startMeters : '')
+      + ' – '
+      + destination + ' ' + on + (endMeters ? ' ' + endMeters : '')
+      + ' – ' + hours;
+  }
+
+  function detailRowsHtml(reservation, options) {
+    options = options || {};
+    var start = parseLocal(reservation.scheduled_start_time);
+    var end = parseLocal(reservation.scheduled_end_time);
+    var typeLabel = reservation.reservation_type_label
+      || reservation.reservation_type
+      || 'Reservation';
+    var missionCode = reservation.mission && reservation.mission.code ? reservation.mission.code : '';
+    var missionName = reservation.mission && reservation.mission.name ? reservation.mission.name : '';
+    var mission = missionCode
+      ? (missionName ? missionCode + ' — ' + missionName : missionCode)
+      : (missionName || '—');
+    var crew = Array.isArray(reservation.crew)
+      ? reservation.crew.map(function (member) {
+          var name = member.person_name || '';
+          var role = roleLabel(member.role);
+          if (!name) return '';
+          return name + (role ? ' (' + role + ')' : '');
+        }).filter(Boolean)
+      : [];
+    var legs = reservationLegs(reservation);
+    var legLines = legs.map(function (leg, index) {
+      return options.completed ? completedLegLine(leg, index) : plannedLegLine(leg, index);
+    });
+    var notes = String(reservation.notes || '').trim();
+
+    var html = ''
+      + '<div class="fltsch-detail-row"><dt>Type of Reservation</dt><dd>' + escapeHtml(typeLabel) + '</dd></div>'
+      + '<div class="fltsch-detail-row"><dt>Time</dt><dd>' + escapeHtml(formatReservationWindow(start, end)) + '</dd></div>'
+      + '<div class="fltsch-detail-row"><dt>Mission</dt><dd>' + escapeHtml(mission) + '</dd></div>'
+      + '<div class="fltsch-detail-row"><dt>Crew</dt><dd>'
+      + (crew.length
+        ? '<ul class="fltsch-detail-list">' + crew.map(function (line) {
+            return '<li>' + escapeHtml(line) + '</li>';
+          }).join('') + '</ul>'
+        : '—')
+      + '</dd></div>'
+      + '<div class="fltsch-detail-row"><dt>Legs</dt><dd>'
+      + (legLines.length
+        ? '<ul class="fltsch-detail-list">' + legLines.map(function (line) {
+            return '<li>' + escapeHtml(line) + '</li>';
+          }).join('') + '</ul>'
+        : '—')
+      + '</dd></div>'
+      + '<div class="fltsch-detail-row"><dt>Public Notes</dt><dd>' + escapeHtml(notes || '—') + '</dd></div>';
+    return html;
+  }
+
+  function ensureHoverTip() {
+    if (hoverTip) return hoverTip;
+    hoverTip = document.createElement('div');
+    hoverTip.className = 'fltsch-hover-tip';
+    hoverTip.hidden = true;
+    document.body.appendChild(hoverTip);
+    return hoverTip;
+  }
+
+  function hideHoverTip() {
+    if (hoverHideTimer) {
+      window.clearTimeout(hoverHideTimer);
+      hoverHideTimer = null;
+    }
+    var tip = ensureHoverTip();
+    tip.hidden = true;
+    tip.innerHTML = '';
+  }
+
+  function showHoverTip(reservation, event) {
+    if (suppressClick) return;
+    var tip = ensureHoverTip();
+    var aircraft = reservation.aircraft && reservation.aircraft.registration
+      ? reservation.aircraft.registration
+      : 'Reservation';
+    tip.innerHTML = ''
+      + '<div class="fltsch-hover-tip-head">' + escapeHtml(aircraft) + '</div>'
+      + '<dl class="fltsch-hover-tip-body">' + detailRowsHtml(reservation, {
+        completed: reservation.status === 'completed'
+      }) + '</dl>';
+    tip.hidden = false;
+    positionHoverTip(event);
+  }
+
+  function positionHoverTip(event) {
+    var tip = ensureHoverTip();
+    if (tip.hidden) return;
+    var padGap = 14;
+    var x = event.clientX + padGap;
+    var y = event.clientY + padGap;
+    tip.style.left = '0px';
+    tip.style.top = '0px';
+    var width = tip.offsetWidth;
+    var height = tip.offsetHeight;
+    if (x + width > window.innerWidth - 8) x = Math.max(8, event.clientX - width - padGap);
+    if (y + height > window.innerHeight - 8) y = Math.max(8, event.clientY - height - padGap);
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
   }
 
   function renderAxis() {
@@ -119,9 +294,27 @@
     };
   }
 
-  function openEdit(reservation) {
-    if (!reservation.editable) return;
-    window.location.href = String(config.editBaseUrl || '') + encodeURIComponent(reservation.scheduler_record_id);
+  function openReservation(reservation) {
+    if (reservation.editable || reservation.can_undispatch) {
+      window.location.href = String(config.editBaseUrl || '') + encodeURIComponent(reservation.scheduler_record_id);
+      return;
+    }
+    if (reservation.status === 'completed') {
+      openCompletedModal(reservation);
+    }
+  }
+
+  function openCompletedModal(reservation) {
+    var aircraft = reservation.aircraft && reservation.aircraft.registration
+      ? reservation.aircraft.registration
+      : 'Completed flight';
+    var title = document.querySelector('#flightCompletedModal .compliance-modal__title, #flightCompletedModal [data-compliance-modal-title]');
+    var body = document.getElementById('flightCompletedModalBody');
+    if (!body) return;
+    if (title) title.textContent = aircraft + ' · Completed flight';
+    body.innerHTML = '<dl class="fltsch-completed-detail">' + detailRowsHtml(reservation, { completed: true }) + '</dl>'
+      + '<p class="fltsch-muted">This flight is locked. Operational values are read-only — use Master Logbook to correct evidence.</p>';
+    showDialog('flightCompletedModal');
   }
 
   function openChangeConfirmation(reservation, proposedStart, proposedEnd, proposedAircraftId) {
@@ -193,6 +386,7 @@
       event.preventDefault();
       moved = true;
       suppressClick = true;
+      hideHoverTip();
       nextStart = clamp(originalStart + delta, dayStart, dayEnd - duration);
       var proposedStart = withMinutes(start, nextStart);
       var proposedEnd = withMinutes(start, nextStart + duration);
@@ -267,6 +461,7 @@
       if (!moved && Math.abs(event.clientX - originX) < 5) return;
       event.preventDefault();
       moved = true;
+      hideHoverTip();
       var pointerMinute = snapMinutes(dayStart + ((event.clientX - rect.left) / rect.width * totalMinutes));
       if (edge === 'start') nextStart = clamp(pointerMinute, dayStart, nextEnd - snap);
       else nextEnd = clamp(pointerMinute, nextStart + snap, dayEnd);
@@ -319,13 +514,7 @@
     element.dataset.type = reservation.reservation_type || 'flight_training';
     element.style.left = position.left + '%';
     element.style.width = position.width + '%';
-    element.title = reservation.editable
-      ? 'Click to edit. Drag to move; drag either edge to resize.'
-      : (reservation.status === 'completed'
-        ? 'Completed flight. Schedule and evidence are locked.'
-        : (reservation.can_undispatch
-          ? 'Dispatched · click to Undispatch if this was accidental.'
-          : 'Locked after Dispatch activation.'));
+    element.removeAttribute('title');
     var evidence = reservation.evidence || {};
     var evidenceHtml = reservation.editable ? '' : '<span class="fltsch-evidence">'
       + evidenceChip('D', 'Dispatch Data', evidence.dispatch)
@@ -335,10 +524,6 @@
       + '</span>';
     element.innerHTML =
       (reservation.editable ? '<span class="fltsch-resize-handle start"></span>' : '')
-      + (reservation.editable ? '<button type="button" class="fltsch-event-edit" aria-label="Edit reservation">Edit</button>' : '')
-      + (!reservation.editable && reservation.can_undispatch
-        ? '<button type="button" class="fltsch-event-edit" aria-label="Undispatch reservation">Undispatch</button>'
-        : '')
       + '<span class="fltsch-event-title">' + escapeHtml(eventTitle(reservation)) + '</span>'
       + '<span class="fltsch-event-meta">' + escapeHtml(eventDetail(reservation, start, end)) + '</span>'
       + evidenceHtml
@@ -346,22 +531,24 @@
 
     element.addEventListener('click', function (event) {
       event.stopPropagation();
-      if (!suppressClick) openEdit(reservation);
+      if (!suppressClick) openReservation(reservation);
     });
     element.addEventListener('pointerdown', function (event) {
       startMove(event, reservation, timeline, element, start, end);
     });
-    var editButton = element.querySelector('.fltsch-event-edit');
-    if (editButton) {
-      editButton.addEventListener('pointerdown', function (event) {
-        event.stopPropagation();
-      });
-      editButton.addEventListener('click', function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        openEdit(reservation);
-      });
-    }
+    element.addEventListener('mouseenter', function (event) {
+      if (hoverHideTimer) {
+        window.clearTimeout(hoverHideTimer);
+        hoverHideTimer = null;
+      }
+      showHoverTip(reservation, event);
+    });
+    element.addEventListener('mousemove', function (event) {
+      positionHoverTip(event);
+    });
+    element.addEventListener('mouseleave', function () {
+      hoverHideTimer = window.setTimeout(hideHoverTip, 80);
+    });
     element.querySelectorAll('.fltsch-resize-handle').forEach(function (handle) {
       handle.addEventListener('pointerdown', function (event) {
         startResize(
@@ -391,6 +578,7 @@
   }
 
   function renderReservations() {
+    hideHoverTip();
     document.querySelectorAll('.fltsch-resource-timeline').forEach(function (timeline) {
       timeline.innerHTML = '';
       var key = timeline.dataset.resourceKey;

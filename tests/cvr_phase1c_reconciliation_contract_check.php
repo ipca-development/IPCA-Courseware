@@ -314,6 +314,18 @@ $closureItem = array(
     'flight_record_uuid' => $flightUuid,
     'payload' => $closurePayload,
 );
+$flightScopedClosureUuid = '30303030-3030-4303-8303-303030303030';
+$flightScopedClosurePayload = $closurePayload;
+$flightScopedClosurePayload['component_uuid'] = $flightScopedClosureUuid;
+$flightScopedClosurePayload['evidence']['closure_uuid'] = $flightScopedClosureUuid;
+$flightScopedClosureItem = array(
+    'item_id' => $flightScopedClosureUuid,
+    'component_type' => 'flight_record_closure',
+    'component_uuid' => $flightScopedClosureUuid,
+    'dispatch_uuid' => $dispatchUuid,
+    'flight_record_uuid' => $flightUuid,
+    'payload' => $flightScopedClosurePayload,
+);
 
 $beforeCounts = table_counts($pdo);
 $results = (new CvrWorkflowSyncReconciliationService($pdo))->reconcile(array(
@@ -326,6 +338,7 @@ $results = (new CvrWorkflowSyncReconciliationService($pdo))->reconcile(array(
     $evidenceItem,
     $verificationItem,
     $closureItem,
+    $flightScopedClosureItem,
 ), $device);
 $afterCounts = table_counts($pdo);
 
@@ -368,6 +381,12 @@ $checks = array(
         && ($results[8]['receipt_id'] ?? '') === '20202020-2020-4202-8202-202020202020'
         && ($results[8]['received_at'] ?? '') === '2026-08-03 18:01:00.222'
         && ($results[8]['canonical_identifiers']['closure_uuid'] ?? '') === $closureComponentUuid,
+    'Flight Closure with alternate device component_uuid matches flight-scoped restored closure' =>
+        ($results[9]['status'] ?? '') === 'VERIFIED_MATCH'
+        && ($results[9]['receipt_id'] ?? '') === '20202020-2020-4202-8202-202020202020'
+        && ($results[9]['canonical_identifiers']['flight_scoped_closure_match'] ?? '') === '1'
+        && ($results[9]['canonical_identifiers']['ending_hobbs'] ?? '') === '167.2'
+        && ($results[9]['canonical_identifiers']['ending_tacho'] ?? '') === '120.8',
     'reconciliation performs no inserts or updates' => $beforeCounts === $afterCounts,
 );
 
@@ -382,7 +401,8 @@ $checks['endpoint is authenticated and bounded'] =
     && str_contains($endpointSource, 'CvrAuthenticationRequired');
 $checks['service uses immutable indexed identities only'] =
     str_contains($serviceSource, 'd.dispatch_uuid = ? AND v.dispatch_version = ?')
-    && str_contains($serviceSource, 'WHERE component_uuid = ? LIMIT 1');
+    && str_contains($serviceSource, 'WHERE component_uuid = ? LIMIT 1')
+    && str_contains($serviceSource, 'existingFlightClosureBatch');
 $checks['intake and reconciliation share canonical functions'] =
     substr_count($dispatchSource, 'canonicalPayload(') >= 2
     && substr_count($evidenceSource, 'canonicalPayload(') >= 2

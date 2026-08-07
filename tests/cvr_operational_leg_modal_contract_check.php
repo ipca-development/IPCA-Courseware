@@ -36,7 +36,8 @@ $page = $root . '/public/admin/master_logbook_intake.php';
 $service = $root . '/src/CvrAdminLegCorrectionService.php';
 $phase4 = $root . '/tests/cvr_phase4a_operational_consolidation_contract_check.php';
 
-require_contains($page, 'Flight Identity', 'identity section', $failures);
+require_contains($service, 'createAdminClosureEvidenceBatch', 'admin closure mints evidence batch', $failures);
+require_absent($service, 'VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 'admin closure no longer inserts null batch_id', $failures);
 require_contains($page, 'Route and Time', 'route section', $failures);
 require_contains($page, 'Aircraft Meters', 'meters section', $failures);
 require_contains($page, 'Fuel and Oil', 'fuel section', $failures);
