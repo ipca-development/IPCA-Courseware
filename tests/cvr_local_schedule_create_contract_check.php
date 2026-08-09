@@ -7,6 +7,9 @@ $service = file_get_contents($root . '/src/FlightScheduleService.php') ?: '';
 $endpoint = file_get_contents($root . '/public/api/cvr/schedule_duty_sync.php') ?: '';
 $store = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift') ?: '';
 $uploads = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift') ?: '';
+$api = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/APIClient.swift') ?: '';
+$views = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift') ?: '';
+$scheduleJs = file_get_contents($root . '/public/admin/assets/flight_schedule.js') ?: '';
 
 $checks = array(
     'endpoint routes create separately from supersession' =>
@@ -28,10 +31,11 @@ $checks = array(
         str_contains($service, "\$departure = \$airportChain[0] ?? '';")
         && str_contains($service, "'allow_route_free_flight' => \$airportChain === array()")
         && str_contains($service, 'Informative route legs must form one continuous airport chain.'),
-    'first create is transactional and conflict checked' =>
+    'first create is transactional and records overlap as advisory' =>
         str_contains($service, 'createScheduledDutyFromDevice(array $device, array $payload)')
         && str_contains($service, '$this->pdo->beginTransaction();')
-        && str_contains($service, '$this->assertNoResourceConflicts(')
+        && str_contains($service, '$overlapWarnings = $this->resourceConflictWarnings(')
+        && str_contains($service, "'warnings' => \$overlapWarnings")
         && str_contains($service, 'INSERT INTO ipca_flight_schedule_slots')
         && str_contains($service, 'INSERT INTO ipca_flight_schedule_crew')
         && str_contains($service, 'createOnlineScheduleReservationIdentity')
@@ -52,6 +56,15 @@ $checks = array(
         && str_contains($store, 'The original local draft never existed online.')
         && str_contains($store, 'queueLocalScheduleCreation(dispatch: &dispatch, state: &state)')
         && str_contains($store, 'dispatch.supersedesSchedulerRecordID = nil'),
+    'synced overlap warning remains visible without blocking reservation' =>
+        str_contains($api, 'var warnings: [String]?')
+        && str_contains($uploads, '(response.warnings ?? []).joined')
+        && str_contains($store, 'case syncedWithWarning')
+        && str_contains($views, 'RESERVATION SYNCED · OVERLAP'),
+    'online scheduler stacks overlapping reservations in separate lanes' =>
+        str_contains($scheduleJs, 'var laneEnds = [];')
+        && str_contains($scheduleJs, 'createEvent(placement.reservation, timeline, placement.lane)')
+        && str_contains($scheduleJs, 'timeline.style.minHeight = Math.max(68, 8 + laneCount * 60)'),
     'simulation and offline paths preserve queued reservation' =>
         str_contains($uploads, 'guard !settings.isSimulationModeEnabled else')
         && str_contains($uploads, 'if let networkMonitor,')
