@@ -131,6 +131,28 @@ function cw_user_can_access_flight_replay(?array $user): bool
     return in_array($role, array('admin', 'supervisor', 'instructor', 'chief_instructor'), true);
 }
 
+/**
+ * Staff roles allowed full edit on the online Flight Schedule (create/move/cancel/undispatch).
+ */
+function cw_user_can_edit_flight_schedule(?array $user): bool
+{
+    if (!is_array($user)) {
+        return false;
+    }
+    $role = strtolower(trim((string)($user['role'] ?? '')));
+    return in_array($role, array('admin', 'supervisor', 'instructor', 'chief_instructor'), true);
+}
+
+function cw_require_flight_schedule_editor(): void
+{
+    global $pdo;
+    cw_require_login();
+    $user = cw_current_user($pdo);
+    if (!cw_user_can_edit_flight_schedule($user)) {
+        redirect(cw_home_path_for_role((string)($user['role'] ?? '')));
+    }
+}
+
 function cw_require_student(): void {
     global $pdo;
     cw_require_login();
