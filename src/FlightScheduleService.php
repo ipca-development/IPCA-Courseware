@@ -726,6 +726,17 @@ final class FlightScheduleService
                     throw new RuntimeException('The replacement reservation UUID is already in use.');
                 }
                 $this->assertReplacementRetryEquivalent($existingNew, $payload, $crew);
+                $retryWarnings = $this->resourceConflictWarnings(
+                    $newId,
+                    $aircraftId,
+                    isset($old['cohort_id']) ? ((int)$old['cohort_id'] ?: null) : null,
+                    array_values(array_unique(array_filter(array_map(
+                        static fn(array $member): int => (int)($member['user_id'] ?? $member['person_id'] ?? 0),
+                        $crew
+                    )))),
+                    (string)$old['scheduled_start_time'],
+                    (string)$old['scheduled_end_time']
+                );
                 $this->pdo->commit();
                 return array(
                     'ok' => true,
@@ -733,6 +744,7 @@ final class FlightScheduleService
                     'scheduler_record_id' => $newId,
                     'reservation_uuid' => $newId,
                     'supersedes_scheduler_record_id' => $oldId,
+                    'warnings' => $retryWarnings,
                 );
             }
             if ((string)($old['status'] ?? '') !== 'scheduled'
@@ -794,7 +806,7 @@ final class FlightScheduleService
                 static fn(array $member): int => (int)($member['user_id'] ?? 0),
                 $normalizedCrew
             ))));
-            $this->assertNoResourceConflicts(
+            $overlapWarnings = $this->resourceConflictWarnings(
                 $newId,
                 $aircraftId,
                 isset($old['cohort_id']) ? ((int)$old['cohort_id'] ?: null) : null,
@@ -896,6 +908,7 @@ final class FlightScheduleService
                 'leg_uuid' => $identity['leg_uuid'] ?? null,
                 'supersedes_scheduler_record_id' => $oldId,
                 'duty_fingerprint_sha256' => $this->dutyIdentity()->canonicalize($dutyInput)['fingerprint'],
+                'warnings' => $overlapWarnings,
             );
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
