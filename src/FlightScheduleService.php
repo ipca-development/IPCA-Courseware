@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
 require_once __DIR__ . '/CvrOperationalIdentityService.php';
+require_once __DIR__ . '/CvrDutyAssignmentIdentityService.php';
 require_once __DIR__ . '/CvrOperationalBlockTimeService.php';
 
 final class FlightScheduleService
@@ -18,6 +19,7 @@ final class FlightScheduleService
 
     private ?CvrOperationalIdentityReadService $identityRead = null;
     private ?CvrOperationalIdentityService $identityWrite = null;
+    private ?CvrDutyAssignmentIdentityService $dutyIdentity = null;
 
     public function __construct(private PDO $pdo)
     {
@@ -31,6 +33,11 @@ final class FlightScheduleService
     private function identityWrite(): CvrOperationalIdentityService
     {
         return $this->identityWrite ??= new CvrOperationalIdentityService($this->pdo);
+    }
+
+    private function dutyIdentity(): CvrDutyAssignmentIdentityService
+    {
+        return $this->dutyIdentity ??= new CvrDutyAssignmentIdentityService($this->pdo);
     }
 
     /** @return list<array<string,mixed>> */
@@ -196,6 +203,14 @@ final class FlightScheduleService
         if ($aircraftId <= 0 || strtotime($end) <= strtotime($start)) {
             throw new RuntimeException('Aircraft and a valid start/end time are required.');
         }
+        $aircraftStatement = $this->pdo->prepare(
+            'SELECT registration FROM ipca_aircraft_devices WHERE id = ? LIMIT 1'
+        );
+        $aircraftStatement->execute(array($aircraftId));
+        $aircraftRegistration = strtoupper(trim((string)$aircraftStatement->fetchColumn()));
+        if ($aircraftRegistration === '') {
+            throw new RuntimeException('Selected aircraft/device was not found.');
+        }
         if (substr($start, 0, 10) !== $scheduledDate) {
             throw new RuntimeException('Scheduled date must match the start time.');
         }
@@ -243,6 +258,24 @@ final class FlightScheduleService
                 $end
             );
             $isCreate = !is_array($row);
+            $dutyInput = array(
+                'organization_id' => $this->requireOrganizationIdForCreate($values, $missionId),
+                'aircraft_device_id' => $aircraftId,
+                'aircraft_registration' => $aircraftRegistration,
+                'reservation_type' => $reservationType,
+                'activity_domain' => CvrOperationalIdentityService::defaultActivityDomainForReservationType($reservationType) ?? 'administrative',
+                'training_assignment_category' => $reservationType,
+                'mission_id' => $missionId,
+                'mission_code' => $missionCode,
+                'crew' => $crew,
+                'source' => 'server_create',
+                'created_by_user_id' => $actorUserId,
+            );
+            if (!$isCreate
+                && $this->dutyIdentity()->isEnforcementEnabled()
+                && $this->dutyIdentity()->snapshotForReservation($recordId) !== null) {
+                $this->dutyIdentity()->assertReservationMatches($recordId, $dutyInput);
+            }
             if (!$isCreate) {
                 $slotId = (int)$row['id'];
                 $this->pdo->prepare(
@@ -303,10 +336,13 @@ final class FlightScheduleService
                     }
                 }
             }
-            $insertCrew = $this->pdo->prepare(
-                'INSERT INTO ipca_flight_schedule_crew
-                 (schedule_slot_id, user_id, person_name_snapshot, crew_role) VALUES (?, ?, ?, ?)'
-            );
+            $hasDutyColumns = $this->scheduleCrewDutyColumnsAvailable();
+            $insertCrew = $this->pdo->prepare($hasDutyColumns
+                ? 'INSERT INTO ipca_flight_schedule_crew
+                   (schedule_slot_id, user_id, person_name_snapshot, crew_role, pilot_function, is_pic)
+                   VALUES (?, ?, ?, ?, ?, ?)'
+                : 'INSERT INTO ipca_flight_schedule_crew
+                   (schedule_slot_id, user_id, person_name_snapshot, crew_role) VALUES (?, ?, ?, ?)');
             foreach ($crew as $member) {
                 $name = substr(trim((string)($member['person_name'] ?? '')), 0, 255);
                 $role = substr(strtolower(trim((string)($member['role'] ?? ''))), 0, 64);
@@ -314,7 +350,17 @@ final class FlightScheduleService
                     continue;
                 }
                 $userId = (int)($member['user_id'] ?? 0) ?: null;
-                $insertCrew->execute(array($slotId, $userId, $name, $role));
+                $params = array($slotId, $userId, $name, $role);
+                if ($hasDutyColumns) {
+                    $params[] = CvrDutyAssignmentIdentityService::normalizePilotFunction(
+                        (string)($member['pilot_function'] ?? 'NONE')
+                    );
+                    $params[] = (bool)($member['is_pic'] ?? false) ? 1 : 0;
+                }
+                $insertCrew->execute($params);
+            }
+            if ($isCreate && $canonicalWrite && $this->dutyIdentity()->isSnapshotWriteEnabled()) {
+                $this->dutyIdentity()->writeSnapshot($recordId, $dutyInput);
             }
             $this->pdo->commit();
         } catch (Throwable $e) {
@@ -382,6 +428,13 @@ final class FlightScheduleService
                 : (int)$slot['aircraft_id'];
             if ($targetAircraftId <= 0) {
                 throw new RuntimeException('Aircraft is required.');
+            }
+            if ($targetAircraftId !== (int)$slot['aircraft_id']
+                && $this->dutyIdentity()->isEnforcementEnabled()
+                && $this->dutyIdentity()->snapshotForReservation($schedulerRecordId) !== null) {
+                throw new RuntimeException(
+                    'Changing aircraft/device is a material Duty Assignment change. Create a new reservation.'
+                );
             }
             if ($targetAircraftId !== (int)$slot['aircraft_id']) {
                 $aircraftExists = $this->pdo->prepare(
@@ -546,8 +599,11 @@ final class FlightScheduleService
             return array();
         }
         $placeholders = implode(',', array_fill(0, count($slotIds), '?'));
+        $pilotColumn = $this->scheduleCrewDutyColumnsAvailable()
+            ? 'pilot_function, is_pic'
+            : "'NONE' AS pilot_function, 0 AS is_pic";
         $statement = $this->pdo->prepare(
-            "SELECT schedule_slot_id, user_id, person_name_snapshot, crew_role
+            "SELECT schedule_slot_id, user_id, person_name_snapshot, crew_role, $pilotColumn
              FROM ipca_flight_schedule_crew WHERE schedule_slot_id IN ($placeholders)
              ORDER BY id ASC"
         );
@@ -558,6 +614,10 @@ final class FlightScheduleService
                 'person_id' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
                 'person_name' => (string)$row['person_name_snapshot'],
                 'role' => (string)$row['crew_role'],
+                'pilot_function' => CvrDutyAssignmentIdentityService::normalizePilotFunction(
+                    (string)($row['pilot_function'] ?? 'NONE')
+                ),
+                'is_pic' => (bool)($row['is_pic'] ?? false),
             );
         }
         return $result;
@@ -1049,13 +1109,34 @@ final class FlightScheduleService
             $personId = (int)($member['user_id'] ?? $member['person_id'] ?? 0);
             $name = strtolower(trim((string)($member['person_name'] ?? $member['name'] ?? '')));
             $role = strtolower(trim((string)($member['role'] ?? $member['crew_role'] ?? '')));
+            $pilotFunction = CvrDutyAssignmentIdentityService::normalizePilotFunction(
+                (string)($member['pilot_function'] ?? 'NONE')
+            );
+            $isPic = (bool)($member['is_pic'] ?? false) || $role === 'pic';
             if ($personId <= 0 && $name === '') {
                 continue;
             }
-            $parts[] = $personId . ':' . $name . ':' . $role;
+            $parts[] = $personId . ':' . $name . ':' . $role . ':' . $pilotFunction . ':' . (int)$isPic;
         }
         sort($parts);
         return implode('|', $parts);
+    }
+
+    private function scheduleCrewDutyColumnsAvailable(): bool
+    {
+        try {
+            foreach (array('pilot_function', 'is_pic') as $column) {
+                $stmt = $this->pdo->query(
+                    'SHOW COLUMNS FROM ipca_flight_schedule_crew LIKE ' . $this->pdo->quote($column)
+                );
+                if ($stmt === false || $stmt->fetchColumn() === false) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /** @param list<int> $crewUserIds */

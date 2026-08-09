@@ -73,11 +73,17 @@ try {
             $userIds = is_array($_POST['crew_user_id'] ?? null) ? $_POST['crew_user_id'] : array();
             $roles = is_array($_POST['crew_role'] ?? null) ? $_POST['crew_role'] : array();
             $names = is_array($_POST['crew_name'] ?? null) ? $_POST['crew_name'] : array();
+            $pilotFunctions = is_array($_POST['crew_pilot_function'] ?? null)
+                ? $_POST['crew_pilot_function'] : array();
+            $picResponsibilities = is_array($_POST['crew_is_pic'] ?? null)
+                ? $_POST['crew_is_pic'] : array();
             foreach ($names as $index => $name) {
                 $crew[] = array(
                     'user_id' => (int)($userIds[$index] ?? 0),
                     'person_name' => (string)$name,
                     'role' => (string)($roles[$index] ?? ''),
+                    'pilot_function' => (string)($pilotFunctions[$index] ?? 'NONE'),
+                    'is_pic' => (string)($picResponsibilities[$index] ?? '0') === '1',
                 );
             }
             $service->saveSlot($_POST, $crew, (int)($currentUser['id'] ?? 0));
@@ -270,7 +276,7 @@ compliance_page_open(array(
   .fltsch-field-full{grid-column:1/-1;}
   .fltsch-crew{grid-column:1/-1;border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#f8fafc;}
   .fltsch-crew-title{margin:0 0 10px;color:#0f172a;font-size:13px;font-weight:850;}
-  .fltsch-crew-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(180px,.6fr);gap:10px;margin-top:9px;}
+  .fltsch-crew-row{display:grid;grid-template-columns:minmax(0,1.4fr) repeat(3,minmax(135px,.6fr));gap:10px;margin-top:9px;}
   .fltsch-muted{color:#64748b;font-size:12.5px;line-height:1.45;}
   .fltsch-kind{display:block;margin-top:4px;color:#284e85;font-size:11.5px;font-weight:800;}
   .fltsch-route{color:#64748b;font-size:12px;margin-top:3px;}
@@ -339,12 +345,14 @@ compliance_page_open(array(
 
       <div class="fltsch-crew">
         <h3 class="fltsch-crew-title">Crew</h3>
-        <p class="fltsch-muted" style="margin:0 0 10px">One crew set for the whole reservation. Different crew or a PIC role swap requires a separate reservation.</p>
+        <p class="fltsch-muted" style="margin:0 0 10px">One accountable crew and pilot-function assignment for the whole reservation. Different crew or a PIC role swap requires a separate reservation; any student, PF, PM, instructor, or accountable crew change does as well.</p>
         <?php for ($i = 0; $i < 3; $i++): ?>
           <?php $assigned = is_array($formCrew[$i] ?? null) ? $formCrew[$i] : array(); ?>
           <div class="fltsch-crew-row">
             <label class="cmpcal-field"><span>Person <?= $i + 1 ?></span><select name="crew_user_id[]" data-crew-user="<?= $i ?>"><option value="">Optional</option><?php foreach ($users as $user): ?><option value="<?= (int)$user['id'] ?>" data-name="<?= h((string)$user['display_name']) ?>" data-default-role="<?= h(in_array((string)$user['role'], array('instructor','supervisor','chief_instructor'), true) ? 'instructor' : ((string)$user['role'] === 'student' ? 'student' : '')) ?>" <?= (int)($assigned['person_id'] ?? 0) === (int)$user['id'] ? 'selected' : '' ?>><?= h((string)$user['display_name']) ?></option><?php endforeach; ?></select><input type="hidden" name="crew_name[]" id="crew_name_<?= $i ?>" value="<?= h((string)($assigned['person_name'] ?? '')) ?>"></label>
-            <label class="cmpcal-field"><span>Role</span><select name="crew_role[]" id="crew_role_<?= $i ?>"><option value="">None</option><?php foreach (array('student' => 'Student', 'instructor' => 'Instructor', 'pic' => 'PIC', 'safetyPilot' => 'Safety Pilot', 'observer' => 'Observer') as $roleValue => $roleLabel): ?><option value="<?= h($roleValue) ?>" <?= strcasecmp((string)($assigned['role'] ?? ''), $roleValue) === 0 ? 'selected' : '' ?>><?= h($roleLabel) ?></option><?php endforeach; ?></select></label>
+            <label class="cmpcal-field"><span>Participant Role</span><select name="crew_role[]" id="crew_role_<?= $i ?>"><option value="">None</option><?php foreach (array('student' => 'Student', 'instructor' => 'Instructor', 'supervising_instructor' => 'Supervising Instructor', 'examiner' => 'Examiner', 'safety_pilot' => 'Safety Pilot', 'observer' => 'Observer') as $roleValue => $roleLabel): ?><option value="<?= h($roleValue) ?>" <?= strcasecmp((string)($assigned['role'] ?? ''), $roleValue) === 0 ? 'selected' : '' ?>><?= h($roleLabel) ?></option><?php endforeach; ?></select></label>
+            <label class="cmpcal-field"><span>Pilot Function</span><select name="crew_pilot_function[]" id="crew_pilot_function_<?= $i ?>"><?php foreach (array('NONE' => 'None', 'PF' => 'PF', 'PM' => 'PM') as $functionValue => $functionLabel): ?><option value="<?= h($functionValue) ?>" <?= strcasecmp((string)($assigned['pilot_function'] ?? 'NONE'), $functionValue) === 0 ? 'selected' : '' ?>><?= h($functionLabel) ?></option><?php endforeach; ?></select></label>
+            <label class="cmpcal-field"><span>PIC Responsibility</span><select name="crew_is_pic[]" id="crew_is_pic_<?= $i ?>"><option value="0" <?= empty($assigned['is_pic']) ? 'selected' : '' ?>>No</option><option value="1" <?= !empty($assigned['is_pic']) ? 'selected' : '' ?>>Yes</option></select></label>
           </div>
         <?php endfor; ?>
       </div>
