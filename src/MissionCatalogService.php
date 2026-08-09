@@ -93,6 +93,123 @@ final class MissionCatalogService
         return is_array($rows) ? $rows : array();
     }
 
+    /**
+     * Missions for the online scheduler reservation modal: natural code order + schedule category.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listMissionsForSchedule(): array
+    {
+        $rows = $this->listMissions();
+        usort(
+            $rows,
+            static fn(array $left, array $right): int => self::compareMissionCodes(
+                (string)($left['code'] ?? ''),
+                (string)($right['code'] ?? '')
+            )
+        );
+        foreach ($rows as &$row) {
+            $row['schedule_category'] = self::scheduleCategoryForMission(
+                (string)($row['code'] ?? ''),
+                (string)($row['name'] ?? '')
+            );
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * Map catalogue hour tags to reservation types used by the online scheduler.
+     * Flight Training = DUAL/PIC/SOLO/NIGHT/X-C; Briefing = LB / briefing scenarios;
+     * Simulator = SE/FSTD (and related device tags).
+     */
+    public static function scheduleCategoryForMission(string $code, string $name): ?string
+    {
+        $haystack = strtoupper(trim($code . ' ' . $name));
+        if ($haystack === '') {
+            return null;
+        }
+
+        foreach (array('FSTD', 'SIMULATOR', 'AATD', 'FNPT') as $token) {
+            if (str_contains($haystack, $token)) {
+                return 'simulator_training';
+            }
+        }
+
+        foreach (array('BRIEFING', 'THEORY', 'MEETING', 'GROUND SCHOOL', 'CLASSROOM') as $token) {
+            if (str_contains($haystack, $token)) {
+                return 'briefing';
+            }
+        }
+
+        if (preg_match('/\bLB\b/', $haystack) === 1) {
+            $hasFlight = str_contains($haystack, 'DUAL')
+                || str_contains($haystack, 'PIC')
+                || str_contains($haystack, 'SOLO');
+            if (!$hasFlight) {
+                return 'briefing';
+            }
+        }
+
+        if (
+            str_contains($haystack, 'DUAL')
+            || str_contains($haystack, 'PIC')
+            || str_contains($haystack, 'SOLO')
+            || str_contains($haystack, 'NIGHT')
+            || str_contains($haystack, 'X-C')
+            || preg_match('/\bXC\b/', $haystack) === 1
+        ) {
+            return 'flight_training';
+        }
+
+        return null;
+    }
+
+    public static function compareMissionCodes(string $left, string $right): int
+    {
+        $leftParts = preg_split('/[^0-9A-Za-z]+/', strtoupper(trim($left))) ?: array();
+        $rightParts = preg_split('/[^0-9A-Za-z]+/', strtoupper(trim($right))) ?: array();
+        $count = max(count($leftParts), count($rightParts));
+        for ($i = 0; $i < $count; $i++) {
+            $a = (string)($leftParts[$i] ?? '');
+            $b = (string)($rightParts[$i] ?? '');
+            if ($a === '' && $b === '') {
+                continue;
+            }
+            if ($a === '') {
+                return -1;
+            }
+            if ($b === '') {
+                return 1;
+            }
+            $aNumeric = ctype_digit($a);
+            $bNumeric = ctype_digit($b);
+            if ($aNumeric && $bNumeric) {
+                $cmp = ((int)$a) <=> ((int)$b);
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+                continue;
+            }
+            $cmp = strcmp($a, $b);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+        }
+
+        return 0;
+    }
+
+    public static function reservationTypeRequiresMission(string $reservationType): bool
+    {
+        return in_array(
+            strtolower(trim($reservationType)),
+            array('flight_training', 'briefing', 'simulator_training'),
+            true
+        );
+    }
+
     private function nextVersionNumber(int $missionId): int
     {
         $stmt = $this->pdo->prepare('SELECT COALESCE(MAX(version_number), 0) + 1 FROM ipca_mission_versions WHERE mission_id = ?');
