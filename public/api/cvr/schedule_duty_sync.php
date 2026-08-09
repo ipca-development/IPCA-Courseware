@@ -52,7 +52,8 @@ try {
             'pilot flying', 'logging pic', 'crew', 'valid matching',
             'enrolled device aircraft', 'scheduled', 'schedule start', 'mission',
             'organization', 'registration', 'informative route', 'different material',
-            'user account', 'primary customer',
+            'user account', 'primary customer', 'already reserved during this time',
+            'already assigned during this time', 'already scheduled during this time',
         );
         $message = strtolower($e->getMessage());
         if (array_filter($safe, static fn(string $needle): bool => str_contains($message, $needle))) {
