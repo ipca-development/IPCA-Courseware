@@ -657,6 +657,85 @@ final class FlightScheduleService
     }
 
     /**
+     * Update only the planning window of an unclaimed reservation. Schedule time
+     * is mutable planning data and does not create a new Duty Assignment identity.
+     *
+     * @param array<string,mixed> $device
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    public function updateScheduledDutyWindowFromDevice(array $device, array $payload): array
+    {
+        $recordId = strtolower(trim((string)($payload['scheduler_record_id'] ?? '')));
+        $reservationUuid = strtolower(trim((string)($payload['reservation_uuid'] ?? $recordId)));
+        if (!$this->isUuid($recordId) || $reservationUuid !== $recordId) {
+            throw new RuntimeException('A valid matching reservation UUID and schedule record UUID are required.');
+        }
+        $deviceAircraftId = (int)($device['aircraft_id'] ?? 0);
+        $aircraftId = (int)($payload['aircraft_id'] ?? 0);
+        if ($deviceAircraftId <= 0 || $aircraftId !== $deviceAircraftId) {
+            throw new RuntimeException('The schedule window must use the enrolled device aircraft.');
+        }
+        $scheduledDate = $this->date((string)($payload['scheduled_date'] ?? ''));
+        $start = $this->timestamp((string)($payload['scheduled_start_time'] ?? ''), 'scheduled start');
+        $end = $this->timestamp((string)($payload['scheduled_end_time'] ?? ''), 'scheduled end');
+        if (substr($start, 0, 10) !== $scheduledDate || strtotime($end) <= strtotime($start)) {
+            throw new RuntimeException('A valid same-date schedule start and end are required.');
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $statement = $this->pdo->prepare(
+                'SELECT * FROM ipca_flight_schedule_slots
+                 WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE'
+            );
+            $statement->execute(array($recordId));
+            $slot = $statement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($slot)) {
+                throw new RuntimeException('The reservation schedule window was not found.');
+            }
+            if ((int)($slot['aircraft_id'] ?? 0) !== $aircraftId) {
+                throw new RuntimeException('The reservation aircraft does not match this device.');
+            }
+            if ((string)($slot['status'] ?? '') !== 'scheduled'
+                || trim((string)($slot['claimed_dispatch_uuid'] ?? '')) !== '') {
+                throw new RuntimeException('Only an unclaimed scheduled reservation may change its schedule window.');
+            }
+            $crewStatement = $this->pdo->prepare(
+                'SELECT user_id FROM ipca_flight_schedule_crew
+                 WHERE schedule_slot_id = ? AND user_id IS NOT NULL'
+            );
+            $crewStatement->execute(array((int)$slot['id']));
+            $warnings = $this->resourceConflictWarnings(
+                $recordId,
+                $aircraftId,
+                isset($slot['cohort_id']) ? ((int)$slot['cohort_id'] ?: null) : null,
+                array_map('intval', $crewStatement->fetchAll(PDO::FETCH_COLUMN) ?: array()),
+                $start,
+                $end
+            );
+            $this->pdo->prepare(
+                'UPDATE ipca_flight_schedule_slots
+                 SET scheduled_date = ?, scheduled_start_time = ?, scheduled_end_time = ?, updated_by = NULL
+                 WHERE id = ?'
+            )->execute(array($scheduledDate, $start, $end, (int)$slot['id']));
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        return array(
+            'ok' => true,
+            'already_present' => false,
+            'scheduler_record_id' => $recordId,
+            'reservation_uuid' => $recordId,
+            'warnings' => $warnings,
+        );
+    }
+
+    /**
      * Atomically replace an unclaimed scheduled Duty Assignment from an enrolled
      * CVR device. The device may queue/retry this operation while offline.
      *
@@ -714,6 +793,19 @@ final class FlightScheduleService
             if (!is_array($old)) {
                 throw new RuntimeException('The reservation being replaced was not found.');
             }
+            $replacementDate = array_key_exists('scheduled_date', $payload)
+                ? $this->date((string)$payload['scheduled_date'])
+                : (string)$old['scheduled_date'];
+            $replacementStart = array_key_exists('scheduled_start_time', $payload)
+                ? $this->timestamp((string)$payload['scheduled_start_time'], 'scheduled start')
+                : (string)$old['scheduled_start_time'];
+            $replacementEnd = array_key_exists('scheduled_end_time', $payload)
+                ? $this->timestamp((string)$payload['scheduled_end_time'], 'scheduled end')
+                : (string)$old['scheduled_end_time'];
+            if (substr($replacementStart, 0, 10) !== $replacementDate
+                || strtotime($replacementEnd) <= strtotime($replacementStart)) {
+                throw new RuntimeException('A valid same-date schedule start and end are required.');
+            }
 
             $newStatement = $this->pdo->prepare(
                 'SELECT * FROM ipca_flight_schedule_slots WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE'
@@ -734,8 +826,8 @@ final class FlightScheduleService
                         static fn(array $member): int => (int)($member['user_id'] ?? $member['person_id'] ?? 0),
                         $crew
                     )))),
-                    (string)$old['scheduled_start_time'],
-                    (string)$old['scheduled_end_time']
+                    $replacementStart,
+                    $replacementEnd
                 );
                 $this->pdo->commit();
                 return array(
@@ -811,8 +903,8 @@ final class FlightScheduleService
                 $aircraftId,
                 isset($old['cohort_id']) ? ((int)$old['cohort_id'] ?: null) : null,
                 $participantIds,
-                (string)$old['scheduled_start_time'],
-                (string)$old['scheduled_end_time']
+                $replacementStart,
+                $replacementEnd
             );
 
             $this->pdo->prepare(
@@ -824,8 +916,8 @@ final class FlightScheduleService
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)'
             )->execute(array(
                 $newId, $oldId, $organizationId, $reservationType,
-                (string)$old['scheduled_date'], (string)$old['scheduled_start_time'],
-                (string)$old['scheduled_end_time'], $aircraftId, $missionId,
+                $replacementDate, $replacementStart,
+                $replacementEnd, $aircraftId, $missionId,
                 isset($old['cohort_id']) ? ((int)$old['cohort_id'] ?: null) : null,
                 $missionCode, $plannedDeparture, $plannedDestination,
                 'scheduled', substr((string)($old['notes'] ?? ''), 0, 1000),
@@ -869,8 +961,8 @@ final class FlightScheduleService
                     static fn(array $leg): string => strtolower(trim((string)($leg['leg_uuid'] ?? ''))),
                     $legs
                 ),
-                'scheduled_start_time' => (string)$old['scheduled_start_time'],
-                'scheduled_end_time' => (string)$old['scheduled_end_time'],
+                'scheduled_start_time' => $replacementStart,
+                'scheduled_end_time' => $replacementEnd,
             ));
             $dutyInput = array(
                 'organization_id' => $organizationId,
@@ -1988,8 +2080,14 @@ final class FlightScheduleService
     {
         $incomingMission = strtoupper(trim((string)($payload['mission_code'] ?? '')));
         $storedMission = strtoupper(trim((string)($existing['mission_code'] ?? '')));
+        $incomingStart = trim((string)($payload['scheduled_start_time'] ?? ''));
+        $incomingEnd = trim((string)($payload['scheduled_end_time'] ?? ''));
         if ((int)($payload['aircraft_id'] ?? 0) !== (int)($existing['aircraft_id'] ?? 0)
             || $incomingMission !== $storedMission
+            || ($incomingStart !== ''
+                && substr($incomingStart, 0, 19) !== substr((string)$existing['scheduled_start_time'], 0, 19))
+            || ($incomingEnd !== ''
+                && substr($incomingEnd, 0, 19) !== substr((string)$existing['scheduled_end_time'], 0, 19))
             || $this->replacementCrewSignature($crew)
                 !== $this->storedReplacementCrewSignature((int)$existing['id'])) {
             throw new RuntimeException(
