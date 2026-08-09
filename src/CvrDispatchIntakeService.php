@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrSyncException.php';
+require_once __DIR__ . '/CvrOperationalIdentityService.php';
+require_once __DIR__ . '/CvrDutyAssignmentIdentityService.php';
+require_once __DIR__ . '/FlightSessionService.php';
 
 final class CvrDispatchIntakeService
 {
@@ -51,6 +54,8 @@ final class CvrDispatchIntakeService
                     throw new CvrTechnicalReviewRequired('Dispatch schedule linkage requires technical review.');
                 }
                 $this->claimScheduledSlot($normalized, $device);
+                $this->ingestCanonicalDutyIdentity($normalized, $organizationId);
+                $this->ingestOperationalSession($normalized, $device);
             }
 
             $existingVersion = $this->dispatchVersion($dispatchId, $normalized['dispatch_version']);
@@ -159,6 +164,7 @@ final class CvrDispatchIntakeService
             'dispatch_uuid' => $normalized['dispatch_uuid'],
             'dispatch_version' => $normalized['dispatch_version'],
             'flight_record_uuid' => $normalized['flight_record_uuid'],
+            'operational_session_uuid' => $normalized['operational_session_uuid'] ?: null,
             'payload_sha256' => $verifiedPayloadSha256,
             'received_at' => $receivedAt,
             'canonical_identifiers' => array(
@@ -166,6 +172,7 @@ final class CvrDispatchIntakeService
                 'dispatch_uuid' => $normalized['dispatch_uuid'],
                 'dispatch_version' => (string)$normalized['dispatch_version'],
                 'flight_record_uuid' => $normalized['flight_record_uuid'],
+                'operational_session_uuid' => $normalized['operational_session_uuid'] ?: null,
             ),
             'continuity_warnings' => $continuityWarnings,
             'dispatch' => array(
@@ -247,6 +254,22 @@ final class CvrDispatchIntakeService
             : null;
         $oilUnit = substr(trim((string)($dispatch['oil_unit'] ?? '')), 0, 16);
         $schedulerRecordId = strtolower(trim((string)($dispatch['scheduler_record_id'] ?? '')));
+        $operationalIdentity = is_array($dispatch['operational_identity'] ?? null)
+            ? $dispatch['operational_identity']
+            : array();
+        $reservationUuid = strtolower(trim((string)(
+            $dispatch['reservation_uuid'] ?? $operationalIdentity['reservation_uuid'] ?? ''
+        )));
+        $legUuid = strtolower(trim((string)(
+            $dispatch['leg_uuid'] ?? $operationalIdentity['leg_uuid'] ?? ''
+        )));
+        $operationalSessionUuid = strtolower(trim((string)(
+            $dispatch['operational_session_uuid'] ?? $payload['operational_session_uuid'] ?? ''
+        )));
+        $sessionModelVersion = strtolower(trim((string)(
+            $dispatch['session_model_version'] ?? $payload['session_model_version'] ?? ''
+        )));
+        $isOperationalSession = $sessionModelVersion === FlightSessionService::MODEL_OPERATIONAL_V1;
         $startingHobbs = isset($dispatch['starting_hobbs']) ? (float)$dispatch['starting_hobbs'] : null;
         $startingTacho = isset($dispatch['starting_tacho']) ? (float)$dispatch['starting_tacho'] : null;
         $fuelOnboard = trim((string)($dispatch['fuel_onboard'] ?? ''));
@@ -275,6 +298,21 @@ final class CvrDispatchIntakeService
         if ($schedulerRecordId !== '' && !$this->isUuid($schedulerRecordId)) {
             throw new CvrUserCorrectionRequired('scheduler_record_id must be a valid UUID.');
         }
+        if ($isOperationalSession) {
+            if (!$this->isUuid($reservationUuid) || !$this->isUuid($operationalSessionUuid)) {
+                throw new CvrUserCorrectionRequired(
+                    'Operational Session Dispatch requires valid reservation_uuid and operational_session_uuid values.'
+                );
+            }
+            if ($legUuid !== '') {
+                throw new CvrUserCorrectionRequired('Operational Session Dispatch must not create an actual leg identity.');
+            }
+        } elseif (($reservationUuid === '') !== ($legUuid === '')
+            || ($reservationUuid !== '' && (!$this->isUuid($reservationUuid) || !$this->isUuid($legUuid)))) {
+            throw new CvrUserCorrectionRequired(
+                'Dispatch operational identity requires valid reservation_uuid and leg_uuid values.'
+            );
+        }
 
         $deviceTail = self::normalizeTailRegistration((string)($device['aircraft_registration'] ?? ''));
         $tailNumber = self::normalizeTailRegistration($tailNumber);
@@ -293,6 +331,13 @@ final class CvrDispatchIntakeService
             }
             $name = trim((string)($member['person_name'] ?? ''));
             $role = trim((string)($member['role'] ?? ''));
+            try {
+                $pilotFunction = CvrDutyAssignmentIdentityService::normalizePilotFunction(
+                    (string)($member['pilot_function'] ?? $member['pilotFunction'] ?? 'NONE')
+                );
+            } catch (InvalidArgumentException) {
+                throw new CvrUserCorrectionRequired('Dispatch crew pilot function is invalid.');
+            }
             if ($name === '' || $role === '' || $role === 'unknown') {
                 throw new CvrUserCorrectionRequired('Dispatch crew name and role are required.');
             }
@@ -301,6 +346,10 @@ final class CvrDispatchIntakeService
                 'person_id' => isset($member['person_id']) ? (int)$member['person_id'] : null,
                 'person_name' => substr($name, 0, 255),
                 'role' => substr($role, 0, 64),
+                'pilot_function' => $pilotFunction,
+                'is_pic' => (bool)($member['is_pic'] ?? $member['isPIC'] ?? false)
+                    || strtolower($role) === 'pic',
+                'is_primary_customer' => (bool)($member['is_primary_customer'] ?? false),
             );
         }
 
@@ -381,6 +430,11 @@ final class CvrDispatchIntakeService
             'oil_unit' => $oilQuantity !== null ? $oilUnit : null,
             'dispatch_source' => substr(trim((string)($dispatch['dispatch_source'] ?? 'iphone_offline_local')), 0, 64),
             'scheduler_record_id' => $schedulerRecordId,
+            'reservation_uuid' => $reservationUuid,
+            'leg_uuid' => $legUuid,
+            'operational_session_uuid' => $operationalSessionUuid,
+            'session_model_version' => $sessionModelVersion,
+            'operational_identity' => $operationalIdentity,
             'creator_identity' => substr(trim((string)($dispatch['creator_identity'] ?? '')), 0, 128),
             'created_at' => $this->normalizeTimestamp((string)($dispatch['created_at'] ?? '')),
             'modified_at' => $this->normalizeTimestamp((string)($dispatch['modified_at'] ?? '')),
@@ -500,14 +554,22 @@ final class CvrDispatchIntakeService
             throw new CvrDependencyNotReady('Scheduled session linkage is not available yet.');
         }
         $claimedDispatch = strtolower(trim((string)($slot['claimed_dispatch_uuid'] ?? '')));
-        if ((string)$slot['status'] === 'completed'
-            && $claimedDispatch === $normalized['dispatch_uuid']) {
+        $incomingDispatch = strtolower(trim((string)$normalized['dispatch_uuid']));
+        $siblingClaim = $claimedDispatch !== ''
+            && $claimedDispatch !== $incomingDispatch
+            && $this->isSiblingLegDispatchForSlot($slot, $claimedDispatch, $incomingDispatch);
+
+        if ((string)$slot['status'] === 'completed' && $claimedDispatch === $incomingDispatch) {
             return;
         }
-        if (in_array((string)$slot['status'], array('cancelled', 'completed'), true)) {
+        if ((string)$slot['status'] === 'cancelled') {
             throw new CvrUserCorrectionRequired('Scheduled session is not available for Dispatch.');
         }
-        if ($claimedDispatch !== '' && $claimedDispatch !== $normalized['dispatch_uuid']) {
+        // Multi-leg: first leg may mark the slot completed while later legs still upload.
+        if ((string)$slot['status'] === 'completed' && !$siblingClaim) {
+            throw new CvrUserCorrectionRequired('Scheduled session is not available for Dispatch.');
+        }
+        if ($claimedDispatch !== '' && $claimedDispatch !== $incomingDispatch && !$siblingClaim) {
             throw new CvrTechnicalReviewRequired('Scheduled session linkage requires technical review.');
         }
         $deviceAircraftId = (int)($device['aircraft_id'] ?? 0);
@@ -523,14 +585,17 @@ final class CvrDispatchIntakeService
         if ($slotMission !== '' && strcasecmp($slotMission, (string)$normalized['mission_code']) !== 0) {
             throw new CvrUserCorrectionRequired('Scheduled session mission does not match the Dispatch.');
         }
-        foreach (array('planned_departure_airport', 'planned_destination_airport') as $field) {
-            $scheduledAirport = strtoupper(trim((string)($slot[$field] ?? '')));
-            if ($scheduledAirport !== '' && $scheduledAirport !== (string)$normalized[$field]) {
-                throw new CvrUserCorrectionRequired('Scheduled session airports do not match the Dispatch.');
-            }
+        if (($normalized['session_model_version'] ?? '') !== FlightSessionService::MODEL_OPERATIONAL_V1
+            && !$this->dispatchAirportsMatchScheduledPlan($slot, $normalized)) {
+            throw new CvrUserCorrectionRequired('Scheduled session airports do not match the Dispatch.');
         }
-        $crewStatement = $this->pdo->prepare(
-            'SELECT user_id, person_name_snapshot, crew_role
+        $hasDutyColumns = $this->scheduleCrewDutyColumnsAvailable();
+        $crewStatement = $this->pdo->prepare($hasDutyColumns
+            ? 'SELECT user_id, person_name_snapshot, crew_role, pilot_function, is_pic,
+                      1 AS duty_columns_present
+               FROM ipca_flight_schedule_crew WHERE schedule_slot_id = ?'
+            : 'SELECT user_id, person_name_snapshot, crew_role, \'NONE\' AS pilot_function,
+                      0 AS is_pic, 0 AS duty_columns_present
              FROM ipca_flight_schedule_crew WHERE schedule_slot_id = ?'
         );
         $crewStatement->execute(array((int)$slot['id']));
@@ -538,6 +603,10 @@ final class CvrDispatchIntakeService
             if (!$this->dispatchCrewMatchesScheduledMember($normalized['crew'], $scheduledCrew)) {
                 throw new CvrUserCorrectionRequired('Scheduled session crew does not match the Dispatch.');
             }
+        }
+        if ($siblingClaim) {
+            // Keep the original claim owner; later legs share the same scheduled reservation.
+            return;
         }
         $this->pdo->prepare(
             "UPDATE ipca_flight_schedule_slots
@@ -559,6 +628,133 @@ final class CvrDispatchIntakeService
     }
 
     /**
+     * True when another Dispatch already claimed this slot for a different leg of the same reservation.
+     *
+     * @param array<string,mixed> $slot
+     */
+    private function isSiblingLegDispatchForSlot(array $slot, string $claimedDispatchUuid, string $incomingDispatchUuid): bool
+    {
+        $schedulerId = strtolower(trim((string)($slot['scheduler_record_id'] ?? '')));
+        if ($schedulerId === '' || $claimedDispatchUuid === '' || $incomingDispatchUuid === '') {
+            return false;
+        }
+        $statement = $this->pdo->prepare(
+            "SELECT LOWER(TRIM(dispatch_uuid)) AS dispatch_uuid,
+                    LOWER(TRIM(COALESCE(scheduler_record_id, ''))) AS scheduler_record_id
+             FROM ipca_cvr_dispatches
+             WHERE LOWER(TRIM(dispatch_uuid)) IN (?, ?)"
+        );
+        $statement->execute(array($claimedDispatchUuid, $incomingDispatchUuid));
+        $byUuid = array();
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $byUuid[(string)$row['dispatch_uuid']] = (string)$row['scheduler_record_id'];
+        }
+        $claimedScheduler = $byUuid[$claimedDispatchUuid] ?? '';
+        $incomingScheduler = $byUuid[$incomingDispatchUuid] ?? '';
+        // Incoming may not be inserted yet when claim runs during first insert — fall back to slot id.
+        if ($incomingScheduler === '') {
+            $incomingScheduler = $schedulerId;
+        }
+        return $claimedScheduler !== ''
+            && $claimedScheduler === $schedulerId
+            && $incomingScheduler === $schedulerId;
+    }
+
+    /**
+     * Accept either the slot first→last route or any planned hop from canonical legs.
+     * Device sessions expand multi-leg slots per hop, so A→B and B→C must both claim A→C slots.
+     *
+     * @param array<string,mixed> $slot
+     * @param array<string,mixed> $normalized
+     */
+    private function dispatchAirportsMatchScheduledPlan(array $slot, array $normalized): bool
+    {
+        $dispatchDeparture = strtoupper(trim((string)($normalized['planned_departure_airport'] ?? '')));
+        $dispatchDestination = strtoupper(trim((string)($normalized['planned_destination_airport'] ?? '')));
+        $hops = $this->scheduledAirportHops($slot);
+        if ($hops === array()) {
+            return true;
+        }
+        foreach ($hops as $hop) {
+            $scheduledDeparture = (string)($hop['departure'] ?? '');
+            $scheduledDestination = (string)($hop['destination'] ?? '');
+            $departureOk = $scheduledDeparture === '' || $scheduledDeparture === $dispatchDeparture;
+            $destinationOk = $scheduledDestination === '' || $scheduledDestination === $dispatchDestination;
+            if ($departureOk && $destinationOk) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @param array<string,mixed> $slot
+     * @return list<array{departure:string,destination:string}>
+     */
+    private function scheduledAirportHops(array $slot): array
+    {
+        $hops = array();
+        $seen = array();
+        $append = static function (string $departure, string $destination) use (&$hops, &$seen): void {
+            $departure = strtoupper(trim($departure));
+            $destination = strtoupper(trim($destination));
+            if ($departure === '' && $destination === '') {
+                return;
+            }
+            $key = $departure . '>' . $destination;
+            if (isset($seen[$key])) {
+                return;
+            }
+            $seen[$key] = true;
+            $hops[] = array(
+                'departure' => $departure,
+                'destination' => $destination,
+            );
+        };
+
+        try {
+            require_once __DIR__ . '/CvrOperationalIdentityService.php';
+            $identity = new CvrOperationalIdentityService($this->pdo);
+            $organizationId = max(1, (int)($slot['organization_id'] ?? 1));
+            $schedulerId = strtolower(trim((string)($slot['scheduler_record_id'] ?? '')));
+            $alias = null;
+            if ($schedulerId !== '') {
+                $alias = $identity->findAlias($organizationId, 'schedule', 'scheduler_record_id', $schedulerId, null);
+            }
+            if (!is_array($alias) && (int)($slot['id'] ?? 0) > 0) {
+                $alias = $identity->findAlias(
+                    $organizationId,
+                    'schedule',
+                    'schedule_slot_id',
+                    (string)(int)$slot['id'],
+                    null
+                );
+            }
+            $reservationUuid = is_array($alias) ? strtolower(trim((string)($alias['reservation_uuid'] ?? ''))) : '';
+            if ($reservationUuid !== '' && strtolower(trim((string)($alias['target_type'] ?? ''))) === 'reservation') {
+                foreach ($identity->listLegsForReservation($reservationUuid) as $leg) {
+                    if (!is_array($leg)) {
+                        continue;
+                    }
+                    $append(
+                        (string)($leg['origin_airport'] ?? ''),
+                        (string)($leg['destination_airport'] ?? '')
+                    );
+                }
+            }
+        } catch (Throwable) {
+            // Identity is additive; fall through to slot first→last airports.
+        }
+
+        $append(
+            (string)($slot['planned_departure_airport'] ?? ''),
+            (string)($slot['planned_destination_airport'] ?? '')
+        );
+
+        return $hops;
+    }
+
+    /**
      * Match scheduled crew to Dispatch crew by person id when both are present,
      * otherwise by normalized name. Role must still match.
      *
@@ -571,13 +767,27 @@ final class CvrDispatchIntakeService
             ? (int)$scheduledCrew['user_id']
             : 0;
         $scheduledName = strtolower(trim((string)($scheduledCrew['person_name_snapshot'] ?? '')));
-        $scheduledRole = strtolower(trim((string)($scheduledCrew['crew_role'] ?? '')));
+        $scheduledRole = $this->normalizedRoleToken((string)($scheduledCrew['crew_role'] ?? ''));
+        $scheduledPilotFunction = CvrDutyAssignmentIdentityService::normalizePilotFunction(
+            (string)($scheduledCrew['pilot_function'] ?? 'NONE')
+        );
+        $scheduledIsPic = (bool)($scheduledCrew['is_pic'] ?? false);
+        $compareDutyFunctions = (bool)($scheduledCrew['duty_columns_present'] ?? false);
         foreach ($dispatchCrew as $member) {
             if (!is_array($member)) {
                 continue;
             }
-            $dispatchRole = strtolower(trim((string)($member['role'] ?? '')));
+            $dispatchRole = $this->normalizedRoleToken((string)($member['role'] ?? ''));
             if ($scheduledRole !== '' && $dispatchRole !== $scheduledRole) {
+                continue;
+            }
+            if ($compareDutyFunctions
+                && (
+                    CvrDutyAssignmentIdentityService::normalizePilotFunction(
+                        (string)($member['pilot_function'] ?? 'NONE')
+                    ) !== $scheduledPilotFunction
+                    || (bool)($member['is_pic'] ?? false) !== $scheduledIsPic
+                )) {
                 continue;
             }
             $dispatchPersonId = isset($member['person_id']) ? (int)$member['person_id'] : 0;
@@ -590,6 +800,36 @@ final class CvrDispatchIntakeService
             }
         }
         return false;
+    }
+
+    private function normalizedRoleToken(string $value): string
+    {
+        return strtolower(preg_replace('/[^a-z0-9]+/i', '', trim($value)) ?? '');
+    }
+
+    private function scheduleCrewDutyColumnsAvailable(): bool
+    {
+        try {
+            if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+                $names = array();
+                $stmt = $this->pdo->query("PRAGMA table_info('ipca_flight_schedule_crew')");
+                foreach ($stmt?->fetchAll(PDO::FETCH_ASSOC) ?: array() as $column) {
+                    $names[] = strtolower((string)($column['name'] ?? ''));
+                }
+                return in_array('pilot_function', $names, true) && in_array('is_pic', $names, true);
+            }
+            foreach (array('pilot_function', 'is_pic') as $column) {
+                $stmt = $this->pdo->query(
+                    'SHOW COLUMNS FROM ipca_flight_schedule_crew LIKE ' . $this->pdo->quote($column)
+                );
+                if ($stmt === false || $stmt->fetchColumn() === false) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /** @param array<string,mixed> $normalized */
@@ -626,12 +866,12 @@ final class CvrDispatchIntakeService
     {
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_cvr_dispatches
-              (dispatch_uuid, organization_id, device_id, workflow_flight_record_uuid, scheduler_record_id, current_version,
+              (dispatch_uuid, organization_id, device_id, workflow_flight_record_uuid, operational_session_uuid, scheduler_record_id, current_version,
                aircraft_id, aircraft_registration, scheduled_date, mission_code, crew_json,
                starting_hobbs, starting_tacho, fuel_onboard, oil_percentage, oil_quantity, oil_unit, dispatch_source,
                consent_status, status, cvr_unit_identifier, beacon_identifier)
             VALUES
-              (:dispatch_uuid, :organization_id, :device_id, :workflow_flight_record_uuid, :scheduler_record_id, :current_version,
+              (:dispatch_uuid, :organization_id, :device_id, :workflow_flight_record_uuid, :operational_session_uuid, :scheduler_record_id, :current_version,
                :aircraft_id, :aircraft_registration, :scheduled_date, :mission_code, :crew_json,
                :starting_hobbs, :starting_tacho, :fuel_onboard, :oil_percentage, :oil_quantity, :oil_unit, :dispatch_source,
                :consent_status, :status, :cvr_unit_identifier, :beacon_identifier)
@@ -641,6 +881,7 @@ final class CvrDispatchIntakeService
             ':organization_id' => $organizationId,
             ':device_id' => $deviceId,
             ':workflow_flight_record_uuid' => $normalized['flight_record_uuid'],
+            ':operational_session_uuid' => $normalized['operational_session_uuid'] ?: null,
             ':scheduler_record_id' => $normalized['scheduler_record_id'] ?: null,
             ':current_version' => $normalized['dispatch_version'],
             ':aircraft_id' => $normalized['aircraft_id'],
@@ -671,6 +912,7 @@ final class CvrDispatchIntakeService
         $stmt = $this->pdo->prepare("
             UPDATE ipca_cvr_dispatches
             SET workflow_flight_record_uuid = :workflow_flight_record_uuid,
+                operational_session_uuid = COALESCE(operational_session_uuid, :operational_session_uuid),
                 scheduler_record_id = :scheduler_record_id,
                 current_version = :current_version,
                 aircraft_id = :aircraft_id,
@@ -694,6 +936,7 @@ final class CvrDispatchIntakeService
         ");
         $stmt->execute(array(
             ':workflow_flight_record_uuid' => $normalized['flight_record_uuid'],
+            ':operational_session_uuid' => $normalized['operational_session_uuid'] ?: null,
             ':scheduler_record_id' => $normalized['scheduler_record_id'] ?: null,
             ':current_version' => $normalized['dispatch_version'],
             ':aircraft_id' => $normalized['aircraft_id'],
@@ -801,12 +1044,35 @@ final class CvrDispatchIntakeService
             $existing['scheduler_record_id'],
             $incoming['scheduler_record_id']
         );
+        $existing = $this->withDutyRetryDefaults($existing);
+        $incoming = $this->withDutyRetryDefaults($incoming);
         $existingCanonical = AuditEventService::jsonEncode($this->canonicalize($existing));
         $incomingCanonical = AuditEventService::jsonEncode($this->canonicalize($incoming));
         return hash_equals(
             hash('sha256', $existingCanonical),
             hash('sha256', $incomingCanonical)
         );
+    }
+
+    /** @param array<string,mixed> $candidate @return array<string,mixed> */
+    private function withDutyRetryDefaults(array $candidate): array
+    {
+        $candidate['reservation_uuid'] = (string)($candidate['reservation_uuid'] ?? '');
+        $candidate['leg_uuid'] = (string)($candidate['leg_uuid'] ?? '');
+        $candidate['operational_identity'] = is_array($candidate['operational_identity'] ?? null)
+            ? $candidate['operational_identity']
+            : array();
+        if (is_array($candidate['crew'] ?? null)) {
+            foreach ($candidate['crew'] as &$member) {
+                if (is_array($member)) {
+                    $member['pilot_function'] = (string)($member['pilot_function'] ?? 'NONE');
+                        $member['is_pic'] = (bool)($member['is_pic'] ?? false);
+                    $member['is_primary_customer'] = (bool)($member['is_primary_customer'] ?? false);
+                }
+            }
+            unset($member);
+        }
+        return $candidate;
     }
 
     /**
@@ -823,6 +1089,155 @@ final class CvrDispatchIntakeService
         $stmt->execute(array($dispatchId, $version));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Persist device-supplied canonical identity and enforce the immutable duty snapshot.
+     *
+     * @param array<string,mixed> $normalized
+     */
+    private function ingestCanonicalDutyIdentity(array $normalized, int $organizationId): void
+    {
+        $reservationUuid = strtolower(trim((string)($normalized['reservation_uuid'] ?? '')));
+        $legUuid = strtolower(trim((string)($normalized['leg_uuid'] ?? '')));
+        $isOperationalSession = (string)($normalized['session_model_version'] ?? '')
+            === FlightSessionService::MODEL_OPERATIONAL_V1;
+        $duty = new CvrDutyAssignmentIdentityService($this->pdo);
+        if ($reservationUuid === '' || (!$isOperationalSession && $legUuid === '')) {
+            $schedulerRecordId = strtolower(trim((string)($normalized['scheduler_record_id'] ?? '')));
+            if ($duty->isEnforcementEnabled()
+                && $schedulerRecordId !== ''
+                && $duty->snapshotForReservation($schedulerRecordId) !== null) {
+                throw new CvrUserCorrectionRequired(
+                    'This scheduled Dispatch requires canonical reservation and segment identity.'
+                );
+            }
+            return;
+        }
+
+        $identity = new CvrOperationalIdentityService($this->pdo);
+        if (!$identity->isFlagEnabled(CvrOperationalIdentityService::FLAG_CANONICAL_WRITE)) {
+            if ($duty->isEnforcementEnabled()) {
+                throw new CvrTechnicalReviewRequired(
+                    'Canonical Duty Assignment intake is not enabled on the server.'
+                );
+            }
+            return;
+        }
+
+        $operational = is_array($normalized['operational_identity'] ?? null)
+            ? $normalized['operational_identity']
+            : array();
+        $reservation = $identity->findReservationByUuid($reservationUuid);
+        $createdReservation = false;
+        if ($reservation === null) {
+            $reservation = $identity->createReservation(array(
+                'reservation_uuid' => $reservationUuid,
+                'organization_id' => $organizationId,
+                'organization_timezone_iana' => (string)($operational['organization_timezone_iana'] ?? 'UTC'),
+                'reservation_type' => (string)($operational['reservation_type'] ?? 'flight_training'),
+                'activity_domain' => (string)($operational['activity_domain'] ?? 'flight'),
+                    'status' => $isOperationalSession ? 'scheduled' : 'active',
+                'source' => 'ios_offline',
+                'adoption_source_system' => 'ios_cvr',
+                'adoption_provenance' => array(
+                    'linkage_method' => 'offline_create',
+                    'dispatch_uuid' => (string)$normalized['dispatch_uuid'],
+                ),
+            ), true);
+            $createdReservation = true;
+        }
+        if ((int)($reservation['organization_id'] ?? 0) !== $organizationId) {
+            throw new CvrTechnicalReviewRequired('Reservation organization identity requires review.');
+        }
+
+        if (!$isOperationalSession) {
+            $leg = $identity->findLegByUuid($legUuid);
+            if ($leg === null) {
+                $existingLegs = $identity->listLegsForReservation($reservationUuid);
+                $identity->createFlightLeg(array(
+                    'leg_uuid' => $legUuid,
+                    'reservation_uuid' => $reservationUuid,
+                    'organization_id' => $organizationId,
+                    'sequence_number' => count($existingLegs) + 1,
+                    'origin_airport' => (string)($operational['origin_airport'] ?? $normalized['planned_departure_airport']),
+                    'destination_airport' => (string)($operational['destination_airport'] ?? $normalized['planned_destination_airport']),
+                    'organization_timezone_iana' => (string)($operational['organization_timezone_iana'] ?? $reservation['organization_timezone_iana']),
+                    'status' => 'dispatched',
+                    'source' => 'ios_offline',
+                ), true);
+            } elseif ((string)($leg['reservation_uuid'] ?? '') !== $reservationUuid) {
+                throw new CvrTechnicalReviewRequired('Segment identity belongs to another reservation.');
+            }
+        }
+
+        foreach (array(
+            array('dispatch_uuid', (string)$normalized['dispatch_uuid'], (string)$normalized['dispatch_version']),
+            array('workflow_flight_record_uuid', (string)$normalized['flight_record_uuid'], null),
+        ) as [$aliasType, $aliasValue, $aliasVersion]) {
+            $identity->createAlias(array(
+                'organization_id' => $organizationId,
+                'source_system' => 'ios_cvr',
+                'alias_type' => $aliasType,
+                'alias_value' => $aliasValue,
+                'alias_version' => $aliasVersion,
+                'target_type' => $isOperationalSession ? 'reservation' : 'leg',
+                'reservation_uuid' => $isOperationalSession ? $reservationUuid : null,
+                'leg_uuid' => $isOperationalSession ? null : $legUuid,
+                'confidence_state' => 'VERIFIED',
+                'linkage_method' => 'offline_create',
+            ), true);
+        }
+
+        $dutyInput = array(
+            'organization_id' => $organizationId,
+            'aircraft_device_id' => (int)($normalized['aircraft_id'] ?? 0),
+            'aircraft_registration' => (string)($normalized['aircraft_registration'] ?? ''),
+            'reservation_type' => (string)($reservation['reservation_type'] ?? 'flight_training'),
+            'activity_domain' => (string)($reservation['activity_domain'] ?? 'flight'),
+            'training_assignment_category' => (string)($reservation['reservation_type'] ?? 'flight_training'),
+            'mission_code' => (string)($normalized['mission_code'] ?? ''),
+            'crew' => is_array($normalized['crew'] ?? null) ? $normalized['crew'] : array(),
+            'source' => 'ios_offline',
+        );
+        $existingDuty = $duty->snapshotForReservation($reservationUuid);
+        if ($createdReservation && $existingDuty === null && $duty->isSnapshotWriteEnabled()) {
+            $duty->writeSnapshot($reservationUuid, $dutyInput);
+            $existingDuty = $duty->snapshotForReservation($reservationUuid);
+        }
+        if ($existingDuty !== null) {
+            $duty->assertDispatchMatches($reservationUuid, $normalized);
+        }
+    }
+
+    /** @param array<string,mixed> $normalized @param array<string,mixed> $device */
+    private function ingestOperationalSession(array $normalized, array $device): void
+    {
+        if ((string)($normalized['session_model_version'] ?? '')
+            !== FlightSessionService::MODEL_OPERATIONAL_V1) {
+            return;
+        }
+        $fuelText = trim((string)($normalized['fuel_onboard'] ?? ''));
+        $fuelQuantity = is_numeric($fuelText)
+            ? (float)$fuelText
+            : (preg_match('/^-?[0-9]+(?:\.[0-9]+)?/', $fuelText, $match) === 1
+                ? (float)$match[0]
+                : null);
+        (new FlightSessionService($this->pdo))->createOperationalSession($device, array(
+            'operational_session_uuid' => (string)$normalized['operational_session_uuid'],
+            'reservation_uuid' => (string)$normalized['reservation_uuid'],
+            'dispatch_uuid' => (string)$normalized['dispatch_uuid'],
+            'workflow_flight_record_uuid' => (string)$normalized['flight_record_uuid'],
+            'dispatch_confirmed_at_utc' => (string)$normalized['modified_at'],
+            'starting_hobbs' => $normalized['starting_hobbs'],
+            'starting_tacho' => $normalized['starting_tacho'],
+            'starting_fuel_quantity' => $fuelQuantity,
+            'starting_fuel_unit' => 'USG',
+            'starting_oil_quantity' => $normalized['oil_quantity'] ?? $normalized['oil_percentage'],
+            'starting_oil_unit' => $normalized['oil_quantity'] !== null
+                ? ($normalized['oil_unit'] ?? null)
+                : ($normalized['oil_percentage'] !== null ? 'PERCENT' : null),
+        ));
     }
 
     private function requireSchema(): void

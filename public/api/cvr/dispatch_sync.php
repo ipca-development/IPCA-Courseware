@@ -48,6 +48,16 @@ try {
     cvr_dispatch_sync_json($e->httpStatus(), $e->payload(cvr_sync_request_id(is_array($payload ?? null) ? $payload : array())));
 } catch (Throwable $e) {
     error_log('CVR Dispatch sync failed: ' . $e->getMessage());
-    $failure = new CvrTemporaryTechnicalFailure();
+    $message = 'Synchronization is temporarily unavailable.';
+    if ($e instanceof PDOException) {
+        $sqlState = (string)$e->getCode();
+        $detail = $e->getMessage();
+        if ($sqlState === '23000' && str_contains($detail, 'uk_ipca_cvr_dispatches_scheduler')) {
+            $message = 'This multi-leg schedule already has a Dispatch row; later legs must sync under the shared reservation without a unique scheduler lock.';
+        } elseif ($sqlState === '23000') {
+            $message = 'Dispatch could not be stored because of a database uniqueness conflict.';
+        }
+    }
+    $failure = new CvrTemporaryTechnicalFailure($message);
     cvr_dispatch_sync_json($failure->httpStatus(), $failure->payload(cvr_sync_request_id(is_array($payload ?? null) ? $payload : array())));
 }
