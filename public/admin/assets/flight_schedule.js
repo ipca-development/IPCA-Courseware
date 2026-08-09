@@ -2,6 +2,130 @@
   'use strict';
 
   var config = window.IPCAFlightSchedule || {};
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function formatCoord(value, digits) {
+    var n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return n.toFixed(digits == null ? 5 : digits);
+  }
+
+  function renderAdsbHtml(data, options) {
+    options = options || {};
+    var includeMap = options.includeMap !== false;
+    if (!data || data.ok === false) {
+      return '<p class="fltsch-adsb-status is-ground">ADS-B unavailable</p>'
+        + '<p class="fltsch-muted" style="margin:0">' + escapeHtml((data && data.error) || 'Unable to load ADS-B status.') + '</p>';
+    }
+    if (!data.in_flight) {
+      var groundDetail = data.detail || data.error || data.fetch_error || '';
+      return '<p class="fltsch-adsb-status is-ground">Aircraft not in flight</p>'
+        + (groundDetail ? '<p class="fltsch-muted" style="margin:0">' + escapeHtml(groundDetail) + '</p>' : '');
+    }
+    var pos = data.position || {};
+    var nearest = data.nearest_airport || (pos && pos.nearest_airport) || null;
+    var mapEmbed = data.map_embed_url || pos.map_embed_url || '';
+    var mapUrl = data.map_url || pos.map_url || '';
+    var rows = [
+      ['Latitude', formatCoord(pos.lat)],
+      ['Longitude', formatCoord(pos.lon)],
+      ['Altitude', pos.altitude_ft != null ? (Number(pos.altitude_ft).toLocaleString() + ' ft') : '—'],
+      ['Groundspeed', pos.groundspeed_kt != null ? (Number(pos.groundspeed_kt) + ' kt') : '—'],
+      ['Track', pos.track_deg != null ? (Number(pos.track_deg) + '°') : '—'],
+      ['Callsign', pos.callsign ? String(pos.callsign) : '—']
+    ];
+    if (nearest && nearest.icao) {
+      rows.push(['Near', String(nearest.icao) + (nearest.distance_nm != null ? (' · ' + nearest.distance_nm + ' NM') : '')]);
+    }
+    var meta = rows.map(function (row) {
+      return '<div><dt>' + escapeHtml(row[0]) + '</dt><dd>' + escapeHtml(row[1]) + '</dd></div>';
+    }).join('');
+    var map = '';
+    if (includeMap) {
+      if (mapEmbed) {
+        map = '<div class="fltsch-adsb-map"><iframe title="Aircraft position map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="'
+          + escapeHtml(mapEmbed) + '"></iframe></div>';
+      }
+      if (mapUrl) {
+        map += '<a class="fltsch-adsb-map-link" href="' + escapeHtml(mapUrl) + '" target="_blank" rel="noopener noreferrer">Open full map</a>';
+      }
+    }
+    return '<p class="fltsch-adsb-status is-airborne">Aircraft in flight</p>'
+      + '<dl class="fltsch-adsb-meta">' + meta + '</dl>'
+      + map;
+  }
+
+  function loadAircraftAdsb(aircraftId, bodyEl) {
+    if (!bodyEl) return Promise.resolve();
+    var id = Number(aircraftId || 0);
+    if (!id) {
+      bodyEl.innerHTML = '<p class="fltsch-muted" style="margin:0">Select an aircraft to check live position.</p>';
+      return Promise.resolve();
+    }
+    bodyEl.innerHTML = '<p class="fltsch-muted" style="margin:0">Checking aircraft position…</p>';
+    var url = String(config.adsbApiUrl || '/admin/api/schedule_aircraft_adsb.php')
+      + '?aircraft_id=' + encodeURIComponent(String(id));
+    return fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function (response) { return response.json().catch(function () { return null; }).then(function (data) {
+        return { okHttp: response.ok, data: data };
+      }); })
+      .then(function (result) {
+        if (!result.data) {
+          bodyEl.innerHTML = renderAdsbHtml({ ok: false, error: 'Invalid ADS-B response.' });
+          return;
+        }
+        bodyEl.innerHTML = renderAdsbHtml(result.data);
+      })
+      .catch(function () {
+        bodyEl.innerHTML = renderAdsbHtml({ ok: false, error: 'ADS-B request failed.' });
+      });
+  }
+
+  function wireReservationAdsbPanel() {
+    var panel = document.getElementById('flightReservationAdsbPanel');
+    var body = document.getElementById('flightReservationAdsbBody');
+    var select = document.getElementById('flightReservationAircraft');
+    var refresh = document.getElementById('flightReservationAdsbRefresh');
+    if (!panel || !body) return;
+
+    function currentId() {
+      if (select && select.value) return Number(select.value) || 0;
+      return Number(panel.getAttribute('data-aircraft-id') || 0) || 0;
+    }
+
+    function refreshPanel() {
+      var id = currentId();
+      panel.setAttribute('data-aircraft-id', String(id || ''));
+      return loadAircraftAdsb(id, body);
+    }
+
+    if (select) {
+      select.addEventListener('change', function () { refreshPanel(); });
+    }
+    if (refresh) {
+      refresh.addEventListener('click', function () { refreshPanel(); });
+    }
+    if (currentId() > 0) {
+      refreshPanel();
+    }
+  }
+
+  window.IPCAScheduleAdsb = {
+    load: loadAircraftAdsb,
+    render: renderAdsbHtml,
+    wireReservationPanel: wireReservationAdsbPanel
+  };
+
+  wireReservationAdsbPanel();
+
   var scheduler = document.getElementById('flightResourceScheduler');
   if (!scheduler || !Array.isArray(config.reservations)) return;
 
@@ -10,6 +134,7 @@
   var snap = Number(config.snapMinutes || 15);
   var totalMinutes = dayEnd - dayStart;
   var suppressClick = false;
+  var scheduleInteractionActive = false;
   var hoverTip = null;
   var hoverHideTimer = null;
 
@@ -78,12 +203,6 @@
   function formatDateTime(date) {
     return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
       + ', ' + formatTime(date);
-  }
-
-  function escapeHtml(value) {
-    return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character];
-    });
   }
 
   function showDialog(id) {
@@ -295,13 +414,68 @@
   }
 
   function openReservation(reservation) {
-    if (reservation.editable || reservation.can_undispatch) {
+    // Live ADS-B is opened from the aircraft tail number, not the reservation block.
+    // Dispatched / claimed blocks stay locked here; undispatch remains available from the ADS-B modal.
+    if (reservation.status === 'claimed') {
+      return;
+    }
+    if (reservation.editable) {
       window.location.href = String(config.editBaseUrl || '') + encodeURIComponent(reservation.scheduler_record_id);
       return;
     }
     if (reservation.status === 'completed') {
       openCompletedModal(reservation);
     }
+  }
+
+  function reservationForAircraft(aircraftId) {
+    var id = Number(aircraftId || 0);
+    if (!id) return null;
+    var claimed = null;
+    var fallback = null;
+    (config.reservations || []).forEach(function (reservation) {
+      var reservationAircraftId = reservation && reservation.aircraft
+        ? Number(reservation.aircraft.id || 0)
+        : 0;
+      if (reservationAircraftId !== id) return;
+      if (reservation.status === 'claimed') {
+        claimed = reservation;
+        return;
+      }
+      if (!fallback) fallback = reservation;
+    });
+    return claimed || fallback;
+  }
+
+  function syntheticAircraftReservation(aircraftId, registration) {
+    return {
+      aircraft: {
+        id: Number(aircraftId || 0),
+        registration: String(registration || '')
+      },
+      status: '',
+      can_undispatch: false,
+      scheduled_start_time: null,
+      scheduled_end_time: null,
+      claimed_at: null,
+      mission: null,
+      crew: []
+    };
+  }
+
+  function openAircraftAdsbModal(aircraftId, registration) {
+    var id = Number(aircraftId || 0);
+    if (!id) return;
+    var reservation = reservationForAircraft(id) || syntheticAircraftReservation(id, registration);
+    if (!reservation.aircraft) {
+      reservation.aircraft = { id: id, registration: String(registration || '') };
+    } else {
+      reservation.aircraft.id = id;
+      if (!reservation.aircraft.registration && registration) {
+        reservation.aircraft.registration = String(registration);
+      }
+    }
+    openDispatchedModal(reservation);
   }
 
   function openCompletedModal(reservation) {
@@ -312,9 +486,287 @@
     var body = document.getElementById('flightCompletedModalBody');
     if (!body) return;
     if (title) title.textContent = aircraft + ' · Completed flight';
-    body.innerHTML = '<dl class="fltsch-completed-detail">' + detailRowsHtml(reservation, { completed: true }) + '</dl>'
+    var aircraftId = reservation.aircraft && reservation.aircraft.id ? Number(reservation.aircraft.id) : 0;
+    body.innerHTML = '<div class="fltsch-adsb-panel" style="margin-bottom:14px">'
+      + '<div class="fltsch-adsb-head"><strong>Live ADS-B</strong></div>'
+      + '<div class="fltsch-adsb-body" id="flightCompletedAdsbBody"><p class="fltsch-muted" style="margin:0">Checking aircraft position…</p></div>'
+      + '</div>'
+      + '<dl class="fltsch-completed-detail">' + detailRowsHtml(reservation, { completed: true }) + '</dl>'
       + '<p class="fltsch-muted">This flight is locked. Operational values are read-only — use Master Logbook to correct evidence.</p>';
     showDialog('flightCompletedModal');
+    if (window.IPCAScheduleAdsb && typeof window.IPCAScheduleAdsb.load === 'function') {
+      window.IPCAScheduleAdsb.load(aircraftId, document.getElementById('flightCompletedAdsbBody'));
+    }
+  }
+
+  var dispatchedTrackChart = null;
+  var dispatchedTrackReservation = null;
+
+  function ensureDispatchedTrackChart() {
+    var root = document.getElementById('flightDispatchedTrackRoot');
+    if (!root) return null;
+    if (!dispatchedTrackChart && window.IPCALegTrackChart && typeof window.IPCALegTrackChart.create === 'function') {
+      dispatchedTrackChart = window.IPCALegTrackChart.create(root);
+    }
+    return dispatchedTrackChart;
+  }
+
+  function trackWindowForReservation(reservation) {
+    var start = parseLocal(reservation.scheduled_start_time);
+    var end = parseLocal(reservation.scheduled_end_time);
+    var claimed = reservation.claimed_at ? parseLocal(reservation.claimed_at) : null;
+    var from = start || claimed || new Date(Date.now() - 6 * 3600 * 1000);
+    if (claimed && claimed < from) from = claimed;
+    var to = end && end > new Date() ? end : new Date();
+    if (end && reservation.status === 'completed') to = end;
+    return { from: from, to: to };
+  }
+
+  function loadDispatchedTrack(reservation, options) {
+    options = options || {};
+    var silent = !!options.silent;
+    var chart = ensureDispatchedTrackChart();
+    var modalRoot = document.getElementById('flightDispatchedTrackRoot');
+    var statusEl = (modalRoot && modalRoot.querySelector('#legs-track-status'))
+      || document.getElementById('legs-track-status');
+    var adsbBody = document.getElementById('flightDispatchedAdsbBody');
+    var aircraftId = reservation.aircraft && reservation.aircraft.id ? Number(reservation.aircraft.id) : 0;
+    if (!aircraftId) {
+      if (adsbBody) adsbBody.innerHTML = renderAdsbHtml({ ok: false, error: 'Aircraft is missing on this reservation.' }, { includeMap: false });
+      if (statusEl) {
+        statusEl.textContent = 'Cannot load ADS-B track without an aircraft.';
+        statusEl.dataset.tone = 'error';
+      }
+      return Promise.resolve(null);
+    }
+
+    var trackWindow = trackWindowForReservation(reservation);
+    trackWindow.to = new Date();
+    if (!(trackWindow.from instanceof Date) || !Number.isFinite(trackWindow.from.getTime())) {
+      trackWindow.from = new Date(Date.now() - 6 * 3600 * 1000);
+    }
+    if (!(trackWindow.to instanceof Date) || !Number.isFinite(trackWindow.to.getTime())) {
+      trackWindow.to = new Date();
+    }
+    if (!silent && statusEl) {
+      statusEl.textContent = 'Loading live ADS-B track…';
+      statusEl.dataset.tone = 'loading';
+    }
+    if (!silent && adsbBody) {
+      adsbBody.innerHTML = '<p class="fltsch-muted" style="margin:0">Checking aircraft position…</p>';
+    }
+
+    var url = String(config.adsbTrackApiUrl || '/admin/api/schedule_aircraft_adsb_track.php')
+      + '?aircraft_id=' + encodeURIComponent(String(aircraftId))
+      + '&from=' + encodeURIComponent(trackWindow.from.toISOString())
+      + '&to=' + encodeURIComponent(trackWindow.to.toISOString())
+      // Live dispatch modal must stay fast: archive traffic over ~1.8M samples
+      // previously timed out the whole request and showed "Aircraft not in flight".
+      // Nearby aircraft still come from the live ADS-B area query.
+      + '&include_traffic=0'
+      // Background polls need only current ownship + nearby traffic. Full trace
+      // and terrain reconstruction run once on open/manual refresh.
+      + (silent ? '&live_only=1' : '');
+
+    return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        return response.json().catch(function () { return null; }).then(function (data) {
+          return { okHttp: response.ok, data: data, status: response.status };
+        });
+      })
+      .then(function (result) {
+        if (dispatchedTrackReservation !== reservation) return null;
+        var data = result && result.data;
+        if (!data || data.ok === false) {
+          if (!silent && adsbBody) {
+            adsbBody.innerHTML = renderAdsbHtml({
+              ok: false,
+              error: (data && data.error) || ('Unable to load ADS-B' + (result && result.status ? (' (HTTP ' + result.status + ')') : '') + '.')
+            }, { includeMap: false });
+          }
+          if (!silent && statusEl) {
+            statusEl.textContent = (data && data.error) || 'Unable to load ADS-B track.';
+            statusEl.dataset.tone = 'error';
+          }
+          return null;
+        }
+
+        // Status panel is independent of the map — never let chart failures wipe this.
+        if (!silent && adsbBody) {
+          adsbBody.innerHTML = renderAdsbHtml({
+            ok: true,
+            in_flight: !!data.in_flight,
+            detail: data.detail,
+            position: data.position || null,
+            nearest_airport: data.position && data.position.nearest_airport ? data.position.nearest_airport : null,
+            error: data.fetch_error
+          }, { includeMap: false });
+        }
+
+        var label = (reservation.aircraft && reservation.aircraft.registration)
+          || (data.aircraft && data.aircraft.registration)
+          || 'Aircraft';
+        var windowStartEpoch = trackWindow.from.getTime() / 1000;
+
+        try {
+          if (chart && typeof chart.startLiveFollow === 'function') {
+            if (!chart._scheduleLiveStarted) {
+              chart._trafficHistoryLoaded = !!(data.traffic && data.traffic.length);
+              if (typeof chart.invalidate === 'function') chart.invalidate();
+              chart.startLiveFollow({
+                label: label,
+                pollMs: 3500,
+                windowStartEpoch: windowStartEpoch,
+                follow: true,
+                initialSnapshot: data,
+                pollFn: function () {
+                  if (dispatchedTrackReservation !== reservation) return Promise.resolve(null);
+                  // Silent polls return the payload; pollLiveOnce ingests once.
+                  return loadDispatchedTrack(reservation, { silent: true });
+                }
+              });
+              chart._scheduleLiveStarted = true;
+            } else if (!silent && typeof chart.ingestLiveSnapshot === 'function') {
+              // Manual Refresh: ingest immediately. Interval polls ingest via pollFn return.
+              chart.ingestLiveSnapshot(data);
+              if (data.traffic && data.traffic.length) chart._trafficHistoryLoaded = true;
+            }
+          } else if (chart && typeof chart.loadOwnshipSamples === 'function') {
+            chart.loadOwnshipSamples(data.track && Array.isArray(data.track.samples) ? data.track.samples : [], {
+              style: 'adsb',
+              label: label,
+              nearby: Array.isArray(data.nearby) ? data.nearby : [],
+              emptyMessage: data.in_flight
+                ? 'Aircraft is airborne, but no historical track points were returned yet.'
+                : 'No ADS-B track samples are available for this reservation window.'
+            });
+          } else if (statusEl && !silent) {
+            statusEl.textContent = data.in_flight
+              ? ('In flight · ' + label + ' (map unavailable)')
+              : (data.detail || 'Aircraft not in flight');
+            statusEl.dataset.tone = data.in_flight ? 'ok' : 'muted';
+          }
+        } catch (chartError) {
+          if (statusEl && !silent) {
+            statusEl.textContent = (chartError && chartError.message)
+              ? ('Map error: ' + chartError.message)
+              : 'Live map failed — ADS-B status above is still valid.';
+            statusEl.dataset.tone = 'error';
+          }
+        }
+
+        globalThis.setTimeout(function () {
+          if (chart && typeof chart.invalidate === 'function') chart.invalidate();
+        }, 180);
+        return data;
+      })
+      .catch(function (err) {
+        if (dispatchedTrackReservation !== reservation) return null;
+        if (!silent) {
+          var message = (err && err.message) ? String(err.message) : 'ADS-B request failed.';
+          if (adsbBody) adsbBody.innerHTML = renderAdsbHtml({ ok: false, error: message }, { includeMap: false });
+          if (statusEl) {
+            statusEl.textContent = message;
+            statusEl.dataset.tone = 'error';
+          }
+        }
+        return null;
+      });
+  }
+
+  function openUndispatchModal(reservation) {
+    var modal = document.getElementById('flightUndispatchModal');
+    var form = document.getElementById('flightUndispatchForm');
+    if (!modal || !form) {
+      window.location.href = String(config.editBaseUrl || '') + encodeURIComponent(reservation.scheduler_record_id);
+      return;
+    }
+    var idInput = form.querySelector('[name="scheduler_record_id"]');
+    if (idInput) idInput.value = reservation.scheduler_record_id || '';
+    var aircraftEl = document.getElementById('flightUndispatchAircraft');
+    var missionEl = document.getElementById('flightUndispatchMission');
+    var dispatchEl = document.getElementById('flightUndispatchDispatch');
+    if (aircraftEl) {
+      aircraftEl.textContent = (reservation.aircraft && reservation.aircraft.registration)
+        ? reservation.aircraft.registration
+        : '—';
+    }
+    if (missionEl) {
+      missionEl.textContent = (reservation.mission && reservation.mission.code)
+        ? reservation.mission.code
+        : '—';
+    }
+    if (dispatchEl) {
+      dispatchEl.textContent = reservation.claimed_dispatch_uuid || '—';
+    }
+    // Close track modal first so undispatch is the focused dialog.
+    var trackModal = document.getElementById('flightDispatchedModal');
+    if (trackModal && typeof trackModal.close === 'function' && trackModal.open) {
+      trackModal.close();
+    }
+    showDialog('flightUndispatchModal');
+  }
+
+  function openDispatchedModal(reservation) {
+    dispatchedTrackReservation = reservation;
+    var aircraft = reservation.aircraft && reservation.aircraft.registration
+      ? reservation.aircraft.registration
+      : 'Aircraft';
+    var title = document.querySelector('#flightDispatchedModal .compliance-modal__title, #flightDispatchedModal [data-compliance-modal-title]');
+    if (title) title.textContent = aircraft + ' · Live ADS-B';
+    var summary = document.getElementById('flightDispatchedSummary');
+    if (summary) {
+      var hasScheduleDetail = !!(reservation.scheduler_record_id || reservation.status === 'claimed' || reservation.status === 'completed');
+      summary.innerHTML = (hasScheduleDetail
+        ? ('<dl class="fltsch-completed-detail">' + detailRowsHtml(reservation, { completed: reservation.status === 'completed' }) + '</dl>')
+        : '')
+        + '<p class="fltsch-muted">Live ADS-B follows this aircraft continuously. Full selected-aircraft track is shown; nearby traffic appears without trails.</p>';
+    }
+    var undispatchBtn = document.getElementById('flightDispatchedUndispatchBtn');
+    if (undispatchBtn) {
+      undispatchBtn.hidden = !reservation.can_undispatch;
+      if (!undispatchBtn.dataset.bound) {
+        undispatchBtn.dataset.bound = '1';
+        undispatchBtn.addEventListener('click', function () {
+          if (dispatchedTrackReservation && dispatchedTrackReservation.can_undispatch) {
+            openUndispatchModal(dispatchedTrackReservation);
+          }
+        });
+      }
+    }
+    showDialog('flightDispatchedModal');
+    var chart = ensureDispatchedTrackChart();
+    if (chart) {
+      chart._scheduleLiveStarted = false;
+      chart._trafficHistoryLoaded = false;
+      if (typeof chart.stopLiveFollow === 'function') chart.stopLiveFollow();
+      if (typeof chart.reset === 'function') chart.reset(false);
+    }
+    loadDispatchedTrack(reservation);
+    var refresh = document.getElementById('flightDispatchedAdsbRefresh');
+    if (refresh && !refresh.dataset.bound) {
+      refresh.dataset.bound = '1';
+      refresh.addEventListener('click', function () {
+        if (dispatchedTrackReservation) loadDispatchedTrack(dispatchedTrackReservation);
+      });
+    }
+    var modal = document.getElementById('flightDispatchedModal');
+    if (modal && !modal.dataset.trackCloseBound) {
+      modal.dataset.trackCloseBound = '1';
+      modal.addEventListener('close', function () {
+        dispatchedTrackReservation = null;
+        if (dispatchedTrackChart) {
+          dispatchedTrackChart._scheduleLiveStarted = false;
+          if (typeof dispatchedTrackChart.stopLiveFollow === 'function') dispatchedTrackChart.stopLiveFollow();
+          if (typeof dispatchedTrackChart.stopPlayback === 'function') dispatchedTrackChart.stopPlayback();
+        }
+      });
+    }
+    globalThis.setTimeout(function () {
+      if (dispatchedTrackChart && typeof dispatchedTrackChart.invalidate === 'function') {
+        dispatchedTrackChart.invalidate();
+      }
+    }, 220);
   }
 
   function openChangeConfirmation(reservation, proposedStart, proposedEnd, proposedAircraftId) {
@@ -330,7 +782,9 @@
       var targetTimeline = document.querySelector('.fltsch-resource-timeline[data-resource-key="device:' + nextAircraftId + '"]');
       var rowLabel = targetTimeline && targetTimeline.closest('.fltsch-resource-row');
       var title = rowLabel ? rowLabel.querySelector('.fltsch-resource-label') : null;
-      nextAircraftLabel = title ? title.textContent.trim() : ('#' + nextAircraftId);
+      nextAircraftLabel = (title && title.dataset.aircraftRegistration)
+        || (title && title.querySelector('.fltsch-tail-reg') && title.querySelector('.fltsch-tail-reg').textContent.trim())
+        || ('#' + nextAircraftId);
     }
     document.getElementById('flightChangeRecordId').value = reservation.scheduler_record_id;
     document.getElementById('flightChangeStart').value = postDateTime(proposedStart);
@@ -365,6 +819,7 @@
   function startMove(pointerEvent, reservation, timeline, eventElement, start, end) {
     if (!reservation.editable || pointerEvent.button !== 0) return;
     if (pointerEvent.target.closest('.fltsch-resize-handle')) return;
+    scheduleInteractionActive = true;
 
     var originX = pointerEvent.clientX;
     var originalStart = minutes(start);
@@ -414,6 +869,7 @@
     }
 
     function up() {
+      scheduleInteractionActive = false;
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', up);
@@ -445,6 +901,7 @@
   function startResize(pointerEvent, reservation, timeline, eventElement, start, end, edge) {
     if (!reservation.editable || pointerEvent.button !== 0) return;
     pointerEvent.stopPropagation();
+    scheduleInteractionActive = true;
 
     var originX = pointerEvent.clientX;
     var moved = false;
@@ -475,6 +932,7 @@
     }
 
     function up() {
+      scheduleInteractionActive = false;
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', up);
@@ -520,7 +978,7 @@
       + evidenceChip('D', 'Dispatch Data', evidence.dispatch)
       + evidenceChip('F', 'Flight Data', evidence.flight)
       + evidenceChip('A', 'Audio', evidence.audio)
-      + evidenceChip('B', 'Briefing', evidence.briefing)
+      + evidenceChip('B', 'Debrief', evidence.briefing)
       + '</span>';
     element.innerHTML =
       (reservation.editable ? '<span class="fltsch-resize-handle start"></span>' : '')
@@ -591,6 +1049,121 @@
     renderNowLines();
   }
 
+  function enrichLiveReservation(reservation, previousById) {
+    var keys = [];
+    var aircraftId = reservation && reservation.aircraft ? Number(reservation.aircraft.id || 0) : 0;
+    if (aircraftId > 0) keys.push('device:' + aircraftId);
+    (Array.isArray(reservation.crew) ? reservation.crew : []).forEach(function (member) {
+      var personId = Number(member.person_id || 0);
+      var key = 'staff:' + personId;
+      if (personId > 0 && document.querySelector('.fltsch-resource-timeline[data-resource-key="' + key + '"]')) {
+        keys.push(key);
+      }
+    });
+    var cohortId = reservation && reservation.cohort ? Number(reservation.cohort.id || 0) : 0;
+    if (cohortId > 0) keys.push('cohort:' + cohortId);
+
+    // Preserve inferred cohort placement across a Duty supersession. The source
+    // schedule endpoint remains authoritative for aircraft, staff and direct cohort.
+    var prior = previousById[String(reservation.scheduler_record_id || '')]
+      || previousById[String(reservation.supersedes_scheduler_record_id || '')];
+    if (prior && Array.isArray(prior.resource_keys)) {
+      prior.resource_keys.forEach(function (key) {
+        if (String(key).indexOf('cohort:') === 0) keys.push(String(key));
+      });
+    }
+    reservation.resource_keys = Array.from(new Set(keys));
+    return reservation;
+  }
+
+  var liveRefreshInFlight = false;
+  var liveReservationsFingerprint = JSON.stringify(config.reservations);
+  var liveStatus = document.getElementById('flightScheduleLiveStatus');
+
+  function setLiveStatus(state, text) {
+    if (!liveStatus) return;
+    liveStatus.dataset.state = state;
+    liveStatus.textContent = text;
+  }
+
+  function updateHeroStats(reservations) {
+    var counts = {
+      Reservations: reservations.length,
+      Today: config.date === postDateTime(new Date()).slice(0, 10) ? reservations.length : 0,
+      Available: reservations.filter(function (item) { return item.status === 'scheduled'; }).length,
+      'Dispatch Locked': reservations.filter(function (item) { return item.status === 'claimed'; }).length,
+      Completed: reservations.filter(function (item) { return item.status === 'completed'; }).length
+    };
+    document.querySelectorAll('.cmp-stat-chip').forEach(function (chip) {
+      var label = chip.querySelector('.cmp-stat-label');
+      var value = chip.querySelector('.cmp-stat-value');
+      if (!label || !value || !Object.prototype.hasOwnProperty.call(counts, label.textContent.trim())) return;
+      value.textContent = String(counts[label.textContent.trim()]);
+    });
+  }
+
+  function refreshLiveReservations() {
+    if (liveRefreshInFlight || scheduleInteractionActive || document.hidden || document.querySelector('dialog[open]')) {
+      return Promise.resolve(false);
+    }
+    var url = String(config.liveReservationsUrl || '/admin/api/schedule_reservations.php')
+      + '?date=' + encodeURIComponent(String(config.date || ''))
+      + '&_=' + Date.now();
+    liveRefreshInFlight = true;
+    setLiveStatus('updating', 'LIVE · updating…');
+    return fetch(url, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' }
+    })
+      .then(function (response) {
+        return response.json().catch(function () { return null; }).then(function (data) {
+          return { okHttp: response.ok, data: data };
+        });
+      })
+      .then(function (result) {
+        if (!result.okHttp || !result.data || result.data.ok !== true
+            || !Array.isArray(result.data.reservations)) {
+          setLiveStatus('warning', 'LIVE · retrying');
+          return false;
+        }
+        var previousById = {};
+        config.reservations.forEach(function (reservation) {
+          previousById[String(reservation.scheduler_record_id || '')] = reservation;
+        });
+        var next = result.data.reservations.map(function (reservation) {
+          return enrichLiveReservation(reservation, previousById);
+        });
+        var fingerprint = JSON.stringify(next);
+        var updatedAt = new Date();
+        setLiveStatus(
+          'live',
+          'LIVE · updated ' + updatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        );
+        updateHeroStats(next);
+        if (fingerprint === liveReservationsFingerprint) return false;
+        config.reservations = next;
+        liveReservationsFingerprint = fingerprint;
+        renderReservations();
+        return true;
+      })
+      .catch(function () {
+        // Keep the last valid schedule visible; the next poll retries automatically.
+        setLiveStatus('warning', 'LIVE · offline, retrying');
+        return false;
+      })
+      .finally(function () {
+        liveRefreshInFlight = false;
+      });
+  }
+
+  var liveRefreshMilliseconds = Math.max(3000, Number(config.liveRefreshMilliseconds || 5000));
+  window.setInterval(refreshLiveReservations, liveRefreshMilliseconds);
+  refreshLiveReservations();
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) refreshLiveReservations();
+  });
+
   function prepareNewReservation(timeline, event) {
     if (event.target !== timeline) return;
     var rect = timeline.getBoundingClientRect();
@@ -622,6 +1195,69 @@
     timeline.addEventListener('click', function (event) {
       prepareNewReservation(timeline, event);
     });
+  });
+
+  function setAircraftInFlightState(label, inFlight) {
+    if (!label) return;
+    var pill = label.querySelector('.fltsch-inflight-pill');
+    if (pill) pill.hidden = !inFlight;
+    label.classList.toggle('is-in-flight', !!inFlight);
+  }
+
+  function refreshAircraftInFlightPills() {
+    if (document.hidden) return Promise.resolve();
+    var labels = Array.prototype.slice.call(
+      document.querySelectorAll('.fltsch-resource-label[data-aircraft-id]')
+    );
+    if (!labels.length) return Promise.resolve();
+    return Promise.all(labels.map(function (label) {
+      var aircraftId = Number(label.dataset.aircraftId || 0);
+      if (!aircraftId) return Promise.resolve();
+      var url = String(config.adsbApiUrl || '/admin/api/schedule_aircraft_adsb.php')
+        + '?aircraft_id=' + encodeURIComponent(String(aircraftId))
+        + '&_=' + Date.now();
+      return fetch(url, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      })
+        .then(function (response) {
+          return response.json().catch(function () { return null; });
+        })
+        .then(function (data) {
+          setAircraftInFlightState(label, !!(data && data.ok && data.in_flight));
+        })
+        .catch(function () {
+          // Keep the last known pill state; the next poll retries.
+        });
+    }));
+  }
+
+  function wireAircraftTailAdsb() {
+    document.querySelectorAll('.fltsch-resource-label[data-aircraft-id]').forEach(function (label) {
+      if (label.dataset.adsbBound === '1') return;
+      label.dataset.adsbBound = '1';
+      function openFromLabel(event) {
+        if (event) event.preventDefault();
+        openAircraftAdsbModal(
+          Number(label.dataset.aircraftId || 0),
+          String(label.dataset.aircraftRegistration || '')
+        );
+      }
+      label.addEventListener('click', openFromLabel);
+      label.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          openFromLabel(event);
+        }
+      });
+    });
+  }
+
+  wireAircraftTailAdsb();
+  refreshAircraftInFlightPills();
+  window.setInterval(refreshAircraftInFlightPills, Math.max(15000, liveRefreshMilliseconds * 3));
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) refreshAircraftInFlightPills();
   });
 
   renderAxis();

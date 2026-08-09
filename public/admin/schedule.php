@@ -8,7 +8,24 @@ require_once __DIR__ . '/../../src/FlightScheduleService.php';
 require_once __DIR__ . '/../../src/CockpitAircraftService.php';
 require_once __DIR__ . '/../../src/MissionCatalogService.php';
 
-cw_require_admin();
+if (!isset($flightScheduleContext) || !is_array($flightScheduleContext)) {
+    cw_require_admin();
+    $flightScheduleContext = array(
+        'audience' => 'admin',
+        'base_path' => '/admin/schedule.php',
+        'actor_type' => 'admin',
+    );
+} else {
+    cw_require_flight_schedule_editor();
+}
+$scheduleBasePath = (string)($flightScheduleContext['base_path'] ?? '/admin/schedule.php');
+if ($scheduleBasePath === '') {
+    $scheduleBasePath = '/admin/schedule.php';
+}
+$scheduleActorType = (string)($flightScheduleContext['actor_type'] ?? 'admin');
+if ($scheduleActorType === '') {
+    $scheduleActorType = 'admin';
+}
 $currentUser = cw_current_user($pdo) ?: array();
 $service = new FlightScheduleService($pdo);
 $notice = '';
@@ -46,7 +63,7 @@ try {
             (new CvrDispatchReleaseService($pdo))->releaseBySchedulerRecordId(
                 (string)($_POST['scheduler_record_id'] ?? ''),
                 (int)($currentUser['id'] ?? 0),
-                'admin'
+                $scheduleActorType
             );
             $notice = 'Dispatch released. The reservation is available again.';
             $editId = '';
@@ -72,19 +89,44 @@ try {
             $crew = array();
             $userIds = is_array($_POST['crew_user_id'] ?? null) ? $_POST['crew_user_id'] : array();
             $roles = is_array($_POST['crew_role'] ?? null) ? $_POST['crew_role'] : array();
-            $names = is_array($_POST['crew_name'] ?? null) ? $_POST['crew_name'] : array();
-            $pilotFunctions = is_array($_POST['crew_pilot_function'] ?? null)
-                ? $_POST['crew_pilot_function'] : array();
             $picResponsibilities = is_array($_POST['crew_is_pic'] ?? null)
-                ? $_POST['crew_is_pic'] : array();
+                ? $_POST['crew_is_pic']
+                : array();
+            $names = is_array($_POST['crew_name'] ?? null) ? $_POST['crew_name'] : array();
             foreach ($names as $index => $name) {
+                $hasPerson = (int)($userIds[$index] ?? 0) > 0 && trim((string)$name) !== '';
+                $role = match ($index) {
+                    0 => 'student',
+                    2 => in_array((string)($roles[$index] ?? ''), array('supervising_instructor', 'observer'), true)
+                        ? (string)$roles[$index]
+                        : '',
+                    default => in_array(
+                        (string)($roles[$index] ?? ''),
+                        array('instructor', 'examiner', 'pilot_monitoring', 'safety_pilot'),
+                        true
+                    ) ? (string)$roles[$index] : '',
+                };
                 $crew[] = array(
                     'user_id' => (int)($userIds[$index] ?? 0),
                     'person_name' => (string)$name,
-                    'role' => (string)($roles[$index] ?? ''),
-                    'pilot_function' => (string)($pilotFunctions[$index] ?? 'NONE'),
-                    'is_pic' => (string)($picResponsibilities[$index] ?? '0') === '1',
+                    'role' => $role,
+                    'pilot_function' => $hasPerson ? ($index === 0 ? 'PF' : ($index === 1 ? 'PM' : 'NONE')) : 'NONE',
+                    'is_pic' => $hasPerson && $index < 2
+                        && (string)($picResponsibilities[$index] ?? '0') === '1',
+                    'is_primary_customer' => $hasPerson && $index === 0,
                 );
+            }
+            if ((int)($crew[0]['user_id'] ?? 0) <= 0) {
+                throw new RuntimeException('Select the Customer who is responsible for this reservation.');
+            }
+            foreach (array(1 => 'Person 2', 2 => 'Person 3') as $index => $label) {
+                if ((int)($crew[$index]['user_id'] ?? 0) > 0 && (string)($crew[$index]['role'] ?? '') === '') {
+                    throw new RuntimeException($label . ' requires a capacity.');
+                }
+            }
+            if ((string)($_POST['reservation_type'] ?? 'flight_training') === 'flight_training'
+                && empty($crew[0]['is_pic']) && empty($crew[1]['is_pic'])) {
+                throw new RuntimeException('Select at least one pilot who logs PIC.');
             }
             $service->saveSlot($_POST, $crew, (int)($currentUser['id'] ?? 0));
             $notice = 'Reservation saved.';
@@ -96,15 +138,33 @@ try {
         static fn(array $slot): bool => (string)($slot['status'] ?? '') !== 'cancelled'
     ));
     $aircraft = (new CockpitAircraftService($pdo))->activeAircraft();
-    $missions = (new MissionCatalogService($pdo))->listMissions();
+    $missions = (new MissionCatalogService($pdo))->listMissionsForSchedule();
     $reservationTypes = $service->reservationTypes();
     $userStatement = $pdo->query(
         "SELECT id, COALESCE(NULLIF(TRIM(name), ''), email) AS display_name, role"
-        . " FROM users WHERE role IN ('student', 'instructor', 'supervisor', 'chief_instructor')"
-        . " AND status = 'active'"
+        . " FROM users WHERE status = 'active'"
         . ' ORDER BY display_name ASC, id ASC'
     );
     $users = $userStatement ? ($userStatement->fetchAll(PDO::FETCH_ASSOC) ?: array()) : array();
+    $students = array_values(array_filter(
+        $users,
+        static fn(array $row): bool => (string)($row['role'] ?? '') === 'student'
+    ));
+    $operationalUsers = array_values(array_filter(
+        $users,
+        static fn(array $row): bool => strtolower((string)($row['role'] ?? '')) !== 'admin'
+    ));
+    $accountRoleLabels = array(
+        'instructor' => 'Instructor',
+        'supervisor' => 'Instructor',
+        'chief_instructor' => 'Instructor',
+        'other_instructor' => 'Instructor',
+    );
+    $operationalUserLabel = static function (array $user) use ($accountRoleLabels): string {
+        $name = (string)($user['display_name'] ?? '');
+        $roleLabel = $accountRoleLabels[strtolower((string)($user['role'] ?? ''))] ?? '';
+        return $roleLabel !== '' ? $name . ' (' . $roleLabel . ')' : $name;
+    };
     $staff = array_values(array_filter(
         $users,
         static fn(array $row): bool => in_array((string)($row['role'] ?? ''), array('instructor', 'supervisor', 'chief_instructor'), true)
@@ -276,7 +336,9 @@ compliance_page_open(array(
   .fltsch-field-full{grid-column:1/-1;}
   .fltsch-crew{grid-column:1/-1;border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#f8fafc;}
   .fltsch-crew-title{margin:0 0 10px;color:#0f172a;font-size:13px;font-weight:850;}
-  .fltsch-crew-row{display:grid;grid-template-columns:minmax(0,1.4fr) repeat(3,minmax(135px,.6fr));gap:10px;margin-top:9px;}
+  .fltsch-crew-row{display:grid;grid-template-columns:minmax(220px,1.35fr) minmax(220px,1fr) minmax(140px,.55fr);gap:10px;margin-top:12px;align-items:end;}
+  .fltsch-pic-check{min-height:38px;display:flex;align-items:center;gap:14px;padding:0 2px;color:#0f172a;font-size:13px;font-weight:800;}
+  .fltsch-pic-check input[type="checkbox"]{width:18px;height:18px;margin:0 4px 0 0;accent-color:#173f70;}
   .fltsch-muted{color:#64748b;font-size:12.5px;line-height:1.45;}
   .fltsch-kind{display:block;margin-top:4px;color:#284e85;font-size:11.5px;font-weight:800;}
   .fltsch-route{color:#64748b;font-size:12px;margin-top:3px;}
@@ -285,22 +347,90 @@ compliance_page_open(array(
   .fltsch-locked{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border-radius:999px;background:#f1f5f9;color:#64748b;font-size:11px;font-weight:760;}
   .fltsch-delete{margin-right:auto!important;border-color:#fecaca!important;color:#991b1b!important;}
   #flightReservationModal{width:min(860px,calc(100vw - 32px));}
-  @media(max-width:760px){.cmpcal-form-grid,.fltsch-crew-row{grid-template-columns:1fr}.fltsch-filters,.fltsch-filters .cmpcal-field{width:100%}.fltsch-filters .compliance-btn{width:100%}.fltsch-card{padding:14px}}
+  .fltsch-adsb-panel{margin-top:4px;border:1px solid rgba(15,23,42,.12);border-radius:14px;background:#f8fafc;overflow:hidden}
+  .fltsch-adsb-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(15,23,42,.08)}
+  .fltsch-adsb-head strong{font-size:13px;color:#0f172a}
+  .fltsch-adsb-refresh{height:30px!important;min-height:30px!important;padding:0 10px!important;border-radius:8px!important;font-size:12px!important}
+  .fltsch-adsb-body{padding:12px}
+  .fltsch-adsb-status{margin:0 0 8px;font-size:14px;font-weight:800;color:#0f172a}
+  .fltsch-adsb-status.is-airborne{color:#166534}
+  .fltsch-adsb-status.is-ground{color:#92400e}
+  .fltsch-adsb-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;margin:0;font-size:12px;color:#334155}
+  .fltsch-adsb-meta div{display:flex;justify-content:space-between;gap:8px}
+  .fltsch-adsb-meta dt{color:#64748b;font-weight:700}
+  .fltsch-adsb-meta dd{margin:0;font-weight:700;text-align:right}
+  .fltsch-adsb-map{margin-top:10px;border:1px solid rgba(15,23,42,.1);border-radius:10px;overflow:hidden;background:#e2e8f0}
+  .fltsch-adsb-map iframe{display:block;width:100%;height:180px;border:0}
+  .fltsch-adsb-map-link{display:inline-block;margin-top:8px;font-size:12px;font-weight:700;color:#1d4ed8;text-decoration:none}
+  .fltsch-live-track{display:grid;gap:12px}
+  .fltsch-live-track .legs-track-map-wrap{position:relative}
+  .fltsch-live-track .legs-track-map{height:440px;border:1px solid #dbe3ee;border-radius:12px;overflow:hidden;background:#dbe4ee}
+  .fltsch-live-track .legs-track-map.is-adsb-style{background:#c9d4e0}
+  .legs-track-map-controls{position:absolute;top:10px;right:10px;z-index:500;display:grid;gap:6px;justify-items:stretch;min-width:148px}
+  .legs-track-center-btn,.legs-track-rings-btn{border:1px solid #cbd5e1;border-radius:9px;background:rgba(255,255,255,.94);color:#0f172a;padding:7px 10px;font-size:12px;font-weight:850;cursor:pointer;box-shadow:0 2px 8px rgba(15,23,42,.18);text-align:left}
+  .legs-track-center-btn[aria-pressed="true"]{border-color:#f59e0b;background:#fffbeb;color:#92400e}
+  .legs-track-center-btn[aria-pressed="false"],.legs-track-rings-btn[aria-pressed="false"]{opacity:.92}
+  .legs-track-rings-btn[aria-pressed="true"]{border-color:#db2777;background:#fdf2f8;color:#9d174d}
+  .legs-track-range-label{background:transparent;border:0}
+  .legs-track-range-label span{display:inline-block;padding:1px 5px;border-radius:999px;background:rgba(15,23,42,.72);color:#fce7f3;font:800 10px/1.2 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;white-space:nowrap;box-shadow:0 1px 3px rgba(15,23,42,.35)}
+  .fltsch-live-track .legs-track-status{margin:0 0 8px;font-size:12px;font-weight:700;color:#64748b;line-height:1.4}
+  .fltsch-live-track .legs-track-status[data-tone="ok"]{color:#166534}
+  .fltsch-live-track .legs-track-status[data-tone="error"]{color:#991b1b}
+  .fltsch-live-track .legs-track-status[data-tone="loading"]{color:#1d4ed8}
+  .fltsch-live-track .legs-track-player{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin-top:10px}
+  .fltsch-live-track .legs-track-play{border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#0f172a;padding:8px 12px;font-size:12px;font-weight:850;cursor:pointer;min-width:72px}
+  .fltsch-live-track .legs-track-play:disabled{opacity:.45;cursor:not-allowed}
+  .fltsch-live-track .legs-track-timeline{width:100%;accent-color:#f59e0b}
+  .fltsch-live-track .legs-track-times{display:grid;gap:2px;justify-items:end;font-variant-numeric:tabular-nums;font-size:12px;font-weight:800;color:#334155;min-width:52px}
+  .fltsch-live-track .legs-track-times span{color:#64748b;font-weight:700}
+  .legs-track-profile{margin-top:12px;border:1px solid #dbe3ee;border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#0f172a 0%,#1e293b 100%);color:#e2e8f0}
+  .legs-track-profile-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:8px 12px 0;font-size:12px}
+  .legs-track-profile-head strong{font-size:12px;font-weight:850;letter-spacing:.02em;color:#f8fafc}
+  .legs-track-profile-meta{margin:0;color:#94a3b8;font-weight:700;font-variant-numeric:tabular-nums}
+  .legs-track-profile-svg{display:block;width:100%;height:148px}
+  .legs-track-marker{background:transparent;border:0}
+  .legs-track-marker span{display:block;border-radius:999px;background:var(--mk,#334155);box-shadow:0 0 0 2px #fff,0 2px 6px rgba(15,23,42,.28)}
+  .legs-track-marker.is-ownship span{border-radius:4px;transform:rotate(45deg)}
+  .legs-track-marker em{display:block;margin-top:2px;font-style:normal;font-size:9px;font-weight:800;color:#0f172a;text-shadow:0 0 3px #fff;white-space:nowrap;text-align:center}
+  .fltsch-live-status{display:inline-flex;align-items:center;gap:6px;color:#047857;font-size:12px;font-weight:850;white-space:nowrap}
+  .fltsch-live-status::before{content:"";width:8px;height:8px;border-radius:999px;background:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.14)}
+  .fltsch-live-status[data-state="updating"]{color:#1d4ed8}
+  .fltsch-live-status[data-state="updating"]::before{background:#3b82f6}
+  .fltsch-live-status[data-state="warning"]{color:#b45309}
+  .fltsch-live-status[data-state="warning"]::before{background:#f59e0b}
+  .legs-track-adsb-wrap{position:relative;width:28px;height:28px}
+  .legs-track-plane{display:block;transform:rotate(var(--hdg, 0deg));filter:drop-shadow(0 1px 2px rgba(15,23,42,.45));transform-origin:50% 55%}
+  .legs-track-telem{position:absolute;left:30px;top:-2px;padding:3px 7px;border-radius:4px;background:rgba(30,41,59,.88);color:#f8fafc;font:700 11px/1.25 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;white-space:nowrap;box-shadow:0 2px 8px rgba(15,23,42,.28);pointer-events:none}
+  .adsb-aircraft-symbol{position:relative;display:grid;place-items:center;transform-origin:center}
+  .adsb-aircraft-symbol svg{filter:drop-shadow(0 1px 2px rgba(15,23,42,.38))}
+  .adsb-aircraft-symbol-large-jet,.adsb-aircraft-symbol-military{width:42px;height:42px}
+  .adsb-aircraft-symbol-business-jet{width:36px;height:36px}
+  .adsb-aircraft-symbol-small-prop,.adsb-aircraft-symbol-helicopter{width:30px;height:30px}
+  .adsb-aircraft-symbol-plane{display:block;transform-origin:center}
+  .adsb-aircraft-label{position:absolute;left:30px;top:14px;white-space:nowrap;background:rgba(38,38,38,.72);border:0;border-radius:0;padding:2px 5px 3px;color:#fff;font-size:10px;font-weight:900;line-height:1.05;letter-spacing:-.02em;text-align:left;text-shadow:0 1px 1px #000,1px 0 1px #000,0 -1px 1px #000,-1px 0 1px #000;box-shadow:none;pointer-events:none}
+  .adsb-aircraft-label strong{display:block;font-size:10px;font-weight:900}
+  .adsb-aircraft-label span{display:block;font-size:10px;font-weight:900}
+  .adsb-aircraft-symbol-large-jet .adsb-aircraft-label,.adsb-aircraft-symbol-military .adsb-aircraft-label{left:34px;top:18px}
+  .adsb-aircraft-symbol-business-jet .adsb-aircraft-label{left:32px;top:16px}
+  @media(max-width:760px){.cmpcal-form-grid,.fltsch-crew-row{grid-template-columns:1fr}.fltsch-filters,.fltsch-filters .cmpcal-field{width:100%}.fltsch-filters .compliance-btn{width:100%}.fltsch-card{padding:14px}.fltsch-adsb-meta{grid-template-columns:1fr}}
 </style>
-<link rel="stylesheet" href="/admin/assets/flight_schedule.css?v=20260807.1">
+<link rel="stylesheet" href="/admin/assets/flight_schedule.css?v=20260809.03">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" crossorigin="">
 
 <section class="fltsch-card fltsch-scheduler-card">
   <div class="fltsch-day-toolbar">
     <div class="fltsch-day-nav">
-      <a class="fltsch-icon-btn" href="/admin/schedule.php?date=<?= h(date('Y-m-d', strtotime($selectedDate . ' -1 day'))) ?>" aria-label="Previous day">‹</a>
-      <a class="fltsch-today-btn" href="/admin/schedule.php?date=<?= h($today) ?>">Today</a>
-      <a class="fltsch-icon-btn" href="/admin/schedule.php?date=<?= h(date('Y-m-d', strtotime($selectedDate . ' +1 day'))) ?>" aria-label="Next day">›</a>
+      <a class="fltsch-icon-btn" href="<?= h($scheduleBasePath) ?>?date=<?= h(date('Y-m-d', strtotime($selectedDate . ' -1 day'))) ?>" aria-label="Previous day">‹</a>
+      <a class="fltsch-today-btn" href="<?= h($scheduleBasePath) ?>?date=<?= h($today) ?>">Today</a>
+      <a class="fltsch-icon-btn" href="<?= h($scheduleBasePath) ?>?date=<?= h(date('Y-m-d', strtotime($selectedDate . ' +1 day'))) ?>" aria-label="Next day">›</a>
     </div>
     <form method="get" class="fltsch-date-form">
       <input type="date" name="date" value="<?= h($selectedDate) ?>" aria-label="Schedule date" onchange="this.form.submit()">
     </form>
     <div class="fltsch-day-title"><?= h(date('l, F j, Y', strtotime($selectedDate))) ?></div>
-    <div class="fltsch-toolbar-note">Hover for details · click to open · drag to move · drag edges to resize · 15-minute increments</div>
+    <div class="fltsch-toolbar-note">Hover for details · click reservation to open · click aircraft tail for live ADS-B · drag to move · drag edges to resize · 15-minute increments</div>
+    <div class="fltsch-live-status" id="flightScheduleLiveStatus" data-state="live">LIVE · connecting…</div>
   </div>
   <div class="fltsch-legend" aria-label="Schedule status legend">
     <span><i class="is-scheduled"></i> Scheduled · editable</span>
@@ -321,12 +451,30 @@ compliance_page_open(array(
           <div class="fltsch-empty-resource">No <?= h(strtolower((string)$group['label'])) ?> available.</div>
         <?php endif; ?>
         <?php foreach ($group['items'] as $resource): ?>
+          <?php
+            $resourceKey = (string)$resource['key'];
+            $isAircraftTail = str_starts_with($resourceKey, 'device:');
+            $aircraftId = $isAircraftTail ? (int)substr($resourceKey, 7) : 0;
+          ?>
           <div class="fltsch-resource-row">
-            <div class="fltsch-resource-label">
-              <strong><?= h((string)$resource['label']) ?></strong>
+            <div
+              class="fltsch-resource-label<?= $isAircraftTail ? ' is-aircraft-tail' : '' ?>"
+              <?php if ($isAircraftTail && $aircraftId > 0): ?>
+                data-aircraft-id="<?= $aircraftId ?>"
+                data-aircraft-registration="<?= h((string)$resource['label']) ?>"
+                role="button"
+                tabindex="0"
+                title="Open live ADS-B"
+                aria-label="Open live ADS-B for <?= h((string)$resource['label']) ?>"
+              <?php endif; ?>
+            >
+              <strong>
+                <span class="fltsch-tail-reg"><?= h((string)$resource['label']) ?></span>
+                <?php if ($isAircraftTail): ?><span class="fltsch-inflight-pill" hidden>IN-FLIGHT</span><?php endif; ?>
+              </strong>
               <?php if ((string)$resource['detail'] !== ''): ?><span><?= h((string)$resource['detail']) ?></span><?php endif; ?>
             </div>
-            <div class="fltsch-resource-timeline" data-resource-key="<?= h((string)$resource['key']) ?>"></div>
+            <div class="fltsch-resource-timeline" data-resource-key="<?= h($resourceKey) ?>"></div>
           </div>
         <?php endforeach; ?>
       </div>
@@ -341,28 +489,46 @@ compliance_page_open(array(
     <?php if ($editing): ?><input type="hidden" name="scheduler_record_id" value="<?= h((string)$editing['scheduler_record_id']) ?>"><?php endif; ?>
     <div class="cmpcal-form-grid">
       <label class="cmpcal-field"><span>Reservation type</span><select name="reservation_type" required><?php foreach ($reservationTypes as $typeValue => $typeLabel): ?><option value="<?= h($typeValue) ?>" <?= (string)($editing['reservation_type'] ?? 'flight_training') === $typeValue ? 'selected' : '' ?>><?= h($typeLabel) ?></option><?php endforeach; ?></select></label>
-      <label class="cmpcal-field"><span>Aircraft</span><select name="aircraft_id" required><option value="">Select aircraft</option><?php foreach ($aircraft as $row): ?><option value="<?= (int)$row['id'] ?>" <?= (int)($editing['aircraft']['id'] ?? 0) === (int)$row['id'] ? 'selected' : '' ?>><?= h((string)$row['registration'] . (trim((string)($row['aircraft_type'] ?? '')) !== '' ? ' — ' . (string)$row['aircraft_type'] : '')) ?></option><?php endforeach; ?></select></label>
+      <label class="cmpcal-field"><span>Aircraft</span><select name="aircraft_id" id="flightReservationAircraft" required><option value="">Select aircraft</option><?php foreach ($aircraft as $row): ?><option value="<?= (int)$row['id'] ?>" <?= (int)($editing['aircraft']['id'] ?? 0) === (int)$row['id'] ? 'selected' : '' ?>><?= h((string)$row['registration'] . (trim((string)($row['aircraft_type'] ?? '')) !== '' ? ' — ' . (string)$row['aircraft_type'] : '')) ?></option><?php endforeach; ?></select></label>
 
       <div class="fltsch-crew">
-        <h3 class="fltsch-crew-title">Crew</h3>
-        <p class="fltsch-muted" style="margin:0 0 10px">One accountable crew and pilot-function assignment for the whole reservation. Different crew or a PIC role swap requires a separate reservation; any student, PF, PM, instructor, or accountable crew change does as well.</p>
-        <?php for ($i = 0; $i < 3; $i++): ?>
-          <?php $assigned = is_array($formCrew[$i] ?? null) ? $formCrew[$i] : array(); ?>
-          <div class="fltsch-crew-row">
-            <label class="cmpcal-field"><span>Person <?= $i + 1 ?></span><select name="crew_user_id[]" data-crew-user="<?= $i ?>"><option value="">Optional</option><?php foreach ($users as $user): ?><option value="<?= (int)$user['id'] ?>" data-name="<?= h((string)$user['display_name']) ?>" data-default-role="<?= h(in_array((string)$user['role'], array('instructor','supervisor','chief_instructor'), true) ? 'instructor' : ((string)$user['role'] === 'student' ? 'student' : '')) ?>" <?= (int)($assigned['person_id'] ?? 0) === (int)$user['id'] ? 'selected' : '' ?>><?= h((string)$user['display_name']) ?></option><?php endforeach; ?></select><input type="hidden" name="crew_name[]" id="crew_name_<?= $i ?>" value="<?= h((string)($assigned['person_name'] ?? '')) ?>"></label>
-            <label class="cmpcal-field"><span>Participant Role</span><select name="crew_role[]" id="crew_role_<?= $i ?>"><option value="">None</option><?php foreach (array('student' => 'Student', 'instructor' => 'Instructor', 'supervising_instructor' => 'Supervising Instructor', 'examiner' => 'Examiner', 'safety_pilot' => 'Safety Pilot', 'observer' => 'Observer') as $roleValue => $roleLabel): ?><option value="<?= h($roleValue) ?>" <?= strcasecmp((string)($assigned['role'] ?? ''), $roleValue) === 0 ? 'selected' : '' ?>><?= h($roleLabel) ?></option><?php endforeach; ?></select></label>
-            <label class="cmpcal-field"><span>Pilot Function</span><select name="crew_pilot_function[]" id="crew_pilot_function_<?= $i ?>"><?php foreach (array('NONE' => 'None', 'PF' => 'PF', 'PM' => 'PM') as $functionValue => $functionLabel): ?><option value="<?= h($functionValue) ?>" <?= strcasecmp((string)($assigned['pilot_function'] ?? 'NONE'), $functionValue) === 0 ? 'selected' : '' ?>><?= h($functionLabel) ?></option><?php endforeach; ?></select></label>
-            <label class="cmpcal-field"><span>PIC Responsibility</span><select name="crew_is_pic[]" id="crew_is_pic_<?= $i ?>"><option value="0" <?= empty($assigned['is_pic']) ? 'selected' : '' ?>>No</option><option value="1" <?= !empty($assigned['is_pic']) ? 'selected' : '' ?>>Yes</option></select></label>
-          </div>
-        <?php endfor; ?>
+        <h3 class="fltsch-crew-title">People and responsibility</h3>
+        <?php $customer = is_array($formCrew[0] ?? null) ? $formCrew[0] : array(); ?>
+        <div class="fltsch-crew-row">
+          <label class="cmpcal-field"><span>Customer</span><select name="crew_user_id[0]" data-crew-user="0" required><option value="">Select Customer</option><?php foreach ($students as $user): ?><option value="<?= (int)$user['id'] ?>" data-name="<?= h((string)$user['display_name']) ?>" <?= (int)($customer['person_id'] ?? 0) === (int)$user['id'] ? 'selected' : '' ?>><?= h((string)$user['display_name']) ?></option><?php endforeach; ?></select><input type="hidden" name="crew_name[0]" id="crew_name_0" value="<?= h((string)($customer['person_name'] ?? '')) ?>"><input type="hidden" name="crew_role[0]" value="student"></label>
+          <div aria-hidden="true"></div>
+          <label class="fltsch-pic-check"><input type="hidden" name="crew_is_pic[0]" value="0"><input type="checkbox" name="crew_is_pic[0]" value="1" <?= !empty($customer['is_pic']) ? 'checked' : '' ?>><span>PIC</span></label>
+        </div>
+
+        <?php $personTwo = is_array($formCrew[1] ?? null) ? $formCrew[1] : array(); ?>
+        <div class="fltsch-crew-row">
+          <label class="cmpcal-field"><span>Person 2 (optional)</span><select name="crew_user_id[1]" data-crew-user="1"><option value="">No second pilot</option><?php foreach ($operationalUsers as $user): ?><option value="<?= (int)$user['id'] ?>" data-name="<?= h((string)$user['display_name']) ?>" <?= (int)($personTwo['person_id'] ?? 0) === (int)$user['id'] ? 'selected' : '' ?>><?= h($operationalUserLabel($user)) ?></option><?php endforeach; ?></select><input type="hidden" name="crew_name[1]" id="crew_name_1" value="<?= h((string)($personTwo['person_name'] ?? '')) ?>"></label>
+          <label class="cmpcal-field"><span>Role</span><select name="crew_role[1]" id="crew_role_1"><option value="">Select role</option><?php foreach (array('instructor' => 'Instructor', 'pilot_monitoring' => 'Pilot Monitoring', 'safety_pilot' => 'Safety Pilot', 'examiner' => 'Examiner') as $roleValue => $roleLabel): ?><option value="<?= h($roleValue) ?>" <?= strcasecmp((string)($personTwo['role'] ?? ''), $roleValue) === 0 ? 'selected' : '' ?>><?= h($roleLabel) ?></option><?php endforeach; ?></select></label>
+          <label class="fltsch-pic-check"><input type="hidden" name="crew_is_pic[1]" value="0"><input type="checkbox" name="crew_is_pic[1]" value="1" <?= !empty($personTwo['is_pic']) ? 'checked' : '' ?>><span>PIC</span></label>
+        </div>
+
+        <?php $personThree = is_array($formCrew[2] ?? null) ? $formCrew[2] : array(); ?>
+        <div class="fltsch-crew-row">
+          <label class="cmpcal-field"><span>Person 3 (optional)</span><select name="crew_user_id[2]" data-crew-user="2"><option value="">No supervisor or observer</option><?php foreach ($operationalUsers as $user): ?><option value="<?= (int)$user['id'] ?>" data-name="<?= h((string)$user['display_name']) ?>" <?= (int)($personThree['person_id'] ?? 0) === (int)$user['id'] ? 'selected' : '' ?>><?= h($operationalUserLabel($user)) ?></option><?php endforeach; ?></select><input type="hidden" name="crew_name[2]" id="crew_name_2" value="<?= h((string)($personThree['person_name'] ?? '')) ?>"></label>
+          <label class="cmpcal-field"><span>Role</span><select name="crew_role[2]" id="crew_role_2"><option value="">Select role</option><option value="supervising_instructor" <?= (string)($personThree['role'] ?? '') === 'supervising_instructor' ? 'selected' : '' ?>>Supervising Instructor</option><option value="observer" <?= (string)($personThree['role'] ?? '') === 'observer' ? 'selected' : '' ?>>Observer</option></select></label>
+        </div>
       </div>
 
-      <label class="cmpcal-field"><span>Mission</span><select name="mission_id" required><option value="">Select mission</option><?php foreach ($missions as $row): ?><option value="<?= (int)$row['id'] ?>" <?= (int)($editing['mission']['id'] ?? 0) === (int)$row['id'] ? 'selected' : '' ?>><?= h((string)$row['code'] . ' — ' . (string)$row['name']) ?></option><?php endforeach; ?></select></label>
+      <?php
+        $editingReservationType = (string)($editing['reservation_type'] ?? 'flight_training');
+        $missionFieldRequired = MissionCatalogService::reservationTypeRequiresMission($editingReservationType);
+      ?>
+      <label class="cmpcal-field" id="flightReservationMissionField"<?= $missionFieldRequired ? '' : ' style="display:none"' ?>><span>Mission</span><select name="mission_id" id="flightReservationMission"<?= $missionFieldRequired ? ' required' : '' ?>><option value="">Select mission</option><?php foreach ($missions as $row): ?><?php
+        $missionCategory = (string)($row['schedule_category'] ?? '');
+        if ($missionCategory === '') {
+            continue;
+        }
+      ?><option value="<?= (int)$row['id'] ?>" data-schedule-category="<?= h($missionCategory) ?>" <?= (int)($editing['mission']['id'] ?? 0) === (int)$row['id'] ? 'selected' : '' ?>><?= h((string)$row['code'] . ' — ' . (string)$row['name']) ?></option><?php endforeach; ?></select></label>
       <label class="cmpcal-field"><span>Cohort (optional)</span><select name="cohort_id" id="flightReservationCohort"><option value="">No direct cohort</option><?php foreach ($cohorts as $row): ?><option value="<?= (int)$row['id'] ?>" <?= (int)($editing['cohort']['id'] ?? 0) === (int)$row['id'] ? 'selected' : '' ?>><?= h((string)$row['name']) ?></option><?php endforeach; ?></select></label>
       <label class="cmpcal-field"><span>Depart date</span><input type="date" name="scheduled_start_date" value="<?= h($formStartDate) ?>" required></label>
-      <label class="cmpcal-field"><span>Depart time</span><input type="time" name="scheduled_start_clock" value="<?= h($formStartClock) ?>" required></label>
+      <label class="cmpcal-field"><span>Depart time (24h)</span><input type="text" name="scheduled_start_clock" value="<?= h($formStartClock) ?>" required pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="14:30" inputmode="numeric" maxlength="5" autocomplete="off" title="24-hour time as HH:MM" lang="en-GB"></label>
       <label class="cmpcal-field"><span>Return date</span><input type="date" name="scheduled_end_date" value="<?= h($formEndDate) ?>" required></label>
-      <label class="cmpcal-field"><span>Return time</span><input type="time" name="scheduled_end_clock" value="<?= h($formEndClock) ?>" required></label>
+      <label class="cmpcal-field"><span>Return time (24h)</span><input type="text" name="scheduled_end_clock" value="<?= h($formEndClock) ?>" required pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="16:00" inputmode="numeric" maxlength="5" autocomplete="off" title="24-hour time as HH:MM" lang="en-GB"></label>
       <div class="fltsch-crew fltsch-field-full" id="flightAirportChain">
         <h3 class="fltsch-crew-title">Route legs</h3>
         <p class="fltsch-muted" style="margin:0 0 10px">Same crew for all legs. Add legs for a continuous airport chain (arrival of leg N = departure of leg N+1).</p>
@@ -398,20 +564,19 @@ compliance_page_open(array(
   <?php endif; ?>
 <?php compliance_modal_close(); ?>
 
-<?php if (is_array($undispatchCandidate)): ?>
 <?php compliance_modal_open('flightUndispatchModal', 'Undispatch reservation'); ?>
   <form method="post" id="flightUndispatchForm">
     <input type="hidden" name="action" value="undispatch">
     <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
-    <input type="hidden" name="scheduler_record_id" value="<?= h((string)$undispatchCandidate['scheduler_record_id']) ?>">
+    <input type="hidden" name="scheduler_record_id" value="<?= h((string)($undispatchCandidate['scheduler_record_id'] ?? '')) ?>">
     <p class="fltsch-muted">
       This reservation was claimed by Dispatch on the CVR Unit, but no flight events, audio, or Check-In evidence exist yet.
       Undispatch releases the lock so the reservation appears again on the schedule and the device.
     </p>
     <dl class="fltsch-change-details">
-      <div><dt>Aircraft</dt><dd><?= h((string)($undispatchCandidate['aircraft']['registration'] ?? '')) ?></dd></div>
-      <div><dt>Mission</dt><dd><?= h((string)($undispatchCandidate['mission']['code'] ?? '')) ?></dd></div>
-      <div><dt>Dispatch</dt><dd><?= h((string)($undispatchCandidate['claimed_dispatch_uuid'] ?? '—')) ?></dd></div>
+      <div><dt>Aircraft</dt><dd id="flightUndispatchAircraft"><?= h((string)($undispatchCandidate['aircraft']['registration'] ?? '—')) ?></dd></div>
+      <div><dt>Mission</dt><dd id="flightUndispatchMission"><?= h((string)($undispatchCandidate['mission']['code'] ?? '—')) ?></dd></div>
+      <div><dt>Dispatch</dt><dd id="flightUndispatchDispatch"><?= h((string)($undispatchCandidate['claimed_dispatch_uuid'] ?? '—')) ?></dd></div>
     </dl>
     <div class="compliance-modal__footer">
       <button type="button" class="compliance-btn compliance-btn--secondary" data-compliance-modal-close>Cancel</button>
@@ -419,7 +584,6 @@ compliance_page_open(array(
     </div>
   </form>
 <?php compliance_modal_close(); ?>
-<?php endif; ?>
 
 <?php compliance_modal_open('flightScheduleChangeModal', 'Confirm schedule change'); ?>
   <form method="post" id="flightScheduleChangeForm">
@@ -446,6 +610,50 @@ compliance_page_open(array(
   </div>
 <?php compliance_modal_close(); ?>
 
+<?php compliance_modal_open('flightDispatchedModal', 'Live ADS-B'); ?>
+  <div class="fltsch-live-track" id="flightDispatchedTrackRoot">
+    <div id="flightDispatchedSummary"></div>
+    <div class="fltsch-adsb-panel">
+      <div class="fltsch-adsb-head">
+        <strong>Live ADS-B</strong>
+        <button type="button" class="compliance-btn compliance-btn--secondary fltsch-adsb-refresh" id="flightDispatchedAdsbRefresh">Refresh</button>
+      </div>
+      <div class="fltsch-adsb-body" id="flightDispatchedAdsbBody">
+        <p class="fltsch-muted" style="margin:0">Checking aircraft position…</p>
+      </div>
+    </div>
+    <div>
+      <p class="legs-track-status" id="legs-track-status" data-tone="muted">Loading ADS-B track history…</p>
+      <div class="legs-track-map-wrap">
+        <div class="legs-track-map" id="legs-track-map" role="img" aria-label="ADS-B track map with history replay"></div>
+        <div class="legs-track-map-controls">
+          <button type="button" class="legs-track-center-btn" id="legs-track-center" aria-pressed="true" title="Keep map centered on the tracked airplane">Center on airplane</button>
+          <button type="button" class="legs-track-rings-btn" id="legs-track-rings" aria-pressed="false" title="Show 2.5–20 NM range rings around the tracked airplane">Range rings</button>
+        </div>
+      </div>
+      <div class="legs-track-profile" id="legs-track-profile" hidden>
+        <div class="legs-track-profile-head">
+          <strong>Vertical profile</strong>
+          <p class="legs-track-profile-meta" id="legs-track-profile-meta">Altitude · terrain clearance</p>
+        </div>
+        <svg class="legs-track-profile-svg" id="legs-track-profile-svg" viewBox="0 0 720 148" preserveAspectRatio="none" role="img" aria-label="Altitude and terrain clearance profile"></svg>
+      </div>
+      <div class="legs-track-player">
+        <button type="button" class="legs-track-play" id="legs-track-play" disabled aria-pressed="false">Play</button>
+        <input class="legs-track-timeline" id="legs-track-timeline" type="range" min="0" max="1" step="0.1" value="0" disabled aria-label="Track time scrubber">
+        <div class="legs-track-times">
+          <strong id="legs-track-current">00:00</strong>
+          <span id="legs-track-end">00:00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="compliance-modal__footer">
+    <button type="button" class="compliance-btn compliance-btn--secondary" data-compliance-modal-close>Close</button>
+    <button type="button" class="compliance-btn compliance-btn--primary" id="flightDispatchedUndispatchBtn" hidden>Undispatch</button>
+  </div>
+<?php compliance_modal_close(); ?>
+
 <script>
 window.IPCAFlightSchedule = <?= json_encode(array(
     'date' => $selectedDate,
@@ -453,19 +661,57 @@ window.IPCAFlightSchedule = <?= json_encode(array(
     'dayEndMinutes' => 22 * 60,
     'snapMinutes' => 15,
     'reservations' => $schedulerReservations,
-    'editBaseUrl' => '/admin/schedule.php?date=' . rawurlencode($selectedDate) . '&edit=',
+    'editBaseUrl' => $scheduleBasePath . '?date=' . rawurlencode($selectedDate) . '&edit=',
+    'liveReservationsUrl' => '/admin/api/schedule_reservations.php',
+    'liveRefreshMilliseconds' => 5000,
+    'adsbApiUrl' => '/admin/api/schedule_aircraft_adsb.php',
+    'adsbTrackApiUrl' => '/admin/api/schedule_aircraft_adsb_track.php',
 ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 document.querySelectorAll('[data-crew-user]').forEach(function(select) {
-  function syncCrew(assignRole) {
+  function syncCrew() {
     var option = select.options[select.selectedIndex];
     document.getElementById('crew_name_' + select.dataset.crewUser).value = option ? (option.dataset.name || '') : '';
-    if (assignRole) {
-      document.getElementById('crew_role_' + select.dataset.crewUser).value = option ? (option.dataset.defaultRole || '') : '';
+  }
+  select.addEventListener('change', syncCrew);
+  syncCrew();
+});
+(function() {
+  var form = document.getElementById('flightReservationForm');
+  if (!form) return;
+  var typeSelect = form.querySelector('[name="reservation_type"]');
+  var missionSelect = document.getElementById('flightReservationMission');
+  var missionField = document.getElementById('flightReservationMissionField');
+  if (!typeSelect || !missionSelect || !missionField) return;
+
+  var missionOptions = Array.prototype.slice.call(missionSelect.querySelectorAll('option')).filter(function(option) {
+    return option.value !== '';
+  });
+
+  function syncMissionOptions() {
+    var reservationType = String(typeSelect.value || '');
+    var needsMission = reservationType === 'flight_training'
+      || reservationType === 'briefing'
+      || reservationType === 'simulator_training';
+    missionField.style.display = needsMission ? '' : 'none';
+    missionSelect.required = needsMission;
+    if (!needsMission) {
+      missionSelect.value = '';
+      return;
+    }
+    missionOptions.forEach(function(option) {
+      var show = (option.getAttribute('data-schedule-category') || '') === reservationType;
+      option.hidden = !show;
+      option.disabled = !show;
+    });
+    var selected = missionSelect.options[missionSelect.selectedIndex];
+    if (!selected || selected.value === '' || selected.disabled || selected.hidden) {
+      missionSelect.value = '';
     }
   }
-  select.addEventListener('change', function() { syncCrew(true); });
-  syncCrew(false);
-});
+
+  typeSelect.addEventListener('change', syncMissionOptions);
+  syncMissionOptions();
+})();
 (function() {
   var rows = document.getElementById('flightAirportChainRows');
   var addBtn = document.getElementById('flightAddLegBtn');
@@ -521,7 +767,7 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
 (function() {
   var modal = document.getElementById('flightReservationModal');
   var returnUrl = <?= json_encode(
-      '/admin/schedule.php?date=' . rawurlencode($selectedDate),
+      $scheduleBasePath . '?date=' . rawurlencode($selectedDate),
       JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
   ) ?>;
   if (modal && typeof modal.showModal === 'function') modal.showModal();
@@ -538,7 +784,7 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
 (function() {
   var modal = document.getElementById('flightUndispatchModal');
   var returnUrl = <?= json_encode(
-      '/admin/schedule.php?date=' . rawurlencode($selectedDate),
+      $scheduleBasePath . '?date=' . rawurlencode($selectedDate),
       JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
   ) ?>;
   if (modal && typeof modal.showModal === 'function') modal.showModal();
@@ -550,6 +796,10 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
 })();
 <?php endif; ?>
 </script>
-<script src="/admin/assets/flight_schedule.js?v=20260807.1"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin=""></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js" crossorigin=""></script>
+<script src="/admin/assets/leg_track_chart.js?v=20260808.21"></script>
+<script src="/admin/assets/flight_schedule.js?v=20260809.02"></script>
 <?php compliance_page_close(); ?>
 <?php cw_footer(); ?>
