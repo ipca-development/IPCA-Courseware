@@ -800,6 +800,6 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin=""></script>
 <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js" crossorigin=""></script>
 <script src="/admin/assets/leg_track_chart.js?v=20260808.21"></script>
-<script src="/admin/assets/flight_schedule.js?v=20260809.02"></script>
+<script src="/admin/assets/flight_schedule.js?v=20260809.04"></script>
 <?php compliance_page_close(); ?>
 <?php cw_footer(); ?>

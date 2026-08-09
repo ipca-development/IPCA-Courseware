@@ -546,6 +546,14 @@ final class FlightScheduleService
             );
             $existingStatement->execute(array($recordId));
             $existing = $existingStatement->fetch(PDO::FETCH_ASSOC);
+            $overlapWarnings = $this->resourceConflictWarnings(
+                $recordId,
+                $aircraftId,
+                null,
+                array_keys($crewUserIds),
+                $start,
+                $end
+            );
             if (is_array($existing)) {
                 $this->assertDeviceCreateRetryEquivalent(
                     $existing,
@@ -561,17 +569,10 @@ final class FlightScheduleService
                     'already_present' => true,
                     'scheduler_record_id' => $recordId,
                     'reservation_uuid' => $recordId,
+                    'warnings' => $overlapWarnings,
                 );
             }
 
-            $this->assertNoResourceConflicts(
-                $recordId,
-                $aircraftId,
-                null,
-                array_keys($crewUserIds),
-                $start,
-                $end
-            );
             $this->pdo->prepare(
                 'INSERT INTO ipca_flight_schedule_slots
                  (scheduler_record_id, organization_id, reservation_type, scheduled_date,
@@ -651,6 +652,7 @@ final class FlightScheduleService
             'already_present' => false,
             'scheduler_record_id' => $recordId,
             'reservation_uuid' => $recordId,
+            'warnings' => $overlapWarnings,
         );
     }
 
@@ -1758,6 +1760,32 @@ final class FlightScheduleService
         string $start,
         string $end
     ): void {
+        $warnings = $this->resourceConflictWarnings(
+            $recordId,
+            $aircraftId,
+            $cohortId,
+            $crewUserIds,
+            $start,
+            $end
+        );
+        if ($warnings !== array()) {
+            throw new RuntimeException($warnings[0]);
+        }
+    }
+
+    /**
+     * @param list<int> $crewUserIds
+     * @return list<string>
+     */
+    private function resourceConflictWarnings(
+        string $recordId,
+        int $aircraftId,
+        ?int $cohortId,
+        array $crewUserIds,
+        string $start,
+        string $end
+    ): array {
+        $warnings = array();
         $aircraftConflict = $this->pdo->prepare(
             "SELECT scheduler_record_id FROM ipca_flight_schedule_slots
              WHERE scheduler_record_id <> ?
@@ -1769,7 +1797,7 @@ final class FlightScheduleService
         );
         $aircraftConflict->execute(array($recordId, $aircraftId, $end, $start));
         if ($aircraftConflict->fetchColumn() !== false) {
-            throw new RuntimeException('The selected aircraft is already reserved during this time.');
+            $warnings[] = 'The selected aircraft is already reserved during this time.';
         }
 
         if ($cohortId !== null) {
@@ -1784,7 +1812,7 @@ final class FlightScheduleService
             );
             $cohortConflict->execute(array($recordId, $cohortId, $end, $start));
             if ($cohortConflict->fetchColumn() !== false) {
-                throw new RuntimeException('The selected cohort already has a reservation during this time.');
+                $warnings[] = 'The selected cohort already has a reservation during this time.';
             }
         }
 
@@ -1803,9 +1831,10 @@ final class FlightScheduleService
             );
             $crewConflict->execute(array_merge(array($recordId), $crewUserIds, array($end, $start)));
             if ($crewConflict->fetchColumn() !== false) {
-                throw new RuntimeException('A selected crew member is already reserved during this time.');
+                $warnings[] = 'A selected crew member is already reserved during this time.';
             }
         }
+        return $warnings;
     }
 
     /**

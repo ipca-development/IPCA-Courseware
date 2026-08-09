@@ -958,7 +958,7 @@
     document.addEventListener('pointercancel', up);
   }
 
-  function createEvent(reservation, timeline) {
+  function createEvent(reservation, timeline, lane) {
     var start = parseLocal(reservation.scheduled_start_time);
     var end = parseLocal(reservation.scheduled_end_time);
     if (!start || !end || minutes(end) <= dayStart || minutes(start) >= dayEnd) return;
@@ -972,6 +972,7 @@
     element.dataset.type = reservation.reservation_type || 'flight_training';
     element.style.left = position.left + '%';
     element.style.width = position.width + '%';
+    element.style.top = (8 + Math.max(0, Number(lane || 0)) * 60) + 'px';
     element.removeAttribute('title');
     var evidence = reservation.evidence || {};
     var evidenceHtml = reservation.editable ? '' : '<span class="fltsch-evidence">'
@@ -1040,9 +1041,25 @@
     document.querySelectorAll('.fltsch-resource-timeline').forEach(function (timeline) {
       timeline.innerHTML = '';
       var key = timeline.dataset.resourceKey;
-      config.reservations.forEach(function (reservation) {
-        if (Array.isArray(reservation.resource_keys) && reservation.resource_keys.indexOf(key) !== -1) {
-          createEvent(reservation, timeline);
+      var matching = config.reservations.filter(function (reservation) {
+        return Array.isArray(reservation.resource_keys) && reservation.resource_keys.indexOf(key) !== -1;
+      }).sort(function (left, right) {
+        return parseLocal(left.scheduled_start_time) - parseLocal(right.scheduled_start_time);
+      });
+      var laneEnds = [];
+      var placements = matching.map(function (reservation) {
+        var start = parseLocal(reservation.scheduled_start_time);
+        var end = parseLocal(reservation.scheduled_end_time);
+        var lane = 0;
+        while (lane < laneEnds.length && start < laneEnds[lane]) lane += 1;
+        laneEnds[lane] = end;
+        return { reservation: reservation, lane: lane };
+      });
+      var laneCount = Math.max(1, laneEnds.length);
+      timeline.style.minHeight = Math.max(68, 8 + laneCount * 60) + 'px';
+      placements.forEach(function (placement) {
+        if (placement.reservation) {
+          createEvent(placement.reservation, timeline, placement.lane);
         }
       });
     });
