@@ -39,9 +39,14 @@ try {
 
     try {
         $service = new FlightScheduleService($pdo);
-        $result = trim((string)($payload['supersedes_scheduler_record_id'] ?? '')) !== ''
-            ? $service->supersedeScheduledDutyFromDevice($device, $payload)
-            : $service->createScheduledDutyFromDevice($device, $payload);
+        $operation = strtolower(trim((string)($payload['operation'] ?? 'create')));
+        if ($operation === 'update_window') {
+            $result = $service->updateScheduledDutyWindowFromDevice($device, $payload);
+        } elseif (trim((string)($payload['supersedes_scheduler_record_id'] ?? '')) !== '') {
+            $result = $service->supersedeScheduledDutyFromDevice($device, $payload);
+        } else {
+            $result = $service->createScheduledDutyFromDevice($device, $payload);
+        }
     } catch (InvalidArgumentException $e) {
         throw new CvrUserCorrectionRequired($e->getMessage());
     } catch (RuntimeException $e) {
