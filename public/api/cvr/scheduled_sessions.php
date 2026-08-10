@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/DeviceAuthService.php';
 require_once __DIR__ . '/../../../src/FlightScheduleService.php';
+require_once __DIR__ . '/../../../src/FlightSessionService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -25,7 +26,12 @@ try {
         isset($_GET['from']) ? (string)$_GET['from'] : null,
         isset($_GET['to']) ? (string)$_GET['to'] : null
     );
-    cvr_scheduled_sessions_json(200, array('ok' => true, 'scheduled_sessions' => $sessions));
+    cvr_scheduled_sessions_json(200, array(
+        'ok' => true,
+        'scheduled_sessions' => $sessions,
+        'operational_session_model_enabled' =>
+            (new FlightSessionService($pdo))->modelEnabledForDevice($device),
+    ));
 } catch (RuntimeException $e) {
     $message = $e->getMessage();
     $authFailure = str_contains(strtolower($message), 'device token')

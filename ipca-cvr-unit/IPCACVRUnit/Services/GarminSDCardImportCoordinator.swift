@@ -23,6 +23,7 @@ final class GarminSDCardImportCoordinator: ObservableObject {
     @Published var showExcluded = false
     @Published var filter: GarminSDCardImportFilter = .all
     @Published var selectedTargetFlightRecordID: String?
+    @Published private(set) var guidedTargetFlightRecordID: String?
     @Published var lastError = ""
     @Published var serverStatusMessage = ""
     @Published var showingSetupSheet = false
@@ -78,6 +79,7 @@ final class GarminSDCardImportCoordinator: ObservableObject {
     // MARK: - Entry points
 
     func openFromLogRow(entry: CVRFlightLogEntry, settings: SettingsStore) {
+        guidedTargetFlightRecordID = nil
         selectedTargetFlightRecordID = entry.flightRecordID
         filter = .all
         lastError = ""
@@ -89,7 +91,21 @@ final class GarminSDCardImportCoordinator: ObservableObject {
         Task { await probe(settings: settings) }
     }
 
+    func openGuidedFromLogRow(entry: CVRFlightLogEntry, settings: SettingsStore) {
+        guidedTargetFlightRecordID = entry.flightRecordID
+        selectedTargetFlightRecordID = entry.flightRecordID
+        filter = .new
+        lastError = ""
+        guard settings.hasGarminSDCardFolderConfigured else {
+            showingSetupSheet = true
+            return
+        }
+        showingFileSheet = true
+        Task { await probe(settings: settings) }
+    }
+
     func openBrowse(settings: SettingsStore) {
+        guidedTargetFlightRecordID = nil
         selectedTargetFlightRecordID = nil
         filter = .all
         lastError = ""
@@ -413,6 +429,26 @@ final class GarminSDCardImportCoordinator: ObservableObject {
         guard let targetFlightRecordID = selectedTargetFlightRecordID,
               let entry = flightLogs.entries.first(where: { $0.flightRecordID == targetFlightRecordID }) else {
             lastError = "Select a flight from the Log before importing this Garmin CSV."
+            lastImportResult = GarminSDCardImportResult(
+                kind: .failure,
+                filename: candidate.filename,
+                message: lastError
+            )
+            return
+        }
+        if let guidedTargetFlightRecordID,
+           guidedTargetFlightRecordID != targetFlightRecordID {
+            lastError = "The mandatory Garmin handoff must remain linked to its completed flight."
+            lastImportResult = GarminSDCardImportResult(
+                kind: .failure,
+                filename: candidate.filename,
+                message: lastError
+            )
+            return
+        }
+        if guidedTargetFlightRecordID == targetFlightRecordID,
+           !candidate.isRecommended || candidate.matchWarning != nil {
+            lastError = "This CSV is not an exact aircraft and timestamp match for the completed flight."
             lastImportResult = GarminSDCardImportResult(
                 kind: .failure,
                 filename: candidate.filename,
@@ -919,6 +955,9 @@ final class GarminSDCardImportCoordinator: ObservableObject {
     /// Power-up / idle sessions of several minutes are common; require a real leg length.
     nonisolated private static let minimumEligibleRowCount = 300
     nonisolated private static let minimumEligibleDurationSeconds: TimeInterval = 5 * 60
+    /// TEMPORARY TEST OVERRIDE: allow short but non-empty data-rich CSV files
+    /// while the complete post-flight handoff is being flight-tested.
+    nonisolated private static let allowShortCSVForPostFlightFlowTesting = true
 
     nonisolated private static func flightDurationSeconds(start: Date?, end: Date?) -> TimeInterval? {
         guard let start, let end, end >= start else { return nil }
@@ -932,18 +971,26 @@ final class GarminSDCardImportCoordinator: ObservableObject {
         durationSeconds: TimeInterval?
     ) -> String? {
         if byteCount > 0 && byteCount < minimumEligibleByteCount {
-            return "Too short — file is too small (\(formatBytes(byteCount)))."
+            if !allowShortCSVForPostFlightFlowTesting {
+                return "Too short — file is too small (\(formatBytes(byteCount)))."
+            }
         }
         if let durationSeconds, durationSeconds < minimumEligibleDurationSeconds {
-            return "Too short — \(formatDuration(durationSeconds)) of data (need at least 5 minutes)."
+            if !allowShortCSVForPostFlightFlowTesting {
+                return "Too short — \(formatDuration(durationSeconds)) of data (need at least 5 minutes)."
+            }
         }
         if rowCount > 0 && rowCount < minimumEligibleRowCount {
-            return "Too short — \(rowCount) sample(s) (need at least \(minimumEligibleRowCount))."
+            if !allowShortCSVForPostFlightFlowTesting {
+                return "Too short — \(rowCount) sample(s) (need at least \(minimumEligibleRowCount))."
+            }
         }
         // Data-rich headers alone are not enough: if we could not prove duration or samples,
         // do not offer Import (avoids short power-up logs with failed time parse).
         if durationSeconds == nil && rowCount <= 0 {
-            return "Too short — could not confirm at least 5 minutes of flight data."
+            if !allowShortCSVForPostFlightFlowTesting {
+                return "Too short — could not confirm at least 5 minutes of flight data."
+            }
         }
         return nil
     }

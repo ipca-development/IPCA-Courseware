@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../src/ManualReconstructionBundleService.php';
 require_once __DIR__ . '/../../src/FlightDebriefService.php';
 require_once __DIR__ . '/../../src/ReplayShareService.php';
 require_once __DIR__ . '/../../src/CvrAdminLegCorrectionService.php';
+require_once __DIR__ . '/../../src/CvrAdminLegSplitService.php';
 require_once __DIR__ . '/../../src/CvrOperationalLegVisibilityService.php';
 require_once __DIR__ . '/../../src/CockpitRecorderDebriefQueueService.php';
 require_once __DIR__ . '/../../src/MissionCatalogService.php';
@@ -203,6 +204,7 @@ try {
             'generate_bundle_debrief',
             'hide_operational_leg',
             'restore_operational_leg',
+            'split_operational_leg',
             'create_fuel_uplift',
             'delete_fuel_uplift',
         );
@@ -336,19 +338,85 @@ try {
             $reconstructionNotice = 'Replay access revoked immediately.';
         } elseif ($action === 'save_operational_leg') {
             $dispatchId = (int)($_POST['dispatch_id'] ?? 0);
-            (new CvrAdminLegCorrectionService($pdo))->save(
+            $legInput = is_array($_POST['leg'] ?? null) ? $_POST['leg'] : $_POST;
+            $segmentInputs = is_array($_POST['leg_segments'] ?? null) ? $_POST['leg_segments'] : array();
+            $lockFinancial = !empty($_POST['lock_financial']);
+            $financialService = new CvrFinancialDispatchService($pdo);
+            $existingFinancial = $financialService->forDispatch($dispatchId);
+            if (is_array($existingFinancial) && !empty($existingFinancial['is_locked']) && !$lockFinancial) {
+                throw new RuntimeException('Unlock this Operational Leg before editing.');
+            }
+            $correction = new CvrAdminLegCorrectionService($pdo);
+            if ($segmentInputs !== array()) {
+                $totalTakeoffs = 0;
+                $totalLandings = 0;
+                $normalizedSegments = array();
+                $ordered = array_values($segmentInputs);
+                foreach ($ordered as $index => $segment) {
+                    if (!is_array($segment)) {
+                        continue;
+                    }
+                    $seq = max(1, (int)($segment['sequence_number'] ?? ((int)$index + 1)));
+                    $takeoffs = max(0, (int)($segment['takeoff_count'] ?? 0));
+                    $landings = max(0, (int)($segment['landing_count'] ?? 0));
+                    $totalTakeoffs += $takeoffs;
+                    $totalLandings += $landings;
+                    $normalized = array(
+                        'sequence_number' => $seq,
+                        'dispatch_id' => (int)($segment['dispatch_id'] ?? 0),
+                        'departure_airport' => strtoupper(trim((string)($segment['departure_airport'] ?? ''))),
+                        'arrival_airport' => strtoupper(trim((string)($segment['arrival_airport'] ?? ''))),
+                        'starting_hobbs' => $segment['starting_hobbs'] ?? null,
+                        'ending_hobbs' => $segment['ending_hobbs'] ?? null,
+                        'starting_tacho' => $segment['starting_tacho'] ?? null,
+                        'ending_tacho' => $segment['ending_tacho'] ?? null,
+                        'fuel_onboard' => $segment['fuel_onboard'] ?? null,
+                        'fuel_remaining' => $segment['fuel_remaining'] ?? null,
+                        'takeoff_count' => $takeoffs,
+                        'landing_count' => $landings,
+                    );
+                    $normalizedSegments[] = $normalized;
+                    $segmentDispatchId = (int)($segment['dispatch_id'] ?? 0);
+                    if ($segmentDispatchId > 0) {
+                        $correction->saveSegmentOperationalValues(
+                            $segmentDispatchId,
+                            $normalized,
+                            $actorUserId > 0 ? $actorUserId : null
+                        );
+                    }
+                }
+                if ($normalizedSegments !== array()) {
+                    $firstSeg = $normalizedSegments[0];
+                    $lastSeg = $normalizedSegments[count($normalizedSegments) - 1];
+                    $legInput['starting_hobbs'] = $firstSeg['starting_hobbs'];
+                    $legInput['ending_hobbs'] = $lastSeg['ending_hobbs'];
+                    $legInput['starting_tacho'] = $firstSeg['starting_tacho'];
+                    $legInput['ending_tacho'] = $lastSeg['ending_tacho'];
+                    $legInput['fuel_onboard'] = $firstSeg['fuel_onboard'];
+                    $legInput['fuel_remaining'] = $lastSeg['fuel_remaining'];
+                }
+                $legInput['takeoff_count'] = $totalTakeoffs;
+                $legInput['landing_count'] = $totalLandings;
+                $correction->patchLegSegmentOperationalFields($dispatchId, $normalizedSegments);
+            }
+            $correction->save(
                 $dispatchId,
-                is_array($_POST['leg'] ?? null) ? $_POST['leg'] : $_POST,
+                $legInput,
                 $actorUserId > 0 ? $actorUserId : null
             );
-            $lockFinancial = !empty($_POST['lock_financial']);
             $financialInput = is_array($_POST['financial'] ?? null) ? $_POST['financial'] : array();
             if ($financialInput !== array() || $lockFinancial) {
-                $financialService = new CvrFinancialDispatchService($pdo);
-                $existingFinancial = $financialService->forDispatch($dispatchId);
                 if (is_array($existingFinancial) && !empty($existingFinancial['is_locked']) && !$lockFinancial) {
                     // Locked financial stays unchanged on normal Save Changes.
                 } else {
+                    $hs = isset($legInput['starting_hobbs']) && is_numeric($legInput['starting_hobbs'])
+                        ? (float)$legInput['starting_hobbs'] : null;
+                    $he = isset($legInput['ending_hobbs']) && is_numeric($legInput['ending_hobbs'])
+                        ? (float)$legInput['ending_hobbs'] : null;
+                    if ($hs !== null && $he !== null && $he >= $hs) {
+                        $financialInput['aircraft_rental_hours'] = round($he - $hs, 1);
+                        $financialInput['hobbs_delta'] = $financialInput['aircraft_rental_hours'];
+                    }
                     $financialService->saveDraft(
                         $dispatchId,
                         $financialInput,
@@ -358,7 +426,7 @@ try {
                 }
             }
             $reconstructionNotice = $lockFinancial
-                ? 'Operational leg updated and financial dispatch locked.'
+                ? 'Operational leg saved and locked.'
                 : 'Operational leg updated.';
         } elseif ($action === 'unlock_financial_dispatch') {
             (new CvrFinancialDispatchService($pdo))->unlock(
@@ -368,7 +436,19 @@ try {
                 (string)($_POST['unlock_code'] ?? ''),
                 trim((string)($_POST['unlock_reason'] ?? ''))
             );
-            $reconstructionNotice = 'Financial dispatch unlocked for editing.';
+            $reconstructionNotice = 'Operational leg unlocked for editing.';
+        } elseif ($action === 'split_operational_leg') {
+            if ($cvrMlAudience !== 'admin' || !$cvrMlCanEdit) {
+                throw new RuntimeException('Define Legs is only available to admins.');
+            }
+            $splitResult = (new CvrAdminLegSplitService($pdo))->apply(
+                (int)($_POST['dispatch_id'] ?? 0),
+                is_array($_POST['split'] ?? null) ? $_POST['split'] : array(),
+                $actorUserId > 0 ? $actorUserId : null
+            );
+            $reconstructionNotice = 'Annotated continuous Check-In with '
+                . (int)($splitResult['leg_count'] ?? 0)
+                . ' legs. Replay, CSV, and financials stay on this Operational Leg.';
         } elseif ($action === 'hide_operational_leg') {
             (new CvrOperationalLegVisibilityService($pdo))->hide(
                 (int)($_POST['dispatch_id'] ?? 0),
@@ -890,6 +970,7 @@ function cvr_intake_financial_leg_payload(
         return $base;
     }
     return array_merge($base, array(
+        'id' => (int)($saved['id'] ?? 0),
         'customer_user_id' => $saved['customer_user_id'] ?? $base['customer_user_id'],
         'customer_name' => ($saved['customer_name'] ?? '') !== '' ? $saved['customer_name'] : $base['customer_name'],
         'instructor_user_id' => $saved['instructor_user_id'] ?? $base['instructor_user_id'],
@@ -897,8 +978,13 @@ function cvr_intake_financial_leg_payload(
         'aircraft_label' => ($saved['aircraft_label'] ?? '') !== '' ? $saved['aircraft_label'] : $base['aircraft_label'],
         'aircraft_rate_usd_per_hour' => (float)($saved['aircraft_rate_usd_per_hour'] ?? $base['aircraft_rate_usd_per_hour']),
         'preflight_briefing_hours' => (float)($saved['preflight_briefing_hours'] ?? 0),
-        'flight_instruction_hours' => (float)($saved['flight_instruction_hours'] ?? $base['flight_instruction_hours']),
-        'ground_instruction_hours' => (float)($saved['ground_instruction_hours'] ?? $base['ground_instruction_hours']),
+        // Use array_key_exists so an intentional 0.0 instruction time is not replaced by Hobbs.
+        'flight_instruction_hours' => array_key_exists('flight_instruction_hours', $saved)
+            ? (float)$saved['flight_instruction_hours']
+            : (float)$base['flight_instruction_hours'],
+        'ground_instruction_hours' => array_key_exists('ground_instruction_hours', $saved)
+            ? (float)$saved['ground_instruction_hours']
+            : (float)$base['ground_instruction_hours'],
         'instructional_rate_id' => $saved['instructional_rate_id'] ?? $base['instructional_rate_id'],
         'existing_balance_usd' => (float)($saved['existing_balance_usd'] ?? $base['existing_balance_usd']),
         'status' => (string)($saved['status'] ?? 'draft'),
@@ -1629,6 +1715,20 @@ a.intake-refresh:hover{
 .ml-aircraft-pill{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:900;border:1px solid #93c5fd;color:#1d4ed8;background:#eff6ff}
 /* Edit Operational Leg — structured aviation correction modal */
 #legs-edit-modal .intake-modal{max-width:980px;width:min(980px,96vw);display:flex;flex-direction:column;max-height:92vh}
+#legs-split-modal .intake-modal{max-width:1100px;width:min(1100px,96vw);display:flex;flex-direction:column;max-height:92vh}
+.leg-split-notes{display:grid;gap:6px;margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid #dbe3ee;color:#334155;font-size:12px;line-height:1.45}
+.leg-split-notes li{margin-left:1rem}
+.leg-split-summary{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.leg-split-chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 10px;background:#eef2ff;color:#1e3a8a;font-size:11px;font-weight:800}
+.leg-split-table-wrap{overflow:auto}
+.leg-split-table{width:100%;border-collapse:collapse;font-size:12px;min-width:980px}
+.leg-split-table th,.leg-split-table td{border-bottom:1px solid #e2e8f0;padding:8px 6px;text-align:left;vertical-align:middle}
+.leg-split-table th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;white-space:nowrap}
+.leg-split-table input{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:700;box-sizing:border-box}
+.leg-split-delta{font-weight:900;color:#0f766e;font-variant-numeric:tabular-nums;white-space:nowrap}
+.leg-split-status{min-height:1.2em;font-size:12px;font-weight:700;color:#b91c1c;margin:8px 0}
+.leg-split-status.is-ok{color:#166534}
+.leg-split-status.is-muted{color:#64748b}
 #legs-edit-modal .intake-modal-body{overflow:auto;padding:16px 18px 8px}
 .leg-edit-sections{display:grid;gap:14px}
 .leg-edit-card{border:1px solid #dbe3ee;border-radius:14px;background:#fff;padding:14px 14px 12px;box-shadow:0 4px 12px rgba(15,23,42,.04)}
@@ -1674,10 +1774,12 @@ a.intake-refresh:hover{
 .leg-edit-fin-table td.num,.leg-edit-fin-table th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .leg-edit-fin-table tr.is-section th{background:#e2e8f0}
 .leg-edit-fin-table tr.is-total td{font-weight:900;border-bottom:0}
-.leg-edit-fin-locked{display:none;margin:0 0 10px;padding:8px 10px;border-radius:8px;background:#ecfdf5;border:1px solid #86efac;color:#166534;font-size:12px;font-weight:700}
+.leg-edit-fin-locked{display:none;margin:0;padding:8px 10px;border-radius:8px;background:#ecfdf5;border:1px solid #86efac;color:#166534;font-size:12px;font-weight:700}
 .leg-edit-fin-locked.is-on{display:block}
-.leg-edit-fin-unlock{display:none;gap:8px;align-items:end;margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1}
-.leg-edit-fin-unlock.is-on{display:flex;flex-wrap:wrap}
+.leg-edit-record-lock{display:none;flex-direction:column;gap:10px;margin-top:8px;padding:12px 0 4px;border-top:1px solid #e2e8f0}
+.leg-edit-record-lock.is-on{display:flex}
+.leg-edit-fin-unlock{display:none;gap:8px;align-items:end;flex-wrap:wrap}
+.leg-edit-fin-unlock.is-on{display:flex}
 .leg-edit-save-lock{border:0;border-radius:10px;background:#0f766e;color:#fff;padding:10px 14px;font-size:12px;font-weight:900;cursor:pointer}
 .leg-edit-save-lock:disabled{opacity:.45;cursor:not-allowed}
 @media (max-width:720px){.leg-edit-fin-row{grid-template-columns:1fr}.leg-edit-fin-row label{text-align:left}}
@@ -1695,6 +1797,25 @@ a.intake-refresh:hover{
 .leg-edit-briefing-status.is-error{color:#991b1b}
 .leg-edit-briefing-status.is-ok{color:#166534}
 .leg-edit-tz{font-size:12px;font-weight:700;color:#64748b}
+.legs-track-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.legs-track-head h4{margin:0}
+.legs-track-open{font-size:12px;font-weight:800;color:#1d4ed8;text-decoration:none}
+.legs-track-open:hover{text-decoration:underline}
+.legs-track-status{margin:0 0 10px;font-size:12px;font-weight:700;color:#64748b;line-height:1.4}
+.legs-track-status[data-tone="ok"]{color:#166534}
+.legs-track-status[data-tone="error"]{color:#991b1b}
+.legs-track-status[data-tone="loading"]{color:#1d4ed8}
+.legs-track-map{height:320px;border:1px solid #dbe3ee;border-radius:12px;overflow:hidden;background:#e8eef6}
+.legs-track-player{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin-top:10px}
+.legs-track-play{border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#0f172a;padding:8px 12px;font-size:12px;font-weight:850;cursor:pointer;min-width:72px}
+.legs-track-play:disabled{opacity:.45;cursor:not-allowed}
+.legs-track-timeline{width:100%;accent-color:#1d4ed8}
+.legs-track-times{display:grid;gap:2px;justify-items:end;font-variant-numeric:tabular-nums;font-size:12px;font-weight:800;color:#334155;min-width:52px}
+.legs-track-times span{color:#64748b;font-weight:700}
+.legs-track-marker{background:transparent;border:0}
+.legs-track-marker span{display:block;border-radius:999px;background:var(--mk,#334155);box-shadow:0 0 0 2px #fff,0 2px 6px rgba(15,23,42,.28)}
+.legs-track-marker.is-ownship span{border-radius:4px;transform:rotate(45deg)}
+.legs-track-marker em{display:block;margin-top:2px;font-style:normal;font-size:9px;font-weight:800;color:#0f172a;text-shadow:0 0 3px #fff;white-space:nowrap;text-align:center}
 .leg-edit-badge{display:inline-flex;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:#e2e8f0;color:#475569}
 .leg-edit-badge-staff{background:#dbeafe;color:#1e40af}
 .leg-edit-badge-student{background:#dcfce7;color:#166534}
@@ -1726,6 +1847,10 @@ a.intake-refresh:hover{
 .legs-route-icao{font-size:14px;font-weight:900;letter-spacing:.05em;color:#0f172a;line-height:1.15}
 .legs-route-join{font-size:11px;font-weight:800;color:#94a3b8;line-height:1;padding:1px 0}
 .legs-route-place{font-size:10px;font-weight:650;color:#94a3b8;line-height:1.25;margin-top:2px}
+.legs-route-via{font-size:11px;font-weight:750;color:#0369a1;margin-top:3px;letter-spacing:.02em}
+.leg-edit-segment{border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-top:12px;background:#f8fafc}
+.leg-edit-segment-title{font-size:12px;font-weight:850;letter-spacing:.06em;text-transform:uppercase;color:#0369a1;margin:0 0 10px}
+.leg-edit-segments[hidden],.leg-edit-single-route[hidden],.leg-edit-single-meters[hidden],.leg-edit-single-fuel[hidden],.leg-edit-single-ops[hidden]{display:none!important}
 .legs-crew{display:grid;gap:10px;min-width:0}
 .legs-crew-person{display:grid;gap:1px;min-width:0}
 .legs-crew-name{font-size:12px;font-weight:800;color:#0f172a;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
@@ -2011,7 +2136,7 @@ a.intake-refresh:hover{
             $oilPct = $card['oil_percentage'];
             $fuelQty = $card['fuel_quantity'];
             $fuelUnit = (string)($card['fuel_unit'] ?? 'USG');
-            $fuelBurn = $card['fuel_burn'] ?? null;
+            $fuelBurn = $card['fuel_burn_avg_usg_per_hour'] ?? $card['fuel_burn'] ?? null;
             $uplifts = is_array($card['uplifts'] ?? null) ? $card['uplifts'] : array();
             $loggedParts = cvr_intake_fleet_logged_parts($pdo, $card['logged_at'] ?? null, $reg);
             $upliftPayload = array();
@@ -2025,8 +2150,8 @@ a.intake-refresh:hover{
                 );
             }
             $burnLabel = $fuelBurn !== null
-                ? ('Burn ' . cvr_intake_format_one_decimal($fuelBurn) . ' ' . $fuelUnit)
-                : 'Burn —';
+                ? ('Avg ' . cvr_intake_format_one_decimal($fuelBurn) . ' ' . $fuelUnit . '/hr')
+                : 'Avg —';
           ?>
           <article
             class="fleet-status-card"
@@ -2236,6 +2361,19 @@ a.intake-refresh:hover{
               $oilGauge = cvr_intake_oil_gauge($row, $acCfg);
               $depPlace = cvr_intake_airport_place($depAirport);
               $arrPlace = cvr_intake_airport_place($arrAirport);
+              $legSegments = is_array($row['leg_segments'] ?? null) ? $row['leg_segments'] : array();
+              $viaAirports = is_array($row['via_airports'] ?? null) ? $row['via_airports'] : array();
+              if ($viaAirports === array() && count($legSegments) >= 2) {
+                  foreach ($legSegments as $segIndex => $segment) {
+                      if (!is_array($segment) || $segIndex === 0) {
+                          continue;
+                      }
+                      $viaIcao = strtoupper(trim((string)($segment['departure_airport'] ?? '')));
+                      if ($viaIcao !== '' && $viaIcao !== $arrAirport && !in_array($viaIcao, $viaAirports, true)) {
+                          $viaAirports[] = $viaIcao;
+                      }
+                  }
+              }
               $legPayload = array(
                   'dispatch_id' => (int)($row['id'] ?? 0),
                   'dispatch_uuid' => (string)($row['dispatch_uuid'] ?? ''),
@@ -2244,6 +2382,12 @@ a.intake-refresh:hover{
                   'mission_code' => $missionCode,
                   'departure_airport' => $depAirport,
                   'arrival_airport' => $arrAirport,
+                  'via_airports' => $viaAirports,
+                  'leg_segments' => $legSegments,
+                  'device_multi_leg_grouped' => !empty($row['device_multi_leg_grouped']),
+                  'sibling_dispatch_ids' => is_array($row['sibling_dispatch_ids'] ?? null)
+                      ? array_values(array_map('intval', $row['sibling_dispatch_ids']))
+                      : array(),
                   'off_block_utc' => (string)($row['off_block_utc'] ?? ''),
                   'on_block_utc' => (string)($row['on_block_utc'] ?? ''),
                   'off_block_local' => '',
@@ -2264,6 +2408,9 @@ a.intake-refresh:hover{
                   'recording_uid' => $recordingUid,
                   'has_garmin_csv' => $garminOn,
                   'is_hidden' => !empty($row['is_hidden']),
+                  'reservation_uuid' => (string)($row['reservation_uuid'] ?? ''),
+                  'leg_uuid' => (string)($row['leg_uuid'] ?? ''),
+                  'identity_source' => (string)($row['identity_source'] ?? ''),
                   'timezone' => cvr_intake_california_timezone($pdo, $tail),
                   'hobbs_delta' => $hobbsDelta !== '' ? (float)$hobbsDelta : null,
                   'financial' => cvr_intake_financial_leg_payload(
@@ -2312,10 +2459,16 @@ a.intake-refresh:hover{
                     <div class="legs-route-icao"><?= cvr_intake_h($depAirport) ?></div>
                     <div class="legs-route-join">↓</div>
                     <div class="legs-route-icao"><?= cvr_intake_h($arrAirport) ?></div>
-                    <?php if ($depPlace !== ''): ?><div class="legs-route-place"><?= cvr_intake_h($depPlace) ?></div><?php endif; ?>
+                    <?php if ($viaAirports !== array()): ?>
+                      <div class="legs-route-via">Via <?= cvr_intake_h(implode(', ', $viaAirports)) ?></div>
+                    <?php elseif ($depPlace !== ''): ?>
+                      <div class="legs-route-place"><?= cvr_intake_h($depPlace) ?></div>
+                    <?php endif; ?>
                   <?php else: ?>
                     <div class="legs-route-icao"><?= cvr_intake_h($depAirport !== '' ? $depAirport : '—') ?> → <?= cvr_intake_h($arrAirport !== '' ? $arrAirport : '—') ?></div>
-                    <?php if ($depPlace !== '' || $arrPlace !== ''): ?>
+                    <?php if ($viaAirports !== array()): ?>
+                      <div class="legs-route-via">Via <?= cvr_intake_h(implode(', ', $viaAirports)) ?></div>
+                    <?php elseif ($depPlace !== '' || $arrPlace !== ''): ?>
                       <div class="legs-route-place"><?= cvr_intake_h(trim(($depPlace !== '' ? $depPlace : '—') . ' → ' . ($arrPlace !== '' ? $arrPlace : '—'))) ?></div>
                     <?php endif; ?>
                   <?php endif; ?>
@@ -3454,71 +3607,97 @@ a.intake-refresh:hover{
 
           <section class="leg-edit-card" data-leg-section="route">
             <h4>Route and Time</h4>
-            <div class="leg-edit-grid">
-              <label class="leg-edit-field"><span>Departure Airport</span>
-                <input class="leg-edit-icao" name="leg[departure_airport]" id="legs-edit-dep" type="text" maxlength="4" minlength="3" autocomplete="off" required>
-                <div class="leg-edit-error" data-error-for="dep"></div>
-              </label>
-              <label class="leg-edit-field"><span>Arrival Airport</span>
-                <input class="leg-edit-icao" name="leg[arrival_airport]" id="legs-edit-arr" type="text" maxlength="4" minlength="3" autocomplete="off" required>
-                <div class="leg-edit-error" data-error-for="arr"></div>
-              </label>
-              <label class="leg-edit-field"><span>Date</span>
-                <input name="leg_date" id="legs-edit-date" type="date" required>
-                <div class="leg-edit-error" data-error-for="date"></div>
-              </label>
-              <label class="leg-edit-field">
-                <span>Off Block Time — Local <em id="legs-edit-tz-label">(America/Los_Angeles)</em></span>
-                <input class="leg-edit-time" name="leg_off_time" id="legs-edit-off-time" type="text" inputmode="numeric" maxlength="5" placeholder="18:29" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" required>
-                <div class="leg-edit-error" data-error-for="off"></div>
-              </label>
+            <div class="leg-edit-single-route" id="legs-edit-single-route">
+              <div class="leg-edit-grid">
+                <label class="leg-edit-field"><span>Departure Airport</span>
+                  <input class="leg-edit-icao" name="leg[departure_airport]" id="legs-edit-dep" type="text" maxlength="4" minlength="3" autocomplete="off" required>
+                  <div class="leg-edit-error" data-error-for="dep"></div>
+                </label>
+                <label class="leg-edit-field"><span>Arrival Airport</span>
+                  <input class="leg-edit-icao" name="leg[arrival_airport]" id="legs-edit-arr" type="text" maxlength="4" minlength="3" autocomplete="off" required>
+                  <div class="leg-edit-error" data-error-for="arr"></div>
+                </label>
+                <label class="leg-edit-field"><span>Date</span>
+                  <input name="leg_date" id="legs-edit-date" type="date" required>
+                  <div class="leg-edit-error" data-error-for="date"></div>
+                </label>
+                <label class="leg-edit-field">
+                  <span>Off Block Time — Local <em id="legs-edit-tz-label">(America/Los_Angeles)</em></span>
+                  <input class="leg-edit-time" name="leg_off_time" id="legs-edit-off-time" type="text" inputmode="numeric" maxlength="5" placeholder="18:29" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" required>
+                  <div class="leg-edit-error" data-error-for="off"></div>
+                </label>
+              </div>
+              <div class="leg-edit-derived">
+                <div><strong>Calculated On Block</strong><div><span id="legs-edit-onblock">—</span> <span class="leg-edit-tz">Local</span></div></div>
+                <div class="leg-edit-tz">Timezone: <span id="legs-edit-tz-value">America/Los_Angeles</span></div>
+              </div>
             </div>
-            <div class="leg-edit-derived">
-              <div><strong>Calculated On Block</strong><div><span id="legs-edit-onblock">—</span> <span class="leg-edit-tz">Local</span></div></div>
-              <div class="leg-edit-tz">Timezone: <span id="legs-edit-tz-value">America/Los_Angeles</span></div>
+            <div class="leg-edit-segments" id="legs-edit-route-segments" hidden></div>
+          </section>
+
+          <section class="leg-edit-card" data-leg-section="track" id="legs-track-panel">
+            <div class="legs-track-head">
+              <h4>GPS Track and Traffic</h4>
+              <a class="legs-track-open" id="legs-track-open-replay" href="#" target="_blank" rel="noopener" hidden>Open full replay</a>
+            </div>
+            <p class="legs-track-status" id="legs-track-status" data-tone="muted">Open a Flight Record with a linked CVR recording to preview GPS and traffic.</p>
+            <div class="legs-track-map" id="legs-track-map" role="img" aria-label="GPS track map with traffic overlay"></div>
+            <div class="legs-track-player">
+              <button type="button" class="legs-track-play" id="legs-track-play" disabled aria-pressed="false">Play</button>
+              <input class="legs-track-timeline" id="legs-track-timeline" type="range" min="0" max="1" step="0.1" value="0" disabled aria-label="Track time scrubber">
+              <div class="legs-track-times">
+                <strong id="legs-track-current">00:00</strong>
+                <span id="legs-track-end">00:00</span>
+              </div>
             </div>
           </section>
 
           <section class="leg-edit-card" data-leg-section="meters">
             <h4>Aircraft Meters</h4>
-            <div class="leg-edit-grid">
-              <div class="leg-edit-meter">
-                <div class="leg-edit-meter-title">Hobbs</div>
-                <div class="leg-edit-meter-row">
-                  <label class="leg-edit-field"><span>Start</span><input name="leg[starting_hobbs]" id="legs-edit-hobbs-start" type="number" step="0.1" min="0" inputmode="decimal" required></label>
-                  <div class="leg-edit-meter-arrow">→</div>
-                  <label class="leg-edit-field"><span>End</span><input name="leg[ending_hobbs]" id="legs-edit-hobbs-end" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+            <div class="leg-edit-single-meters" id="legs-edit-single-meters">
+              <div class="leg-edit-grid">
+                <div class="leg-edit-meter">
+                  <div class="leg-edit-meter-title">Hobbs</div>
+                  <div class="leg-edit-meter-row">
+                    <label class="leg-edit-field"><span>Start</span><input name="leg[starting_hobbs]" id="legs-edit-hobbs-start" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                    <div class="leg-edit-meter-arrow">→</div>
+                    <label class="leg-edit-field"><span>End</span><input name="leg[ending_hobbs]" id="legs-edit-hobbs-end" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                  </div>
+                  <div class="leg-edit-derived"><strong>Difference</strong><span id="legs-edit-hobbs-diff">—</span></div>
+                  <div class="leg-edit-error" data-error-for="hobbs"></div>
                 </div>
-                <div class="leg-edit-derived"><strong>Difference</strong><span id="legs-edit-hobbs-diff">—</span></div>
-                <div class="leg-edit-error" data-error-for="hobbs"></div>
-              </div>
-              <div class="leg-edit-meter">
-                <div class="leg-edit-meter-title">Tacho</div>
-                <div class="leg-edit-meter-row">
-                  <label class="leg-edit-field"><span>Start</span><input name="leg[starting_tacho]" id="legs-edit-tacho-start" type="number" step="0.1" min="0" inputmode="decimal" required></label>
-                  <div class="leg-edit-meter-arrow">→</div>
-                  <label class="leg-edit-field"><span>End</span><input name="leg[ending_tacho]" id="legs-edit-tacho-end" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                <div class="leg-edit-meter">
+                  <div class="leg-edit-meter-title">Tacho</div>
+                  <div class="leg-edit-meter-row">
+                    <label class="leg-edit-field"><span>Start</span><input name="leg[starting_tacho]" id="legs-edit-tacho-start" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                    <div class="leg-edit-meter-arrow">→</div>
+                    <label class="leg-edit-field"><span>End</span><input name="leg[ending_tacho]" id="legs-edit-tacho-end" type="number" step="0.1" min="0" inputmode="decimal" required></label>
+                  </div>
+                  <div class="leg-edit-derived"><strong>Difference</strong><span id="legs-edit-tacho-diff">—</span></div>
+                  <div class="leg-edit-error" data-error-for="tacho"></div>
                 </div>
-                <div class="leg-edit-derived"><strong>Difference</strong><span id="legs-edit-tacho-diff">—</span></div>
-                <div class="leg-edit-error" data-error-for="tacho"></div>
               </div>
             </div>
+            <div class="leg-edit-segments" id="legs-edit-meter-segments" hidden></div>
           </section>
 
           <section class="leg-edit-card" data-leg-section="fuel">
             <h4>Fuel and Oil</h4>
-            <div class="leg-edit-grid-3">
-              <label class="leg-edit-field"><span>Fuel Departure</span>
-                <div class="leg-edit-unit"><input name="leg[fuel_onboard]" id="legs-edit-fuel-dep" type="number" step="0.1" min="0" inputmode="decimal" required><span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
-              </label>
-              <label class="leg-edit-field"><span>Fuel Landing</span>
-                <div class="leg-edit-unit"><input name="leg[fuel_remaining]" id="legs-edit-fuel-ldg" type="number" step="0.1" min="0" inputmode="decimal" required><span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
-              </label>
-              <div class="leg-edit-field"><span>Fuel Burn</span>
-                <div class="leg-edit-derived" style="margin:0"><span id="legs-edit-fuel-burn">—</span>&nbsp;<span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
+            <div class="leg-edit-single-fuel" id="legs-edit-single-fuel">
+              <div class="leg-edit-grid-3">
+                <label class="leg-edit-field"><span>Fuel Departure</span>
+                  <div class="leg-edit-unit"><input name="leg[fuel_onboard]" id="legs-edit-fuel-dep" type="number" step="0.1" min="0" inputmode="decimal" required><span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
+                </label>
+                <label class="leg-edit-field"><span>Fuel Landing</span>
+                  <div class="leg-edit-unit"><input name="leg[fuel_remaining]" id="legs-edit-fuel-ldg" type="number" step="0.1" min="0" inputmode="decimal" required><span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
+                </label>
+                <div class="leg-edit-field"><span>Fuel Burn</span>
+                  <div class="leg-edit-derived" style="margin:0"><span id="legs-edit-fuel-burn">—</span>&nbsp;<span class="leg-edit-suffix" data-fuel-suffix>USG</span></div>
+                </div>
               </div>
+              <div class="leg-edit-error" data-error-for="fuel"></div>
             </div>
-            <div class="leg-edit-error" data-error-for="fuel"></div>
+            <div class="leg-edit-segments" id="legs-edit-fuel-segments" hidden></div>
             <div style="margin-top:12px;max-width:280px">
               <label class="leg-edit-field"><span>Oil Quantity</span>
                 <div class="leg-edit-unit">
@@ -3531,10 +3710,13 @@ a.intake-refresh:hover{
 
           <section class="leg-edit-card" data-leg-section="ops">
             <h4>Takeoffs and Landings</h4>
-            <div class="leg-edit-grid" style="max-width:420px">
-              <label class="leg-edit-field"><span>Takeoffs</span><input name="leg[takeoff_count]" id="legs-edit-to" type="number" min="0" step="1" inputmode="numeric" required></label>
-              <label class="leg-edit-field"><span>Landings</span><input name="leg[landing_count]" id="legs-edit-ldg" type="number" min="0" step="1" inputmode="numeric" required></label>
+            <div class="leg-edit-single-ops" id="legs-edit-single-ops">
+              <div class="leg-edit-grid" style="max-width:420px">
+                <label class="leg-edit-field"><span>Takeoffs</span><input name="leg[takeoff_count]" id="legs-edit-to" type="number" min="0" step="1" inputmode="numeric" required></label>
+                <label class="leg-edit-field"><span>Landings</span><input name="leg[landing_count]" id="legs-edit-ldg" type="number" min="0" step="1" inputmode="numeric" required></label>
+              </div>
             </div>
+            <div class="leg-edit-segments" id="legs-edit-ops-segments" hidden></div>
           </section>
 
           <section class="leg-edit-card" data-leg-section="crew">
@@ -3549,7 +3731,7 @@ a.intake-refresh:hover{
             <?php if ($financialDispatchError !== ''): ?>
               <div class="intake-notice" style="margin-bottom:10px"><?= cvr_intake_h($financialDispatchError) ?></div>
             <?php endif; ?>
-            <div class="leg-edit-fin-locked" id="legs-fin-locked-banner">Financial dispatch is locked.</div>
+            <div class="leg-edit-fin-locked" id="legs-fin-locked-banner">This Operational Leg is locked.</div>
             <div class="leg-edit-fin-head">
               <div><strong>Customer:</strong> <span id="legs-fin-head-customer">—</span></div>
               <div><strong>Aircraft:</strong> <span id="legs-fin-head-aircraft">—</span></div>
@@ -3630,22 +3812,27 @@ a.intake-refresh:hover{
                 </tbody>
               </table>
             </div>
-
-            <div class="leg-edit-fin-unlock" id="legs-fin-unlock-box">
-              <?php if ($cvrMlAudience !== 'admin'): ?>
-                <label class="leg-edit-field" style="margin:0"><span>Unlock code</span>
-                  <input type="password" id="legs-fin-unlock-code" autocomplete="off" placeholder="Special unlock code">
-                </label>
-              <?php endif; ?>
-              <label class="leg-edit-field" style="margin:0;min-width:180px"><span>Reason</span>
-                <input type="text" id="legs-fin-unlock-reason" maxlength="500" placeholder="Optional">
-              </label>
-              <button class="app-btn app-btn-secondary" type="button" id="legs-fin-unlock-btn"><span>Unlock Financial</span></button>
-            </div>
           </section>
+        </div>
+        <div class="leg-edit-record-lock" id="legs-record-lock">
+          <div class="leg-edit-fin-locked" id="legs-fin-locked-banner">This Operational Leg is locked.</div>
+          <div class="leg-edit-fin-unlock" id="legs-fin-unlock-box">
+            <?php if ($cvrMlAudience !== 'admin'): ?>
+              <label class="leg-edit-field" style="margin:0"><span>Unlock code</span>
+                <input type="password" id="legs-fin-unlock-code" autocomplete="off" placeholder="Special unlock code">
+              </label>
+            <?php endif; ?>
+            <label class="leg-edit-field" style="margin:0;min-width:180px"><span>Reason</span>
+              <input type="text" id="legs-fin-unlock-reason" maxlength="500" placeholder="Optional">
+            </label>
+            <button class="app-btn app-btn-secondary" type="button" id="legs-fin-unlock-btn"><span>Unlock Record</span></button>
+          </div>
         </div>
         <div class="leg-edit-footer">
           <button class="leg-edit-cancel" type="button" data-legs-edit-close>Cancel</button>
+          <?php if ($cvrMlAudience === 'admin' && $cvrMlCanEdit): ?>
+            <button class="app-btn app-btn-secondary" type="button" id="legs-split-btn">Define Legs</button>
+          <?php endif; ?>
           <?php if ($cvrMlCanEdit): ?>
             <button class="leg-edit-save" type="submit" id="legs-edit-save-btn">Save Changes</button>
             <button class="leg-edit-save-lock" type="button" id="legs-edit-save-lock-btn" disabled>Save and LOCK</button>
@@ -3692,6 +3879,49 @@ a.intake-refresh:hover{
         <textarea id="legs-briefing-copy-box" readonly placeholder="Open a leg with a generated debrief to load the Generic Briefing."></textarea>
         <div class="leg-edit-briefing-status" id="legs-briefing-status"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="intake-modal-backdrop" id="legs-split-modal" hidden>
+  <div class="intake-modal" role="dialog" aria-modal="true" aria-labelledby="legs-split-title">
+    <div class="intake-modal-head">
+      <div>
+        <h3 id="legs-split-title">Define Legs</h3>
+        <p class="intake-muted" style="margin:4px 0 0">Annotate this continuous Check-In with multi-leg detail. One Operational Leg is kept — replay, CSV, debrief, and financials stay whole.</p>
+      </div>
+      <button type="button" class="intake-modal-close" id="legs-split-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="intake-modal-body">
+      <div class="leg-split-status is-muted" id="legs-split-status">Loading suggestions…</div>
+      <ul class="leg-split-notes" id="legs-split-notes" hidden></ul>
+      <div class="leg-split-summary" id="legs-split-summary" hidden></div>
+      <div id="legs-split-table-wrap" class="leg-split-table-wrap" hidden>
+        <table class="leg-split-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>From</th>
+              <th>To</th>
+              <th>Off Block UTC</th>
+              <th>Hobbs</th>
+              <th>ΔH</th>
+              <th>Tacho</th>
+              <th>ΔT</th>
+              <th>TO</th>
+              <th>LDG</th>
+              <th>Fuel Start</th>
+              <th>Fuel End</th>
+              <th>Burn</th>
+            </tr>
+          </thead>
+          <tbody id="legs-split-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="leg-edit-footer">
+      <button class="leg-edit-cancel" type="button" id="legs-split-cancel">Cancel</button>
+      <button class="leg-edit-save" type="button" id="legs-split-apply" disabled>Confirm Legs</button>
     </div>
   </div>
 </div>
@@ -3819,7 +4049,12 @@ a.intake-refresh:hover{
 <?php
 $transcriptReviewJsPath = __DIR__ . '/assets/transcript_review.js';
 $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($transcriptReviewJsPath) : (string)time();
+$legTrackJsPath = __DIR__ . '/assets/leg_track_chart.js';
+$legTrackJsVer = is_file($legTrackJsPath) ? (string)filemtime($legTrackJsPath) : (string)time();
 ?>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="/admin/assets/leg_track_chart.js?v=<?= cvr_intake_h($legTrackJsVer) ?>"></script>
 <script src="/admin/assets/transcript_review.js?v=<?= cvr_intake_h($transcriptReviewJsVer) ?>"></script>
 
 <script>
@@ -4704,6 +4939,104 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     const debriefModal = document.getElementById('legs-debrief-modal');
     const crewBox = document.getElementById('legs-edit-crew');
     const form = document.getElementById('legs-edit-form');
+    const canEditLegs = <?= $cvrMlCanEdit ? 'true' : 'false' ?>;
+    const syncSegmentOperationTotals = () => {
+      const opsSeg = document.getElementById('legs-edit-ops-segments');
+      if (!opsSeg || opsSeg.hidden) return;
+      let takeoffs = 0;
+      let landings = 0;
+      opsSeg.querySelectorAll('[data-segment-ops="takeoff"]').forEach((el) => {
+        takeoffs += Math.max(0, Number(el.value) || 0);
+      });
+      opsSeg.querySelectorAll('[data-segment-ops="landing"]').forEach((el) => {
+        landings += Math.max(0, Number(el.value) || 0);
+      });
+      const toInput = document.getElementById('legs-edit-to');
+      const ldgInput = document.getElementById('legs-edit-ldg');
+      if (toInput) toInput.value = String(takeoffs);
+      if (ldgInput) ldgInput.value = String(landings);
+    };
+
+    const syncSegmentMeterFuelTotals = () => {
+      const meterSeg = document.getElementById('legs-edit-meter-segments');
+      const fuelSeg = document.getElementById('legs-edit-fuel-segments');
+      if (!meterSeg || meterSeg.hidden) return;
+      const hobbsStarts = Array.from(meterSeg.querySelectorAll('[data-segment-meter="hobbs-start"]'));
+      const hobbsEnds = Array.from(meterSeg.querySelectorAll('[data-segment-meter="hobbs-end"]'));
+      const tachoStarts = Array.from(meterSeg.querySelectorAll('[data-segment-meter="tacho-start"]'));
+      const tachoEnds = Array.from(meterSeg.querySelectorAll('[data-segment-meter="tacho-end"]'));
+      if (hobbsStarts.length && hobbsEnds.length) {
+        document.getElementById('legs-edit-hobbs-start').value = oneDecimal(hobbsStarts[0].value);
+        document.getElementById('legs-edit-hobbs-end').value = oneDecimal(hobbsEnds[hobbsEnds.length - 1].value);
+      }
+      if (tachoStarts.length && tachoEnds.length) {
+        document.getElementById('legs-edit-tacho-start').value = oneDecimal(tachoStarts[0].value);
+        document.getElementById('legs-edit-tacho-end').value = oneDecimal(tachoEnds[tachoEnds.length - 1].value);
+      }
+      meterSeg.querySelectorAll('.leg-edit-segment').forEach((card) => {
+        const hs = Number(card.querySelector('[data-segment-meter="hobbs-start"]')?.value);
+        const he = Number(card.querySelector('[data-segment-meter="hobbs-end"]')?.value);
+        const ts = Number(card.querySelector('[data-segment-meter="tacho-start"]')?.value);
+        const te = Number(card.querySelector('[data-segment-meter="tacho-end"]')?.value);
+        const hd = card.querySelector('[data-segment-diff="hobbs"]');
+        const td = card.querySelector('[data-segment-diff="tacho"]');
+        if (hd) hd.textContent = Number.isFinite(hs) && Number.isFinite(he) && he >= hs ? oneDecimal(he - hs) : '—';
+        if (td) td.textContent = Number.isFinite(ts) && Number.isFinite(te) && te >= ts ? oneDecimal(te - ts) : '—';
+      });
+      if (fuelSeg && !fuelSeg.hidden) {
+        const fuelDeps = Array.from(fuelSeg.querySelectorAll('[data-segment-fuel="dep"]'));
+        const fuelLdgs = Array.from(fuelSeg.querySelectorAll('[data-segment-fuel="ldg"]'));
+        if (fuelDeps.length && fuelLdgs.length) {
+          document.getElementById('legs-edit-fuel-dep').value = oneDecimal(fuelDeps[0].value);
+          document.getElementById('legs-edit-fuel-ldg').value = oneDecimal(fuelLdgs[fuelLdgs.length - 1].value);
+        }
+        fuelSeg.querySelectorAll('.leg-edit-segment').forEach((card) => {
+          const fd = Number(card.querySelector('[data-segment-fuel="dep"]')?.value);
+          const fl = Number(card.querySelector('[data-segment-fuel="ldg"]')?.value);
+          const burn = card.querySelector('[data-segment-diff="fuel"]');
+          if (burn) burn.textContent = Number.isFinite(fd) && Number.isFinite(fl) ? oneDecimal(fd - fl) : '—';
+        });
+      }
+      updateDerived();
+      syncFinancialFlightHoursFromHobbs();
+    };
+
+    const segmentFieldsEditable = () => canEditLegs && !financialLocked;
+
+    const applyRecordLockState = () => {
+      const editable = canEditLegs && !financialLocked;
+      form.querySelectorAll('input, select, textarea, button').forEach((el) => {
+        if (!(el instanceof HTMLElement)) return;
+        if (el.closest('.leg-edit-fin-unlock')) return;
+        if (el.matches('[data-legs-edit-close], .leg-edit-cancel')) return;
+        if (el.type === 'hidden') return;
+        if (el.id === 'legs-edit-save-btn' || el.id === 'legs-edit-save-lock-btn') return;
+        if (el.tagName === 'BUTTON' || el.tagName === 'SELECT' || el.type === 'checkbox' || el.type === 'radio' || el.type === 'file' || el.type === 'date') {
+          el.disabled = !editable;
+          return;
+        }
+        el.readOnly = !editable;
+        el.disabled = !editable;
+      });
+      form.querySelectorAll('[data-segment-field]').forEach((el) => {
+        el.readOnly = !editable;
+        el.disabled = !editable;
+      });
+      const addCrew = document.getElementById('legs-edit-add-crew');
+      if (addCrew) addCrew.disabled = !editable;
+      const splitBtn = document.getElementById('legs-split-btn');
+      if (splitBtn) splitBtn.disabled = !editable || splitBtn.hidden;
+      const saveBtn = document.getElementById('legs-edit-save-btn');
+      if (saveBtn) saveBtn.disabled = !editable;
+      const lockBtn = document.getElementById('legs-edit-save-lock-btn');
+      if (lockBtn) {
+        lockBtn.disabled = financialLocked || !isFinancialComplete();
+      }
+    };
+
+    const applySegmentFieldLockState = () => {
+      applyRecordLockState();
+    };
     if (!table || !editModal || !debriefModal || !crewBox || !form) {
       return;
     }
@@ -4729,9 +5062,23 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
 
     let baselineSnapshot = '';
     let currentLeg = null;
+    const trackPanel = document.getElementById('legs-track-panel');
+    const trackChart = (window.IPCALegTrackChart && trackPanel)
+      ? window.IPCALegTrackChart.create(trackPanel)
+      : null;
 
-    const openModal = (modal) => { modal.hidden = false; };
-    const closeModal = (modal) => { modal.hidden = true; };
+    const openModal = (modal) => {
+      modal.hidden = false;
+      if (modal === editModal && trackChart) {
+        trackChart.invalidate();
+      }
+    };
+    const closeModal = (modal) => {
+      if (modal === editModal && trackChart) {
+        trackChart.reset();
+      }
+      modal.hidden = true;
+    };
     const oneDecimal = (v) => {
       const n = Number(v);
       return Number.isFinite(n) ? (Math.round(n * 10) / 10).toFixed(1) : '';
@@ -4837,15 +5184,11 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       financialLocked = !!locked;
       const banner = document.getElementById('legs-fin-locked-banner');
       const unlockBox = document.getElementById('legs-fin-unlock-box');
+      const recordLock = document.getElementById('legs-record-lock');
       banner?.classList.toggle('is-on', financialLocked);
       unlockBox?.classList.toggle('is-on', financialLocked);
-      form.querySelectorAll('[data-fin-field]').forEach((el) => {
-        el.disabled = financialLocked;
-      });
-      const lockBtn = document.getElementById('legs-edit-save-lock-btn');
-      if (lockBtn) {
-        lockBtn.disabled = financialLocked || !isFinancialComplete();
-      }
+      recordLock?.classList.toggle('is-on', financialLocked);
+      applyRecordLockState();
     };
 
     const isFinancialComplete = () => {
@@ -4853,7 +5196,15 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       const instructor = Number(document.getElementById('legs-fin-instructor')?.value || 0);
       const rate = Number(document.getElementById('legs-fin-rate')?.value || 0);
       const flightHours = Number(document.getElementById('legs-fin-flight-hours')?.value);
-      return customer > 0 && instructor > 0 && rate > 0 && Number.isFinite(flightHours) && flightHours >= 0;
+      const groundHours = Number(document.getElementById('legs-fin-ground-hours')?.value || 0);
+      const preflightHours = Number(document.getElementById('legs-fin-preflight')?.value || 0);
+      if (!(customer > 0) || !Number.isFinite(flightHours) || flightHours < 0) return false;
+      const instructionHours = (Number.isFinite(flightHours) ? flightHours : 0)
+        + (Number.isFinite(groundHours) ? groundHours : 0)
+        + (Number.isFinite(preflightHours) ? preflightHours : 0);
+      // Rental-only / experience building: instructor + rate not required when instruction is 0.
+      if (instructionHours <= 0) return true;
+      return instructor > 0 && rate > 0;
     };
 
     const syncFinancialFlightHoursFromHobbs = () => {
@@ -4865,6 +5216,24 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       if (Number.isFinite(hs) && Number.isFinite(he) && he >= hs) {
         flightInput.value = oneDecimal(he - hs);
       }
+    };
+
+    const financialHasPersistedInstructionHours = (fin) => {
+      if (!fin || typeof fin !== 'object') return false;
+      if (Number(fin.id || 0) > 0) return true;
+      if (fin.is_locked || fin.status === 'locked') return true;
+      if (fin.session_total_usd != null || fin.grand_total_usd != null) return true;
+      if (fin.overview != null) return true;
+      return false;
+    };
+
+    const financialRentalHoursFromHobbs = () => {
+      const hs = Number(document.getElementById('legs-edit-hobbs-start')?.value);
+      const he = Number(document.getElementById('legs-edit-hobbs-end')?.value);
+      if (Number.isFinite(hs) && Number.isFinite(he) && he >= hs) {
+        return Math.round((he - hs) * 10) / 10;
+      }
+      return 0;
     };
 
     const refreshFinancialOverview = () => {
@@ -4881,6 +5250,7 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       const rateOpt = rateSelect?.selectedOptions?.[0];
       const instrRate = Number(rateOpt?.getAttribute('data-rate') || 0);
       const aircraftRate = Number(rental.rate_usd_per_hour || 0);
+      const rentalHours = financialRentalHoursFromHobbs();
       const flightHours = Number(document.getElementById('legs-fin-flight-hours')?.value || 0);
       const groundHours = Number(document.getElementById('legs-fin-ground-hours')?.value || 0);
       const preflightHours = Number(document.getElementById('legs-fin-preflight')?.value || 0);
@@ -4896,7 +5266,7 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       document.getElementById('legs-fin-instructor-name').value = instructorName === 'Instructor' && !instructorSelect?.value ? '' : instructorName;
       document.getElementById('legs-fin-aircraft-reg').value = reg;
 
-      const aircraftTotal = Math.round(flightHours * aircraftRate * 100) / 100;
+      const aircraftTotal = Math.round(rentalHours * aircraftRate * 100) / 100;
       const flightTotal = Math.round(flightHours * instrRate * 100) / 100;
       const groundTotal = Math.round(groundHours * instrRate * 100) / 100;
       const preflightTotal = Math.round(preflightHours * instrRate * 100) / 100;
@@ -4906,7 +5276,7 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
 
       let html = '';
       html += '<tr class="is-section"><th>Aircraft Rental</th><th class="num">Hours</th><th class="num">Total</th></tr>';
-      html += '<tr><td>#' + (reg || '—') + ' ' + aircraftLabel + '</td><td class="num">' + oneDecimal(flightHours || 0) + '</td><td class="num">' + money(aircraftTotal) + '</td></tr>';
+      html += '<tr><td>#' + (reg || '—') + ' ' + aircraftLabel + '</td><td class="num">' + oneDecimal(rentalHours || 0) + '</td><td class="num">' + money(aircraftTotal) + '</td></tr>';
       html += '<tr class="is-section"><th>Instruction</th><th class="num">Hours</th><th class="num">Total</th></tr>';
       if (flightHours > 0) {
         html += '<tr><td>Flight Time (' + instructorName + ')</td><td class="num">' + oneDecimal(flightHours) + '</td><td class="num">' + money(flightTotal) + '</td></tr>';
@@ -4954,7 +5324,13 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       }
       if (rate && fin.instructional_rate_id) rate.value = String(fin.instructional_rate_id);
       document.getElementById('legs-fin-preflight').value = oneDecimal(fin.preflight_briefing_hours ?? 0) || '0.0';
-      document.getElementById('legs-fin-flight-hours').value = oneDecimal(fin.flight_instruction_hours ?? leg?.hobbs_delta ?? 0) || '0.0';
+      const persisted = financialHasPersistedInstructionHours(fin);
+      const instructionHours = persisted
+        ? (fin.flight_instruction_hours ?? 0)
+        : (fin.flight_instruction_hours ?? leg?.hobbs_delta ?? 0);
+      document.getElementById('legs-fin-flight-hours').value = oneDecimal(instructionHours) || '0.0';
+      // Keep intentional values (including 0.0) from being overwritten by Hobbs auto-sync.
+      financialFlightHoursTouched = persisted;
       document.getElementById('legs-fin-ground-hours').value = oneDecimal(fin.ground_instruction_hours ?? 0.3) || '0.3';
       if (fin.customer_name) document.getElementById('legs-fin-customer-name').value = fin.customer_name;
       if (fin.instructor_name) document.getElementById('legs-fin-instructor-name').value = fin.instructor_name;
@@ -5061,6 +5437,219 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       }
     };
 
+    const formatSegmentLocal = (utc, timezone) => {
+      const raw = String(utc || '').trim();
+      if (!raw) return { date: '', time: '—' };
+      try {
+        const dt = new Date(raw.includes('T') ? raw + (raw.endsWith('Z') ? '' : 'Z') : raw.replace(' ', 'T') + 'Z');
+        if (Number.isNaN(dt.getTime())) return { date: '', time: '—' };
+        const fmt = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone || 'America/Los_Angeles',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+        const parts = Object.fromEntries(fmt.formatToParts(dt).map((p) => [p.type, p.value]));
+        return {
+          date: `${parts.year}-${parts.month}-${parts.day}`,
+          time: `${parts.hour}:${parts.minute}`,
+        };
+      } catch (e) {
+        return { date: '', time: '—' };
+      }
+    };
+
+    const renderAnnotatedSegments = (leg) => {
+      const segments = Array.isArray(leg?.leg_segments) ? leg.leg_segments : [];
+      const hasSegments = segments.length >= 2;
+      const singleRoute = document.getElementById('legs-edit-single-route');
+      const singleMeters = document.getElementById('legs-edit-single-meters');
+      const singleFuel = document.getElementById('legs-edit-single-fuel');
+      const singleOps = document.getElementById('legs-edit-single-ops');
+      const routeSeg = document.getElementById('legs-edit-route-segments');
+      const meterSeg = document.getElementById('legs-edit-meter-segments');
+      const fuelSeg = document.getElementById('legs-edit-fuel-segments');
+      const opsSeg = document.getElementById('legs-edit-ops-segments');
+      const fuelUnit = document.getElementById('legs-edit-fuel-unit')?.value || 'USG';
+      const toggleRequired = (ids, on) => {
+        ids.forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (on) el.setAttribute('required', 'required');
+          else el.removeAttribute('required');
+        });
+      };
+      if (singleRoute) singleRoute.hidden = hasSegments;
+      if (singleMeters) singleMeters.hidden = hasSegments;
+      if (singleFuel) singleFuel.hidden = hasSegments;
+      if (singleOps) singleOps.hidden = hasSegments;
+      toggleRequired([
+        'legs-edit-dep', 'legs-edit-arr', 'legs-edit-date', 'legs-edit-off-time',
+        'legs-edit-hobbs-start', 'legs-edit-hobbs-end', 'legs-edit-tacho-start', 'legs-edit-tacho-end',
+        'legs-edit-fuel-dep', 'legs-edit-fuel-ldg',
+        'legs-edit-to', 'legs-edit-ldg',
+      ], !hasSegments);
+      // Session totals remain posted even when segment cards are shown.
+      if (hasSegments) {
+        ['legs-edit-dep', 'legs-edit-arr', 'legs-edit-date', 'legs-edit-off-time',
+          'legs-edit-hobbs-start', 'legs-edit-hobbs-end', 'legs-edit-tacho-start', 'legs-edit-tacho-end',
+          'legs-edit-fuel-dep', 'legs-edit-fuel-ldg',
+          'legs-edit-to', 'legs-edit-ldg'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.disabled = false;
+        });
+      }
+      if (!hasSegments) {
+        if (routeSeg) { routeSeg.hidden = true; routeSeg.innerHTML = ''; }
+        if (meterSeg) { meterSeg.hidden = true; meterSeg.innerHTML = ''; }
+        if (fuelSeg) { fuelSeg.hidden = true; fuelSeg.innerHTML = ''; }
+        if (opsSeg) { opsSeg.hidden = true; opsSeg.innerHTML = ''; }
+        applySegmentFieldLockState();
+        return;
+      }
+      const tz = leg.timezone || 'America/Los_Angeles';
+      const esc = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      routeSeg.innerHTML = segments.map((seg, index) => {
+        const n = Number(seg.sequence_number || (index + 1));
+        const off = formatSegmentLocal(seg.off_block_utc, tz);
+        const on = formatSegmentLocal(seg.on_block_utc, tz);
+        return `<div class="leg-edit-segment">
+          <div class="leg-edit-segment-title">Leg ${n}</div>
+          <div class="leg-edit-grid">
+            <div class="leg-edit-field"><span>Departure Airport</span><div style="font-weight:850">${esc(seg.departure_airport || '—')}</div></div>
+            <div class="leg-edit-field"><span>Arrival Airport</span><div style="font-weight:850">${esc(seg.arrival_airport || '—')}</div></div>
+            <div class="leg-edit-field"><span>Date</span><div style="font-weight:850">${esc(off.date || '—')}</div></div>
+            <div class="leg-edit-field"><span>Off Block Time</span><div style="font-weight:850">${esc(off.time)} Local</div></div>
+            <div class="leg-edit-field"><span>On Block Time</span><div style="font-weight:850">${esc(on.time)} Local</div></div>
+          </div>
+        </div>`;
+      }).join('');
+      routeSeg.hidden = false;
+
+      const editableAttr = segmentFieldsEditable() ? '' : 'readonly';
+      meterSeg.innerHTML = segments.map((seg, index) => {
+        const n = Number(seg.sequence_number || (index + 1));
+        const route = `${seg.departure_airport || '—'} - ${seg.arrival_airport || '—'}`;
+        const dispatchId = Number(seg.dispatch_id || 0);
+        const hs = oneDecimal(seg.starting_hobbs);
+        const he = oneDecimal(seg.ending_hobbs);
+        const hd = oneDecimal(seg.hobbs_delta != null ? seg.hobbs_delta : (Number(he) - Number(hs)));
+        const ts = oneDecimal(seg.starting_tacho);
+        const te = oneDecimal(seg.ending_tacho);
+        const td = oneDecimal(seg.tacho_delta != null ? seg.tacho_delta : (Number(te) - Number(ts)));
+        return `<div class="leg-edit-segment">
+          <div class="leg-edit-segment-title">Leg ${n} (${esc(route)})</div>
+          <input type="hidden" name="leg_segments[${index}][sequence_number]" value="${esc(n)}">
+          <input type="hidden" name="leg_segments[${index}][dispatch_id]" value="${esc(dispatchId || '')}">
+          <input type="hidden" name="leg_segments[${index}][departure_airport]" value="${esc(seg.departure_airport || '')}">
+          <input type="hidden" name="leg_segments[${index}][arrival_airport]" value="${esc(seg.arrival_airport || '')}">
+          <div class="leg-edit-grid">
+            <div class="leg-edit-meter">
+              <div class="leg-edit-meter-title">Hobbs</div>
+              <div class="leg-edit-meter-row">
+                <label class="leg-edit-field"><span>Start</span>
+                  <input name="leg_segments[${index}][starting_hobbs]" data-segment-field data-segment-meter="hobbs-start" type="number" step="0.1" min="0" inputmode="decimal" value="${esc(hs)}" ${editableAttr}>
+                </label>
+                <div class="leg-edit-meter-arrow">→</div>
+                <label class="leg-edit-field"><span>End</span>
+                  <input name="leg_segments[${index}][ending_hobbs]" data-segment-field data-segment-meter="hobbs-end" type="number" step="0.1" min="0" inputmode="decimal" value="${esc(he)}" ${editableAttr}>
+                </label>
+              </div>
+              <div class="leg-edit-derived"><strong>Difference</strong><span data-segment-diff="hobbs">${esc(hd || '—')}</span></div>
+            </div>
+            <div class="leg-edit-meter">
+              <div class="leg-edit-meter-title">Tacho</div>
+              <div class="leg-edit-meter-row">
+                <label class="leg-edit-field"><span>Start</span>
+                  <input name="leg_segments[${index}][starting_tacho]" data-segment-field data-segment-meter="tacho-start" type="number" step="0.1" min="0" inputmode="decimal" value="${esc(ts)}" ${editableAttr}>
+                </label>
+                <div class="leg-edit-meter-arrow">→</div>
+                <label class="leg-edit-field"><span>End</span>
+                  <input name="leg_segments[${index}][ending_tacho]" data-segment-field data-segment-meter="tacho-end" type="number" step="0.1" min="0" inputmode="decimal" value="${esc(te)}" ${editableAttr}>
+                </label>
+              </div>
+              <div class="leg-edit-derived"><strong>Difference</strong><span data-segment-diff="tacho">${esc(td || '—')}</span></div>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      meterSeg.hidden = false;
+
+      fuelSeg.innerHTML = segments.map((seg, index) => {
+        const n = Number(seg.sequence_number || (index + 1));
+        const route = `${seg.departure_airport || '—'} - ${seg.arrival_airport || '—'}`;
+        const start = oneDecimal(seg.fuel_onboard);
+        const end = oneDecimal(seg.fuel_remaining);
+        const burn = oneDecimal(
+          seg.fuel_burn != null
+            ? seg.fuel_burn
+            : (start !== '' && end !== '' ? Number(start) - Number(end) : '')
+        );
+        return `<div class="leg-edit-segment">
+          <div class="leg-edit-segment-title">Leg ${n} (${esc(route)})</div>
+          <div class="leg-edit-grid-3">
+            <label class="leg-edit-field"><span>Fuel Departure</span>
+              <div class="leg-edit-unit">
+                <input name="leg_segments[${index}][fuel_onboard]" data-segment-field data-segment-fuel="dep" type="number" step="0.1" min="0" inputmode="decimal" value="${esc(start)}" ${editableAttr}>
+                <span class="leg-edit-suffix">${esc(fuelUnit)}</span>
+              </div>
+            </label>
+            <label class="leg-edit-field"><span>Fuel Landing</span>
+              <div class="leg-edit-unit">
+                <input name="leg_segments[${index}][fuel_remaining]" data-segment-field data-segment-fuel="ldg" type="number" step="0.1" min="0" inputmode="decimal" value="${esc(end)}" ${editableAttr}>
+                <span class="leg-edit-suffix">${esc(fuelUnit)}</span>
+              </div>
+            </label>
+            <div class="leg-edit-field"><span>Fuel Burn</span>
+              <div class="leg-edit-derived" style="margin:0"><span data-segment-diff="fuel">${esc(burn || '—')}</span>&nbsp;<span class="leg-edit-suffix">${esc(fuelUnit)}</span></div>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      fuelSeg.hidden = false;
+
+      opsSeg.innerHTML = segments.map((seg, index) => {
+        const n = Number(seg.sequence_number || (index + 1));
+        const route = `${seg.departure_airport || '—'} - ${seg.arrival_airport || '—'}`;
+        const to = Number(seg.takeoff_count ?? 0);
+        const ldg = Number(seg.landing_count ?? 0);
+        return `<div class="leg-edit-segment">
+          <div class="leg-edit-segment-title">Leg ${n} — ${esc(route)}</div>
+          <div class="leg-edit-grid" style="max-width:420px">
+            <label class="leg-edit-field"><span>Takeoffs</span>
+              <input name="leg_segments[${index}][takeoff_count]" data-segment-field data-segment-ops="takeoff" type="number" min="0" step="1" inputmode="numeric" value="${esc(to)}" ${editableAttr}>
+            </label>
+            <label class="leg-edit-field"><span>Landings</span>
+              <input name="leg_segments[${index}][landing_count]" data-segment-field data-segment-ops="landing" type="number" min="0" step="1" inputmode="numeric" value="${esc(ldg)}" ${editableAttr}>
+            </label>
+          </div>
+        </div>`;
+      }).join('');
+      opsSeg.hidden = false;
+      syncSegmentOperationTotals();
+      syncSegmentMeterFuelTotals();
+      applySegmentFieldLockState();
+      const bindSegmentInputs = (root) => {
+        root?.querySelectorAll('[data-segment-field]').forEach((input) => {
+          input.addEventListener('input', () => {
+            syncSegmentOperationTotals();
+            syncSegmentMeterFuelTotals();
+          });
+          input.addEventListener('change', () => {
+            syncSegmentOperationTotals();
+            syncSegmentMeterFuelTotals();
+          });
+        });
+      };
+      bindSegmentInputs(meterSeg);
+      bindSegmentInputs(fuelSeg);
+      bindSegmentInputs(opsSeg);
+    };
+
     const fillEditForm = (leg) => {
       currentLeg = leg;
       clearErrors();
@@ -5095,9 +5684,20 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       document.getElementById('legs-csv-status').textContent = leg.has_garmin_csv ? 'Garmin Uploaded' : 'Garmin Missing';
       renderCrew(leg.crew || []);
       fillFinancial(leg);
+      renderAnnotatedSegments(leg);
+      const splitBtn = document.getElementById('legs-split-btn');
+      if (splitBtn) {
+        const alreadyMulti = !!(leg.device_multi_leg_grouped)
+          || (Array.isArray(leg.leg_segments) && leg.leg_segments.length >= 2);
+        splitBtn.hidden = alreadyMulti;
+        splitBtn.disabled = alreadyMulti;
+      }
       updateDerived();
       baselineSnapshot = serializeSnapshot();
       loadGenericBriefing(leg);
+      if (trackChart) {
+        trackChart.load(leg);
+      }
     };
 
     const validate = () => {
@@ -5111,8 +5711,8 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       const arr = document.getElementById('legs-edit-arr').value.trim().toUpperCase();
       document.getElementById('legs-edit-dep').value = dep;
       document.getElementById('legs-edit-arr').value = arr;
-      if (!/^[A-Z]{3,4}$/.test(dep)) { showError('dep', 'Enter a valid departure airport.'); ok = false; }
-      if (!/^[A-Z]{3,4}$/.test(arr)) { showError('arr', 'Enter a valid arrival airport.'); ok = false; }
+      if (!/^[A-Z0-9]{3,4}$/.test(dep)) { showError('dep', 'Enter a valid departure airport (e.g. KTRM or L08).'); ok = false; }
+      if (!/^[A-Z0-9]{3,4}$/.test(arr)) { showError('arr', 'Enter a valid arrival airport (e.g. KTRM or L08).'); ok = false; }
       if (!document.getElementById('legs-edit-date').value) { showError('date', 'Enter the flight date.'); ok = false; }
       const time = document.getElementById('legs-edit-off-time').value.trim();
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
@@ -5200,10 +5800,10 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       updateDerived();
     });
     document.getElementById('legs-edit-dep')?.addEventListener('input', (e) => {
-      e.target.value = String(e.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+      e.target.value = String(e.target.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
     });
     document.getElementById('legs-edit-arr')?.addEventListener('input', (e) => {
-      e.target.value = String(e.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+      e.target.value = String(e.target.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
     });
 
     document.getElementById('legs-fin-flight-hours')?.addEventListener('input', () => {
@@ -5218,10 +5818,10 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     document.getElementById('legs-edit-save-lock-btn')?.addEventListener('click', () => {
       if (financialLocked) return;
       if (!isFinancialComplete()) {
-        window.alert('Complete Customer, Instructor, rate, and flight hours before locking.');
+        window.alert('Complete Customer before locking. Instructor and rate are required when instruction hours are greater than zero.');
         return;
       }
-      if (!window.confirm('Save and LOCK this financial dispatch?\n\nAfter lock, only an admin or an instructor with the unlock code can edit it.')) {
+      if (!window.confirm('Save and LOCK this Operational Leg?\n\nAfter lock, identity, route, meters, fuel, crew, and financials cannot be edited until an admin (or instructor with the unlock code) unlocks the record.')) {
         return;
       }
       document.getElementById('legs-fin-lock-flag').value = '1';
@@ -5256,6 +5856,211 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
       unlockForm.submit();
     });
 
+    const splitModal = document.getElementById('legs-split-modal');
+    const splitStatus = document.getElementById('legs-split-status');
+    const splitNotes = document.getElementById('legs-split-notes');
+    const splitSummary = document.getElementById('legs-split-summary');
+    const splitTableWrap = document.getElementById('legs-split-table-wrap');
+    const splitTbody = document.getElementById('legs-split-tbody');
+    const splitApply = document.getElementById('legs-split-apply');
+    let splitPreview = null;
+
+    const setSplitStatus = (message, tone) => {
+      if (!splitStatus) return;
+      splitStatus.textContent = message || '';
+      splitStatus.classList.remove('is-ok', 'is-muted');
+      if (tone === 'ok') splitStatus.classList.add('is-ok');
+      if (tone === 'muted') splitStatus.classList.add('is-muted');
+    };
+
+    const closeSplitModal = () => {
+      if (splitModal) splitModal.hidden = true;
+      splitPreview = null;
+      if (splitApply) splitApply.disabled = true;
+    };
+
+    const oneDec = (value) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? (Math.round(n * 10) / 10).toFixed(1) : '';
+    };
+
+    const refreshSplitDerived = () => {
+      if (!splitTbody) return;
+      const rows = Array.from(splitTbody.querySelectorAll('tr'));
+      rows.forEach((tr) => {
+        const hs = Number(tr.querySelector('[data-split-field="starting_hobbs"]')?.value);
+        const he = Number(tr.querySelector('[data-split-field="ending_hobbs"]')?.value);
+        const ts = Number(tr.querySelector('[data-split-field="starting_tacho"]')?.value);
+        const te = Number(tr.querySelector('[data-split-field="ending_tacho"]')?.value);
+        const fs = Number(tr.querySelector('[data-split-field="fuel_onboard"]')?.value);
+        const fe = Number(tr.querySelector('[data-split-field="fuel_remaining"]')?.value);
+        const hobbsEl = tr.querySelector('[data-split-delta="hobbs"]');
+        const tachoEl = tr.querySelector('[data-split-delta="tacho"]');
+        const burnEl = tr.querySelector('[data-split-delta="burn"]');
+        if (hobbsEl) hobbsEl.textContent = Number.isFinite(hs) && Number.isFinite(he) ? ('+' + oneDec(he - hs)) : '—';
+        if (tachoEl) tachoEl.textContent = Number.isFinite(ts) && Number.isFinite(te) ? ('+' + oneDec(te - ts)) : '—';
+        if (burnEl) burnEl.textContent = Number.isFinite(fs) && Number.isFinite(fe) ? oneDec(Math.max(0, fs - fe)) : '—';
+      });
+    };
+
+    const renderSplitPreview = (preview) => {
+      splitPreview = preview;
+      if (splitNotes) {
+        splitNotes.innerHTML = '';
+        (preview.notes || []).forEach((note) => {
+          const li = document.createElement('li');
+          li.textContent = String(note);
+          splitNotes.appendChild(li);
+        });
+        splitNotes.hidden = !(preview.notes || []).length;
+      }
+      if (splitSummary) {
+        const hobbsTotal = oneDec((Number(preview.ending_hobbs) || 0) - (Number(preview.starting_hobbs) || 0));
+        const tachoTotal = oneDec((Number(preview.ending_tacho) || 0) - (Number(preview.starting_tacho) || 0));
+        const chips = [
+          'Total ΔH ' + hobbsTotal,
+          'Total ΔT ' + tachoTotal,
+        ];
+        if (preview.fuel_burn_total != null) {
+          chips.push('Total burn ' + oneDec(preview.fuel_burn_total) + ' USG');
+        }
+        if (preview.verified_takeoff_count || preview.verified_landing_count) {
+          chips.push('Check-In TO/LDG ' + (preview.verified_takeoff_count || 0) + '/' + (preview.verified_landing_count || 0));
+        }
+        splitSummary.innerHTML = chips.map((c) => '<span class="leg-split-chip">' + c + '</span>').join('');
+        splitSummary.hidden = false;
+      }
+      if (splitTbody) {
+        splitTbody.innerHTML = '';
+        (preview.proposed_legs || []).forEach((leg, index) => {
+          const tr = document.createElement('tr');
+          const esc = (v) => String(v ?? '').replace(/"/g, '&quot;');
+          tr.innerHTML = `
+            <td>${index + 1}</td>
+            <td><input data-split-field="departure_airport" value="${esc(leg.departure_airport)}" maxlength="4" style="text-transform:uppercase"></td>
+            <td><input data-split-field="arrival_airport" value="${esc(leg.arrival_airport)}" maxlength="4" style="text-transform:uppercase"></td>
+            <td><input data-split-field="off_block_utc" value="${esc(leg.off_block_utc)}"></td>
+            <td>
+              <div style="display:grid;gap:4px">
+                <input data-split-field="starting_hobbs" type="number" step="0.1" value="${esc(leg.starting_hobbs)}" title="Hobbs start">
+                <input data-split-field="ending_hobbs" type="number" step="0.1" value="${esc(leg.ending_hobbs)}" title="Hobbs end">
+              </div>
+            </td>
+            <td class="leg-split-delta" data-split-delta="hobbs">+${esc(leg.hobbs_delta)}</td>
+            <td>
+              <div style="display:grid;gap:4px">
+                <input data-split-field="starting_tacho" type="number" step="0.1" value="${esc(leg.starting_tacho)}" title="Tacho start">
+                <input data-split-field="ending_tacho" type="number" step="0.1" value="${esc(leg.ending_tacho)}" title="Tacho end">
+              </div>
+            </td>
+            <td class="leg-split-delta" data-split-delta="tacho">+${esc(leg.tacho_delta)}</td>
+            <td><input data-split-field="takeoff_count" type="number" min="0" step="1" value="${esc(leg.takeoff_count)}" style="width:3.2rem"></td>
+            <td><input data-split-field="landing_count" type="number" min="0" step="1" value="${esc(leg.landing_count)}" style="width:3.2rem"></td>
+            <td><input data-split-field="fuel_onboard" type="number" step="0.1" value="${esc(leg.fuel_onboard)}"></td>
+            <td><input data-split-field="fuel_remaining" type="number" step="0.1" value="${esc(leg.fuel_remaining)}"></td>
+            <td class="leg-split-delta" data-split-delta="burn">${esc(leg.fuel_burn)}</td>
+          `;
+          splitTbody.appendChild(tr);
+        });
+        splitTbody.querySelectorAll('input').forEach((input) => {
+          input.addEventListener('input', refreshSplitDerived);
+        });
+        refreshSplitDerived();
+      }
+      if (splitTableWrap) splitTableWrap.hidden = false;
+      if (splitApply) splitApply.disabled = !(preview.proposed_legs || []).length;
+      setSplitStatus('Review deltas, TO/LDG, and fuel burn, then confirm. Final meters stay locked to Check-In.', 'ok');
+    };
+
+    const collectSplitLegs = () => {
+      if (!splitTbody) return [];
+      return Array.from(splitTbody.querySelectorAll('tr')).map((tr) => {
+        const read = (name) => tr.querySelector(`[data-split-field="${name}"]`)?.value || '';
+        return {
+          departure_airport: String(read('departure_airport')).trim().toUpperCase(),
+          arrival_airport: String(read('arrival_airport')).trim().toUpperCase(),
+          off_block_utc: String(read('off_block_utc')).trim(),
+          starting_hobbs: read('starting_hobbs'),
+          ending_hobbs: read('ending_hobbs'),
+          starting_tacho: read('starting_tacho'),
+          ending_tacho: read('ending_tacho'),
+          takeoff_count: read('takeoff_count') || '1',
+          landing_count: read('landing_count') || '1',
+          fuel_onboard: read('fuel_onboard'),
+          fuel_remaining: read('fuel_remaining'),
+        };
+      });
+    };
+
+    document.getElementById('legs-split-btn')?.addEventListener('click', async () => {
+      const dispatchId = document.getElementById('legs-edit-dispatch-id')?.value || '';
+      if (!dispatchId || !currentLeg) return;
+      if (currentLeg.financial?.is_locked) {
+        window.alert('Unlock this Operational Leg before splitting it.');
+        return;
+      }
+      if (!splitModal) return;
+      splitModal.hidden = false;
+      if (splitTableWrap) splitTableWrap.hidden = true;
+      if (splitNotes) splitNotes.hidden = true;
+      if (splitSummary) splitSummary.hidden = true;
+      if (splitApply) splitApply.disabled = true;
+      setSplitStatus('Loading suggestions from schedule, CSV, and GPS…', 'muted');
+      try {
+        const response = await fetch('/admin/api/operational_leg_split_preview.php?dispatch_id=' + encodeURIComponent(dispatchId), {
+          credentials: 'same-origin',
+        });
+        const payload = await response.json();
+        if (!payload.ok || !payload.preview) {
+          throw new Error(payload.message || 'Could not build split suggestions.');
+        }
+        renderSplitPreview(payload.preview);
+      } catch (error) {
+        setSplitStatus(error instanceof Error ? error.message : 'Could not build split suggestions.', 'error');
+        if (splitApply) splitApply.disabled = true;
+      }
+    });
+
+    document.getElementById('legs-split-close')?.addEventListener('click', closeSplitModal);
+    document.getElementById('legs-split-cancel')?.addEventListener('click', closeSplitModal);
+
+    splitApply?.addEventListener('click', () => {
+      const dispatchId = document.getElementById('legs-edit-dispatch-id')?.value || '';
+      if (!dispatchId) return;
+      const legs = collectSplitLegs();
+      if (legs.length < 2) {
+        window.alert('At least two legs are required.');
+        return;
+      }
+      if (!window.confirm(
+        'Annotate this Check-In with ' + legs.length + ' legs?\n\n'
+        + 'One Operational Leg is kept. Replay, CSV recovery, debrief, and financials stay on this Flight Record.'
+      )) {
+        return;
+      }
+      const applyForm = document.createElement('form');
+      applyForm.method = 'post';
+      applyForm.style.display = 'none';
+      const csrf = form.querySelector('input[name="csrf_token"]')?.value || '';
+      const append = (name, value) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = String(value);
+        applyForm.appendChild(input);
+      };
+      append('action', 'split_operational_leg');
+      append('csrf_token', csrf);
+      append('dispatch_id', dispatchId);
+      legs.forEach((leg, index) => {
+        Object.entries(leg).forEach(([key, value]) => {
+          append(`split[legs][${index}][${key}]`, value);
+        });
+      });
+      document.body.appendChild(applyForm);
+      applyForm.submit();
+    });
+
     document.getElementById('legs-edit-add-crew')?.addEventListener('click', () => {
       const current = Array.from(crewBox.querySelectorAll('.leg-edit-crew-row')).map((row) => ({
         role: row.querySelector('select[name*="[role]"]')?.value || 'student',
@@ -5283,12 +6088,25 @@ $transcriptReviewJsVer = is_file($transcriptReviewJsPath) ? (string)filemtime($t
     });
 
     form.addEventListener('submit', (event) => {
+      const lockingNow = document.getElementById('legs-fin-lock-flag')?.value === '1';
+      if (financialLocked && !lockingNow) {
+        event.preventDefault();
+        window.alert('Unlock this Operational Leg before editing.');
+        return;
+      }
+      // Preserve the Flight Instruction field as entered (including 0.0) — do not re-pull Hobbs.
+      financialFlightHoursTouched = true;
+      syncSegmentOperationTotals();
+      syncSegmentMeterFuelTotals();
       // Normalize meter decimals before submit
       ['legs-edit-hobbs-start','legs-edit-hobbs-end','legs-edit-tacho-start','legs-edit-tacho-end','legs-edit-fuel-dep','legs-edit-fuel-ldg']
         .forEach((id) => {
           const el = document.getElementById(id);
           if (el && el.value !== '') el.value = oneDecimal(el.value);
         });
+      form.querySelectorAll('[data-segment-meter], [data-segment-fuel]').forEach((el) => {
+        if (el.value !== '') el.value = oneDecimal(el.value);
+      });
       ['legs-fin-preflight','legs-fin-flight-hours','legs-fin-ground-hours'].forEach((id) => {
         const el = document.getElementById(id);
         if (el && el.value !== '') el.value = oneDecimal(el.value);

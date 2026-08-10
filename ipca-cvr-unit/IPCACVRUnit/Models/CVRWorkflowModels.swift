@@ -45,12 +45,10 @@ enum CVRDispatchStatus: String, Codable {
     var displayTitle: String {
         switch self {
         case .noDispatch: return "NO DISPATCH"
-        case .dispatchIncomplete: return "DISPATCH INCOMPLETE"
-        case .consentRequired: return "CONSENT REQUIRED"
-        case .tailNumberConflict: return "TAIL NUMBER CONFLICT"
-        case .readyForVerification: return "READY FOR VERIFICATION"
-        case .dispatchVerified: return "DISPATCH VERIFIED"
-        case .flightRecordLoggingEnabled: return "FLIGHT RECORD LOGGING ENABLED"
+        case .dispatchIncomplete, .consentRequired, .tailNumberConflict, .readyForVerification:
+            return "VERIFY AND DISPATCH"
+        case .dispatchVerified, .flightRecordLoggingEnabled:
+            return "DISPATCHED"
         }
     }
 }
@@ -77,6 +75,9 @@ enum CVRFlightRecordStatus: String, Codable {
 enum CVRCrewRole: String, Codable, CaseIterable, Identifiable {
     case student
     case instructor
+    case pilotMonitoring = "pilot_monitoring"
+    case supervisingInstructor
+    case examiner
     case pic
     case safetyPilot
     case observer
@@ -90,12 +91,31 @@ enum CVRCrewRole: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .student: return "Student"
         case .instructor: return "Instructor"
+        case .pilotMonitoring: return "Pilot Monitoring"
+        case .supervisingInstructor: return "Supervising Instructor"
+        case .examiner: return "Examiner"
         case .pic: return "PIC"
         case .safetyPilot: return "Safety Pilot"
         case .observer: return "Observer"
         case .passenger: return "Passenger"
         case .maintenance: return "Maintenance"
         case .unknown: return "Unknown"
+        }
+    }
+}
+
+enum CVRPilotFunction: String, Codable, CaseIterable, Identifiable {
+    case none = "NONE"
+    case pilotFlying = "PF"
+    case pilotMonitoring = "PM"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .none: return "None"
+        case .pilotFlying: return "PF"
+        case .pilotMonitoring: return "PM"
         }
     }
 }
@@ -174,6 +194,72 @@ struct CVROperationalSessionContext: Codable, Equatable {
     }
 }
 
+enum CVROperationalSessionState: String, Codable, Equatable {
+    case intended
+    case evidenceCapturing = "evidence_capturing"
+    case endingStateSecured = "ending_state_secured"
+    case evidenceClosed = "evidence_closed"
+    case finalized
+    case cancelled
+}
+
+/// Stage 1 execution identity. This is intentionally separate from the legacy
+/// planned-leg continuity context and from every audio recording identity.
+struct CVROperationalSessionRecord: Identifiable, Codable, Equatable {
+    static let modelVersion = "operational_session_v1"
+
+    var id: String
+    var reservationUUID: String
+    var dispatchID: String
+    var workflowFlightRecordUUID: String
+    var modelVersion: String
+    var state: CVROperationalSessionState
+    var dispatchConfirmedAtUTC: Date
+    var aircraftID: Int?
+    var aircraftRegistration: String
+    var startingHobbs: Double
+    var startingTacho: Double
+    var startingFuelQuantity: Double?
+    var startingFuelUnit: String
+    var startingOilQuantity: Double?
+    var startingOilUnit: String?
+    /// Crew-secured session endpoint evidence. These values are persisted before
+    /// Avionics OFF and never depend on a server receipt.
+    var endingHobbs: Double? = nil
+    var endingTacho: Double? = nil
+    var endingFuelQuantity: Double? = nil
+    var endingFuelUnit: String? = nil
+    var endingStateSecuredAtUTC: Date? = nil
+    var avionicsOffAtUTC: Date? = nil
+}
+
+enum CVRPostFlightGarminPhase: String, Codable, Equatable {
+    case waitingForGarminData
+    case insertCardInCVR
+    case selectingCSV
+    case uploadingCSV
+    case uploadVerified
+    case verifyingLegs
+    case returnCardToGarmin
+    case completed
+}
+
+struct CVRPostFlightGarminHandoff: Codable, Equatable, Identifiable {
+    var id: String { flightRecordUUID }
+    var flightRecordUUID: String
+    var dispatchUUID: String
+    var reservationUUID: String?
+    var operationalSessionUUID: String?
+    var aircraftRegistration: String
+    var phase: CVRPostFlightGarminPhase
+    var beaconLossConfirmedAt: Date
+    var countdownEndsAt: Date
+    var selectedCSVHash: String?
+    var uploadReceiptID: String?
+    var legReviewRevisionUUID: String?
+    var cardReturnedConfirmedAt: Date?
+}
+
 struct CVRWorkflowState: Codable, Equatable {
     var selectedTab: CVROperationalTab
     var activeDispatch: CVRDispatchRecord?
@@ -186,6 +272,10 @@ struct CVRWorkflowState: Codable, Equatable {
     var discrepancies: [CVRDiscrepancyRecord]
     /// Phase 3 multi-leg / engine continuity. Optional for older flight-workflow.json.
     var operationalSession: CVROperationalSessionContext?
+    /// Stage 1 reservation-linked execution. Optional for legacy workflow files.
+    var activeOperationalSession: CVROperationalSessionRecord? = nil
+    /// Mandatory post-flight Garmin SD-card handoff. It survives workflow archival.
+    var postFlightGarminHandoff: CVRPostFlightGarminHandoff? = nil
     var updatedAt: Date
 
     static var empty: CVRWorkflowState {
@@ -200,6 +290,8 @@ struct CVRWorkflowState: Codable, Equatable {
             uploadComponents: [],
             discrepancies: [],
             operationalSession: nil,
+            activeOperationalSession: nil,
+            postFlightGarminHandoff: nil,
             updatedAt: Date()
         )
     }
@@ -225,6 +317,10 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
     var missionCode: String
     var plannedDepartureAirport: String
     var plannedDestinationAirport: String
+    /// Optional scheduler route context. Informative only; never an execution requirement.
+    var informativeRouteAirports: [String]? = nil
+    /// Planned scheduler-leg identities only. These are never actual flown-leg identities.
+    var informativePlannedLegUUIDs: [String]? = nil
     var crew: [CVRCrewAssignment]
     var startingHobbs: Double?
     var startingTacho: Double?
@@ -234,6 +330,8 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
     var startingOilUnit: String?
     var dispatchSource: String
     var schedulerRecordID: String?
+    /// Reservation parent is explicit for route-free Operational Sessions.
+    var reservationUUID: String? = nil
     var creatorIdentity: String
     var createdAt: Date
     var modifiedAt: Date
@@ -251,6 +349,11 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
     var previousEndingOilUnit: String?
     var refueledSincePreviousFlight: Bool?
     var oilServicedSincePreviousFlight: Bool?
+    /// Pending append-only scheduler replacement lineage for a material Duty edit.
+    var supersedesReservationUUID: String? = nil
+    var supersedesSchedulerRecordID: String? = nil
+    var operationalSessionUUID: String? = nil
+    var operationalSessionModelVersion: String? = nil
     /// Phase 2D offline canonical identity. Nil when canonical writes are disabled.
     var operationalIdentity: CVRLocalOperationalIdentity?
 
@@ -259,12 +362,23 @@ struct CVRDispatchRecord: Identifiable, Codable, Equatable {
         if tailNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.append("TAIL NUMBER REQUIRED") }
         if aircraftID == nil { items.append("AIRCRAFT REQUIRED") }
         if missionCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.append("MISSION CODE REQUIRED") }
-        let departure = plannedDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let destination = plannedDestinationAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if departure.isEmpty { items.append("Departure airport is required.") }
-        if destination.isEmpty { items.append("Destination airport is required.") }
+        if operationalSessionModelVersion != CVROperationalSessionRecord.modelVersion {
+            let departure = plannedDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let destination = plannedDestinationAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if departure.isEmpty { items.append("Departure airport is required.") }
+            if destination.isEmpty { items.append("Destination airport is required.") }
+        }
         if crew.isEmpty { items.append("CREW REQUIRED") }
         if crew.contains(where: { $0.role == .unknown }) { items.append("CREW FUNCTION REQUIRED") }
+        if crew.filter({
+            $0.role == .student && $0.effectivePilotFunction == .pilotFlying
+        }).count != 1 {
+            items.append("EXACTLY ONE CUSTOMER / PILOT FLYING REQUIRED")
+        }
+        let picCount = crew.filter(\.hasPICResponsibility).count
+        if picCount < 1 || picCount > 2 {
+            items.append("ONE OR TWO PILOTS LOGGING PIC REQUIRED")
+        }
         if startingHobbs == nil { items.append("STARTING HOBBS REQUIRED") }
         if startingTacho == nil { items.append("STARTING TACHO REQUIRED") }
         if fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items.append("FUEL QUANTITY REQUIRED") }
@@ -333,6 +447,18 @@ struct CVRCrewAssignment: Identifiable, Codable, Equatable {
     var personID: Int?
     var personName: String
     var role: CVRCrewRole
+    /// Independent from participant role: a Student or Instructor may be PF or PM.
+    var pilotFunction: CVRPilotFunction? = nil
+    /// PIC responsibility is orthogonal to PF/PM (for example, one pilot may be PF and PIC).
+    var isPIC: Bool? = nil
+
+    var effectivePilotFunction: CVRPilotFunction {
+        pilotFunction ?? .none
+    }
+
+    var hasPICResponsibility: Bool {
+        isPIC ?? (role == .pic)
+    }
 }
 
 struct CVRConsentRecord: Identifiable, Codable, Equatable {
@@ -407,6 +533,9 @@ struct CVRWorkflowArchiveRecord: Identifiable, Codable, Equatable {
     var archivedAt: Date
     var appVersion: String
     var status: CVRWorkflowArchiveStatus
+    var operationalSession: CVROperationalSessionRecord? = nil
+    /// Soft-hide from Log overview (PIN void). Archive export can still exist.
+    var voidedAt: Date? = nil
 }
 
 struct CVRRecorderVerificationRecord: Identifiable, Codable, Equatable {
@@ -822,8 +951,12 @@ final class CVRFlightLogStore: ObservableObject {
             }
             uploadProgress = 1
             lastError = ""
-            await refresh(settings: settings)
             clearPendingGarminAfterVerifiedSuccess(fileURL: pending.fileURL)
+            // The attachment endpoint has already verified linkage. Clear the durable
+            // retry marker before refreshing so a slower Log refresh cannot expose a
+            // stale "select/upload" action or submit the same file again.
+            await refresh(settings: settings)
+            lastError = ""
         } catch is CancellationError {
             await preservePendingFailure(
                 pending,

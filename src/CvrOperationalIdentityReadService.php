@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/CvrOperationalIdentityService.php';
+require_once __DIR__ . '/CvrDutyAssignmentIdentityService.php';
 
 /**
  * Phase 2B canonical identity dual-read projections.
@@ -300,6 +301,14 @@ final class CvrOperationalIdentityReadService
         $payload['reservation_uuid'] = $projection['reservation_uuid'];
         $payload['leg_uuid'] = $projection['leg_uuid'];
         $payload['identity_source'] = $projection['identity_source'];
+        if (is_string($projection['reservation_uuid']) && $projection['reservation_uuid'] !== '') {
+            $duty = (new CvrDutyAssignmentIdentityService($this->pdo))
+                ->snapshotForReservation($projection['reservation_uuid']);
+            $payload['duty_assignment_verified'] = is_array($duty);
+            $payload['duty_fingerprint_sha256'] = is_array($duty)
+                ? (string)($duty['duty_fingerprint_sha256'] ?? '')
+                : null;
+        }
         return $payload;
     }
 

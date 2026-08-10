@@ -29,6 +29,7 @@ if ($scheduleActorType === '') {
 $currentUser = cw_current_user($pdo) ?: array();
 $service = new FlightScheduleService($pdo);
 $notice = '';
+$warning = '';
 $error = '';
 $undispatchCandidate = null;
 $selectedDate = substr((string)($_GET['date'] ?? $_GET['from'] ?? ''), 0, 10);
@@ -68,7 +69,7 @@ try {
             $notice = 'Dispatch released. The reservation is available again.';
             $editId = '';
         } elseif ($action === 'reschedule') {
-            $service->rescheduleSlot(
+            $result = $service->rescheduleSlot(
                 (string)($_POST['scheduler_record_id'] ?? ''),
                 (string)($_POST['scheduled_start_time'] ?? ''),
                 (string)($_POST['scheduled_end_time'] ?? ''),
@@ -76,7 +77,12 @@ try {
                 (string)($_POST['expected_updated_at'] ?? ''),
                 (int)($_POST['aircraft_id'] ?? 0) ?: null
             );
-            $notice = 'Reservation updated.';
+            $warnings = is_array($result['warnings'] ?? null) ? $result['warnings'] : array();
+            if ($warnings !== array()) {
+                $warning = 'Reservation updated with overlap warning: ' . implode(' ', $warnings);
+            } else {
+                $notice = 'Reservation updated.';
+            }
             $editId = '';
         } else {
             $_POST['scheduled_date'] = (string)($_POST['scheduled_start_date'] ?? '');
@@ -128,8 +134,13 @@ try {
                 && empty($crew[0]['is_pic']) && empty($crew[1]['is_pic'])) {
                 throw new RuntimeException('Select at least one pilot who logs PIC.');
             }
-            $service->saveSlot($_POST, $crew, (int)($currentUser['id'] ?? 0));
-            $notice = 'Reservation saved.';
+            $result = $service->saveSlot($_POST, $crew, (int)($currentUser['id'] ?? 0));
+            $warnings = is_array($result['warnings'] ?? null) ? $result['warnings'] : array();
+            if ($warnings !== array()) {
+                $warning = 'Reservation saved with overlap warning: ' . implode(' ', $warnings);
+            } else {
+                $notice = 'Reservation saved.';
+            }
             $editId = '';
         }
     }
@@ -304,7 +315,9 @@ $todayCount = count(array_filter($slots, static fn(array $slot): bool => (string
 $lockedCount = count(array_filter($slots, static fn(array $slot): bool => (string)($slot['status'] ?? '') === 'claimed'));
 $flash = $error !== ''
     ? array('type' => 'error', 'message' => $error)
-    : ($notice !== '' ? array('type' => 'success', 'message' => $notice) : null);
+    : ($warning !== ''
+        ? array('type' => 'warning', 'message' => $warning)
+        : ($notice !== '' ? array('type' => 'success', 'message' => $notice) : null));
 
 cw_header('Flight Operations · Schedule');
 compliance_page_open(array(

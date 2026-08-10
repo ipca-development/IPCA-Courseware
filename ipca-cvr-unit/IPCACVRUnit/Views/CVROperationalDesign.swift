@@ -297,6 +297,8 @@ struct CVROperationalStatusCard: View {
     var color: Color
     var value: String?
     var caption: String?
+    /// When true, banner height follows content with light vertical padding (no tall primary min-height).
+    var hugsContent: Bool = false
     var metrics: CVROperationalMetrics
 
     var body: some View {
@@ -311,11 +313,13 @@ struct CVROperationalStatusCard: View {
                     .minimumScaleFactor(0.82)
                     .allowsTightening(true)
             }
-            Text(subtitle)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(CVROperationalPalette.textSecondary)
-                .lineLimit(1)
-                .allowsTightening(true)
+            if !subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(subtitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(CVROperationalPalette.textSecondary)
+                    .lineLimit(1)
+                    .allowsTightening(true)
+            }
             if let value {
                 Text(value)
                     .font(.system(size: metrics.timerFontSize, weight: .bold, design: .monospaced))
@@ -324,7 +328,7 @@ struct CVROperationalStatusCard: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
-            if let caption {
+            if let caption, !caption.isEmpty {
                 Text(caption)
                     .font(.caption2.weight(.bold))
                     .tracking(1.4)
@@ -332,8 +336,9 @@ struct CVROperationalStatusCard: View {
                     .lineLimit(1)
             }
         }
-        .padding(metrics.cardPadding)
-        .frame(maxWidth: .infinity, minHeight: metrics.primaryHeight)
+        .padding(.horizontal, metrics.cardPadding)
+        .padding(.vertical, hugsContent ? (metrics.isCompact ? 8 : 10) : metrics.cardPadding)
+        .frame(maxWidth: .infinity, minHeight: hugsContent ? 0 : metrics.primaryHeight)
         .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
     }
@@ -347,9 +352,11 @@ struct CVROperationalTile: View {
     var metrics: CVROperationalMetrics
     var caption: String? = nil
     var action: (() -> Void)? = nil
+    /// Compact strip tiles (In-Flight HOBBS/DISPATCH/REC/GPS): less empty space under the value.
+    var compact: Bool = false
 
     var body: some View {
-        let content = VStack(spacing: 4) {
+        let content = VStack(spacing: compact ? 2 : 4) {
             Image(systemName: iconName)
                 .font(.system(size: metrics.tileIconSize, weight: .semibold))
                 .foregroundStyle(CVROperationalPalette.secondaryBlue)
@@ -362,10 +369,13 @@ struct CVROperationalTile: View {
             Text(value)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(color)
-                .lineLimit(3)
+                .lineLimit(compact ? 1 : 3)
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.75)
-                .frame(minHeight: caption == nil ? 32 : 28, alignment: .top)
+                .frame(
+                    minHeight: compact ? 0 : (caption == nil ? 32 : 28),
+                    alignment: compact ? .center : .top
+                )
             if let caption, !caption.isEmpty {
                 Text(caption)
                     .font(.system(size: 9, weight: .semibold))
@@ -376,8 +386,12 @@ struct CVROperationalTile: View {
             }
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: metrics.tileHeight, maxHeight: .infinity)
+        .padding(.vertical, compact ? 6 : 8)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: compact ? 0 : metrics.tileHeight,
+            maxHeight: compact ? nil : .infinity
+        )
         .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(
             action == nil ? CVROperationalPalette.cardBorder : CVROperationalPalette.secondaryBlue.opacity(0.55),
@@ -532,6 +546,8 @@ struct CVROperationalActionButton: View {
     var subtitle: String?
     var color: Color
     var isConfirmed: Bool = false
+    /// Larger primary title (e.g. DISPATCH FLIGHT). Default keeps existing button scale.
+    var prominentTitle: Bool = false
     var hapticStyle: UIImpactFeedbackGenerator.FeedbackStyle? = .medium
     var action: () -> Void
 
@@ -544,9 +560,10 @@ struct CVROperationalActionButton: View {
         } label: {
             VStack(spacing: 2) {
                 Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .tracking(0.8)
+                    .font(prominentTitle ? .title2.weight(.bold) : .subheadline.weight(.bold))
+                    .tracking(prominentTitle ? 1.2 : 0.8)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 if let subtitle {
                     Text(subtitle)
                         .font(.caption2.weight(.semibold))
@@ -555,7 +572,7 @@ struct CVROperationalActionButton: View {
                 }
             }
             .foregroundStyle(isConfirmed ? Color.white : color)
-            .frame(maxWidth: .infinity, minHeight: 50)
+            .frame(maxWidth: .infinity, minHeight: prominentTitle ? 72 : 50)
             .background(isConfirmed ? CVROperationalPalette.success : CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 17))
             .overlay(RoundedRectangle(cornerRadius: 17).stroke(isConfirmed ? CVROperationalPalette.success : color.opacity(0.75), lineWidth: 1))
             .animation(.easeInOut(duration: 0.12), value: isConfirmed)

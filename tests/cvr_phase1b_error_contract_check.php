@@ -31,7 +31,7 @@ $checks = array(
         && ($temporary['user_action_required'] ?? true) === false
         && ($temporary['request_id'] ?? '') === 'request-temp'
         && str_contains($dispatchEndpoint, 'catch (Throwable $e)')
-        && str_contains($dispatchEndpoint, 'new CvrTemporaryTechnicalFailure()')
+        && str_contains($dispatchEndpoint, 'new CvrTemporaryTechnicalFailure(')
         && str_contains($evidenceEndpoint, 'new CvrTemporaryTechnicalFailure()'),
     'dependency remains automatically retryable' =>
         ($dependency['error_code'] ?? '') === 'DEPENDENCY_NOT_READY'
@@ -91,11 +91,11 @@ $checks = array(
         && str_contains($uploadManager, 'trigger: .explicitRetry')
         && str_contains($workflowViews, 'uploadManager.retryWorkflowSynchronization('),
     'successful probe clears pause and awakens remaining workflow queue' =>
-        substr_count($uploadManager, 'self.clearWorkflowAuthenticationPause()') >= 3
-        && str_contains($uploadManager, 'self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)'),
+        substr_count($uploadManager, 'clearWorkflowAuthenticationPause()') >= 3
+        && str_contains($uploadManager, 'uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)'),
     'authentication failure restores pause without failing component' =>
         str_contains($uploadManager, 'if outcome == .authenticationPaused')
-        && str_contains($uploadManager, 'self.workflowAuthenticationPausedCredential = currentCredential')
+        && str_contains($uploadManager, 'workflowAuthenticationPausedCredential = currentCredential')
         && str_contains($workflowStore, 'case "AUTHENTICATION_REQUIRED":')
         && str_contains($workflowStore, 'state = .queued'),
     'paused routine scans cannot hammer workflow API' =>
@@ -105,7 +105,7 @@ $checks = array(
     'concurrent recovery triggers share one active probe guard' =>
         str_contains($uploadManager, 'private var workflowAuthenticationProbeInFlight = false')
         && str_contains($uploadManager, 'private var activeWorkflowAuthenticationRequestIDs: Set<String> = []')
-        && str_contains($uploadManager, 'self.activeWorkflowAuthenticationRequestIDs.remove(component.id)'),
+        && str_contains($uploadManager, 'activeWorkflowAuthenticationRequestIDs.remove(component.id)'),
     'successful enrollment clears pause and starts synchronization' =>
         str_contains($settings, 'func enrollDevice() async -> Bool')
         && str_contains($contentView, 'if await settings.enrollDevice()')

@@ -65,6 +65,18 @@ $checks = array(
         str_contains($scheduleJs, 'var laneEnds = [];')
         && str_contains($scheduleJs, 'createEvent(placement.reservation, timeline, placement.lane)')
         && str_contains($scheduleJs, 'timeline.style.minHeight = Math.max(68, 8 + laneCount * 60)'),
+    'pre-dispatch schedule window edits preserve reservation identity and sync offline' =>
+        str_contains($endpoint, "\$operation === 'update_window'")
+        && str_contains($service, 'updateScheduledDutyWindowFromDevice')
+        && str_contains($service, 'Only an unclaimed scheduled reservation may change its schedule window.')
+        && str_contains($store, 'func updateActiveScheduleWindow(start: Date, end: Date)')
+        && str_contains($store, '"operation": "update_window"')
+        && str_contains($store, 'queueScheduledDutyWindowUpdate'),
+    'informative route edits preserve reservation identity and synchronize as planning data' =>
+        str_contains($service, 'replaceInformativeReservationRoute')
+        && str_contains($service, 'Informative route is mutable planning context')
+        && str_contains($store, 'func updateActiveInformativeRoute(airports: [String])')
+        && str_contains($store, 'payload["legs"] = routeLegs'),
     'simulation and offline paths preserve queued reservation' =>
         str_contains($uploads, 'guard !settings.isSimulationModeEnabled else')
         && str_contains($uploads, 'if let networkMonitor,')
