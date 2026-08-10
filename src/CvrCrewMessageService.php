@@ -109,7 +109,20 @@ final class CvrCrewMessageService
     /** @param array<string,mixed> $device @return array<string,mixed> */
     public function pendingForDevice(array $device, string $operationalSessionUuid): array
     {
-        $scope = $this->activeDeviceSession($device, $operationalSessionUuid);
+        $serverResolved = trim($operationalSessionUuid) === '';
+        try {
+            $scope = $this->activeDeviceSession($device, $operationalSessionUuid);
+        } catch (RuntimeException $e) {
+            if (!$serverResolved) {
+                throw $e;
+            }
+            return array(
+                'ok' => true,
+                'active_session' => false,
+                'operational_session_uuid' => null,
+                'messages' => array(),
+            );
+        }
         $statement = $this->pdo->prepare(
             'SELECT m.message_uuid, m.operational_session_uuid, m.workflow_flight_record_uuid,
                     m.dispatch_uuid, m.sender_name, m.sender_role, m.body, m.sent_at_utc
@@ -139,6 +152,7 @@ final class CvrCrewMessageService
         unset($message);
         return array(
             'ok' => true,
+            'active_session' => true,
             'operational_session_uuid' => (string)$scope['operational_session_uuid'],
             'messages' => $messages,
         );
@@ -334,13 +348,22 @@ final class CvrCrewMessageService
     /** @param array<string,mixed> $device @return array<string,mixed> */
     private function activeDeviceSession(array $device, string $operationalSessionUuid): array
     {
-        $operationalSessionUuid = $this->uuid($operationalSessionUuid, 'operational_session_uuid');
+        $operationalSessionUuid = strtolower(trim($operationalSessionUuid));
+        if ($operationalSessionUuid !== '') {
+            $operationalSessionUuid = $this->uuid(
+                $operationalSessionUuid,
+                'operational_session_uuid'
+            );
+        }
         $deviceId = (int)($device['id'] ?? 0);
         $organizationId = (int)($device['organization_id'] ?? 0);
         $aircraftId = (int)($device['aircraft_id'] ?? 0);
         if ($deviceId <= 0 || $organizationId <= 0 || $aircraftId <= 0) {
             throw new RuntimeException('Authenticated device assignment is incomplete.');
         }
+        $sessionFilter = $operationalSessionUuid !== ''
+            ? ' AND d.operational_session_uuid = ?'
+            : '';
         $statement = $this->pdo->prepare(
             'SELECT d.organization_id, d.aircraft_id, d.device_id, d.dispatch_uuid,
                     d.workflow_flight_record_uuid, d.operational_session_uuid
@@ -348,10 +371,10 @@ final class CvrCrewMessageService
              INNER JOIN ipca_flight_sessions s ON s.session_uuid = d.operational_session_uuid
              INNER JOIN ipca_flight_schedule_slots slot
                ON slot.claimed_dispatch_uuid = d.dispatch_uuid
-             WHERE d.operational_session_uuid = ?
-               AND d.organization_id = ?
+             WHERE d.organization_id = ?
                AND d.aircraft_id = ?
                AND d.device_id = ?
+               ' . $sessionFilter . '
                AND s.organization_id = d.organization_id
                AND s.aircraft_id = d.aircraft_id
                AND s.device_id = d.device_id
@@ -359,9 +382,14 @@ final class CvrCrewMessageService
                AND slot.status NOT IN (' . self::TERMINAL_STATUSES . ')
                AND d.status NOT IN (' . self::TERMINAL_STATUSES . ')
                AND s.status NOT IN (' . self::TERMINAL_STATUSES . ')
+             ORDER BY d.last_received_at DESC, d.id DESC
              LIMIT 1'
         );
-        $statement->execute(array($operationalSessionUuid, $organizationId, $aircraftId, $deviceId));
+        $parameters = array($organizationId, $aircraftId, $deviceId);
+        if ($operationalSessionUuid !== '') {
+            $parameters[] = $operationalSessionUuid;
+        }
+        $statement->execute($parameters);
         $scope = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($scope)) {
             throw new RuntimeException('No matching active Operational Session is assigned to this device.');

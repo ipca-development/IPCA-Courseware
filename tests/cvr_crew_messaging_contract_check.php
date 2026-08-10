@@ -34,7 +34,7 @@ $pdo->exec('CREATE TABLE ipca_cvr_dispatches (
   id INTEGER PRIMARY KEY, organization_id INTEGER NOT NULL, aircraft_id INTEGER,
   device_id INTEGER NOT NULL, dispatch_uuid TEXT NOT NULL,
   workflow_flight_record_uuid TEXT NOT NULL, operational_session_uuid TEXT,
-  status TEXT NOT NULL
+  status TEXT NOT NULL, last_received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )');
 $pdo->exec('CREATE TABLE ipca_flight_sessions (
   id INTEGER PRIMARY KEY, organization_id INTEGER NOT NULL, aircraft_id INTEGER,
@@ -64,7 +64,7 @@ $flightUuid = '33333333-3333-4333-8333-333333333333';
 $pdo->exec("INSERT INTO ipca_cvr_devices VALUES (7, 42, 9, 1, NULL)");
 $pdo->exec("INSERT INTO ipca_flight_schedule_slots VALUES (1, 42, '$dispatchUuid', 'claimed')");
 $pdo->exec("INSERT INTO ipca_cvr_dispatches VALUES
-  (1, 42, 9, 7, '$dispatchUuid', '$flightUuid', '$sessionUuid', 'active')");
+  (1, 42, 9, 7, '$dispatchUuid', '$flightUuid', '$sessionUuid', 'active', CURRENT_TIMESTAMP)");
 $pdo->exec("INSERT INTO ipca_flight_sessions VALUES (1, 42, 9, 7, '$sessionUuid', 'intended', NULL)");
 
 $service = new CvrCrewMessageService($pdo);
@@ -74,6 +74,7 @@ $initialStatus = $service->activeStatusForAircraft(9, $dispatchUuid);
 $sent = $service->sendForAircraft(9, $dispatchUuid, 'Return to base.', $sender);
 $messageUuid = (string)$sent['message']['message_uuid'];
 $pending = $service->pendingForDevice($device, $sessionUuid);
+$serverResolvedPending = $service->pendingForDevice($device, '');
 $ackPayload = array(
     'message_uuid' => $messageUuid,
     'acknowledgement_uuid' => '44444444-4444-4444-8444-444444444444',
@@ -162,11 +163,13 @@ $checks = array(
     'iOS polling and acknowledgement are local-first and recording independent' =>
         str_contains($iosStore, 'crew-messages.json')
         && str_contains($iosStore, 'pendingAcknowledgements')
-        && str_contains($iosStore, 'Task.sleep(for: .seconds(5))')
+        && str_contains($iosStore, 'self.messageSessionUUID == nil ? .seconds(15) : .seconds(5)')
         && str_contains($iosStore, 'network?.isSatisfied == true')
         && str_contains($iosStore, 'for acknowledgement in pendingAcknowledgements')
         && str_contains($iosStore, 'dispatch.operationalSessionUUID')
         && str_contains($iosStore, 'flight.dispatchID == dispatch.id')
+        && str_contains($iosStore, 'operationalSessionUUID: ""')
+        && str_contains($iosStore, 'serverActiveOperationalSessionUUID')
         && !str_contains($iosStore, 'allowCellularUpload')
         && str_contains($iosContent, 'SYSTEM MESSAGE')
         && str_contains($iosContent, 'ACKNOWLEDGE'),
@@ -179,7 +182,9 @@ $checks = array(
     'active message is delivered only to its assigned device' =>
         $initialStatus['active_session'] === true
         && count($pending['messages']) === 1
-        && (string)$pending['messages'][0]['message_uuid'] === $messageUuid,
+        && (string)$pending['messages'][0]['message_uuid'] === $messageUuid
+        && count($serverResolvedPending['messages']) === 1
+        && (string)$serverResolvedPending['operational_session_uuid'] === $sessionUuid,
     'acknowledgement retry is duplicate safe' =>
         $firstAck['already_acknowledged'] === false
         && $firstAck['acknowledged'] === true

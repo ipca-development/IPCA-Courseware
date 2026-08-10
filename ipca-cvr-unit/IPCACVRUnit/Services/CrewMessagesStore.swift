@@ -95,8 +95,18 @@ struct CVRCrewMessage: Codable, Identifiable, Equatable {
 
 struct CVRCrewMessagesResponse: Codable {
     var ok: Bool
+    var activeSession: Bool?
+    var operationalSessionUUID: String?
     var messages: [CVRCrewMessage]
     var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case activeSession = "active_session"
+        case operationalSessionUUID = "operational_session_uuid"
+        case messages
+        case error
+    }
 }
 
 struct CVRCrewMessageAcknowledgementRequest: Codable, Equatable {
@@ -132,6 +142,8 @@ struct CVRCrewMessageAcknowledgementResponse: Codable {
 @MainActor
 final class CrewMessagesStore: ObservableObject {
     @Published private(set) var messages: [CVRCrewMessage] = []
+    @Published private(set) var serverActiveOperationalSessionUUID: String?
+    @Published private(set) var serverSessionResolutionReceived = false
 
     private struct PersistedState: Codable {
         var messages: [CVRCrewMessage]
@@ -157,7 +169,7 @@ final class CrewMessagesStore: ObservableObject {
     }
 
     var oldestUnacknowledgedMessage: CVRCrewMessage? {
-        guard let sessionUUID = activeOperationalSessionUUID else { return nil }
+        guard let sessionUUID = messageSessionUUID else { return nil }
         return messages
             .filter {
                 $0.operationalSessionUUID.caseInsensitiveCompare(sessionUUID) == .orderedSame
@@ -176,6 +188,8 @@ final class CrewMessagesStore: ObservableObject {
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
+                self?.serverActiveOperationalSessionUUID = nil
+                self?.serverSessionResolutionReceived = false
                 self?.refreshPolling(immediate: true)
             }
             .store(in: &cancellables)
@@ -210,7 +224,7 @@ final class CrewMessagesStore: ObservableObject {
 
     func acknowledge(_ message: CVRCrewMessage) {
         guard message.localAcknowledgedAtUTC == nil,
-              message.operationalSessionUUID.caseInsensitiveCompare(activeOperationalSessionUUID ?? "") == .orderedSame,
+              message.operationalSessionUUID.caseInsensitiveCompare(messageSessionUUID ?? "") == .orderedSame,
               let index = messages.firstIndex(where: { $0.messageUUID == message.messageUUID }) else {
             return
         }
@@ -231,7 +245,7 @@ final class CrewMessagesStore: ObservableObject {
         requestNow()
     }
 
-    private var activeOperationalSessionUUID: String? {
+    private var localOperationalSessionUUID: String? {
         guard let state = workflow?.state else { return nil }
         if let session = state.activeOperationalSession {
             switch session.state {
@@ -252,6 +266,12 @@ final class CrewMessagesStore: ObservableObject {
         return candidate.lowercased()
     }
 
+    private var messageSessionUUID: String? {
+        serverSessionResolutionReceived
+            ? serverActiveOperationalSessionUUID
+            : localOperationalSessionUUID
+    }
+
     private var canReachMessageService: Bool {
         isForeground
             && network?.isSatisfied == true
@@ -261,7 +281,7 @@ final class CrewMessagesStore: ObservableObject {
     }
 
     private var canPollActiveSession: Bool {
-        canReachMessageService && activeOperationalSessionUUID != nil
+        canReachMessageService
     }
 
     private func refreshPolling(immediate: Bool) {
@@ -282,8 +302,10 @@ final class CrewMessagesStore: ObservableObject {
         guard pollingTask == nil else { return }
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled, let self else { return }
+                guard let self else { return }
+                let interval: Duration = self.messageSessionUUID == nil ? .seconds(15) : .seconds(5)
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
                 guard self.canPollActiveSession else {
                     self.pollingTask = nil
                     return
@@ -326,23 +348,29 @@ final class CrewMessagesStore: ObservableObject {
             }
         }
 
-        guard let sessionUUID = activeOperationalSessionUUID else { return }
         do {
             let response = try await client.pendingCrewMessages(
-                operationalSessionUUID: sessionUUID,
+                operationalSessionUUID: "",
                 credential: credential
             )
             guard response.ok else { return }
-            merge(response.messages)
+            serverSessionResolutionReceived = true
+            let resolved = response.operationalSessionUUID?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            serverActiveOperationalSessionUUID = (
+                response.activeSession != false
+                    && resolved.map({ UUID(uuidString: $0) != nil }) == true
+            ) ? resolved?.lowercased() : nil
+            merge(response.messages, sessionUUID: serverActiveOperationalSessionUUID)
         } catch {
             // A failed message poll must never affect recording or workflow state.
         }
     }
 
-    private func merge(_ fetched: [CVRCrewMessage]) {
+    private func merge(_ fetched: [CVRCrewMessage], sessionUUID: String?) {
         var changed = false
         for var message in fetched {
-            guard message.operationalSessionUUID.caseInsensitiveCompare(activeOperationalSessionUUID ?? "") == .orderedSame else {
+            guard message.operationalSessionUUID.caseInsensitiveCompare(sessionUUID ?? "") == .orderedSame else {
                 continue
             }
             if let index = messages.firstIndex(where: { $0.messageUUID == message.messageUUID }) {
