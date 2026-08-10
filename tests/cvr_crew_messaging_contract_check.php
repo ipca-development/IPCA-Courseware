@@ -165,6 +165,8 @@ $checks = array(
         && str_contains($iosStore, 'Task.sleep(for: .seconds(5))')
         && str_contains($iosStore, 'network?.isSatisfied == true')
         && str_contains($iosStore, 'for acknowledgement in pendingAcknowledgements')
+        && str_contains($iosStore, 'dispatch.operationalSessionUUID')
+        && str_contains($iosStore, 'flight.dispatchID == dispatch.id')
         && !str_contains($iosStore, 'allowCellularUpload')
         && str_contains($iosContent, 'SYSTEM MESSAGE')
         && str_contains($iosContent, 'ACKNOWLEDGE'),

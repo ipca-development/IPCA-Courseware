@@ -181,7 +181,14 @@ final class CrewMessagesStore: ObservableObject {
             .store(in: &cancellables)
 
         workflow.$state
-            .map(\.activeOperationalSession)
+            .map { state in
+                [
+                    state.activeOperationalSession?.id ?? "",
+                    state.activeOperationalSession?.state.rawValue ?? "",
+                    state.activeDispatch?.operationalSessionUUID ?? "",
+                    state.activeFlightRecord?.id ?? ""
+                ].joined(separator: ":")
+            }
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -225,13 +232,24 @@ final class CrewMessagesStore: ObservableObject {
     }
 
     private var activeOperationalSessionUUID: String? {
-        guard let session = workflow?.state.activeOperationalSession else { return nil }
-        switch session.state {
-        case .intended, .evidenceCapturing, .endingStateSecured:
-            return session.id.lowercased()
-        case .evidenceClosed, .finalized, .cancelled:
+        guard let state = workflow?.state else { return nil }
+        if let session = state.activeOperationalSession {
+            switch session.state {
+            case .intended, .evidenceCapturing, .endingStateSecured:
+                return session.id.lowercased()
+            case .evidenceClosed, .finalized, .cancelled:
+                return nil
+            }
+        }
+        guard let flight = state.activeFlightRecord,
+              let dispatch = state.activeDispatch,
+              flight.dispatchID == dispatch.id,
+              let candidate = dispatch.operationalSessionUUID?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              UUID(uuidString: candidate) != nil else {
             return nil
         }
+        return candidate.lowercased()
     }
 
     private var canReachMessageService: Bool {
