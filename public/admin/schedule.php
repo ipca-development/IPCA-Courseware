@@ -663,7 +663,6 @@ compliance_page_open(array(
   </div>
   <div class="compliance-modal__footer">
     <button type="button" class="compliance-btn compliance-btn--secondary" data-compliance-modal-close>Close</button>
-    <button type="button" class="compliance-btn compliance-btn--primary" id="flightDispatchedUndispatchBtn" hidden>Undispatch</button>
   </div>
 <?php compliance_modal_close(); ?>
 

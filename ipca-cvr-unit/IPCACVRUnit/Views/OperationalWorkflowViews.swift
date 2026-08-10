@@ -1436,7 +1436,11 @@ private struct ScheduledFlightsView: View {
                     .frame(width: proxy.size.width, alignment: .top)
                 }
                 .refreshable {
-                    await sessionsStore.refresh(settings: settings)
+                    if await sessionsStore.refresh(settings: settings) {
+                        workflow.discardRejectedScheduledDraftMissingFromServer(
+                            serverSessions: sessionsStore.sessions
+                        )
+                    }
                 }
             }
         }
@@ -1489,7 +1493,11 @@ private struct ScheduledFlightsView: View {
         }
         .onChange(of: workflow.scheduleRefreshRevision) {
             Task {
-                await sessionsStore.refresh(settings: settings)
+                if await sessionsStore.refresh(settings: settings) {
+                    workflow.discardRejectedScheduledDraftMissingFromServer(
+                        serverSessions: sessionsStore.sessions
+                    )
+                }
             }
         }
         .sheet(isPresented: $showLocalDispatchSheet) {
@@ -1889,7 +1897,13 @@ private struct ScheduledFlightsView: View {
                 subtitle: "Load flights assigned to \(settings.selectedAircraft?.registration ?? "this aircraft")",
                 color: CVROperationalPalette.secondaryBlue
             ) {
-                Task { await sessionsStore.refresh(settings: settings) }
+                Task {
+                    if await sessionsStore.refresh(settings: settings) {
+                        workflow.discardRejectedScheduledDraftMissingFromServer(
+                            serverSessions: sessionsStore.sessions
+                        )
+                    }
+                }
             }
             if settings.selectedAircraft == nil {
                 CVROperationalActionButton(
@@ -3291,7 +3305,11 @@ struct DispatchWorkflowView: View {
         }
         .onChange(of: workflow.scheduleRefreshRevision) {
             Task {
-                await sessionsStore.refresh(settings: settings)
+                if await sessionsStore.refresh(settings: settings) {
+                    workflow.discardRejectedScheduledDraftMissingFromServer(
+                        serverSessions: sessionsStore.sessions
+                    )
+                }
             }
         }
         .sheet(isPresented: $showLocalDispatchSheet) {
@@ -3785,7 +3803,11 @@ struct DispatchWorkflowView: View {
                         defer { isUndispatching = false }
                         let released = await workflow.undispatchActiveFlight(settings: settings)
                         if released {
-                            await sessionsStore.refresh(settings: settings)
+                            if await sessionsStore.refresh(settings: settings) {
+                                workflow.discardRejectedScheduledDraftMissingFromServer(
+                                    serverSessions: sessionsStore.sessions
+                                )
+                            }
                         }
                         return released
                     }
@@ -5795,7 +5817,7 @@ struct GarminWorkflowView: View {
     }
 }
 
-private struct FlightLogView: View {
+struct FlightLogView: View {
     @EnvironmentObject private var flightLogs: CVRFlightLogStore
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore

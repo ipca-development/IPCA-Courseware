@@ -510,14 +510,15 @@ final class ScheduledSessionsStore: ObservableObject {
         }
     }
 
-    func refresh(settings: SettingsStore) async {
+    @discardableResult
+    func refresh(settings: SettingsStore) async -> Bool {
         guard let serverURL = settings.normalizedServerURL else {
             lastError = "Server URL is invalid."
-            return
+            return false
         }
         guard let credential = settings.deviceCredential, !credential.isEmpty else {
             lastError = "Enroll this CVR Unit to load scheduled flights."
-            return
+            return false
         }
         isRefreshing = true
         defer { isRefreshing = false }
@@ -533,6 +534,7 @@ final class ScheduledSessionsStore: ObservableObject {
             }
             try JSONEncoder().encode(sessions).write(to: cacheURL(), options: [.atomic])
             lastError = ""
+            return true
         } catch {
             lastError = error.localizedDescription
             // Keep only same-aircraft rows from any stale cache while offline.
@@ -540,6 +542,7 @@ final class ScheduledSessionsStore: ObservableObject {
                 id: settings.selectedAircraft?.id,
                 registration: settings.selectedAircraft?.registration
             )
+            return false
         }
     }
 

@@ -60,6 +60,8 @@ struct ContentView: View {
                     AvionicsBeaconTestView()
                 case .recordings:
                     AdminRecordingsView()
+                case .logs:
+                    FlightLogView(adminUnlocked: true)
                 case .flightHistory:
                     AdminWorkflowArchivesView()
                 case .admin:
@@ -82,6 +84,7 @@ private enum AdminTab: String, CaseIterable, Identifiable {
     case status
     case beacon
     case recordings
+    case logs
     case flightHistory
     case admin
     case exitAdmin
@@ -93,6 +96,7 @@ private enum AdminTab: String, CaseIterable, Identifiable {
         case .status: return "Status"
         case .beacon: return "Beacon"
         case .recordings: return "Recordings"
+        case .logs: return "Logs"
         case .flightHistory: return "History"
         case .admin: return "Admin"
         case .exitAdmin: return "Exit"
@@ -104,6 +108,7 @@ private enum AdminTab: String, CaseIterable, Identifiable {
         case .status: return "waveform"
         case .beacon: return "antenna.radiowaves.left.and.right"
         case .recordings: return "externaldrive"
+        case .logs: return "list.bullet.clipboard"
         case .flightHistory: return "archivebox"
         case .admin: return "gearshape"
         case .exitAdmin: return "lock.fill"

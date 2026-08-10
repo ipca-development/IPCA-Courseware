@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/tv_adsb_status.php';
 
 cw_require_flight_schedule_editor();
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
 /**
  * @param array<string,mixed> $payload
@@ -67,7 +68,7 @@ try {
 
     $position = is_array($live) ? tv_adsb_position($live) : null;
     $onGround = is_array($live) ? tv_adsb_is_on_ground($live) : true;
-    $inFlight = is_array($live) && $position !== null && !$onGround;
+    $inFlight = is_array($live) && tv_adsb_is_actively_airborne($live);
 
     if (!$inFlight) {
         $detail = 'No live ADS-B position is available.';

@@ -2615,6 +2615,65 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    /// Remove a non-dispatched local replacement after a successful server refresh proves
+    /// that its reservation no longer exists (for example, it was cancelled online).
+    @discardableResult
+    func discardRejectedScheduledDraftMissingFromServer(
+        serverSessions: [CVRScheduledSession]
+    ) -> Bool {
+        guard let dispatch = state.activeDispatch,
+              state.activeFlightRecord == nil,
+              dispatch.status != .dispatchVerified,
+              dispatch.status != .flightRecordLoggingEnabled else {
+            return false
+        }
+        let dispatchScheduler = dispatch.schedulerRecordID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        guard !dispatchScheduler.isEmpty else { return false }
+
+        let rejectedReplacement = state.uploadComponents.contains { component in
+            guard component.componentType == "schedule_duty_sync",
+                  component.flightRecordID == dispatch.id,
+                  component.userActionRequired == true,
+                  let data = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let superseded = payload["supersedes_scheduler_record_id"] as? String else {
+                return false
+            }
+            return !superseded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard rejectedReplacement else { return false }
+
+        let serverSchedulerIDs = Set(serverSessions.map {
+            $0.schedulerRecordID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+        guard !serverSchedulerIDs.contains(dispatchScheduler) else { return false }
+
+        let dispatchID = dispatch.id
+        let persisted = mutate {
+            $0.activeDispatch = nil
+            $0.activeFlightRecord = nil
+            $0.activeOperationalSession = nil
+            $0.consents = []
+            $0.recorderVerifications = []
+            $0.flightEvents = []
+            $0.flightLegs = []
+            $0.uploadComponents.removeAll {
+                $0.componentType == "schedule_duty_sync" && $0.flightRecordID == dispatchID
+            }
+            $0.discrepancies = []
+            if !$0.engineSessionContinuityActive {
+                $0.operationalSession = nil
+            }
+            $0.selectedTab = .scheduled
+        }
+        if persisted {
+            lastError = ""
+        }
+        return persisted
+    }
+
     /// Continuity is on, no active flight — Schedule can recover a mistaken Transient Stop.
     var canRecoverBrokenEngineContinuity: Bool {
         state.engineSessionContinuityActive

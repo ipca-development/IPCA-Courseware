@@ -14,6 +14,7 @@ $store = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkf
 $uploads = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift') ?: '';
 $api = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/APIClient.swift') ?: '';
 $views = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift') ?: '';
+$catalog = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Models/CVRCatalogModels.swift') ?: '';
 
 $checks = array(
     'migration records append-only scheduler and reservation lineage' =>
@@ -102,6 +103,14 @@ $checks = array(
     'schedule hides superseded cached row and avoids false local-leg warning' =>
         str_contains($views, 'workflow.locallySupersededSchedulerRecordIDs.contains')
         && str_contains($views, '!workflow.hasQueuedScheduleDutyReplacement'),
+    'successful refresh clears a rejected replacement missing from the server' =>
+        str_contains($catalog, 'func refresh(settings: SettingsStore) async -> Bool')
+        && str_contains($store, 'discardRejectedScheduledDraftMissingFromServer')
+        && str_contains($store, 'component.userActionRequired == true')
+        && str_contains($store, 'payload["supersedes_scheduler_record_id"]')
+        && str_contains($store, 'guard !serverSchedulerIDs.contains(dispatchScheduler)')
+        && str_contains($views, 'if await sessionsStore.refresh(settings: settings)')
+        && str_contains($views, 'serverSessions: sessionsStore.sessions'),
     'cockpit clearly distinguishes queued syncing synced and attention states' =>
         str_contains($store, 'var scheduleDutySyncInfo: CVRScheduleDutySyncInfo?')
         && str_contains($store, 'queued. It will sync automatically when internet connectivity is available.')

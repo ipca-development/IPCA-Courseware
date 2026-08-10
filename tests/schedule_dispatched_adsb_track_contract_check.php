@@ -89,6 +89,30 @@ require_contains(
     $failures
 );
 require_contains(
+    $root . '/src/tv_adsb_status.php',
+    'function tv_adsb_is_actively_airborne',
+    'schedule airborne state requires positive recent movement evidence',
+    $failures
+);
+require_contains(
+    $root . '/public/admin/api/schedule_aircraft_adsb.php',
+    'tv_adsb_is_actively_airborne($live)',
+    'schedule status uses fail-safe airborne classifier',
+    $failures
+);
+require_contains(
+    $root . '/public/admin/api/schedule_aircraft_adsb_track.php',
+    'tv_adsb_is_actively_airborne($live)',
+    'schedule track uses fail-safe airborne classifier',
+    $failures
+);
+require_contains(
+    $root . '/public/admin/assets/flight_schedule.js',
+    'setAircraftInFlightState(label, false);',
+    'failed ADS-B poll clears stale IN-FLIGHT pill',
+    $failures
+);
+require_contains(
     $root . '/public/admin/assets/flight_schedule.css',
     'position: absolute',
     'live status is removed from toolbar layout flow',
@@ -112,16 +136,16 @@ require_not_contains(
     'claimed reservation click no longer opens ADS-B modal',
     $failures
 );
-require_contains(
-    $root . '/public/admin/assets/flight_schedule.js',
-    'openUndispatchModal',
-    'undispatch is secondary from dispatched modal',
-    $failures
-);
-require_contains(
+require_not_contains(
     $root . '/public/admin/schedule.php',
     'flightDispatchedUndispatchBtn',
-    'dispatched modal has undispatch action',
+    'live ADS-B modal does not expose undispatch action',
+    $failures
+);
+require_not_contains(
+    $root . '/public/admin/assets/flight_schedule.js',
+    "document.getElementById('flightDispatchedUndispatchBtn')",
+    'live ADS-B JavaScript does not wire undispatch action',
     $failures
 );
 require_contains(

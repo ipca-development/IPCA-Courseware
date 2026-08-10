@@ -1043,6 +1043,35 @@ function tv_adsb_is_on_ground(array $aircraft): bool
     return false;
 }
 
+/**
+ * Fail-safe airborne indication for schedule UI.
+ *
+ * A position without an explicit ground flag is not enough: some providers keep
+ * the last coordinates while omitting altitude/ground state. Require recent
+ * telemetry and fixed-wing airborne groundspeed before showing IN-FLIGHT.
+ */
+function tv_adsb_is_actively_airborne(array $aircraft, int $maxAgeSeconds = 90): bool
+{
+    if (tv_adsb_position($aircraft) === null || tv_adsb_is_on_ground($aircraft)) {
+        return false;
+    }
+
+    $age = null;
+    if (isset($aircraft['seen_pos']) && is_numeric($aircraft['seen_pos'])) {
+        $age = (float)$aircraft['seen_pos'];
+    } elseif (isset($aircraft['seen']) && is_numeric($aircraft['seen'])) {
+        $age = (float)$aircraft['seen'];
+    }
+    if ($age !== null && ($age < 0 || $age > $maxAgeSeconds)) {
+        return false;
+    }
+
+    $groundSpeed = isset($aircraft['gs']) && is_numeric($aircraft['gs'])
+        ? (float)$aircraft['gs']
+        : null;
+    return $groundSpeed !== null && $groundSpeed >= 40.0;
+}
+
 function tv_adsb_is_taxiing(array $aircraft): bool
 {
     if (!tv_adsb_is_on_ground($aircraft)) {

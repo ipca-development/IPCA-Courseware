@@ -914,7 +914,7 @@ try {
 
     $position = is_array($live) ? tv_adsb_position($live) : null;
     $onGround = is_array($live) ? tv_adsb_is_on_ground($live) : true;
-    $inFlight = is_array($live) && $position !== null && !$onGround;
+    $inFlight = is_array($live) && tv_adsb_is_actively_airborne($live);
     $livePayload = null;
     if ($inFlight && is_array($position)) {
         $lat = (float)$position['lat'];

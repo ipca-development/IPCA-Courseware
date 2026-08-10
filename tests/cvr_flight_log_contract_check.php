@@ -21,6 +21,7 @@ $derivation = file_get_contents($root . '/src/FlightRecordDerivationService.php'
 $debrief = file_get_contents($root . '/src/FlightDebriefService.php') ?: '';
 $startingMeterMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_flight_log_starting_meter_adjustments.sql') ?: '';
 $adminCorrection = file_get_contents($root . '/src/CvrAdminLegCorrectionService.php') ?: '';
+$contentView = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/ContentView.swift') ?: '';
 
 $checks = array(
     'flight log API is device authenticated and aircraft scoped' =>
@@ -83,6 +84,11 @@ $checks = array(
         && str_contains($workflowStore, 'func voidFlightLog(')
         && str_contains($workflowStore, 'isFlightLogVoided')
         && str_contains($views, 'workflow.isFlightLogVoided'),
+    'Admin shell exposes Logs so protected void action is reachable' =>
+        str_contains($contentView, 'case .logs:')
+        && str_contains($contentView, 'FlightLogView(adminUnlocked: true)')
+        && str_contains($contentView, 'case .logs: return "Logs"')
+        && str_contains($views, 'struct FlightLogView: View'),
     'Log exposes manual sync at the top tile and bottom action' =>
         str_contains($views, 'title: "SYNC NOW"')
         && str_contains($views, 'syncPendingLogUploads()')

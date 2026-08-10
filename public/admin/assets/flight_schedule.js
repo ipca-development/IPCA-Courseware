@@ -722,18 +722,6 @@
         : '')
         + '<p class="fltsch-muted">Live ADS-B follows this aircraft continuously. Full selected-aircraft track is shown; nearby traffic appears without trails.</p>';
     }
-    var undispatchBtn = document.getElementById('flightDispatchedUndispatchBtn');
-    if (undispatchBtn) {
-      undispatchBtn.hidden = !reservation.can_undispatch;
-      if (!undispatchBtn.dataset.bound) {
-        undispatchBtn.dataset.bound = '1';
-        undispatchBtn.addEventListener('click', function () {
-          if (dispatchedTrackReservation && dispatchedTrackReservation.can_undispatch) {
-            openUndispatchModal(dispatchedTrackReservation);
-          }
-        });
-      }
-    }
     showDialog('flightDispatchedModal');
     var chart = ensureDispatchedTrackChart();
     if (chart) {
@@ -1245,7 +1233,8 @@
           setAircraftInFlightState(label, !!(data && data.ok && data.in_flight));
         })
         .catch(function () {
-          // Keep the last known pill state; the next poll retries.
+          // A failed ADS-B lookup must not preserve a stale airborne claim.
+          setAircraftInFlightState(label, false);
         });
     }));
   }
