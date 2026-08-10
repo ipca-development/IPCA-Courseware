@@ -584,7 +584,7 @@ final class CvrAdminLegSplitService
     private function detectCvrLandingCycles(string $flightUuid): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT event_type, timestamp_utc, latitude, longitude
+            'SELECT event_type, timestamp_utc, latitude, longitude, payload_json
              FROM ipca_cvr_flight_events
              WHERE LOWER(workflow_flight_record_uuid) = ?
              ORDER BY timestamp_utc ASC, id ASC'
@@ -609,7 +609,13 @@ final class CvrAdminLegSplitService
             }
             $lat = isset($event['latitude']) && is_numeric($event['latitude']) ? (float)$event['latitude'] : null;
             $lon = isset($event['longitude']) && is_numeric($event['longitude']) ? (float)$event['longitude'] : null;
-            $near = ($lat !== null && $lon !== null) ? $this->nearestAirport($lat, $lon) : null;
+            $payload = json_decode((string)($event['payload_json'] ?? ''), true);
+            $evidence = is_array($payload['evidence'] ?? null) ? $payload['evidence'] : array();
+            $metadata = is_array($evidence['metadata'] ?? null) ? $evidence['metadata'] : array();
+            $deviceAirport = strtoupper(trim((string)($metadata['airport_identifier'] ?? '')));
+            $near = $deviceAirport !== ''
+                ? array('icao' => $deviceAirport, 'nm' => 0.0)
+                : (($lat !== null && $lon !== null) ? $this->nearestAirport($lat, $lon) : null);
             $cycles[] = array(
                 'landing_utc' => (string)$event['timestamp_utc'],
                 'airport' => $near['icao'] ?? null,
@@ -1159,7 +1165,40 @@ final class CvrAdminLegSplitService
     private function nearestAirport(float $lat, float $lon, float $maxNm = self::AIRPORT_RADIUS_NM): ?array
     {
         $best = null;
-        foreach (tv_adsb_airports() as $icao => $airport) {
+        $airports = array();
+        try {
+            $latitudeDelta = $maxNm / 60.0;
+            $longitudeDelta = $maxNm / max(10.0, 60.0 * cos(deg2rad($lat)));
+            $statement = $this->pdo->prepare(
+                'SELECT icao_identifier, full_name, latitude_deg, longitude_deg
+                 FROM ipca_airports
+                 WHERE latitude_deg BETWEEN ? AND ?
+                   AND longitude_deg BETWEEN ? AND ?
+                 LIMIT 100'
+            );
+            $statement->execute(array(
+                $lat - $latitudeDelta,
+                $lat + $latitudeDelta,
+                $lon - $longitudeDelta,
+                $lon + $longitudeDelta,
+            ));
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+                $identifier = strtoupper(trim((string)($row['icao_identifier'] ?? '')));
+                if ($identifier !== '') {
+                    $airports[$identifier] = array(
+                        'lat' => (float)$row['latitude_deg'],
+                        'lon' => (float)$row['longitude_deg'],
+                        'name' => (string)($row['full_name'] ?? $identifier),
+                    );
+                }
+            }
+        } catch (Throwable) {
+            $airports = array();
+        }
+        if ($airports === array()) {
+            $airports = tv_adsb_airports();
+        }
+        foreach ($airports as $icao => $airport) {
             if (!isset($airport['lat'], $airport['lon'])) {
                 continue;
             }

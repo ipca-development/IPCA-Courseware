@@ -127,6 +127,15 @@ final class CvrDispatchIntakeService
             throw $e;
         }
 
+        require_once __DIR__ . '/CvrAutoReconstructionOrchestrator.php';
+        CvrAutoReconstructionOrchestrator::safeConsider(
+            $this->pdo,
+            $normalized['flight_record_uuid'],
+            null,
+            $dispatchId,
+            null
+        );
+
         $fuelUplift = null;
         if (!$alreadyPresent) {
             try {

@@ -48,7 +48,7 @@ require_contains($draft, 'Enter the destination airport.', 'draft blocks blank d
 require_contains($draft, 'must never blank another leg\'s destination', 'editing one leg preserves others', $failures);
 require_contains($draft, 'isValidICAOIdentifier', 'ICAO validation helper', $failures);
 
-require_contains($store, 'plannedDestinationAirport: homeAirport', 'local create defaults KTRM→KTRM style', $failures);
+require_contains($store, 'plannedDestinationAirport: routeAirports.count >= 2', 'local create supports route-free Operational Sessions', $failures);
 require_contains($store, 'destinationAirport: homeAirport', 'local identity defaults same-airport destination', $failures);
 require_contains($store, 'Enter the destination airport.', 'open-leg blocks blank destination', $failures);
 require_contains($store, 'normalizedAirports.allSatisfy({ !$0.isEmpty })', 'multi-leg refuses blank chain slots', $failures);
@@ -82,7 +82,7 @@ if ($synthesizePos === false) {
 }
 
 require_contains($views, 'Persist Off Block before UI confirmation', 'UI confirms after persist', $failures);
-require_contains($views, 'let action: () -> Bool', 'hold button confirms only on success', $failures);
+require_contains($views, 'let action: () async -> Bool', 'hold button confirms only after persisted async action', $failures);
 require_contains($views, 'uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)', 'engine start queues independent upload', $failures);
 require_contains($upload, 'requestPayloadSnapshot', 'reconciliation preserves original payload/timestamp', $failures);
 require_contains($upload, 'flight_events', 'events upload independently', $failures);

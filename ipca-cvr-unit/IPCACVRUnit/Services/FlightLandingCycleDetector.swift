@@ -13,8 +13,8 @@ enum TakeoffCycleKind: String, Codable, Equatable {
 }
 
 enum GPSFlightTransition: Equatable {
-    case takeoff(timestamp: Date, sample: GPSSample, kind: TakeoffCycleKind)
-    case landing(timestamp: Date, sample: GPSSample, kind: LandingCycleKind)
+    case takeoff(timestamp: Date, sample: GPSSample, kind: TakeoffCycleKind, airportIdentifier: String?)
+    case landing(timestamp: Date, sample: GPSSample, kind: LandingCycleKind, airportIdentifier: String?)
 }
 
 struct AirportReference: Equatable {
@@ -26,7 +26,35 @@ struct AirportReference: Equatable {
 }
 
 enum AirportGeofenceCatalog {
-    static let bundled: [AirportReference] = [
+    private struct RegionalCatalog: Decodable {
+        var airports: [RegionalAirport]
+    }
+
+    private struct RegionalAirport: Decodable {
+        var identifier: String
+        var latitudeDeg: Double
+        var longitudeDeg: Double
+        var elevationFt: Double?
+        var runways: [RegionalRunway]
+
+        enum CodingKeys: String, CodingKey {
+            case identifier
+            case latitudeDeg = "latitude_deg"
+            case longitudeDeg = "longitude_deg"
+            case elevationFt = "elevation_ft"
+            case runways
+        }
+    }
+
+    private struct RegionalRunway: Decodable {
+        var lengthFt: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case lengthFt = "length_ft"
+        }
+    }
+
+    private static let fallback: [AirportReference] = [
         AirportReference(icao: "KTRM", latitude: 33.626667, longitude: -116.159722, elevationFeet: -115, boundaryRadiusNM: 3.0),
         AirportReference(icao: "KPSP", latitude: 33.829667, longitude: -116.506389, elevationFeet: 477, boundaryRadiusNM: 4.0),
         AirportReference(icao: "KCRQ", latitude: 33.128333, longitude: -117.280278, elevationFeet: 331, boundaryRadiusNM: 3.5),
@@ -39,11 +67,12 @@ enum AirportGeofenceCatalog {
         AirportReference(icao: "KAJO", latitude: 33.574722, longitude: -117.128889, elevationFeet: 56, boundaryRadiusNM: 2.5),
     ]
 
+    static let bundled: [AirportReference] = loadRegionalCatalog() ?? fallback
+
     static func resolve(icaoCodes: [String]) -> [AirportReference] {
-        let normalized = Set(icaoCodes.map { $0.uppercased().trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
-        guard !normalized.isEmpty else { return bundled }
-        let matches = bundled.filter { normalized.contains($0.icao) }
-        return matches.isEmpty ? bundled : matches
+        // Planned route fields are informative. Never restrict evidence-derived
+        // takeoff/landing detection to the airports entered at Dispatch.
+        bundled
     }
 
     static func nearestAirport(latitude: Double, longitude: Double, within airports: [AirportReference]) -> AirportReference? {
@@ -71,6 +100,30 @@ enum AirportGeofenceCatalog {
         let a = sin(dLat / 2) * sin(dLat / 2)
             + cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180) * sin(dLon / 2) * sin(dLon / 2)
         return 2 * earthRadiusNM * asin(min(1, sqrt(a)))
+    }
+
+    private static func loadRegionalCatalog() -> [AirportReference]? {
+        guard let url = Bundle.main.url(forResource: "faa_ca_az_nv_airports", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let catalog = try? JSONDecoder().decode(RegionalCatalog.self, from: data) else {
+            return nil
+        }
+        let references = catalog.airports.compactMap { airport -> AirportReference? in
+            let identifier = airport.identifier
+                .uppercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !identifier.isEmpty else { return nil }
+            let longestRunway = airport.runways.compactMap(\.lengthFt).max() ?? 0
+            let radius = min(4.0, max(2.0, 1.5 + longestRunway / 10_000))
+            return AirportReference(
+                icao: identifier,
+                latitude: airport.latitudeDeg,
+                longitude: airport.longitudeDeg,
+                elevationFeet: airport.elevationFt ?? 0,
+                boundaryRadiusNM: radius
+            )
+        }
+        return references.isEmpty ? nil : references
     }
 }
 
@@ -108,6 +161,7 @@ struct FlightLandingCycleDetector {
     private var approachEntrySince: Date?
     private var hasInitialTakeoff = false
     private var airports: [AirportReference] = AirportGeofenceCatalog.bundled
+    private var lastGroundAirportIdentifier: String?
 
     mutating func reset(airportICAOs: [String] = []) {
         phase = .ground
@@ -116,6 +170,7 @@ struct FlightLandingCycleDetector {
         approachEntrySince = nil
         hasInitialTakeoff = false
         airports = AirportGeofenceCatalog.resolve(icaoCodes: airportICAOs)
+        lastGroundAirportIdentifier = nil
     }
 
     mutating func evaluate(sample: GPSSample) -> [GPSFlightTransition] {
@@ -157,6 +212,9 @@ struct FlightLandingCycleDetector {
 
     private mutating func evaluateGroundTakeoff(sample: GPSSample) -> [GPSFlightTransition] {
         landingCandidateAt = nil
+        if let airport = airportContext(for: sample) {
+            lastGroundAirportIdentifier = airport.icao
+        }
         if sample.speedKnots >= Self.takeoffSpeedKnots {
             let candidate = takeoffCandidateAt ?? sample.timestamp
             takeoffCandidateAt = candidate
@@ -165,7 +223,12 @@ struct FlightLandingCycleDetector {
                 phase = .airborne
                 let kind: TakeoffCycleKind = hasInitialTakeoff ? .cycle : .initial
                 hasInitialTakeoff = true
-                return [.takeoff(timestamp: candidate, sample: sample, kind: kind)]
+                return [.takeoff(
+                    timestamp: candidate,
+                    sample: sample,
+                    kind: kind,
+                    airportIdentifier: lastGroundAirportIdentifier
+                )]
             }
         } else {
             takeoffCandidateAt = nil
@@ -183,7 +246,12 @@ struct FlightLandingCycleDetector {
             if sample.timestamp.timeIntervalSince(candidate) >= Self.nonPatternLandingConfirmationSeconds {
                 landingCandidateAt = nil
                 phase = .ground
-                return [.landing(timestamp: candidate, sample: sample, kind: .fullStop)]
+                return [.landing(
+                    timestamp: candidate,
+                    sample: sample,
+                    kind: .fullStop,
+                    airportIdentifier: airportContext(for: sample)?.icao
+                )]
             }
         } else {
             landingCandidateAt = nil
@@ -201,7 +269,12 @@ struct FlightLandingCycleDetector {
         if airportContext(for: sample)?.icao != roll.airportICAO {
             // Left airport after a landing moment without re-takeoff — treat as full stop.
             if let landingAt = roll.landingMomentAt {
-                transitions.append(.landing(timestamp: landingAt, sample: sample, kind: .fullStop))
+                transitions.append(.landing(
+                    timestamp: landingAt,
+                    sample: sample,
+                    kind: .fullStop,
+                    airportIdentifier: roll.airportICAO
+                ))
                 phase = .ground
             } else {
                 phase = .airborne
@@ -222,7 +295,12 @@ struct FlightLandingCycleDetector {
         // Full stop: commit quickly once slowed on the airport surface.
         if let belowStop = roll.belowStopSpeedSince,
            sample.timestamp.timeIntervalSince(belowStop) >= Self.stopHoldSeconds {
-            transitions.append(.landing(timestamp: belowStop, sample: sample, kind: .fullStop))
+            transitions.append(.landing(
+                timestamp: belowStop,
+                sample: sample,
+                kind: .fullStop,
+                airportIdentifier: roll.airportICAO
+            ))
             phase = .ground
             return transitions
         }
@@ -234,8 +312,18 @@ struct FlightLandingCycleDetector {
             let candidate = roll.takeoffCandidateAt ?? sample.timestamp
             roll.takeoffCandidateAt = candidate
             if sample.timestamp.timeIntervalSince(candidate) >= Self.takeoffAfterRollConfirmationSeconds {
-                transitions.append(.landing(timestamp: landingAt, sample: sample, kind: .touchAndGo))
-                transitions.append(.takeoff(timestamp: candidate, sample: sample, kind: .cycle))
+                transitions.append(.landing(
+                    timestamp: landingAt,
+                    sample: sample,
+                    kind: .touchAndGo,
+                    airportIdentifier: roll.airportICAO
+                ))
+                transitions.append(.takeoff(
+                    timestamp: candidate,
+                    sample: sample,
+                    kind: .cycle,
+                    airportIdentifier: roll.airportICAO
+                ))
                 phase = .airborne
                 return transitions
             }

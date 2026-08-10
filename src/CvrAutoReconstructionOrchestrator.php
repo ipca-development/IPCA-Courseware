@@ -88,7 +88,7 @@ final class CvrAutoReconstructionOrchestrator
         }
         $garmin = $this->latestGarmin($resolved, $garminCsvId);
         if ($garmin === null) {
-            return array('ok' => true, 'skipped' => true, 'reason' => 'waiting_for_garmin', 'flight_uuid' => $resolved);
+            return $this->considerPreliminary($resolved, $dispatch, $recording);
         }
 
         $dispatchId = (int)$dispatch['id'];
@@ -165,6 +165,62 @@ final class CvrAutoReconstructionOrchestrator
             $out['debrief'] = array('ok' => false, 'error' => $e->getMessage());
         }
 
+        return $out;
+    }
+
+    /** @return array<string,mixed> */
+    private function considerPreliminary(string $flightUuid, array $dispatch, array $recording): array
+    {
+        try {
+            $bundle = $this->bundles->freezePreliminary(
+                (int)$dispatch['id'],
+                (int)$recording['id'],
+                null
+            );
+        } catch (Throwable $e) {
+            error_log('[CvrAutoReconstructionOrchestrator] preliminary freeze failed: ' . $e->getMessage());
+            return array(
+                'ok' => false,
+                'flight_uuid' => $flightUuid,
+                'evidence_stage' => 'preliminary',
+                'error' => $e->getMessage(),
+            );
+        }
+        $bundleId = (int)($bundle['id'] ?? 0);
+        $out = array(
+            'ok' => $bundleId > 0,
+            'flight_uuid' => $flightUuid,
+            'dispatch_id' => (int)$dispatch['id'],
+            'recording_id' => (int)$recording['id'],
+            'garmin_csv_file_id' => null,
+            'bundle_id' => $bundleId,
+            'evidence_stage' => 'preliminary',
+            'garmin_required' => false,
+        );
+        if ($bundleId <= 0) {
+            return $out;
+        }
+
+        require_once __DIR__ . '/CockpitRecorderDebriefQueueService.php';
+        $debriefQueue = CockpitRecorderDebriefQueueService::fromPdo($this->pdo);
+        if (!CockpitRecorderDebriefQueueService::autoDebriefEnabled()) {
+            $out['debrief'] = array('ok' => true, 'skipped' => true, 'reason' => 'auto_debrief_disabled');
+        } elseif (!$debriefQueue->hasPreliminaryTranscript((int)$recording['id'])) {
+            $out['debrief'] = array(
+                'ok' => true,
+                'skipped' => true,
+                'reason' => 'waiting_for_live_or_pass4_transcript',
+                'garmin_blocking' => false,
+            );
+        } elseif ($this->hasStructuredDebrief($bundleId)) {
+            $out['debrief'] = array('ok' => true, 'skipped' => true, 'reason' => 'already_debriefed');
+        } else {
+            try {
+                $out['debrief'] = $debriefQueue->lockAndQueuePreliminaryDebrief($bundleId, null);
+            } catch (Throwable $e) {
+                $out['debrief'] = array('ok' => false, 'error' => $e->getMessage());
+            }
+        }
         return $out;
     }
 
@@ -419,6 +475,7 @@ final class CvrAutoReconstructionOrchestrator
         $statement = $this->pdo->prepare(
             'SELECT * FROM ipca_manual_intake_bundles
              WHERE cockpit_recording_id = ? AND transcript_snapshot_id IS NULL
+               AND garmin_csv_file_id IS NOT NULL
              ORDER BY id DESC LIMIT 1'
         );
         $statement->execute(array($recordingId));

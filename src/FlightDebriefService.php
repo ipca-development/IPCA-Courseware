@@ -193,23 +193,28 @@ final class FlightDebriefService
         $this->pdo->beginTransaction();
         try {
             $previous = $this->pdo->prepare(
-                'SELECT id FROM ipca_structured_debriefs WHERE bundle_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE'
+                'SELECT d.id
+                 FROM ipca_structured_debriefs d
+                 INNER JOIN ipca_manual_intake_bundles b ON b.id = d.bundle_id
+                 WHERE b.workflow_flight_record_uuid = ?
+                 ORDER BY d.id DESC LIMIT 1 FOR UPDATE'
             );
-            $previous->execute(array($bundleId));
+            $previous->execute(array((string)$bundle['workflow_flight_record_uuid']));
             $supersedes = (int)$previous->fetchColumn() ?: null;
             $insert = $this->pdo->prepare(
                 'INSERT INTO ipca_structured_debriefs
                  (debrief_uuid, bundle_id, mission_version_id, transcript_snapshot_id, supersedes_debrief_id,
-                  status, provider, model, prompt_version, logic_version, prompt_sha256, request_sha256,
+                  status, evidence_stage, provider, model, prompt_version, logic_version, prompt_sha256, request_sha256,
                   response_sha256, raw_response_json, general_text, chronological_review_json,
                   mission_assessment_text, summary_next_steps_text, suggested_overall,
                   overall_calculation_json, uncertainty_json, created_by)
-                 VALUES (?, ?, ?, ?, ?, \'ai_draft\', \'openai\', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, \'ai_draft\', ?, \'openai\', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute(array(
                 AuditEventService::uuid(), $bundleId,
                 isset($missionVersion['id']) && (int)$missionVersion['id'] > 0 ? (int)$missionVersion['id'] : null,
                 (int)$snapshot['id'], $supersedes,
+                (string)($bundle['evidence_stage'] ?? 'final_enriched'),
                 cw_openai_model(), self::PROMPT_VERSION, self::LOGIC_VERSION,
                 hash('sha256', $prompt),
                 hash('sha256', AuditEventService::jsonEncode($request)),
@@ -323,7 +328,7 @@ final class FlightDebriefService
              FROM ipca_manual_intake_bundles b
              INNER JOIN ipca_cvr_dispatches d ON d.id = b.dispatch_id
              INNER JOIN ipca_cockpit_recordings cr ON cr.id = b.cockpit_recording_id
-             INNER JOIN ipca_garmin_csv_files g ON g.id = b.garmin_csv_file_id
+             LEFT JOIN ipca_garmin_csv_files g ON g.id = b.garmin_csv_file_id
              LEFT JOIN ipca_aircraft_devices a ON a.id = d.aircraft_id
              LEFT JOIN ipca_flight_sessions gs ON gs.id = g.session_id
              LEFT JOIN ipca_operational_flight_records gr ON gr.id = gs.current_flight_record_id
@@ -777,9 +782,23 @@ final class FlightDebriefService
             $statement->execute(array((int)$bundle['cockpit_recording_id']));
             $adsb = $statement->fetch(PDO::FETCH_ASSOC) ?: array();
         }
+        $evidenceStage = (string)($bundle['evidence_stage'] ?? 'final_enriched');
+        $limitations = array(
+            'Garmin measures aircraft performance and flight path; it does not prove prompting or decision quality.',
+            'ADS-B provides traffic context; it does not prove the student saw traffic.',
+            'Transcript absence is insufficient evidence, not automatic NO.',
+        );
+        if ($evidenceStage === 'preliminary') {
+            array_unshift(
+                $limitations,
+                'This is a PRELIMINARY shutdown debrief. Garmin evidence is not available yet; do not infer Garmin-derived performance facts.'
+            );
+        }
         return array(
             'bundle_uuid' => $bundle['bundle_uuid'],
             'manifest_sha256' => $bundle['manifest_sha256'],
+            'evidence_stage' => $evidenceStage,
+            'garmin_available' => $evidenceStage !== 'preliminary' && $timeline !== array(),
             'transcript_snapshot' => array(
                 'snapshot_uuid' => $snapshot['snapshot_uuid'],
                 'sha256' => $snapshot['transcript_sha256'],
@@ -789,11 +808,7 @@ final class FlightDebriefService
             'event_markers' => $events,
             'garmin_reconstruction_timeline' => $timeline,
             'adsb_context' => $adsb,
-            'source_limitations' => array(
-                'Garmin measures aircraft performance and flight path; it does not prove prompting or decision quality.',
-                'ADS-B provides traffic context; it does not prove the student saw traffic.',
-                'Transcript absence is insufficient evidence, not automatic NO.',
-            ),
+            'source_limitations' => $limitations,
         );
     }
 

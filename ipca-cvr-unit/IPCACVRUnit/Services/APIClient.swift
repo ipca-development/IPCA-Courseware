@@ -68,6 +68,22 @@ struct ChunkUploadStatusResponse: Codable {
     }
 }
 
+struct LiveAudioSegmentUploadResponse: Codable {
+    var ok: Bool
+    var segmentID: Int?
+    var status: String?
+    var alreadyPresent: Bool?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case segmentID = "segment_id"
+        case status
+        case alreadyPresent = "already_present"
+        case error
+    }
+}
+
 struct StatusResponse: Codable {
     var ok: Bool
     var recording: APIRecording?
@@ -780,6 +796,36 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(ChunkUploadStatusResponse.self, from: data, response: response)
+    }
+
+    func uploadLiveAudioSegment(
+        credential: String,
+        recordingID: String,
+        operationalSessionUUID: String,
+        flightRecordUUID: String,
+        segment: AudioRecordingSegment,
+        sha256: String,
+        language: String,
+        audioData: Data
+    ) async throws -> LiveAudioSegmentUploadResponse {
+        let url = serverURL.appending(path: "api/cvr/live_audio_segment.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 180
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("audio/mp4", forHTTPHeaderField: "Content-Type")
+        request.setValue(recordingID, forHTTPHeaderField: "X-IPCA-Recording-ID")
+        request.setValue(operationalSessionUUID, forHTTPHeaderField: "X-IPCA-Operational-Session-UUID")
+        request.setValue(flightRecordUUID, forHTTPHeaderField: "X-IPCA-Flight-Record-UUID")
+        request.setValue(String(segment.index), forHTTPHeaderField: "X-IPCA-Segment-Index")
+        request.setValue(ISO8601DateFormatter().string(from: segment.startedAt), forHTTPHeaderField: "X-IPCA-Segment-Started-At")
+        request.setValue(String(format: "%.3f", segment.duration), forHTTPHeaderField: "X-IPCA-Segment-Duration")
+        request.setValue(sha256, forHTTPHeaderField: "X-IPCA-SHA256")
+        request.setValue(language, forHTTPHeaderField: "X-IPCA-Language")
+        request.httpBody = audioData
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(LiveAudioSegmentUploadResponse.self, from: data, response: response)
     }
 
     func finalizeChunkedUploadRequest(for recording: Recording, language: String) throws -> URLRequest {

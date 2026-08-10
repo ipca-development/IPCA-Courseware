@@ -35,6 +35,12 @@ final class CockpitRecorderDebriefQueueService
         return $this->processingRuns->findLatestPublishableForRecording($recordingId) !== null;
     }
 
+    public function hasPreliminaryTranscript(int $recordingId): bool
+    {
+        return $this->hasReadableTranscript($recordingId)
+            || $this->bundles->hasCompleteLiveTranscript($recordingId);
+    }
+
     /**
      * @return array<string,mixed>
      */
@@ -108,6 +114,24 @@ final class CockpitRecorderDebriefQueueService
         );
     }
 
+    /** @return array<string,mixed> */
+    public function lockAndQueuePreliminaryDebrief(int $bundleId, ?int $actorUserId = null): array
+    {
+        $bundle = $this->bundles->bundleById($bundleId);
+        $recordingId = (int)($bundle['cockpit_recording_id'] ?? 0);
+        $snapshotId = $this->hasReadableTranscript($recordingId)
+            ? $this->bundles->lockTranscript($bundleId, $actorUserId)
+            : $this->bundles->lockLiveTranscript($bundleId, $actorUserId);
+        $queued = $this->queueDebriefJob($bundleId, $snapshotId, $actorUserId);
+        return array(
+            'ok' => true,
+            'bundle_id' => $bundleId,
+            'transcript_snapshot_id' => $snapshotId,
+            'evidence_stage' => 'preliminary',
+            'debrief_job' => $queued,
+        );
+    }
+
     /**
      * Merge progress fields into an async debrief job payload (no schema migration).
      */
@@ -169,6 +193,7 @@ final class CockpitRecorderDebriefQueueService
                 'progress_message' => '',
                 'error' => '',
                 'debrief_id' => null,
+                'evidence_stage' => '',
                 'running' => false,
             );
         }
@@ -185,12 +210,18 @@ final class CockpitRecorderDebriefQueueService
         $job = $jobStatement->fetch(PDO::FETCH_ASSOC);
 
         $debriefId = null;
+        $evidenceStage = '';
         if ($this->tableExists('ipca_structured_debriefs')) {
             $debriefStatement = $this->pdo->prepare(
-                'SELECT id FROM ipca_structured_debriefs WHERE bundle_id = ? ORDER BY id DESC LIMIT 1'
+                'SELECT id, evidence_stage FROM ipca_structured_debriefs
+                 WHERE bundle_id = ? ORDER BY id DESC LIMIT 1'
             );
             $debriefStatement->execute(array($bundleId));
-            $debriefId = (int)$debriefStatement->fetchColumn() ?: null;
+            $debriefRow = $debriefStatement->fetch(PDO::FETCH_ASSOC);
+            if (is_array($debriefRow)) {
+                $debriefId = (int)($debriefRow['id'] ?? 0) ?: null;
+                $evidenceStage = trim((string)($debriefRow['evidence_stage'] ?? ''));
+            }
         }
 
         if (!is_array($job)) {
@@ -202,6 +233,7 @@ final class CockpitRecorderDebriefQueueService
                 'progress_message' => $debriefId ? 'Ready' : '',
                 'error' => '',
                 'debrief_id' => $debriefId,
+                'evidence_stage' => $evidenceStage,
                 'running' => false,
             );
         }
@@ -242,6 +274,7 @@ final class CockpitRecorderDebriefQueueService
             'progress_message' => $message,
             'error' => trim((string)($job['last_error'] ?? '')),
             'debrief_id' => $debriefId,
+            'evidence_stage' => $evidenceStage,
             'running' => $running,
         );
     }

@@ -8,11 +8,13 @@ final class GPSLocationManager: NSObject, ObservableObject {
     @Published private(set) var latestSample: GPSSample?
     @Published private(set) var lastError: String = ""
     var onFlightTransition: ((GPSFlightTransition) -> Void)?
+    var onEvidenceSample: ((GPSSample) -> Void)?
 
     private static let captureDesiredAccuracy = kCLLocationAccuracyNearestTenMeters
     private static let captureDistanceFilter: CLLocationDistance = 10
     private static let minimumCaptureSampleInterval: TimeInterval = 2
     private static let minimumCaptureDistance: CLLocationDistance = 8
+    private static let evidenceUploadInterval: TimeInterval = 15
 
     private var locationManager: CLLocationManager?
     private var captureRecordingID: String?
@@ -20,6 +22,7 @@ final class GPSLocationManager: NSObject, ObservableObject {
     private var capturedSamples: [GPSSample] = []
     private var lastCapturedLocation: CLLocation?
     private var lastCapturedSampleAt: Date?
+    private var lastEvidenceSampleAt: Date?
     private var landingCycleDetector = FlightLandingCycleDetector()
 
     func prepare() {
@@ -41,6 +44,7 @@ final class GPSLocationManager: NSObject, ObservableObject {
         capturedSamples = []
         lastCapturedLocation = nil
         lastCapturedSampleAt = nil
+        lastEvidenceSampleAt = nil
         landingCycleDetector.reset(airportICAOs: airportICAOs)
 
         guard let locationManager else {
@@ -75,6 +79,7 @@ final class GPSLocationManager: NSObject, ObservableObject {
         captureStartedAt = nil
         lastCapturedLocation = nil
         lastCapturedSampleAt = nil
+        lastEvidenceSampleAt = nil
         landingCycleDetector.reset()
         locationManager?.stopUpdatingLocation()
         updateAuthorizationState()
@@ -184,6 +189,10 @@ final class GPSLocationManager: NSObject, ObservableObject {
             capturedSamples.append(sample)
             lastCapturedLocation = location
             lastCapturedSampleAt = timestamp
+            if lastEvidenceSampleAt.map({ timestamp.timeIntervalSince($0) >= Self.evidenceUploadInterval }) ?? true {
+                lastEvidenceSampleAt = timestamp
+                onEvidenceSample?(sample)
+            }
         }
     }
 

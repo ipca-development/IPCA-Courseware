@@ -952,6 +952,23 @@ private struct CVROperationalLegReviewSheet: View {
                 && ($0.eventType == "gps_landing_provisional"
                     || $0.eventType == "manual_landing_adjustment")
         }.count
+        let endingFuel = numericFuel(flight.fuelRemaining)
+        if let gpsLegs = gpsDerivedLegs(
+            flightRecordID: flight.id,
+            events: events,
+            offBlock: offBlock,
+            onBlock: onBlock,
+            startingHobbs: startingHobbs,
+            endingHobbs: endingHobbs,
+            startingTacho: startingTacho,
+            endingTacho: endingTacho,
+            startingFuel: numericFuel(dispatch.fuelOnboard),
+            endingFuel: endingFuel
+        ), !gpsLegs.isEmpty {
+            legs = gpsLegs
+            seededFromLocalCheckIn = true
+            return
+        }
         legs = [CVROperationalLegReviewLeg(
             sequenceNumber: 1,
             departureAirport: dispatch.plannedDepartureAirport.isEmpty
@@ -973,9 +990,95 @@ private struct CVROperationalLegReviewSheet: View {
                 ?? flight.autoDetectedLandingCount
                 ?? landingEvents,
             fuelOnboard: numericFuel(dispatch.fuelOnboard),
-            fuelRemaining: numericFuel(flight.fuelRemaining)
+            fuelRemaining: endingFuel
         )]
         seededFromLocalCheckIn = true
+    }
+
+    private func gpsDerivedLegs(
+        flightRecordID: String,
+        events: [CVRFlightEventRecord],
+        offBlock: Date,
+        onBlock: Date,
+        startingHobbs: Double,
+        endingHobbs: Double,
+        startingTacho: Double,
+        endingTacho: Double,
+        startingFuel: Double?,
+        endingFuel: Double?
+    ) -> [CVROperationalLegReviewLeg]? {
+        struct EvidenceLeg {
+            var departure: String
+            var arrival: String
+            var takeoffAt: Date
+            var landingAt: Date
+        }
+
+        let evidence = events
+            .filter {
+                $0.flightRecordID == flightRecordID
+                    && ($0.eventType == "gps_takeoff_provisional"
+                        || $0.eventType == "gps_landing_provisional")
+            }
+            .sorted { $0.timestampUTC < $1.timestampUTC }
+        var pendingTakeoff: (airport: String, timestamp: Date)?
+        var evidenceLegs: [EvidenceLeg] = []
+        for event in evidence {
+            let airport = event.metadata?["airport_identifier"]?
+                .uppercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !airport.isEmpty else { continue }
+            if event.eventType == "gps_takeoff_provisional" {
+                pendingTakeoff = (airport, event.timestampUTC)
+            } else if let takeoff = pendingTakeoff, event.timestampUTC >= takeoff.timestamp {
+                evidenceLegs.append(EvidenceLeg(
+                    departure: takeoff.airport,
+                    arrival: airport,
+                    takeoffAt: takeoff.timestamp,
+                    landingAt: event.timestampUTC
+                ))
+                pendingTakeoff = nil
+            }
+        }
+        guard !evidenceLegs.isEmpty else { return nil }
+
+        let sessionDuration = max(1, onBlock.timeIntervalSince(offBlock))
+        func fraction(_ timestamp: Date) -> Double {
+            min(1, max(0, timestamp.timeIntervalSince(offBlock) / sessionDuration))
+        }
+        func interpolate(_ start: Double, _ end: Double, at timestamp: Date) -> Double {
+            start + ((end - start) * fraction(timestamp))
+        }
+
+        return evidenceLegs.enumerated().map { index, evidenceLeg in
+            let legStart = index == 0
+                ? offBlock
+                : evidenceLegs[index - 1].landingAt
+            let legEnd = index == evidenceLegs.count - 1
+                ? onBlock
+                : evidenceLeg.landingAt
+            let fuelStart = startingFuel.flatMap { start in
+                endingFuel.map { interpolate(start, $0, at: legStart) }
+            }
+            let fuelEnd = startingFuel.flatMap { start in
+                endingFuel.map { interpolate(start, $0, at: legEnd) }
+            }
+            return CVROperationalLegReviewLeg(
+                sequenceNumber: index + 1,
+                departureAirport: evidenceLeg.departure,
+                arrivalAirport: evidenceLeg.arrival,
+                offBlockUTC: Self.utcString(from: legStart),
+                onBlockUTC: Self.utcString(from: legEnd),
+                startingHobbs: interpolate(startingHobbs, endingHobbs, at: legStart),
+                endingHobbs: interpolate(startingHobbs, endingHobbs, at: legEnd),
+                startingTacho: interpolate(startingTacho, endingTacho, at: legStart),
+                endingTacho: interpolate(startingTacho, endingTacho, at: legEnd),
+                takeoffCount: 1,
+                landingCount: 1,
+                fuelOnboard: fuelStart,
+                fuelRemaining: fuelEnd
+            )
+        }
     }
 
     private func numericFuel(_ value: String?) -> Double? {
@@ -6232,13 +6335,34 @@ struct FlightLogView: View {
                     .foregroundStyle(CVROperationalPalette.secondaryBlue)
                 }
                 if garminSDCardNeedsAttention(entry) {
+                    let hasPendingGarmin = flightLogs.pendingGarminCSV?.targetFlightRecordID
+                        == entry.flightRecordID
                     Button {
-                        garminSDCard.openFromLogRow(entry: entry, settings: settings)
+                        if hasPendingGarmin {
+                            Task {
+                                await flightLogs.uploadPendingGarminCSV(
+                                    to: entry,
+                                    settings: settings,
+                                    uploadManager: uploadManager
+                                )
+                            }
+                        } else {
+                            directImportTarget = entry
+                            isDirectGarminUpload = true
+                            isShowingFileImporter = true
+                        }
                     } label: {
-                        Label("SD CARD", systemImage: "sdcard")
+                        Label(
+                            hasPendingGarmin ? "RETRY GARMIN" : "SELECT GARMIN CSV",
+                            systemImage: hasPendingGarmin ? "arrow.clockwise.icloud" : "doc.badge.plus"
+                        )
                     }
                     .foregroundStyle(CVROperationalPalette.secondaryBlue)
-                    .accessibilityLabel("Import Garmin CSV from SD card")
+                    .accessibilityLabel(
+                        hasPendingGarmin
+                            ? "Retry the locally stored Garmin CSV upload"
+                            : "Select the Garmin CSV for this flight"
+                    )
                 }
                 if entry.hasGarminCSV && legsCanBeReviewed(entry) {
                     let verified = legsAreVerified(entry)
@@ -6396,9 +6520,21 @@ struct FlightLogView: View {
             || entry.transcriptStatus?.lowercased() == "failed" {
             return ("FAILED", "exclamationmark.octagon.fill", CVROperationalPalette.critical)
         }
-        if entry.serverUploadStatus?.lowercased() == "complete",
-           (entry.audioUploadStatus?.lowercased() == "uploaded" || entry.audioUploadStatus?.lowercased() == "complete"),
-           entry.transcriptStatus?.lowercased() == "ready" {
+        let operationalEvidenceComplete = entry.serverUploadStatus?.lowercased() == "complete"
+            && (entry.audioUploadStatus?.lowercased() == "uploaded"
+                || entry.audioUploadStatus?.lowercased() == "complete")
+            && entry.transcriptStatus?.lowercased() == "ready"
+        if operationalEvidenceComplete,
+           flightLogs.pendingGarminCSV?.targetFlightRecordID == entry.flightRecordID {
+            return ("GARMIN SYNC", "arrow.clockwise.icloud.fill", CVROperationalPalette.warning)
+        }
+        if operationalEvidenceComplete, !entry.hasGarminCSV {
+            return ("GARMIN REQUIRED", "sdcard.fill", CVROperationalPalette.warning)
+        }
+        if operationalEvidenceComplete, !legsAreVerified(entry) {
+            return ("VERIFY LEGS", "list.clipboard.fill", CVROperationalPalette.warning)
+        }
+        if operationalEvidenceComplete {
             return ("COMPLETE", "checkmark.seal.fill", CVROperationalPalette.success)
         }
         if entry.serverUploadStatus?.lowercased() == "complete" {
@@ -6821,13 +6957,8 @@ struct FlightLogView: View {
                 byIdentity[identity] = local
             }
         }
-        for identity in Array(byIdentity.keys) {
-            guard let entry = byIdentity[identity],
-                  flightLogs.hasLocallyAttachedGarminCSV(flightRecordID: entry.flightRecordID) else {
-                continue
-            }
-            byIdentity[identity]?.hasGarminCSV = true
-        }
+        // `hasGarminCSV` means server-verified evidence. A locally staged or failed
+        // attachment remains pending and must never make the Log look complete.
         // Drop any merge result whose flight id was voided (remote+local merge edge cases).
         return byIdentity.values
             .filter { !workflow.isFlightLogVoided($0.flightRecordID) }
@@ -8525,13 +8656,28 @@ private struct SimulationModeChrome: View {
                     } else {
                         kind = .initial
                     }
-                    injectTransition(.takeoff(timestamp: Date(), sample: sample(), kind: kind))
+                    injectTransition(.takeoff(
+                        timestamp: Date(),
+                        sample: sample(),
+                        kind: kind,
+                        airportIdentifier: settings.selectedAircraft?.homeAirport
+                    ))
                 }
                 simButton("T&G Land", icon: "airplane.arrival") {
-                    injectTransition(.landing(timestamp: Date(), sample: sample(), kind: .touchAndGo))
+                    injectTransition(.landing(
+                        timestamp: Date(),
+                        sample: sample(),
+                        kind: .touchAndGo,
+                        airportIdentifier: settings.selectedAircraft?.homeAirport
+                    ))
                 }
                 simButton("Full Stop", icon: "parkingsign.circle.fill") {
-                    injectTransition(.landing(timestamp: Date(), sample: sample(), kind: .fullStop))
+                    injectTransition(.landing(
+                        timestamp: Date(),
+                        sample: sample(),
+                        kind: .fullStop,
+                        airportIdentifier: settings.selectedAircraft?.homeAirport
+                    ))
                 }
                 simButton("Finish Demo", icon: "flag.checkered") {
                     completeSimulationDemo(workflow: workflow, settings: settings, beacon: beacon)

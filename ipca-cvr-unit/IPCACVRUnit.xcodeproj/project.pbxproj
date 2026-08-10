@@ -51,6 +51,7 @@
 		100000000000000000000036 /* GarminSDCardFolderPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000036 /* GarminSDCardFolderPicker.swift */; };
 		100000000000000000000037 /* GarminSDCardImportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000037 /* GarminSDCardImportViews.swift */; };
 		100000000000000000000038 /* GarminSDCardImportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000038 /* GarminSDCardImportModels.swift */; };
+		100000000000000000000039 /* faa_ca_az_nv_airports.json in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000039 /* faa_ca_az_nv_airports.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -100,6 +101,7 @@
 		200000000000000000000036 /* GarminSDCardFolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSDCardFolderPicker.swift; sourceTree = "<group>"; };
 		200000000000000000000037 /* GarminSDCardImportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSDCardImportViews.swift; sourceTree = "<group>"; };
 		200000000000000000000038 /* GarminSDCardImportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSDCardImportModels.swift; sourceTree = "<group>"; };
+		200000000000000000000039 /* faa_ca_az_nv_airports.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = faa_ca_az_nv_airports.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -200,6 +202,7 @@
 		400000000000000000000007 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				200000000000000000000039 /* faa_ca_az_nv_airports.json */,
 				200000000000000000000025 /* mission_catalogue_SPC.csv */,
 			);
 			path = Resources;
@@ -280,6 +283,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				10000000000000000000001C /* Assets.xcassets in Resources */,
+				100000000000000000000039 /* faa_ca_az_nv_airports.json in Resources */,
 				100000000000000000000023 /* mission_catalogue_SPC.csv in Resources */,
 				100000000000000000000011 /* LaunchScreen.storyboard in Resources */,
 			);

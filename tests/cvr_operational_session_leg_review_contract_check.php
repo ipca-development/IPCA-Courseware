@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__);
 $migration = file_get_contents($root . '/scripts/sql/2026_08_09_cvr_operational_session_leg_reviews.sql');
+$reconciliationMigration = file_get_contents($root . '/scripts/sql/2026_08_10_cvr_preliminary_debrief_revisions.sql');
 $service = file_get_contents($root . '/src/CvrOperationalSessionLegReviewService.php');
 $splitService = file_get_contents($root . '/src/CvrAdminLegSplitService.php');
 $endpoint = file_get_contents($root . '/public/api/cvr/operational_session_leg_review.php');
@@ -32,10 +33,17 @@ $checks = [
     'review is constrained to the authenticated Operational Session Dispatch' =>
         str_contains($service, 'AND device_id = ?')
         && str_contains($service, 'operational_session_uuid IS NOT NULL'),
-    'acceptance requires immutable Garmin provenance' =>
-        str_contains($service, 'A verified Garmin CSV must be linked')
+    'acceptance preserves immutable offline or Garmin provenance' =>
+        str_contains($reconciliationMigration, 'evidence_source')
+        && str_contains($service, 'currentEvidence($flightUuid)')
         && str_contains($service, 'hash_equals($evidenceHash, $submittedHash)')
+        && str_contains($service, "'ios_gps_provisional'")
+        && str_contains($service, "'verified_garmin_evidence'")
         && str_contains($service, "'evidence_sha256' => \$evidenceHash"),
+    'Garmin arrival requires append-only reconciliation of GPS review' =>
+        str_contains($service, "'reconciliation_required'")
+        && str_contains($service, '$latestMatchesEvidence')
+        && str_contains($service, 'supersedes_revision_uuid'),
     'retry is idempotent and UUID conflicts are rejected' =>
         str_contains($service, 'reviewByUuid($revisionUuid)')
         && str_contains($service, "'already_present' => true")

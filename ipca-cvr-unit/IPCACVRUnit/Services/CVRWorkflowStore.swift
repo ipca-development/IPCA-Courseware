@@ -1763,7 +1763,7 @@ final class CVRWorkflowStore: ObservableObject {
         let sample: GPSSample
         var metadata: [String: String] = [:]
         switch transition {
-        case .takeoff(let detectedAt, let detectedSample, let kind):
+        case .takeoff(let detectedAt, let detectedSample, let kind, let airportIdentifier):
             let takeoffs = state.flightEvents.filter {
                 $0.flightRecordID == flightRecord.id && $0.eventType == "gps_takeoff_provisional"
             }.count
@@ -1775,7 +1775,11 @@ final class CVRWorkflowStore: ObservableObject {
             timestamp = detectedAt
             sample = detectedSample
             metadata["takeoff_kind"] = kind.rawValue
-        case .landing(let detectedAt, let detectedSample, let kind):
+            if let airportIdentifier, !airportIdentifier.isEmpty {
+                metadata["airport_identifier"] = airportIdentifier
+                metadata["airport_provenance"] = "ios_gps_faa_nasr"
+            }
+        case .landing(let detectedAt, let detectedSample, let kind, let airportIdentifier):
             let takeoffs = state.flightEvents.filter {
                 $0.flightRecordID == flightRecord.id && $0.eventType == "gps_takeoff_provisional"
             }.count
@@ -1787,6 +1791,10 @@ final class CVRWorkflowStore: ObservableObject {
             timestamp = detectedAt
             sample = detectedSample
             metadata["landing_kind"] = kind.rawValue
+            if let airportIdentifier, !airportIdentifier.isEmpty {
+                metadata["airport_identifier"] = airportIdentifier
+                metadata["airport_provenance"] = "ios_gps_faa_nasr"
+            }
         }
         let event = CVRFlightEventRecord(
             id: UUID().uuidString,
@@ -1806,6 +1814,48 @@ final class CVRWorkflowStore: ObservableObject {
             creationMethod: "airport_cycle_gates",
             userIdentity: nil,
             metadata: metadata
+        )
+        mutate {
+            $0.flightEvents.append(event)
+            $0.uploadComponents.append(eventUploadComponent(event))
+        }
+    }
+
+    func recordGPSPositionEvidence(_ sample: GPSSample) {
+        guard let flightRecord = state.activeFlightRecord,
+              state.flightEvents.contains(where: {
+                  $0.flightRecordID == flightRecord.id && $0.eventType == "engine_start_off_block"
+              }) || state.engineSessionContinuityActive,
+              !state.flightEvents.contains(where: {
+                  $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
+              }) else {
+            return
+        }
+        let event = CVRFlightEventRecord(
+            id: UUID().uuidString,
+            flightRecordID: flightRecord.id,
+            recordingSessionID: flightRecord.recordingSessionID,
+            eventType: "gps_position_sample",
+            timestampUTC: sample.timestamp,
+            timestampLocal: sample.timestamp,
+            deviceMonotonicTime: ProcessInfo.processInfo.systemUptime,
+            audioOffset: flightRecord.recordingStartedAt.map {
+                max(0, sample.timestamp.timeIntervalSince($0))
+            },
+            latitude: sample.latitude,
+            longitude: sample.longitude,
+            altitude: sample.altitude,
+            groundSpeed: sample.speedKnots,
+            source: "ios_core_location",
+            confidence: sample.horizontalAccuracy <= 20 ? 0.95 : 0.80,
+            creationMethod: "fifteen_second_evidence_sample",
+            userIdentity: nil,
+            metadata: [
+                "horizontal_accuracy_m": String(format: "%.1f", sample.horizontalAccuracy),
+                "vertical_accuracy_m": String(format: "%.1f", sample.verticalAccuracy),
+                "course_deg": String(format: "%.1f", sample.course),
+                "provenance": "ios_core_location"
+            ]
         )
         mutate {
             $0.flightEvents.append(event)

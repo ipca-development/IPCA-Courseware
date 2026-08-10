@@ -20,6 +20,12 @@ final class ManualReconstructionBundleService
     {
     }
 
+    /** @return array<string,mixed>|null */
+    public function bundleById(int $bundleId): ?array
+    {
+        return $this->bundle($bundleId);
+    }
+
     /** @return array<string,mixed> */
     public function freezeAndPrepare(
         int $dispatchId,
@@ -143,6 +149,136 @@ final class ManualReconstructionBundleService
             $this->pdo->prepare(
                 'UPDATE ipca_manual_intake_bundles SET status = \'needs_review\', processing_error = ? WHERE id = ?'
             )->execute(array($e->getMessage(), $bundleId));
+            throw $e;
+        }
+        return $this->bundle($bundleId) ?? array();
+    }
+
+    /** @return array<string,mixed> */
+    public function freezePreliminary(
+        int $dispatchId,
+        int $recordingId,
+        ?int $actorUserId
+    ): array {
+        $this->requireSchema();
+        $dispatch = $this->row(self::SOURCE_TABLES['dispatch'], $dispatchId);
+        $recording = $this->row(self::SOURCE_TABLES['cockpit_audio'], $recordingId);
+        $this->assertAllowedSource('dispatch', $dispatch);
+        $this->assertAllowedSource('cockpit_audio', $recording);
+        $workflowUuid = $this->uuid(
+            (string)($dispatch['workflow_flight_record_uuid'] ?? ''),
+            'Dispatch Flight Record'
+        );
+        $aircraft = $this->normalizeTail((string)($dispatch['aircraft_registration'] ?? ''));
+        $recordingAircraft = $this->normalizeTail((string)($recording['aircraft_registration'] ?? ''));
+        if ($aircraft === '') {
+            throw new RuntimeException('Dispatch aircraft registration is required.');
+        }
+        if ($recordingAircraft !== '' && $recordingAircraft !== $aircraft) {
+            throw new RuntimeException('Cockpit Audio aircraft does not match the Dispatch.');
+        }
+
+        $existing = $this->pdo->prepare(
+            'SELECT * FROM ipca_manual_intake_bundles
+             WHERE dispatch_id = ? AND cockpit_recording_id = ?
+               AND garmin_csv_file_id IS NULL AND evidence_stage = \'preliminary\'
+             ORDER BY id DESC LIMIT 1'
+        );
+        $existing->execute(array($dispatchId, $recordingId));
+        $existingRow = $existing->fetch(PDO::FETCH_ASSOC);
+        if (is_array($existingRow)) {
+            return $existingRow;
+        }
+
+        $items = array(
+            'dispatch' => $this->snapshot('dispatch', self::SOURCE_TABLES['dispatch'], $dispatch),
+            'cockpit_audio' => $this->snapshot('cockpit_audio', self::SOURCE_TABLES['cockpit_audio'], $recording),
+        );
+        $manifest = array(
+            'schema_version' => 2,
+            'evidence_stage' => 'preliminary',
+            'flight_record_uuid' => $workflowUuid,
+            'aircraft_registration' => $aircraft,
+            'mission_code' => (string)($dispatch['mission_code'] ?? ''),
+            'sources' => array_values($items),
+            'garmin_required' => false,
+            'flightcircle_excluded' => true,
+        );
+        $manifestJson = AuditEventService::jsonEncode($this->canonicalize($manifest));
+        $manifestHash = hash('sha256', $manifestJson);
+
+        $this->pdo->beginTransaction();
+        try {
+            $sequence = $this->pdo->prepare(
+                'SELECT COALESCE(MAX(version_number), 0) + 1
+                 FROM ipca_manual_intake_bundles
+                 WHERE workflow_flight_record_uuid = ? FOR UPDATE'
+            );
+            $sequence->execute(array($workflowUuid));
+            $version = max(1, (int)$sequence->fetchColumn());
+            $supersedes = null;
+            if ($version > 1) {
+                $previous = $this->pdo->prepare(
+                    'SELECT id FROM ipca_manual_intake_bundles
+                     WHERE workflow_flight_record_uuid = ?
+                     ORDER BY version_number DESC LIMIT 1'
+                );
+                $previous->execute(array($workflowUuid));
+                $supersedes = (int)$previous->fetchColumn() ?: null;
+            }
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ipca_manual_intake_bundles
+                 (bundle_uuid, version_number, supersedes_bundle_id, status, evidence_stage,
+                  dispatch_id, cockpit_recording_id, garmin_csv_file_id,
+                  workflow_flight_record_uuid, aircraft_registration, mission_code,
+                  manifest_sha256, manifest_json, validation_warnings_json,
+                  created_by, frozen_at, started_at)
+                 VALUES (?, ?, ?, \'preliminary_ready\', \'preliminary\', ?, ?, NULL,
+                         ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))'
+            );
+            $insert->execute(array(
+                AuditEventService::uuid(),
+                $version,
+                $supersedes,
+                $dispatchId,
+                $recordingId,
+                $workflowUuid,
+                $aircraft,
+                (string)($dispatch['mission_code'] ?? ''),
+                $manifestHash,
+                $manifestJson,
+                AuditEventService::jsonEncode(array(
+                    'Preliminary debrief excludes Garmin flight-data evidence.',
+                )),
+                $actorUserId,
+            ));
+            $bundleId = (int)$this->pdo->lastInsertId();
+            $itemInsert = $this->pdo->prepare(
+                'INSERT INTO ipca_manual_intake_bundle_items
+                 (bundle_id, source_type, source_table, source_id, source_uuid,
+                  source_sha256, metadata_snapshot_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($items as $item) {
+                $itemInsert->execute(array(
+                    $bundleId,
+                    $item['source_type'],
+                    $item['source_table'],
+                    $item['source_id'],
+                    $item['source_uuid'],
+                    $item['source_sha256'],
+                    AuditEventService::jsonEncode($item['metadata']),
+                ));
+            }
+            $this->audit($bundleId, 'preliminary_bundle_frozen', $actorUserId, array(
+                'manifest_sha256' => $manifestHash,
+                'garmin_required' => false,
+            ));
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
             throw $e;
         }
         return $this->bundle($bundleId) ?? array();
@@ -371,6 +507,126 @@ final class ManualReconstructionBundleService
             return array('ready' => false, 'reason' => 'Readable transcript is empty.', 'snapshot_id' => null);
         }
         return array('ready' => false, 'reason' => 'Readable transcript is ready but must be version-locked.', 'snapshot_id' => null);
+    }
+
+    public function hasCompleteLiveTranscript(int $recordingId): bool
+    {
+        if ($recordingId <= 0 || !$this->tableExists('ipca_cvr_live_audio_segments')) {
+            return false;
+        }
+        $recording = $this->row('ipca_cockpit_recordings', $recordingId);
+        $recordingUid = trim((string)($recording['recording_uid'] ?? ''));
+        $recordingDuration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
+        if ($recordingUid === '' || $recordingDuration <= 0) {
+            return false;
+        }
+        $statement = $this->pdo->prepare(
+            'SELECT segment_index, duration_seconds, transcription_status, transcript_text
+             FROM ipca_cvr_live_audio_segments
+             WHERE recording_uid = ? ORDER BY segment_index'
+        );
+        $statement->execute(array($recordingUid));
+        $segments = $statement->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($segments === array()) {
+            return false;
+        }
+        $expectedIndex = 1;
+        $coveredDuration = 0.0;
+        foreach ($segments as $segment) {
+            if ((int)$segment['segment_index'] !== $expectedIndex
+                || strtolower((string)$segment['transcription_status']) !== 'ready') {
+                return false;
+            }
+            $coveredDuration += max(0.0, (float)$segment['duration_seconds']);
+            $expectedIndex++;
+        }
+        return $coveredDuration >= max(1.0, $recordingDuration - 5.0);
+    }
+
+    public function lockLiveTranscript(int $bundleId, ?int $actorUserId): int
+    {
+        $bundle = $this->bundle($bundleId);
+        if (!$bundle) {
+            throw new RuntimeException('Bundle not found.');
+        }
+        if ((int)($bundle['transcript_snapshot_id'] ?? 0) > 0) {
+            return (int)$bundle['transcript_snapshot_id'];
+        }
+        $recording = $this->row('ipca_cockpit_recordings', (int)$bundle['cockpit_recording_id']);
+        if (!$this->hasCompleteLiveTranscript((int)$recording['id'])) {
+            throw new RuntimeException('All in-flight audio segments must be transcribed before the preliminary snapshot is locked.');
+        }
+        $statement = $this->pdo->prepare(
+            'SELECT id, segment_index, started_at, duration_seconds, sha256, transcript_text
+             FROM ipca_cvr_live_audio_segments
+             WHERE recording_uid = ? AND transcription_status = \'ready\'
+             ORDER BY segment_index'
+        );
+        $statement->execute(array((string)$recording['recording_uid']));
+        $segments = $statement->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $parts = array();
+        $manifest = array();
+        $offset = 0.0;
+        foreach ($segments as $segment) {
+            $text = trim((string)($segment['transcript_text'] ?? ''));
+            if ($text !== '') {
+                $parts[] = $text;
+            }
+            $duration = max(0.0, (float)$segment['duration_seconds']);
+            $manifest[] = array(
+                'live_segment_id' => (int)$segment['id'],
+                'segment_index' => (int)$segment['segment_index'],
+                'start_seconds' => round($offset, 3),
+                'end_seconds' => round($offset + $duration, 3),
+                'audio_sha256' => (string)$segment['sha256'],
+                'text_sha256' => hash('sha256', $text),
+                'provenance' => 'in_flight_finalized_audio_segment',
+            );
+            $offset += $duration;
+        }
+        $text = trim(implode("\n\n", $parts));
+        if ($text === '') {
+            throw new RuntimeException('In-flight segment transcript is empty.');
+        }
+        $hash = hash('sha256', AuditEventService::jsonEncode(array(
+            'text' => $text,
+            'chunks' => $manifest,
+            'source' => 'live_incremental',
+        )));
+        $existing = $this->pdo->prepare(
+            'SELECT id FROM ipca_cockpit_transcript_snapshots
+             WHERE cockpit_recording_id = ? AND transcript_sha256 = ? LIMIT 1'
+        );
+        $existing->execute(array((int)$recording['id'], $hash));
+        $snapshotId = (int)$existing->fetchColumn();
+        if ($snapshotId <= 0) {
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ipca_cockpit_transcript_snapshots
+                 (snapshot_uuid, cockpit_recording_id, transcript_sha256, transcript_text,
+                  chunks_manifest_json, source_status, word_count, locked_by)
+                 VALUES (?, ?, ?, ?, ?, \'live_incremental_ready\', ?, ?)'
+            );
+            $insert->execute(array(
+                AuditEventService::uuid(),
+                (int)$recording['id'],
+                $hash,
+                $text,
+                AuditEventService::jsonEncode($manifest),
+                str_word_count($text),
+                $actorUserId,
+            ));
+            $snapshotId = (int)$this->pdo->lastInsertId();
+        }
+        $this->pdo->prepare(
+            'UPDATE ipca_manual_intake_bundles
+             SET transcript_snapshot_id = ? WHERE id = ? AND transcript_snapshot_id IS NULL'
+        )->execute(array($snapshotId, $bundleId));
+        $this->audit($bundleId, 'live_incremental_transcript_locked', $actorUserId, array(
+            'snapshot_id' => $snapshotId,
+            'transcript_sha256' => $hash,
+            'segment_count' => count($segments),
+        ));
+        return $snapshotId;
     }
 
     public function lockTranscript(int $bundleId, ?int $actorUserId): int

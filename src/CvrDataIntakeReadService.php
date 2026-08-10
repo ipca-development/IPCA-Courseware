@@ -407,6 +407,8 @@ final class CvrDataIntakeReadService
             $bundle = $bundleByFlight[$flightKey] ?? array(
                 'bundle_id' => null,
                 'debrief_id' => null,
+                'bundle_evidence_stage' => '',
+                'debrief_evidence_stage' => '',
                 'reconstruction_status' => '',
                 'debrief_job_id' => null,
                 'debrief_job_status' => '',
@@ -432,6 +434,8 @@ final class CvrDataIntakeReadService
             $row['recording_uid'] = $recording['recording_uid'];
             $row['bundle_id'] = $bundle['bundle_id'];
             $row['debrief_id'] = $bundle['debrief_id'];
+            $row['bundle_evidence_stage'] = (string)($bundle['bundle_evidence_stage'] ?? '');
+            $row['debrief_evidence_stage'] = (string)($bundle['debrief_evidence_stage'] ?? '');
             $recordingRecon = strtolower(trim((string)($recording['reconstruction_status'] ?? '')));
             $bundleRecon = strtolower(trim((string)($bundle['reconstruction_status'] ?? '')));
             $row['reconstruction_status'] = $recordingRecon !== '' ? $recordingRecon : $bundleRecon;
@@ -622,6 +626,8 @@ final class CvrDataIntakeReadService
             'recording_uid',
             'bundle_id',
             'debrief_id',
+            'bundle_evidence_stage',
+            'debrief_evidence_stage',
             'reconstruction_status',
             'debrief_job_id',
             'debrief_job_status',
@@ -833,9 +839,13 @@ final class CvrDataIntakeReadService
         $statusExpr = isset($statusCol['reconstruction_status'])
             ? 'COALESCE(b.reconstruction_status, \'\')'
             : (isset($statusCol['status']) ? 'COALESCE(b.status, \'\')' : '\'\'');
+        $stageExpr = isset($statusCol['evidence_stage'])
+            ? 'COALESCE(b.evidence_stage, \'\')'
+            : '\'\'';
         $sql = "
             SELECT LOWER(b.workflow_flight_record_uuid) AS flight_key,
                    b.id AS bundle_id,
+                   {$stageExpr} AS bundle_evidence_stage,
                    {$statusExpr} AS reconstruction_status
             FROM " . $this->quoteIdentifier($bundleTable) . " b
             WHERE b.workflow_flight_record_uuid IS NOT NULL
@@ -854,6 +864,8 @@ final class CvrDataIntakeReadService
                 $map[$key] = array(
                     'bundle_id' => isset($row['bundle_id']) ? (int)$row['bundle_id'] : null,
                     'debrief_id' => null,
+                    'bundle_evidence_stage' => trim((string)($row['bundle_evidence_stage'] ?? '')),
+                    'debrief_evidence_stage' => '',
                     'reconstruction_status' => trim((string)($row['reconstruction_status'] ?? '')),
                     'debrief_job_id' => null,
                     'debrief_job_status' => '',
@@ -869,7 +881,7 @@ final class CvrDataIntakeReadService
                 if ($bundleIds !== array()) {
                     $bPlaceholders = implode(',', array_fill(0, count($bundleIds), '?'));
                     $dStmt = $this->pdo->prepare(
-                        "SELECT bundle_id, id FROM ipca_structured_debriefs
+                        "SELECT bundle_id, id, evidence_stage FROM ipca_structured_debriefs
                          WHERE bundle_id IN ({$bPlaceholders})
                          ORDER BY id DESC"
                     );
@@ -878,13 +890,17 @@ final class CvrDataIntakeReadService
                     foreach ($dStmt->fetchAll(PDO::FETCH_ASSOC) as $dRow) {
                         $bid = (int)($dRow['bundle_id'] ?? 0);
                         if ($bid > 0 && !isset($debriefByBundle[$bid])) {
-                            $debriefByBundle[$bid] = (int)$dRow['id'];
+                            $debriefByBundle[$bid] = array(
+                                'id' => (int)$dRow['id'],
+                                'evidence_stage' => trim((string)($dRow['evidence_stage'] ?? '')),
+                            );
                         }
                     }
                     foreach ($map as $key => $meta) {
                         $bid = (int)($meta['bundle_id'] ?? 0);
                         if ($bid > 0 && isset($debriefByBundle[$bid])) {
-                            $map[$key]['debrief_id'] = $debriefByBundle[$bid];
+                            $map[$key]['debrief_id'] = $debriefByBundle[$bid]['id'];
+                            $map[$key]['debrief_evidence_stage'] = $debriefByBundle[$bid]['evidence_stage'];
                         }
                     }
                 }

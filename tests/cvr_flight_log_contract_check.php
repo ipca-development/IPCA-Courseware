@@ -243,6 +243,9 @@ $checks = array(
         str_contains($models, 'case log')
         && str_contains($views, 'AIRCRAFT FLIGHT LOG')
         && str_contains($views, 'entry.hasGarminCSV ? CVROperationalPalette.cardBorder : CVROperationalPalette.warning.opacity(0.55)')
+        && str_contains($views, 'GARMIN REQUIRED')
+        && str_contains($views, 'GARMIN SYNC')
+        && str_contains($views, 'VERIFY LEGS')
         && str_contains($views, 'OperationalBottomTabBar'),
     'Log replaces the standalone Garmin operational tab' =>
         str_contains($views, 'CVROperationalTab.allCases.filter { $0 != .garmin }')
@@ -269,6 +272,12 @@ $checks = array(
         str_contains($views, 'private var displayEntries: [CVRFlightLogEntry]')
         && str_contains($views, 'for archive in workflow.archives')
         && str_contains($views, 'ForEach(displayEntries.filter { !$0.hasGarminCSV })'),
+    'Log card Garmin recovery bypasses stale folder bookmarks' =>
+        str_contains($views, 'directImportTarget = entry')
+        && str_contains($views, 'isDirectGarminUpload = true')
+        && str_contains($views, 'isShowingFileImporter = true')
+        && str_contains($views, 'SELECT GARMIN CSV')
+        && str_contains($views, 'await flightLogs.uploadPendingGarminCSV('),
     'successful Garmin attachment clears durable retry before status refresh' =>
         str_contains($models, 'locallyAttachedGarminFlightRecordIDs.insert(entry.flightRecordID)')
         && str_contains($models, 'entries[index].hasGarminCSV = true')
@@ -277,7 +286,7 @@ $checks = array(
         && strpos($models, 'clearPendingGarminAfterVerifiedSuccess(fileURL: pending.fileURL)')
             < strpos($models, 'await refresh(settings: settings)', strpos($models, 'clearPendingGarminAfterVerifiedSuccess(fileURL: pending.fileURL)'))
         && str_contains($models, 'catch is CancellationError')
-        && str_contains($views, 'hasLocallyAttachedGarminCSV'),
+        && !str_contains($views, 'hasLocallyAttachedGarminCSV'),
     'manual Log CSV upload cannot reopen its assignment sheet in a loop' =>
         str_contains($views, '@State private var isShowingGarminAssignment = false')
         && str_contains($views, 'isShowingGarminAssignment = false')

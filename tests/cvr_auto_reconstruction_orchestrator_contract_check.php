@@ -30,10 +30,11 @@ $checks = array(
         && str_contains($orchestrator, 'hasReadableTranscript(')
         && str_contains($orchestrator, 'CockpitRecorderDebriefQueueService')
         && str_contains($debriefQueue, 'function lockAndQueueDebrief'),
-    'orchestrator waits for dispatch audio and garmin siblings' =>
+    'orchestrator waits for dispatch and audio but not Garmin for preliminary debrief' =>
         str_contains($orchestrator, "'waiting_for_dispatch'")
         && str_contains($orchestrator, "'waiting_for_audio'")
-        && str_contains($orchestrator, "'waiting_for_garmin'")
+        && str_contains($orchestrator, 'considerPreliminary')
+        && str_contains($orchestrator, "'garmin_required' => false")
         && str_contains($orchestrator, 'flight_session_uid')
         && str_contains($orchestrator, 'workflow_flight_record_uuid'),
     'orchestrator is idempotent for matching triad and existing debrief' =>

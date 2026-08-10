@@ -50,8 +50,13 @@ final class CvrOperationalSessionLegReviewService
             }, $preview['proposed_legs']);
         }
         $preview['operational_session_uuid'] = strtolower((string)$dispatch['operational_session_uuid']);
-        $preview['evidence_sha256'] = $this->garminEvidenceHash((string)$dispatch['workflow_flight_record_uuid']);
-        $preview['leg_review_verified'] = is_array($latest);
+        $currentEvidence = $this->currentEvidence((string)$dispatch['workflow_flight_record_uuid']);
+        $latestMatchesEvidence = is_array($latest)
+            && hash_equals((string)$latest['evidence_sha256'], $currentEvidence['sha256']);
+        $preview['evidence_sha256'] = $currentEvidence['sha256'];
+        $preview['evidence_source'] = $currentEvidence['source'];
+        $preview['leg_review_verified'] = $latestMatchesEvidence;
+        $preview['reconciliation_required'] = is_array($latest) && !$latestMatchesEvidence;
         $preview['accepted_revision_uuid'] = is_array($latest) ? (string)$latest['revision_uuid'] : null;
         $preview['accepted_revision_number'] = is_array($latest) ? (int)$latest['revision_number'] : null;
         return array('ok' => true, 'review' => $preview);
@@ -65,10 +70,15 @@ final class CvrOperationalSessionLegReviewService
             strtolower((string)$dispatch['operational_session_uuid']),
             false
         );
+        $evidence = $this->currentEvidence((string)$dispatch['workflow_flight_record_uuid']);
+        $verified = is_array($latest)
+            && hash_equals((string)$latest['evidence_sha256'], $evidence['sha256']);
         return array(
             'ok' => true,
             'dispatch_uuid' => strtolower((string)$dispatch['dispatch_uuid']),
-            'verified' => is_array($latest),
+            'verified' => $verified,
+            'reconciliation_required' => is_array($latest) && !$verified,
+            'evidence_source' => $evidence['source'],
             'revision_uuid' => is_array($latest) ? (string)$latest['revision_uuid'] : null,
             'revision_number' => is_array($latest) ? (int)$latest['revision_number'] : null,
         );
@@ -96,17 +106,21 @@ final class CvrOperationalSessionLegReviewService
                 (string)($dispatch['workflow_flight_record_uuid'] ?? ''),
                 'workflow_flight_record_uuid'
             );
-            $evidenceHash = $this->garminEvidenceHash($flightUuid);
-            if ($evidenceHash === null) {
-                throw new RuntimeException('A verified Garmin CSV must be linked before legs can be accepted.');
-            }
+            $canonicalLegs = AuditEventService::jsonEncode($legs);
+            $evidence = $this->currentEvidence($flightUuid);
+            $evidenceHash = $evidence['sha256'];
+            $evidenceSource = $evidence['source'];
             $submittedHash = strtolower(trim((string)($input['evidence_sha256'] ?? '')));
             if ($submittedHash !== '' && !hash_equals($evidenceHash, $submittedHash)) {
-                throw new RuntimeException('The Garmin evidence changed. Refresh the leg review before accepting.');
+                throw new RuntimeException('The available leg evidence changed. Refresh the leg review before accepting.');
             }
+            $legs = array_map(static function (array $leg) use ($evidenceSource): array {
+                $leg['source'] = $evidenceSource;
+                return $leg;
+            }, $legs);
+            $canonicalLegs = AuditEventService::jsonEncode($legs);
 
             $existing = $this->reviewByUuid($revisionUuid);
-            $canonicalLegs = AuditEventService::jsonEncode($legs);
             if (is_array($existing)) {
                 if (strtolower((string)$existing['operational_session_uuid']) !== $sessionUuid
                     || !hash_equals((string)$existing['evidence_sha256'], $evidenceHash)
@@ -132,9 +146,9 @@ final class CvrOperationalSessionLegReviewService
             $insert = $this->pdo->prepare(
                 'INSERT INTO ipca_operational_session_leg_reviews
                  (revision_uuid, operational_session_uuid, dispatch_id, workflow_flight_record_uuid,
-                  revision_number, status, evidence_sha256, legs_json, reviewed_by_device_id,
+                  revision_number, status, evidence_sha256, evidence_source, legs_json, reviewed_by_device_id,
                   supersedes_revision_uuid)
-                 VALUES (?, ?, ?, ?, ?, \'ACCEPTED\', ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, \'ACCEPTED\', ?, ?, ?, ?, ?)'
             );
             $insert->execute(array(
                 $revisionUuid,
@@ -143,6 +157,7 @@ final class CvrOperationalSessionLegReviewService
                 $flightUuid,
                 $revisionNumber,
                 $evidenceHash,
+                $evidenceSource,
                 $canonicalLegs,
                 $deviceId,
                 $supersedes ?: null,
@@ -158,6 +173,7 @@ final class CvrOperationalSessionLegReviewService
                     'workflow_flight_record_uuid' => $flightUuid,
                     'leg_count' => count($legs),
                     'evidence_sha256' => $evidenceHash,
+                    'evidence_source' => $evidenceSource,
                 ),
                 'CVR device accepted evidence-derived Operational Session legs.',
                 'device',
@@ -241,7 +257,7 @@ final class CvrOperationalSessionLegReviewService
                 'landing_count' => max(0, (int)($row['landing_count'] ?? 0)),
                 'fuel_onboard' => $this->nullableFloat($row['fuel_onboard'] ?? null),
                 'fuel_remaining' => $this->nullableFloat($row['fuel_remaining'] ?? null),
-                'source' => 'verified_garmin_evidence',
+                'source' => trim((string)($row['source'] ?? 'device_reviewed')),
             );
         }
         return $legs;
@@ -391,6 +407,37 @@ final class CvrOperationalSessionLegReviewService
         $stmt->execute(array(strtolower($flightUuid)));
         $value = strtolower(trim((string)$stmt->fetchColumn()));
         return preg_match('/^[a-f0-9]{64}$/', $value) ? $value : null;
+    }
+
+    /** @return array{sha256:string,source:string} */
+    private function currentEvidence(string $flightUuid): array
+    {
+        $garminHash = $this->garminEvidenceHash($flightUuid);
+        if ($garminHash !== null) {
+            return array('sha256' => $garminHash, 'source' => 'verified_garmin_evidence');
+        }
+        $stmt = $this->pdo->prepare(
+            "SELECT event_uuid, payload_sha256
+             FROM ipca_cvr_flight_events
+             WHERE LOWER(workflow_flight_record_uuid) = ?
+               AND event_type IN (
+                 'gps_takeoff_provisional','gps_landing_provisional',
+                 'engine_start_off_block','engine_shutdown_on_block'
+               )
+             ORDER BY timestamp_utc, event_uuid"
+        );
+        $stmt->execute(array(strtolower($flightUuid)));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($rows !== array()) {
+            return array(
+                'sha256' => hash('sha256', AuditEventService::jsonEncode($rows)),
+                'source' => 'ios_gps_provisional',
+            );
+        }
+        return array(
+            'sha256' => hash('sha256', 'device-reviewed-offline|' . strtolower($flightUuid)),
+            'source' => 'device_reviewed_offline',
+        );
     }
 
     /** @return array<string,mixed>|null */

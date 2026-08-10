@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 
 enum CVRWorkflowUploadTrigger: Equatable {
@@ -32,6 +33,9 @@ final class UploadManager: ObservableObject {
     private var workflowReconciliationScanInFlight = false
     private var reconcilingWorkflowComponentIDs: Set<String> = []
     private var deferredWorkflowReconciliationIDs: Set<String> = []
+    private var activeLiveAudioSegmentKeys: Set<String> = []
+    private static let liveAudioUploadedDefaultsKey = "ipca.cvr.liveAudioSegments.uploaded.v1"
+    private static let liveAudioPendingDefaultsKey = "ipca.cvr.liveAudioSegments.pending.v1"
     /// Bumped on Log SYNC so a hung prior upload Task cannot overwrite a newer attempt.
     private var workflowUploadEpochs: [String: Int] = [:]
 
@@ -40,6 +44,16 @@ final class UploadManager: ObservableObject {
         var payloadSHA256: String
         var verifiedAt: Date
         var canonicalIdentifiers: [String: String]
+    }
+
+    private struct PendingLiveAudioSegment: Codable {
+        var key: String
+        var recordingID: String
+        var operationalSessionUUID: String
+        var flightRecordUUID: String
+        var segment: AudioRecordingSegment
+        var sha256: String
+        var language: String
     }
 
     private lazy var session: URLSession = {
@@ -53,6 +67,142 @@ final class UploadManager: ObservableObject {
 
     func configureNetworkMonitor(_ network: NetworkMonitor) {
         networkMonitor = network
+    }
+
+    func uploadFinalizedLiveAudioSegments(
+        _ segments: [AudioRecordingSegment],
+        recordingID: String,
+        operationalSessionUUID: String?,
+        flightRecordUUID: String?,
+        settings: SettingsStore
+    ) {
+        guard !settings.isSimulationModeEnabled,
+              let operationalSessionUUID,
+              !operationalSessionUUID.isEmpty,
+              let flightRecordUUID,
+              !flightRecordUUID.isEmpty else {
+            return
+        }
+
+        let uploaded = Set(
+            UserDefaults.standard.stringArray(forKey: Self.liveAudioUploadedDefaultsKey) ?? []
+        )
+        for segment in segments.sorted(by: { $0.index < $1.index }) {
+            let url = URL(fileURLWithPath: segment.filePath)
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+                  !data.isEmpty else {
+                continue
+            }
+            let sha256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            let key = "\(recordingID.lowercased()):\(segment.index):\(sha256)"
+            guard !uploaded.contains(key) else {
+                continue
+            }
+            persistPendingLiveAudioSegment(PendingLiveAudioSegment(
+                key: key,
+                recordingID: recordingID,
+                operationalSessionUUID: operationalSessionUUID,
+                flightRecordUUID: flightRecordUUID,
+                segment: segment,
+                sha256: sha256,
+                language: settings.language
+            ))
+        }
+        retryQueuedLiveAudioSegments(settings: settings)
+    }
+
+    func retryQueuedLiveAudioSegments(settings: SettingsStore) {
+        guard !settings.isSimulationModeEnabled,
+              let networkMonitor,
+              networkMonitor.canUpload(allowCellular: settings.allowCellularUpload),
+              let serverURL = settings.normalizedServerURL,
+              let credential = settings.deviceCredential,
+              !credential.isEmpty else {
+            return
+        }
+        let uploaded = Set(
+            UserDefaults.standard.stringArray(forKey: Self.liveAudioUploadedDefaultsKey) ?? []
+        )
+        for pending in pendingLiveAudioSegments() {
+            if uploaded.contains(pending.key) {
+                removePendingLiveAudioSegment(pending.key)
+                continue
+            }
+            guard !activeLiveAudioSegmentKeys.contains(pending.key) else { continue }
+            let url = URL(fileURLWithPath: pending.segment.filePath)
+            guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
+                  !data.isEmpty,
+                  SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined()
+                    == pending.sha256 else {
+                continue
+            }
+            activeLiveAudioSegmentKeys.insert(pending.key)
+            Task {
+                defer {
+                    Task { @MainActor in
+                        self.activeLiveAudioSegmentKeys.remove(pending.key)
+                    }
+                }
+                do {
+                    let response = try await APIClient(serverURL: serverURL).uploadLiveAudioSegment(
+                        credential: credential,
+                        recordingID: pending.recordingID,
+                        operationalSessionUUID: pending.operationalSessionUUID,
+                        flightRecordUUID: pending.flightRecordUUID,
+                        segment: pending.segment,
+                        sha256: pending.sha256,
+                        language: pending.language,
+                        audioData: data
+                    )
+                    guard response.ok else {
+                        throw APIClientError.badResponse(
+                            response.error ?? "Live audio segment was not accepted."
+                        )
+                    }
+                    self.markLiveAudioSegmentUploaded(pending.key)
+                    self.removePendingLiveAudioSegment(pending.key)
+                } catch {
+                    // The durable queue and immutable local file survive connectivity,
+                    // app suspension, and process restart. Recording never blocks.
+                }
+            }
+        }
+    }
+
+    private func markLiveAudioSegmentUploaded(_ key: String) {
+        var uploaded = Set(
+            UserDefaults.standard.stringArray(forKey: Self.liveAudioUploadedDefaultsKey) ?? []
+        )
+        uploaded.insert(key)
+        UserDefaults.standard.set(Array(uploaded.prefix(5_000)), forKey: Self.liveAudioUploadedDefaultsKey)
+    }
+
+    private func pendingLiveAudioSegments() -> [PendingLiveAudioSegment] {
+        guard let data = UserDefaults.standard.data(forKey: Self.liveAudioPendingDefaultsKey),
+              let records = try? JSONDecoder().decode([PendingLiveAudioSegment].self, from: data) else {
+            return []
+        }
+        return records
+    }
+
+    private func persistPendingLiveAudioSegment(_ record: PendingLiveAudioSegment) {
+        var records = pendingLiveAudioSegments()
+        if let index = records.firstIndex(where: { $0.key == record.key }) {
+            records[index] = record
+        } else {
+            records.append(record)
+        }
+        if let data = try? JSONEncoder().encode(records) {
+            UserDefaults.standard.set(data, forKey: Self.liveAudioPendingDefaultsKey)
+        }
+    }
+
+    private func removePendingLiveAudioSegment(_ key: String) {
+        let records = pendingLiveAudioSegments().filter { $0.key != key }
+        if let data = try? JSONEncoder().encode(records) {
+            UserDefaults.standard.set(data, forKey: Self.liveAudioPendingDefaultsKey)
+        }
     }
 
     func uploadPending(store: RecordingStore, settings: SettingsStore, network: NetworkMonitor) {

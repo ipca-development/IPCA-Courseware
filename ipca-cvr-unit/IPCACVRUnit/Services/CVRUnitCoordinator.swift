@@ -104,6 +104,8 @@ final class CVRUnitCoordinator: ObservableObject {
                         settings: settings,
                         trigger: networkWasRestored ? .networkRestored : .routine
                     )
+                    self.uploadManager?.retryQueuedLiveAudioSegments(settings: settings)
+                    self.attemptLiveAudioSegmentUploads()
                 }
             }
             .store(in: &cancellables)
@@ -205,19 +207,27 @@ final class CVRUnitCoordinator: ObservableObject {
             }
         }
         audio.onAudioSegmentsChanged = { [weak self] segments, activePath in
+            guard let recordingID = audio.activeRecordingID,
+                  let startedAt = audio.activeRecordingStartedAt else { return }
             Task { @MainActor in
-                guard let self,
-                      let recordingID = audio.activeRecordingID,
-                      let startedAt = audio.activeRecordingStartedAt else { return }
+                guard let self else { return }
                 self.activeFinalizedSegments = segments
                 self.activeSegmentPath = activePath
                 self.saveActiveManifest(recordingID: recordingID, startedAt: startedAt, finalizedSegments: segments, activeSegmentPath: activePath)
+                self.uploadLiveAudioSegments(segments, recordingID: recordingID)
             }
         }
         gps.onFlightTransition = { [weak self] transition in
             guard let self else { return }
             self.workflow?.recordGPSFlightTransition(transition)
             if let workflow = self.workflow, let settings = self.settings {
+                self.uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+            }
+        }
+        gps.onEvidenceSample = { [weak self] sample in
+            guard let self, let workflow = self.workflow else { return }
+            workflow.recordGPSPositionEvidence(sample)
+            if let settings = self.settings {
                 self.uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
             }
         }
@@ -249,6 +259,9 @@ final class CVRUnitCoordinator: ObservableObject {
     func appBecameActive() {
         recordEvent(severity: "info", type: "app_became_active", message: "Cockpit Recorder app became active.")
         attemptPendingUploads()
+        if let settings {
+            uploadManager?.retryQueuedLiveAudioSegments(settings: settings)
+        }
     }
 
     func appEnteredBackground() {
@@ -584,6 +597,26 @@ final class CVRUnitCoordinator: ObservableObject {
         }
         refreshModeFromCurrentState()
         uploadManager.uploadPending(store: store, settings: settings, network: network)
+    }
+
+    private func attemptLiveAudioSegmentUploads() {
+        guard let recordingID = audio?.activeRecordingID ?? activeRecordingSessionID,
+              !activeFinalizedSegments.isEmpty else {
+            return
+        }
+        uploadLiveAudioSegments(activeFinalizedSegments, recordingID: recordingID)
+    }
+
+    private func uploadLiveAudioSegments(_ segments: [AudioRecordingSegment], recordingID: String) {
+        guard let settings, let uploadManager else { return }
+        uploadManager.uploadFinalizedLiveAudioSegments(
+            segments,
+            recordingID: recordingID,
+            operationalSessionUUID: workflow?.state.activeOperationalSession?.id
+                ?? workflow?.state.activeDispatch?.operationalSessionUUID,
+            flightRecordUUID: workflow?.state.activeFlightRecord?.id,
+            settings: settings
+        )
     }
 
     private func refreshModeFromCurrentState() {

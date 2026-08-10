@@ -12,6 +12,8 @@
 /storage/cockpit_recorder/
 /storage/cvr/
 /storage/tmp/
+/storage/analytics/
+/tmp/analytics/
 
 # Local iOS app containers and cockpit audio repair test bundles are too large
 # for Git and must remain machine-local evidence.
