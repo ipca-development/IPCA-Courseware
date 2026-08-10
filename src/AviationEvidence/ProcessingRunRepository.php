@@ -118,7 +118,7 @@ final class ProcessingRunRepository
             return false;
         }
 
-        $reason = substr(trim($reason), 0, 512);
+        $reason = mb_substr(trim($reason), 0, 512);
         if ($reason === '') {
             $reason = 'unknown_failure';
         }
@@ -152,7 +152,7 @@ final class ProcessingRunRepository
             . ' SET heartbeat_at = CURRENT_TIMESTAMP(3), current_phase = ?'
             . ' WHERE id = ? AND status = ?'
         );
-        $stmt->execute(array(substr(trim($phase), 0, 64), $runId, 'running'));
+        $stmt->execute(array(mb_substr(trim($phase), 0, 64), $runId, 'running'));
     }
 
     public function updateStatus(int $runId, string $status): void

@@ -34,7 +34,7 @@ final class SuppressionRepository
             $speechSegmentId,
             $interpretationRevisionId,
             $suppressionType,
-            substr($reason, 0, 255),
+            mb_substr($reason, 0, 255),
             $retainedSegmentId,
             $suppressedText,
         ));

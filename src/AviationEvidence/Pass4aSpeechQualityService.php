@@ -95,7 +95,7 @@ final class Pass4aSpeechQualityService
                 'segment_index' => (int)($segment['provider_segment_index'] ?? $idx),
                 'start_time_ms' => (int)($segment['start_time_ms'] ?? 0),
                 'end_time_ms' => (int)($segment['end_time_ms'] ?? 0),
-                'text_preview' => substr($text, 0, 120),
+                'text_preview' => mb_substr($text, 0, 120),
                 'signals' => $signals,
                 'confidence' => min(1.0, round($score, 4)),
                 'metrics' => array(

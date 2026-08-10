@@ -66,7 +66,7 @@ final class Pass4bRepetitionDetectorService
                     'secondary_hypothesis_repetition',
                     0.6,
                     array(
-                        'secondary_text_preview' => substr(trim($secondaryText), 0, 200),
+                        'secondary_text_preview' => mb_substr(trim($secondaryText), 0, 200),
                         'secondary_lexical' => $secondaryLexical,
                     ),
                     $speechSegments

@@ -221,7 +221,7 @@ final class EvidencePass4Runner
                 'finding_count' => count($pass4b['findings']),
                 'chunk_summary' => $pass4b['chunk_summary'],
                 'findings' => $pass4b['findings'],
-                'readable_text_preview' => substr((string)($pass4b['readable_text'] ?? ''), 0, 400),
+                'readable_text_preview' => mb_substr((string)($pass4b['readable_text'] ?? ''), 0, 400),
             ),
             'interpretation_revision_ids' => array_values(array_filter($interpretationIds)),
             'suppression_ids' => array_values(array_filter($suppressionIds)),

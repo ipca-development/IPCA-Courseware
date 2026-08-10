@@ -58,7 +58,7 @@ final class InterpretationRevisionRepository
                     (string)($factor['source_type'] ?? 'pass4'),
                     isset($factor['source_id']) ? (int)$factor['source_id'] : null,
                     (float)($factor['weight'] ?? 0.0),
-                    substr((string)($factor['description'] ?? ''), 0, 512),
+                    mb_substr((string)($factor['description'] ?? ''), 0, 512),
                 ));
             }
         }
