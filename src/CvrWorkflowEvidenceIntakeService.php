@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrSyncException.php';
+require_once __DIR__ . '/FlightSessionService.php';
 
 final class CvrWorkflowEvidenceIntakeService
 {
@@ -21,7 +22,12 @@ final class CvrWorkflowEvidenceIntakeService
         $canonical = $canonicalPayload['payload_json'];
         $hash = $canonicalPayload['payload_sha256'];
         $deviceId = (int)($device['id'] ?? 0);
-        $this->assertDispatchOwnership($normalized['dispatch_uuid'], $normalized['flight_record_uuid'], $deviceId);
+        $this->assertDispatchOwnership(
+            $normalized['dispatch_uuid'],
+            $normalized['flight_record_uuid'],
+            $normalized['operational_session_uuid'],
+            $deviceId
+        );
 
         $this->pdo->beginTransaction();
         try {
@@ -41,14 +47,15 @@ final class CvrWorkflowEvidenceIntakeService
                 $batchUuid = AuditEventService::uuid();
                 $statement = $this->pdo->prepare(
                     'INSERT INTO ipca_cvr_workflow_evidence_batches
-                     (batch_uuid, component_uuid, workflow_flight_record_uuid, dispatch_uuid, device_id,
+                     (batch_uuid, component_uuid, workflow_flight_record_uuid, operational_session_uuid, dispatch_uuid, device_id,
                       component_type, payload_sha256, payload_json, receipt_uuid)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 $statement->execute(array(
                     $batchUuid,
                     $normalized['component_uuid'],
                     $normalized['flight_record_uuid'],
+                    $normalized['operational_session_uuid'],
                     $normalized['dispatch_uuid'],
                     $deviceId,
                     $normalized['component_type'],
@@ -93,6 +100,12 @@ final class CvrWorkflowEvidenceIntakeService
             throw $e;
         }
 
+        // Projection is idempotent and must also run for duplicate closure
+        // receipts so a previously missed proposal can self-repair on retry.
+        if ($normalized['component_type'] === 'flight_record_closure') {
+            $this->createLogbookProposalsSafely($normalized['flight_record_uuid']);
+        }
+
         return array(
             'ok' => true,
             'error_code' => $alreadyPresent ? 'DUPLICATE_ALREADY_VERIFIED' : null,
@@ -107,6 +120,7 @@ final class CvrWorkflowEvidenceIntakeService
             'component_type' => $normalized['component_type'],
             'dispatch_uuid' => $normalized['dispatch_uuid'],
             'flight_record_uuid' => $normalized['flight_record_uuid'],
+            'operational_session_uuid' => $normalized['operational_session_uuid'],
             'payload_sha256' => $verifiedHash,
             'received_at' => $receivedAt,
             'canonical_identifiers' => array_merge(array(
@@ -116,6 +130,7 @@ final class CvrWorkflowEvidenceIntakeService
                 'component_type' => $normalized['component_type'],
                 'dispatch_uuid' => $normalized['dispatch_uuid'],
                 'flight_record_uuid' => $normalized['flight_record_uuid'],
+                'operational_session_uuid' => $normalized['operational_session_uuid'] ?? '',
             ), $typedIdentifiers),
             'receipt' => array(
                 'receipt_id' => $receipt,
@@ -157,6 +172,10 @@ final class CvrWorkflowEvidenceIntakeService
             'component_uuid' => $this->uuid($payload['component_uuid'] ?? null, 'component_uuid'),
             'flight_record_uuid' => $this->uuid($payload['flight_record_uuid'] ?? null, 'flight_record_uuid'),
             'dispatch_uuid' => $this->uuid($payload['dispatch_uuid'] ?? null, 'dispatch_uuid'),
+            'operational_session_uuid' => $this->nullableUuid(
+                $payload['operational_session_uuid'] ?? null,
+                'operational_session_uuid'
+            ),
             'component_type' => $type,
             'evidence' => is_array($payload['evidence'] ?? null) ? $payload['evidence'] : array(),
             'schema_version' => max(1, (int)($payload['schema_version'] ?? 1)),
@@ -183,14 +202,15 @@ final class CvrWorkflowEvidenceIntakeService
         if ($normalized['component_type'] === 'flight_events') {
             $statement = $this->pdo->prepare(
                 'INSERT INTO ipca_cvr_flight_events
-                 (event_uuid, batch_id, workflow_flight_record_uuid, recording_session_uuid, event_type,
+                 (event_uuid, batch_id, workflow_flight_record_uuid, operational_session_uuid, recording_session_uuid, event_type,
                   timestamp_utc, timestamp_local, device_monotonic_time, audio_offset_seconds, latitude,
                   longitude, altitude, ground_speed, source, confidence, creation_method, user_identity,
                   payload_sha256, payload_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $statement->execute(array(
                 $e['event_uuid'], $batchId, $normalized['flight_record_uuid'],
+                $normalized['operational_session_uuid'],
                 $this->nullableString($e['recording_session_id'] ?? null),
                 $this->requiredString($e['event_type'] ?? null, 'event_type'),
                 $this->date($e['timestamp_utc'] ?? null, 'timestamp_utc'),
@@ -206,10 +226,11 @@ final class CvrWorkflowEvidenceIntakeService
         if ($normalized['component_type'] === 'recorder_verification') {
             $this->pdo->prepare(
                 'INSERT INTO ipca_cvr_recorder_verifications
-                 (verification_uuid, batch_id, workflow_flight_record_uuid, dispatch_uuid, verified_at,
-                  payload_sha256, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)'
+                 (verification_uuid, batch_id, workflow_flight_record_uuid, operational_session_uuid, dispatch_uuid, verified_at,
+                  payload_sha256, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute(array(
                 $e['verification_uuid'], $batchId, $normalized['flight_record_uuid'],
+                $normalized['operational_session_uuid'],
                 $normalized['dispatch_uuid'], $this->date($e['timestamp'] ?? null, 'timestamp'),
                 $hash, $json,
             ));
@@ -222,28 +243,68 @@ final class CvrWorkflowEvidenceIntakeService
         $oilUnit = $oilQuantity !== null ? $this->nullableString($e['ending_oil_unit'] ?? null) : null;
         $this->pdo->prepare(
             'INSERT INTO ipca_cvr_flight_closures
-             (closure_uuid, batch_id, workflow_flight_record_uuid, ending_hobbs, ending_tacho,
+             (closure_uuid, batch_id, workflow_flight_record_uuid, operational_session_uuid, ending_hobbs, ending_tacho,
               fuel_remaining, oil_percentage, oil_quantity, oil_unit, maintenance_remark, payload_sha256, payload_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute(array(
             $e['closure_uuid'], $batchId, $normalized['flight_record_uuid'],
+            $normalized['operational_session_uuid'],
             $e['ending_hobbs'] ?? null, $e['ending_tacho'] ?? null,
             $this->nullableString($e['fuel_remaining'] ?? null), $oil, $oilQuantity, $oilUnit,
             $this->nullableString($e['maintenance_remark'] ?? null), $hash, $json,
         ));
-        $this->pdo->prepare(
-            "UPDATE ipca_flight_schedule_slots schedule_slot
-             INNER JOIN ipca_cvr_dispatches dispatch_record
-               ON dispatch_record.scheduler_record_id = schedule_slot.scheduler_record_id
-             SET schedule_slot.status = 'completed'
-             WHERE dispatch_record.workflow_flight_record_uuid = ?"
-        )->execute(array($normalized['flight_record_uuid']));
+        if ($normalized['operational_session_uuid'] !== null) {
+            (new FlightSessionService($this->pdo))->closeOperationalSession(
+                $normalized['operational_session_uuid'],
+                (string)($e['timestamp_utc'] ?? 'now')
+            );
+            $this->pdo->prepare(
+                "UPDATE ipca_flight_schedule_slots schedule_slot
+                 INNER JOIN ipca_cvr_dispatches dispatch_record
+                   ON dispatch_record.scheduler_record_id = schedule_slot.scheduler_record_id
+                 SET schedule_slot.status = 'scheduled',
+                     schedule_slot.claimed_at = NULL,
+                     schedule_slot.claimed_dispatch_uuid = NULL
+                 WHERE dispatch_record.workflow_flight_record_uuid = ?
+                   AND dispatch_record.operational_session_uuid = ?
+                   AND schedule_slot.claimed_dispatch_uuid = dispatch_record.dispatch_uuid"
+            )->execute(array(
+                $normalized['flight_record_uuid'],
+                $normalized['operational_session_uuid'],
+            ));
+        } else {
+            $this->pdo->prepare(
+                "UPDATE ipca_flight_schedule_slots schedule_slot
+                 INNER JOIN ipca_cvr_dispatches dispatch_record
+                   ON dispatch_record.scheduler_record_id = schedule_slot.scheduler_record_id
+                 SET schedule_slot.status = 'completed'
+                 WHERE dispatch_record.workflow_flight_record_uuid = ?"
+            )->execute(array($normalized['flight_record_uuid']));
+        }
+
     }
 
-    private function assertDispatchOwnership(string $dispatchUuid, string $flightUuid, int $deviceId): void
+    private function createLogbookProposalsSafely(string $flightRecordUuid): void
+    {
+        try {
+            require_once __DIR__ . '/MasterLogbookLogbookProposalService.php';
+            (new MasterLogbookLogbookProposalService($this->pdo))
+                ->createProposalsForFlightRecord($flightRecordUuid);
+        } catch (Throwable $e) {
+            error_log('[CvrWorkflowEvidenceIntake] logbook proposal create failed: ' . $e->getMessage());
+        }
+    }
+
+    private function assertDispatchOwnership(
+        string $dispatchUuid,
+        string $flightUuid,
+        ?string $operationalSessionUuid,
+        int $deviceId
+    ): void
     {
         $statement = $this->pdo->prepare(
-            'SELECT device_id, workflow_flight_record_uuid FROM ipca_cvr_dispatches WHERE dispatch_uuid = ? LIMIT 1'
+            'SELECT device_id, workflow_flight_record_uuid, operational_session_uuid
+             FROM ipca_cvr_dispatches WHERE dispatch_uuid = ? LIMIT 1'
         );
         $statement->execute(array($dispatchUuid));
         $dispatch = $statement->fetch(PDO::FETCH_ASSOC);
@@ -255,6 +316,10 @@ final class CvrWorkflowEvidenceIntakeService
         }
         if (strtolower((string)$dispatch['workflow_flight_record_uuid']) !== $flightUuid) {
             throw new CvrTechnicalReviewRequired('Evidence Flight Record linkage requires technical review.');
+        }
+        $expectedSession = strtolower(trim((string)($dispatch['operational_session_uuid'] ?? '')));
+        if (($operationalSessionUuid ?? '') !== $expectedSession) {
+            throw new CvrTechnicalReviewRequired('Evidence Operational Session linkage requires technical review.');
         }
     }
 
@@ -319,7 +384,7 @@ final class CvrWorkflowEvidenceIntakeService
     private function batch(string $componentUuid): array|false
     {
         $statement = $this->pdo->prepare(
-            'SELECT id, batch_uuid, component_uuid, workflow_flight_record_uuid, dispatch_uuid,
+            'SELECT id, batch_uuid, component_uuid, workflow_flight_record_uuid, operational_session_uuid, dispatch_uuid,
                     device_id, component_type, payload_sha256, payload_json, receipt_uuid, received_at
              FROM ipca_cvr_workflow_evidence_batches WHERE component_uuid = ? LIMIT 1 FOR UPDATE'
         );
@@ -383,6 +448,14 @@ final class CvrWorkflowEvidenceIntakeService
             throw new CvrUserCorrectionRequired($field . ' must be a valid UUID.');
         }
         return $uuid;
+    }
+
+    private function nullableUuid(mixed $value, string $field): ?string
+    {
+        if (trim((string)$value) === '') {
+            return null;
+        }
+        return $this->uuid($value, $field);
     }
 
     private function requiredString(mixed $value, string $field): string

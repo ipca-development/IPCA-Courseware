@@ -88,7 +88,9 @@ if ($pageSource === false
     || !str_contains($pageSource, 'Operational Legs')
     || !str_contains($pageSource, 'Off Block')
     || !str_contains($pageSource, 'On Block')
-    || !str_contains($pageSource, 'Airborne')) {
+    || !str_contains($pageSource, 'airborne_time_hours')
+    || !str_contains($pageSource, 'device_multi_leg_grouped')
+    || !str_contains($intakeSource, 'groupDeviceMultiLegDispatchRows')) {
     fwrite(STDERR, "master_logbook_intake contract failed.\n");
     exit(1);
 }

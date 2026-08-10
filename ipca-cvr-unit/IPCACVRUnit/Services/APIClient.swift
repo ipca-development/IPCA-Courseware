@@ -174,6 +174,36 @@ struct DispatchReleaseResponse: Codable {
     }
 }
 
+struct ScheduleDutySyncResponse: Codable {
+    var ok: Bool
+    var alreadyPresent: Bool?
+    var schedulerRecordID: String?
+    var reservationUUID: String?
+    var legUUID: String?
+    var dutyFingerprintSHA256: String?
+    var errorCode: String?
+    var retryable: Bool?
+    var userActionRequired: Bool?
+    var requestID: String?
+    var error: String?
+    var warnings: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case alreadyPresent = "already_present"
+        case schedulerRecordID = "scheduler_record_id"
+        case reservationUUID = "reservation_uuid"
+        case legUUID = "leg_uuid"
+        case dutyFingerprintSHA256 = "duty_fingerprint_sha256"
+        case errorCode = "error_code"
+        case retryable
+        case userActionRequired = "user_action_required"
+        case requestID = "request_id"
+        case error
+        case warnings
+    }
+}
+
 struct DispatchSyncResponse: Codable {
     struct ServerDispatch: Codable {
         var id: Int
@@ -514,6 +544,184 @@ struct APISynchronizationFailure: Decodable, Equatable {
     }
 }
 
+struct CVROperationalLegReviewLeg: Codable, Equatable, Identifiable {
+    var id: Int { sequenceNumber }
+    var sequenceNumber: Int
+    var departureAirport: String
+    var arrivalAirport: String
+    var offBlockUTC: String
+    var onBlockUTC: String
+    var startingHobbs: Double
+    var endingHobbs: Double
+    var startingTacho: Double
+    var endingTacho: Double
+    var takeoffCount: Int
+    var landingCount: Int
+    var fuelOnboard: Double?
+    var fuelRemaining: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case sequenceNumber = "sequence_number"
+        case legIndex = "leg_index"
+        case departureAirport = "departure_airport"
+        case arrivalAirport = "arrival_airport"
+        case offBlockUTC = "off_block_utc"
+        case onBlockUTC = "on_block_utc"
+        case startingHobbs = "starting_hobbs"
+        case endingHobbs = "ending_hobbs"
+        case startingTacho = "starting_tacho"
+        case endingTacho = "ending_tacho"
+        case takeoffCount = "takeoff_count"
+        case landingCount = "landing_count"
+        case fuelOnboard = "fuel_onboard"
+        case fuelRemaining = "fuel_remaining"
+    }
+
+    init(
+        sequenceNumber: Int,
+        departureAirport: String,
+        arrivalAirport: String,
+        offBlockUTC: String,
+        onBlockUTC: String,
+        startingHobbs: Double,
+        endingHobbs: Double,
+        startingTacho: Double,
+        endingTacho: Double,
+        takeoffCount: Int,
+        landingCount: Int,
+        fuelOnboard: Double?,
+        fuelRemaining: Double?
+    ) {
+        self.sequenceNumber = sequenceNumber
+        self.departureAirport = departureAirport
+        self.arrivalAirport = arrivalAirport
+        self.offBlockUTC = offBlockUTC
+        self.onBlockUTC = onBlockUTC
+        self.startingHobbs = startingHobbs
+        self.endingHobbs = endingHobbs
+        self.startingTacho = startingTacho
+        self.endingTacho = endingTacho
+        self.takeoffCount = takeoffCount
+        self.landingCount = landingCount
+        self.fuelOnboard = fuelOnboard
+        self.fuelRemaining = fuelRemaining
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sequenceNumber = try container.decodeIfPresent(Int.self, forKey: .sequenceNumber)
+            ?? container.decode(Int.self, forKey: .legIndex)
+        departureAirport = try container.decode(String.self, forKey: .departureAirport)
+        arrivalAirport = try container.decode(String.self, forKey: .arrivalAirport)
+        offBlockUTC = try container.decode(String.self, forKey: .offBlockUTC)
+        onBlockUTC = try container.decode(String.self, forKey: .onBlockUTC)
+        startingHobbs = try container.decode(Double.self, forKey: .startingHobbs)
+        endingHobbs = try container.decode(Double.self, forKey: .endingHobbs)
+        startingTacho = try container.decode(Double.self, forKey: .startingTacho)
+        endingTacho = try container.decode(Double.self, forKey: .endingTacho)
+        takeoffCount = try container.decode(Int.self, forKey: .takeoffCount)
+        landingCount = try container.decode(Int.self, forKey: .landingCount)
+        fuelOnboard = try container.decodeIfPresent(Double.self, forKey: .fuelOnboard)
+        fuelRemaining = try container.decodeIfPresent(Double.self, forKey: .fuelRemaining)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sequenceNumber, forKey: .sequenceNumber)
+        try container.encode(departureAirport, forKey: .departureAirport)
+        try container.encode(arrivalAirport, forKey: .arrivalAirport)
+        try container.encode(offBlockUTC, forKey: .offBlockUTC)
+        try container.encode(onBlockUTC, forKey: .onBlockUTC)
+        try container.encode(startingHobbs, forKey: .startingHobbs)
+        try container.encode(endingHobbs, forKey: .endingHobbs)
+        try container.encode(startingTacho, forKey: .startingTacho)
+        try container.encode(endingTacho, forKey: .endingTacho)
+        try container.encode(takeoffCount, forKey: .takeoffCount)
+        try container.encode(landingCount, forKey: .landingCount)
+        try container.encodeIfPresent(fuelOnboard, forKey: .fuelOnboard)
+        try container.encodeIfPresent(fuelRemaining, forKey: .fuelRemaining)
+    }
+}
+
+struct CVROperationalLegReviewPreview: Codable {
+    var operationalSessionUUID: String
+    var evidenceSHA256: String?
+    var proposedLegs: [CVROperationalLegReviewLeg]
+    var startingHobbs: Double?
+    var endingHobbs: Double?
+    var startingTacho: Double?
+    var endingTacho: Double?
+    var fuelStart: Double?
+    var fuelEnd: Double?
+    var fuelBurnTotal: Double?
+    var offBlockUTC: String?
+    var onBlockUTC: String?
+    var verifiedTakeoffCount: Int?
+    var verifiedLandingCount: Int?
+    var crew: [CVRScheduledCrewMember]?
+    var legReviewVerified: Bool?
+    var acceptedRevisionUUID: String?
+    var acceptedRevisionNumber: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case operationalSessionUUID = "operational_session_uuid"
+        case evidenceSHA256 = "evidence_sha256"
+        case proposedLegs = "proposed_legs"
+        case startingHobbs = "starting_hobbs"
+        case endingHobbs = "ending_hobbs"
+        case startingTacho = "starting_tacho"
+        case endingTacho = "ending_tacho"
+        case fuelStart = "fuel_start"
+        case fuelEnd = "fuel_end"
+        case fuelBurnTotal = "fuel_burn_total"
+        case offBlockUTC = "off_block_utc"
+        case onBlockUTC = "on_block_utc"
+        case verifiedTakeoffCount = "verified_takeoff_count"
+        case verifiedLandingCount = "verified_landing_count"
+        case crew
+        case legReviewVerified = "leg_review_verified"
+        case acceptedRevisionUUID = "accepted_revision_uuid"
+        case acceptedRevisionNumber = "accepted_revision_number"
+    }
+}
+
+struct CVROperationalLegReviewPreviewResponse: Codable {
+    var ok: Bool
+    var review: CVROperationalLegReviewPreview
+}
+
+struct CVROperationalLegReviewAcceptResponse: Codable {
+    var ok: Bool
+    var alreadyPresent: Bool?
+    var revisionUUID: String
+    var revisionNumber: Int
+    var legs: [CVROperationalLegReviewLeg]
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case alreadyPresent = "already_present"
+        case revisionUUID = "revision_uuid"
+        case revisionNumber = "revision_number"
+        case legs
+    }
+}
+
+struct CVROperationalLegReviewStatusResponse: Codable {
+    var ok: Bool
+    var dispatchUUID: String
+    var verified: Bool
+    var revisionUUID: String?
+    var revisionNumber: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case dispatchUUID = "dispatch_uuid"
+        case verified
+        case revisionUUID = "revision_uuid"
+        case revisionNumber = "revision_number"
+    }
+}
+
 enum APIClientError: LocalizedError {
     case invalidServerURL
     case badResponse(String)
@@ -666,6 +874,69 @@ struct APIClient {
         return try decode(CVRFlightLogsResponse.self, from: data, response: response)
     }
 
+    func operationalLegReview(
+        dispatchUUID: String,
+        credential: String
+    ) async throws -> CVROperationalLegReviewPreviewResponse {
+        var components = URLComponents(
+            url: serverURL.appending(path: "api/cvr/operational_session_leg_review.php"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "dispatch_uuid", value: dispatchUUID.lowercased())
+        ]
+        guard let url = components?.url else {
+            throw APIClientError.invalidServerURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 60
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(CVROperationalLegReviewPreviewResponse.self, from: data, response: response)
+    }
+
+    func operationalLegReviewStatus(
+        dispatchUUID: String,
+        credential: String
+    ) async throws -> CVROperationalLegReviewStatusResponse {
+        var components = URLComponents(
+            url: serverURL.appending(path: "api/cvr/operational_session_leg_review.php"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "dispatch_uuid", value: dispatchUUID.lowercased()),
+            URLQueryItem(name: "status_only", value: "1"),
+        ]
+        guard let url = components?.url else {
+            throw APIClientError.invalidServerURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(CVROperationalLegReviewStatusResponse.self, from: data, response: response)
+    }
+
+    func acceptOperationalLegReview(
+        payload: [String: Any],
+        credential: String
+    ) async throws -> CVROperationalLegReviewAcceptResponse {
+        let url = serverURL.appending(path: "api/cvr/operational_session_leg_review.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(CVROperationalLegReviewAcceptResponse.self, from: data, response: response)
+    }
+
     func adjustFlightLog(payload: [String: Any], credential: String) async throws -> FlightLogAdjustmentResponse {
         let url = serverURL.appending(path: "api/cvr/flight_log_adjust.php")
         var request = URLRequest(url: url)
@@ -734,6 +1005,20 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(DispatchSyncResponse.self, from: data, response: response)
+    }
+
+    func syncScheduleDuty(payload: [String: Any], credential: String) async throws -> ScheduleDutySyncResponse {
+        let url = serverURL.appending(path: "api/cvr/schedule_duty_sync.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue(payload["request_id"] as? String, forHTTPHeaderField: "X-IPCA-Request-ID")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(ScheduleDutySyncResponse.self, from: data, response: response)
     }
 
     func releaseDispatch(
@@ -885,7 +1170,7 @@ struct APIClient {
     }
 
     private func finalizePayload(for recording: Recording, language: String) -> [String: Any] {
-        [
+        var metadata: [String: Any] = [
             "recording_id": recording.id,
             "started_at": ISO8601DateFormatter().string(from: recording.startedAt),
             "duration": recording.duration,
@@ -899,6 +1184,10 @@ struct APIClient {
             "is_test_recording": recording.isTestRecording ? 1 : 0,
             "source_gap_summary": recording.sourceGapSummary ?? ""
         ]
+        if let operationalSessionID = recording.operationalSessionID, !operationalSessionID.isEmpty {
+            metadata["operational_session_uuid"] = operationalSessionID.lowercased()
+        }
+        return metadata
     }
 
     private func validate(response: URLResponse, data: Data) throws {

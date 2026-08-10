@@ -27,6 +27,14 @@ $checks = array(
         && str_contains($fleetService, 'oilPresentation')
         && str_contains($fleetService, 'AircraftFuelStateService')
         && str_contains($fleetService, 'stateForRegistration'),
+    'fleet status average burn uses Master Logbook visible legs' =>
+        str_contains($fleetService, 'averageFuelBurnByRegistration')
+        && str_contains($fleetService, 'fuel_burn_avg_usg_per_hour')
+        && str_contains($fleetService, 'ipca_cvr_logbook_hidden_legs')
+        && str_contains($fleetService, 'avg_usg_per_hour')
+        && str_contains($intake, "Avg '")
+        && str_contains($intake, '/hr')
+        && str_contains($intake, 'Avg —'),
     'Master Logbook renders compact fleet cards with hobbs oil fuel' =>
         str_contains($intake, 'fleet-status-grid')
         && str_contains($intake, 'fleet-status-meters')

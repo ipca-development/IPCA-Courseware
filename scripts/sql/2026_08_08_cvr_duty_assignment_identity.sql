@@ -1,5 +1,6 @@
 -- Stage 1: immutable Duty Assignment snapshot and explicit pilot functions.
 -- Additive, re-run safe, and feature-gated. No historical backfill.
+
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET collation_connection = utf8mb4_unicode_ci;
 
@@ -26,11 +27,13 @@ CREATE TABLE IF NOT EXISTS ipca_operational_reservation_duties (
   KEY idx_op_duty_customer (organization_id, primary_customer_identity_key),
   KEY idx_op_duty_aircraft (organization_id, aircraft_device_id),
   KEY idx_op_duty_mission (organization_id, mission_id),
-  CONSTRAINT fk_op_duty_reservation FOREIGN KEY (reservation_uuid)
-    REFERENCES ipca_operational_reservations(reservation_uuid)
+  CONSTRAINT fk_op_duty_reservation
+    FOREIGN KEY (reservation_uuid)
+      REFERENCES ipca_operational_reservations(reservation_uuid)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT chk_op_duty_uuid_lower CHECK (
-    reservation_uuid = LOWER(reservation_uuid) AND CHAR_LENGTH(reservation_uuid) = 36
+    reservation_uuid = LOWER(reservation_uuid)
+    AND CHAR_LENGTH(reservation_uuid) = 36
   ),
   CONSTRAINT chk_op_duty_hash_lower CHECK (
     duty_fingerprint_sha256 = LOWER(duty_fingerprint_sha256)
@@ -62,8 +65,9 @@ CREATE TABLE IF NOT EXISTS ipca_operational_reservation_duty_participants (
     reservation_uuid, person_identity_key, participant_role, pilot_function
   ),
   KEY idx_op_duty_participant_person (organization_id, person_identity_key),
-  CONSTRAINT fk_op_duty_participant_reservation FOREIGN KEY (reservation_uuid)
-    REFERENCES ipca_operational_reservations(reservation_uuid)
+  CONSTRAINT fk_op_duty_participant_reservation
+    FOREIGN KEY (reservation_uuid)
+      REFERENCES ipca_operational_reservations(reservation_uuid)
     ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT chk_op_duty_participant_pilot CHECK (
     pilot_function IN ('NONE','PF','PM')
@@ -78,32 +82,41 @@ CREATE TABLE IF NOT EXISTS ipca_operational_reservation_duty_participants (
 
 SET @has_pilot_function := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ipca_flight_schedule_crew'
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_flight_schedule_crew'
     AND COLUMN_NAME = 'pilot_function'
 );
-SET @sql := IF(@has_pilot_function = 0,
+SET @sql := IF(
+  @has_pilot_function = 0,
   'ALTER TABLE ipca_flight_schedule_crew ADD COLUMN pilot_function VARCHAR(8) NOT NULL DEFAULT ''NONE'' AFTER crew_role',
-  'SELECT 1');
+  'SELECT 1'
+);
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @has_is_pic := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ipca_flight_schedule_crew'
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_flight_schedule_crew'
     AND COLUMN_NAME = 'is_pic'
 );
-SET @sql := IF(@has_is_pic = 0,
+SET @sql := IF(
+  @has_is_pic = 0,
   'ALTER TABLE ipca_flight_schedule_crew ADD COLUMN is_pic TINYINT(1) NOT NULL DEFAULT 0 AFTER pilot_function',
-  'SELECT 1');
+  'SELECT 1'
+);
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @has_pilot_check := (
   SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
-  WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'ipca_flight_schedule_crew'
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ipca_flight_schedule_crew'
     AND CONSTRAINT_NAME = 'chk_flight_schedule_crew_pilot_function'
 );
-SET @sql := IF(@has_pilot_check = 0,
+SET @sql := IF(
+  @has_pilot_check = 0,
   'ALTER TABLE ipca_flight_schedule_crew ADD CONSTRAINT chk_flight_schedule_crew_pilot_function CHECK (pilot_function IN (''NONE'',''PF'',''PM''))',
-  'SELECT 1');
+  'SELECT 1'
+);
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @policy_defs_exist := (
@@ -120,10 +133,12 @@ SET @sql := IF(@policy_defs_exist > 0,
      (''duty_assignment_enforcement_enabled'', ''cvr_operational_identity'', ''bool'', ''0'', ''[\"0\",\"1\"]'', NULL,
       ''Stage 1: reject material Duty Assignment identity mismatches and in-place mutation.'', 1, 9240)
    ON DUPLICATE KEY UPDATE
-     category=VALUES(category), value_type=VALUES(value_type),
-     default_value_text=VALUES(default_value_text),
-     allowed_values_json=VALUES(allowed_values_json),
-     description_text=VALUES(description_text),
-     is_admin_editable=VALUES(is_admin_editable), sort_order=VALUES(sort_order)',
+     category = VALUES(category),
+     value_type = VALUES(value_type),
+     default_value_text = VALUES(default_value_text),
+     allowed_values_json = VALUES(allowed_values_json),
+     description_text = VALUES(description_text),
+     is_admin_editable = VALUES(is_admin_editable),
+     sort_order = VALUES(sort_order)',
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

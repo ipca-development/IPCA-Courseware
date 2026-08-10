@@ -1632,6 +1632,87 @@ if ($isPublicReplay) {
   stroke: #73ff45;
   stroke-width: 7.5;
 }
+.g-meter {
+  position: absolute;
+  z-index: 20;
+  width: 58px;
+  box-sizing: border-box;
+  padding: 8px 5px 6px;
+  border-radius: 17px 17px 8px 8px;
+  background: rgba(40, 40, 40, .46);
+  border: 1px solid rgba(255, 255, 255, .28);
+  color: #fff;
+  pointer-events: none;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .28));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.g-meter[hidden] { display: none !important; }
+.g-meter-body {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.g-meter-labels {
+  position: relative;
+  width: 22px;
+  flex: 0 0 22px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1;
+  color: rgba(255, 255, 255, .88);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .55);
+}
+.g-meter-label {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+.g-meter-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 1 1 auto;
+  gap: 1.5px;
+  min-width: 0;
+}
+.g-meter-bar {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 4px;
+  border-radius: 999px;
+  background: rgba(170, 170, 170, .28);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06);
+  transition: background-color 40ms linear, box-shadow 40ms linear;
+}
+.g-meter-bar.is-lit[data-tone="red"] { background: #ff1f12; }
+.g-meter-bar.is-lit[data-tone="orange"] { background: #ff9800; }
+.g-meter-bar.is-lit[data-tone="light-green"] { background: #5cff2e; }
+.g-meter-bar.is-lit[data-tone="dark-green"] { background: #1db954; }
+.g-meter-bar.is-lit {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+}
+.g-meter-bar-fill {
+  display: none;
+}
+.g-meter-value {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: .01em;
+  line-height: 1;
+  color: rgba(255, 255, 255, .96);
+  font-variant-numeric: tabular-nums;
+}
 .trim-indicator {
   position: absolute;
   z-index: 20;
@@ -1841,6 +1922,22 @@ if ($isPublicReplay) {
   accent-color: #38bdf8;
   margin: 0;
   pointer-events: auto;
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+.replay-timeline-wrap {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 34px;
+  overflow: visible;
+}
+.replay-timeline-wrap .replay-range {
+  flex: 1 1 auto;
+  width: 100%;
 }
 .replay-range::-webkit-slider-runnable-track {
   height: 3px;
@@ -1852,6 +1949,203 @@ if ($isPublicReplay) {
   height: 11px;
   margin-top: -4px;
 }
+.replay-timeline-markers {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 26px;
+  transform: translateY(calc(-50% - 10px));
+  pointer-events: none;
+  z-index: 2;
+  overflow: visible;
+}
+.replay-timeline-marker {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 18px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  transform: translateX(-50%);
+  pointer-events: none;
+  cursor: pointer;
+  color: #f59e0b;
+}
+.replay-timeline-marker.is-red { color: #ff1f12; }
+.replay-timeline-marker.is-blue { color: #2f6bff; }
+.replay-timeline-marker.is-green { color: #16a34a; }
+.replay-timeline-marker.is-amber { color: #f5c518; }
+.replay-timeline-marker-stem {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 2px;
+  height: 16px;
+  transform: translateX(-50%);
+  background: currentColor;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.replay-timeline-marker-head {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  margin: 0;
+  border: 0 !important;
+  outline: none;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background-color: currentColor !important;
+  background-image: none !important;
+  color: inherit;
+  box-shadow: none;
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.replay-timeline-marker.is-red .replay-timeline-marker-stem,
+.replay-timeline-marker.is-red .replay-timeline-marker-head { background-color: #ff1f12 !important; color: #ff1f12; }
+.replay-timeline-marker.is-blue .replay-timeline-marker-stem,
+.replay-timeline-marker.is-blue .replay-timeline-marker-head { background-color: #2f6bff !important; color: #2f6bff; }
+.replay-timeline-marker.is-green .replay-timeline-marker-stem,
+.replay-timeline-marker.is-green .replay-timeline-marker-head { background-color: #16a34a !important; color: #16a34a; }
+.replay-timeline-marker.is-amber .replay-timeline-marker-stem,
+.replay-timeline-marker.is-amber .replay-timeline-marker-head { background-color: #f5c518 !important; color: #f5c518; }
+.replay-timeline-marker-tip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%) translateY(2px);
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgba(15, 23, 42, .92);
+  border: 1px solid rgba(226, 232, 240, .28);
+  color: #f8fafc;
+  font: 700 11px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .35);
+  transition: opacity 80ms linear, transform 80ms linear;
+  z-index: 5;
+}
+.replay-timeline-marker-head:hover + .replay-timeline-marker-tip,
+.replay-timeline-marker-head:focus + .replay-timeline-marker-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.replay-events-button {
+  width: auto;
+  min-width: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+.replay-events-panel {
+  right: 12px;
+  bottom: 52px;
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(62vh, 520px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(6, 12, 24, .82);
+  overflow: hidden;
+}
+.replay-events-panel[hidden] { display: none !important; }
+.replay-events-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.replay-events-title {
+  font: 800 13px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #dbeafe;
+}
+.replay-events-count {
+  color: #94a3b8;
+  font: 700 11px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.replay-events-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding-right: 2px;
+}
+.replay-events-empty {
+  color: #94a3b8;
+  font: 600 12px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 18px 8px;
+  text-align: center;
+}
+.replay-event-row {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(226, 232, 240, .16);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, .55);
+  color: #e2e8f0;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.replay-event-row:hover,
+.replay-event-row.is-active {
+  border-color: rgba(96, 165, 250, .55);
+  background: rgba(30, 64, 175, .42);
+}
+.replay-event-time {
+  font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #bfdbfe;
+}
+.replay-event-main {
+  min-width: 0;
+}
+.replay-event-title {
+  font: 800 12px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-event-sub {
+  margin-top: 2px;
+  color: #94a3b8;
+  font: 600 10px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-event-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 52px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font: 800 9px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.replay-event-badge.is-safety { background: #ff1f12; color: #fff; }
+.replay-event-badge.is-training { background: #2f6bff; color: #fff; }
+.replay-event-badge.is-exercise { background: #16a34a; color: #fff; }
+.replay-event-badge.is-ops { background: #d946ef; color: #fff; }
 .replay-time {
   min-width: 8ch;
   color: rgba(255, 255, 255, .94);
@@ -2262,6 +2556,17 @@ if ($isPublicReplay) {
     <div id="aoaIndicator" class="aoa-indicator" aria-label="Angle of attack indicator" hidden>
       <svg id="aoaIndicatorSvg" viewBox="0 10 72 124" role="img" aria-label="Angle of attack"></svg>
     </div>
+    <div id="gMeter" class="g-meter" aria-label="G-meter" hidden>
+      <div class="g-meter-body">
+        <div class="g-meter-labels" aria-hidden="true">
+          <div class="g-meter-label" data-g-label="5.0">+5.0</div>
+          <div class="g-meter-label" data-g-label="1.0">1.0</div>
+          <div class="g-meter-label" data-g-label="-3.0">-3.0</div>
+        </div>
+        <div id="gMeterStack" class="g-meter-stack" aria-hidden="true"></div>
+      </div>
+      <div id="gMeterValue" class="g-meter-value">----</div>
+    </div>
     <div id="altimeterStack" class="altimeter-stack" aria-label="Altimeter and vertical speed indicator" hidden>
       <div class="altimeter-tape">
         <div id="altimeterBugValue" class="altimeter-header">----</div>
@@ -2400,6 +2705,7 @@ if ($isPublicReplay) {
           <label class="replay-toggle"><span>Altimeter</span><input type="checkbox" data-instrument-toggle="altimeter"></label>
           <label class="replay-toggle"><span>Horizontal Situation Indicator</span><input type="checkbox" data-instrument-toggle="hsi"></label>
           <label class="replay-toggle"><span>Angle of Attack Indicator</span><input type="checkbox" data-instrument-toggle="aoa_indicator"></label>
+          <label class="replay-toggle"><span>G-Meter</span><input type="checkbox" data-instrument-toggle="g_meter"></label>
           <label class="replay-toggle"><span>Inset Map</span><input type="checkbox" data-instrument-toggle="inset_map"></label>
           <label class="replay-toggle"><span>Traffic</span><input type="checkbox" data-instrument-toggle="traffic"></label>
           <label class="replay-toggle"><span>PAPI Guidance</span><input type="checkbox" data-instrument-toggle="papi_guidance"></label>
@@ -2441,6 +2747,13 @@ if ($isPublicReplay) {
       <div id="calibrationValues" class="replay-calibration-values">F +0.0m | R +0.0m | U +0.0m</div>
     </div>
     <?php endif; ?>
+    <div id="eventsPanel" class="replay-modal replay-events-panel" aria-label="Replay events" hidden>
+      <div class="replay-events-header">
+        <div class="replay-events-title">Events</div>
+        <div id="eventsCount" class="replay-events-count">0</div>
+      </div>
+      <div id="eventsList" class="replay-events-list"></div>
+    </div>
     <audio id="audio" preload="metadata"<?= $id !== '' ? ' src="/admin/cockpit_recorder_audio.php?id=' . h((string)$id) . '"' : '' ?>></audio>
     <div class="replay-dock" aria-label="Replay controls">
       <div class="replay-control-cluster">
@@ -2451,12 +2764,16 @@ if ($isPublicReplay) {
         <button class="replay-button replay-skip-button" type="button" id="forwardButton" aria-label="Forward 10 seconds">10↷</button>
         <button class="replay-speed-button" type="button" id="speedButton" aria-label="Replay speed">1x</button>
         <span id="timeLabel" class="replay-time">00:00:00</span>
-        <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0" aria-label="Replay timeline">
+        <div class="replay-timeline-wrap">
+          <div id="timelineMarkers" class="replay-timeline-markers" aria-hidden="true"></div>
+          <input class="replay-range" id="timeline" type="range" min="0" max="1" step="0.1" value="0" aria-label="Replay timeline">
+        </div>
       </div>
-      <?php if (!$isPublicReplay): ?><div class="replay-settings-cluster">
+      <div class="replay-settings-cluster">
         <input type="hidden" id="cameraMode" value="synthetic_vision">
-        <button class="replay-icon-button replay-settings-button" type="button" id="settingsButton" aria-label="Open replay settings">⚙</button>
-      </div><?php else: ?><input type="hidden" id="cameraMode" value="synthetic_vision"><?php endif; ?>
+        <button class="replay-icon-button replay-events-button" type="button" id="eventsButton" aria-label="Open replay events" title="Events">Events</button>
+        <?php if (!$isPublicReplay): ?><button class="replay-icon-button replay-settings-button" type="button" id="settingsButton" aria-label="Open replay settings">⚙</button><?php endif; ?>
+      </div>
     </div>
   </div>
   </div>
@@ -2486,6 +2803,11 @@ if ($isPublicReplay) {
   const fullscreenButton = document.getElementById('fullscreenButton');
   const speedButton = document.getElementById('speedButton');
   const settingsButton = document.getElementById('settingsButton');
+  const eventsButton = document.getElementById('eventsButton');
+  const eventsPanel = document.getElementById('eventsPanel');
+  const eventsList = document.getElementById('eventsList');
+  const eventsCount = document.getElementById('eventsCount');
+  const timelineMarkers = document.getElementById('timelineMarkers');
   const settingsPanel = document.getElementById('settingsPanel');
   const settingsCameraTab = document.getElementById('settingsCameraTab');
   const settingsDebugTab = document.getElementById('settingsDebugTab');
@@ -2523,6 +2845,9 @@ if ($isPublicReplay) {
   const trimIndicatorPointer = document.getElementById('trimIndicatorPointer');
   const aoaIndicator = document.getElementById('aoaIndicator');
   const aoaIndicatorSvg = document.getElementById('aoaIndicatorSvg');
+  const gMeter = document.getElementById('gMeter');
+  const gMeterStack = document.getElementById('gMeterStack');
+  const gMeterValue = document.getElementById('gMeterValue');
   const altimeterStack = document.getElementById('altimeterStack');
   const altimeterBody = document.getElementById('altimeterBody');
   const altimeterScale = document.getElementById('altimeterScale');
@@ -2758,6 +3083,7 @@ if ($isPublicReplay) {
     'altimeter',
     'hsi',
     'aoa_indicator',
+    'g_meter',
     'inset_map',
     'traffic',
     'papi_guidance',
@@ -2772,8 +3098,11 @@ if ($isPublicReplay) {
     'system_warning_box',
     'wind_indicator',
   ];
-  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'inset_map', 'traffic', 'papi_guidance', 'engine_instrument_stack', 'system_warning_box']);
-  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'inset_map', 'traffic', 'papi_guidance', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'system_warning_box', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
+  const DEFAULT_ENABLED_INSTRUMENTS = new Set(['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'horizon_bar', 'attitude_indicator', 'wind_indicator', 'aoa_indicator', 'g_meter', 'inset_map', 'traffic', 'papi_guidance', 'engine_instrument_stack', 'system_warning_box']);
+  const IMPLEMENTED_INSTRUMENTS = ['airspeed_indicator', 'trim_position_indicator', 'altimeter', 'hsi', 'aoa_indicator', 'g_meter', 'inset_map', 'traffic', 'papi_guidance', 'horizon_bar', 'attitude_indicator', 'flight_director_bars', 'engine_instrument_stack', 'system_warning_box', 'wind_indicator', 'radio_stack', 'navaid_stack', 'autopilot_fma'];
+  const G_METER_LEVELS = [5.0, 4.5, 4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5, 0.0, -0.5, -1.0, -1.5, -2.0, -2.5, -3.0];
+  const G_METER_CENTER_G = 1.0;
+  const G_METER_STEP = 0.5;
   const CAMERA_SNAP_SEEK_SEC = 0.75;
   const POSITION_KEY_MIN_DIST_M = 0.15;
   const INSET_MAP_SIZE = 240;
@@ -3277,6 +3606,7 @@ if ($isPublicReplay) {
     updateAltimeterTape(sampleAt(activeT), 1 / 60, true);
     updateSystemWarningBox(sampleAt(activeT));
     updateInsetMap(sampleAt(activeT), true);
+    updateGMeter(sampleAt(activeT));
     updateAvionicsHeader(sampleAt(activeT));
     safeRenderCesium(true);
   }
@@ -3322,6 +3652,7 @@ if ($isPublicReplay) {
     insetMapSignature = '';
     saveInsetMapOrientation();
     updateInsetMap(sampleAt(activeT), true);
+    updateGMeter(sampleAt(activeT));
   }
 
   function updateCalibrationPanel() {
@@ -3487,6 +3818,7 @@ if ($isPublicReplay) {
     updateHsiOverlay(sampleAt(activeT), 1 / 60, true);
     updateEnginePanel(sampleAt(activeT), 1 / 60, true);
     updateInsetMap(sampleAt(activeT), true);
+    updateGMeter(sampleAt(activeT));
     updateAvionicsHeader(sampleAt(activeT));
     safeRenderCesium(true);
   }
@@ -3521,6 +3853,7 @@ if ($isPublicReplay) {
     if (horizonLine && !instrumentEnabled('horizon_bar')) setElementHidden(horizonLine, true);
     if (insetMap && !instrumentEnabled('inset_map')) setElementHidden(insetMap, true);
     if (aoaIndicator && !instrumentEnabled('aoa_indicator')) setElementHidden(aoaIndicator, true);
+    if (gMeter && !instrumentEnabled('g_meter')) setElementHidden(gMeter, true);
     if (enginePanel && !instrumentEnabled('engine_instrument_stack')) setElementHidden(enginePanel, true);
     if (systemWarningBox && !instrumentEnabled('system_warning_box')) setElementHidden(systemWarningBox, true);
     if (!instrumentEnabled('papi_guidance')) clearCesiumPapiEntities();
@@ -4147,6 +4480,111 @@ if ($isPublicReplay) {
         ${activeGreen ? '<path class="aoa-symbol is-green" d="M14 111 H27 M45 111 H58 M14 123 H58 M14 135 H58" fill="none" stroke-width="6"></path><circle class="aoa-center" cx="36" cy="111" r="9"></circle>' : ''}
       </g>`;
     setElementHidden(aoaIndicator, false);
+  }
+
+  function gMeterToneForLevel(levelG) {
+    if (levelG >= 4.0 || levelG <= -2.0) return 'red';
+    if (levelG >= 2.5 || levelG <= -0.5) return 'orange';
+    if (Math.abs(levelG - G_METER_CENTER_G) < 0.001) return 'dark-green';
+    return 'light-green';
+  }
+
+  function gMeterBarFill(gValue, barG) {
+    if (!Number.isFinite(gValue)) return 0;
+    if (Math.abs(barG - G_METER_CENTER_G) < 0.001) return 1;
+    if (gValue >= G_METER_CENTER_G) {
+      if (barG < G_METER_CENTER_G) return 0;
+      if (gValue >= barG) return 1;
+      const previous = barG - G_METER_STEP;
+      if (gValue > previous) return clamp((gValue - previous) / G_METER_STEP, 0, 1);
+      return 0;
+    }
+    if (barG > G_METER_CENTER_G) return 0;
+    if (gValue <= barG) return 1;
+    const next = barG + G_METER_STEP;
+    if (gValue < next) return clamp((next - gValue) / G_METER_STEP, 0, 1);
+    return 0;
+  }
+
+  function formatGMeterValue(gValue) {
+    if (!Number.isFinite(gValue)) return '----';
+    const rounded = Math.round(gValue * 10) / 10;
+    const absText = Math.abs(rounded).toFixed(1);
+    if (rounded > 0) return `+${absText}`;
+    if (rounded < 0) return `-${absText}`;
+    return '0.0';
+  }
+
+  function ensureGMeterStack() {
+    if (!gMeterStack || gMeterStack.childElementCount === G_METER_LEVELS.length) return;
+    gMeterStack.innerHTML = '';
+    G_METER_LEVELS.forEach((levelG) => {
+      const bar = document.createElement('div');
+      bar.className = 'g-meter-bar';
+      bar.dataset.g = String(levelG);
+      bar.dataset.tone = gMeterToneForLevel(levelG);
+      const fill = document.createElement('div');
+      fill.className = 'g-meter-bar-fill';
+      bar.appendChild(fill);
+      gMeterStack.appendChild(bar);
+    });
+    if (gMeter) {
+      gMeter.querySelectorAll('[data-g-label]').forEach((label) => {
+        const labelG = Number(label.getAttribute('data-g-label'));
+        const index = G_METER_LEVELS.findIndex((level) => Math.abs(level - labelG) < 0.001);
+        if (index < 0) return;
+        label.style.top = `${(((index + 0.5) / G_METER_LEVELS.length) * 100).toFixed(2)}%`;
+      });
+    }
+  }
+
+  const G_METER_WIDTH_PX = 58;
+  const G_METER_GAP_PX = 8;
+
+  function gMeterReservePx() {
+    return instrumentEnabled('g_meter') ? (G_METER_WIDTH_PX + G_METER_GAP_PX) : 0;
+  }
+
+  function gMeterPlacement() {
+    if (!gMeter || !insetMapTop || !insetMap || elementIsHidden(insetMap)) return false;
+    const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    const topRect = insetMapTop.getBoundingClientRect();
+    if (!topRect || topRect.width <= 0 || topRect.height <= 0) return false;
+    const width = G_METER_WIDTH_PX;
+    const height = Math.round(topRect.height);
+    const leftPx = Math.round(topRect.left - rootRect.left - width - G_METER_GAP_PX);
+    const topPx = Math.round(topRect.top - rootRect.top);
+    if (leftPx < 4 || height < 80) return false;
+    gMeter.style.width = `${width}px`;
+    gMeter.style.height = `${height}px`;
+    gMeter.style.left = `${leftPx}px`;
+    gMeter.style.top = `${topPx}px`;
+    return true;
+  }
+
+  function updateGMeter(sample) {
+    if (!gMeter || !gMeterStack || !gMeterValue) return;
+    ensureGMeterStack();
+    const gValue = firstFinite(
+      sample && sample.normal_acceleration_g,
+      sample && sample.acceleration_g,
+      g3xField(sample, 'normal_acceleration_g', 'acceleration_g', 'NormAc')
+    );
+    if (!sample || !instrumentEnabled('g_meter') || gValue === null || !gMeterPlacement()) {
+      setElementHidden(gMeter, true);
+      return;
+    }
+    const fillG = clamp(gValue, G_METER_LEVELS[G_METER_LEVELS.length - 1], G_METER_LEVELS[0]);
+    const bars = gMeterStack.querySelectorAll('.g-meter-bar');
+    bars.forEach((bar) => {
+      const barG = Number(bar.dataset.g);
+      const fill = gMeterBarFill(fillG, barG);
+      bar.classList.toggle('is-lit', fill >= 0.5);
+      bar.classList.remove('is-full');
+      bar.style.removeProperty('--g-fill');
+    });
+    gMeterValue.textContent = formatGMeterValue(gValue);
+    setElementHidden(gMeter, false);
   }
 
   function altitudeSpeedToY(altitudeFt, currentAltitudeFt, centerY, pxPerFt) {
@@ -5656,12 +6094,205 @@ if ($isPublicReplay) {
     if (tab) setSettingsTab(tab);
     settingsPanel.hidden = open !== true;
     if (settingsButton) settingsButton.classList.toggle('is-active', open === true);
+    if (open === true) setEventsOpen(false);
   }
 
   function toggleSettings(tab = null) {
     if (!settingsPanel) return;
     const willOpen = settingsPanel.hidden || tab !== null;
     setSettingsOpen(willOpen, tab);
+  }
+
+  function setEventsOpen(open) {
+    if (!eventsPanel) return;
+    eventsPanel.hidden = open !== true;
+    if (eventsButton) eventsButton.classList.toggle('is-active', open === true);
+    if (open === true) setSettingsOpen(false);
+  }
+
+  function toggleEvents() {
+    if (!eventsPanel) return;
+    setEventsOpen(!!eventsPanel.hidden);
+  }
+
+  function replayActionsFromPayload(data) {
+    if (data && Array.isArray(data.replay_actions) && data.replay_actions.length) {
+      return data.replay_actions.slice();
+    }
+    const actions = [];
+    const identified = data && Array.isArray(data.identified_exercises) ? data.identified_exercises : [];
+    const identifiedWindows = [];
+    identified.forEach((exercise) => {
+      const t = Number(exercise.t != null ? exercise.t : exercise.t_start_seconds);
+      if (!Number.isFinite(t)) return;
+      const endRaw = exercise.end != null ? exercise.end : exercise.t_end_seconds;
+      const end = endRaw == null ? null : Number(endRaw);
+      identifiedWindows.push({
+        code: String(exercise.exercise_code || ''),
+        t0: t,
+        t1: Number.isFinite(end) ? end : t,
+        markerUuid: String(exercise.source_marker_event_uuid || ''),
+      });
+      actions.push({
+        id: 'exercise:' + (exercise.detection_uuid || ((exercise.exercise_code || 'unknown') + ':' + t)),
+        t,
+        end: Number.isFinite(end) ? end : null,
+        category: 'exercise',
+        marker: 'green',
+        source: 'identified_exercise',
+        event_type: String(exercise.event_type || ('identified_exercise:' + (exercise.exercise_code || ''))),
+        title: String(exercise.title || exercise.display_name || 'Exercise'),
+        subtitle: '',
+        confidence: exercise.confidence,
+      });
+    });
+    const crew = data && Array.isArray(data.crew_events) ? data.crew_events : [];
+    crew.forEach((event) => {
+      const type = String(event.event_type || '');
+      const t = Number(event.t);
+      if (!type || !Number.isFinite(t)) return;
+      if (type === 'exercise_marker') {
+        const uuid = String(event.event_uuid || '');
+        if (uuid && identifiedWindows.some((w) => w.markerUuid === uuid)) return;
+        if (identifiedWindows.some((w) => t >= (w.t0 - 90) && t <= (w.t1 + 90))) return;
+      }
+      let category = 'ops';
+      let marker = 'amber';
+      let title = type;
+      if (type === 'safety_event') {
+        category = 'safety';
+        marker = 'red';
+        title = 'Safety Occurrence';
+      } else if (type === 'exercise_marker') {
+        category = 'exercise';
+        marker = 'blue';
+        title = 'Start of Exercises';
+      } else if (type === 'training_remark_marker') {
+        category = 'training';
+        marker = 'blue';
+        title = 'Flight Training Event';
+      } else if (type === 'gps_takeoff_provisional') {
+        title = 'Takeoff';
+      } else if (type === 'gps_landing_provisional') {
+        title = 'Landing';
+      } else if (type === 'engine_start_off_block') {
+        title = 'Engine Start / Off Block';
+      } else if (type === 'engine_shutdown_on_block') {
+        title = 'Engine Shutdown / On Block';
+      }
+      actions.push({
+        id: 'crew:' + (event.event_uuid || (type + ':' + t)),
+        t,
+        end: null,
+        category,
+        marker,
+        source: 'crew',
+        event_type: type,
+        title,
+        subtitle: '',
+        confidence: event.confidence,
+      });
+    });
+    const detected = data && Array.isArray(data.events) ? data.events : [];
+    detected.forEach((event) => {
+      const type = String(event.event_type || '');
+      const t = Number(event.start);
+      if (!type || !Number.isFinite(t)) return;
+      const lower = type.toLowerCase();
+      let suppressCode = '';
+      if (lower.includes('power-off stall') || lower.includes('power off stall')) suppressCode = 'power_off_stall';
+      else if (lower.includes('steep turn')) suppressCode = 'steep_turn';
+      if (suppressCode && identifiedWindows.some((w) => w.code === suppressCode && t >= (w.t0 - 60) && t <= (w.t1 + 60))) {
+        return;
+      }
+      const isTraining = lower.includes('stall') || lower.includes('steep turn');
+      actions.push({
+        id: 'detected:' + type + ':' + t,
+        t,
+        end: event.end == null ? null : Number(event.end),
+        category: isTraining ? 'training' : 'ops',
+        marker: isTraining ? 'blue' : 'amber',
+        source: 'detected',
+        event_type: type,
+        title: type,
+        subtitle: '',
+        confidence: event.confidence,
+      });
+    });
+    actions.sort((a, b) => (a.t - b.t) || String(a.category).localeCompare(String(b.category)));
+    return actions;
+  }
+
+  function actionBadgeCategory(action) {
+    const type = String(action && action.event_type || '').toLowerCase();
+    if (type === 'safety_event' || action.category === 'safety') return 'safety';
+    if (type === 'exercise_marker' || type.startsWith('identified_exercise:') || action.category === 'exercise') return 'exercise';
+    if (type === 'training_remark_marker' || action.category === 'training') return 'training';
+    return 'ops';
+  }
+
+  function categoryBadgeLabel(category) {
+    if (category === 'safety') return 'SAFETY';
+    if (category === 'exercise') return 'EXERCISE';
+    if (category === 'training') return 'TRAINING';
+    return 'AUTO';
+  }
+
+  function renderEventsUi() {
+    const actions = payload && Array.isArray(payload.replay_actions) ? payload.replay_actions : [];
+    if (eventsCount) eventsCount.textContent = String(actions.length);
+    if (eventsList) {
+      if (!actions.length) {
+        eventsList.innerHTML = '<div class="replay-events-empty">No crew or detected events for this replay.</div>';
+      } else {
+        eventsList.innerHTML = actions.map((action) => {
+          const category = actionBadgeCategory(action);
+          const title = escapeHtml(String(action.title || action.event_type || 'Event'));
+          const t = Number(action.t) || 0;
+          return '<button class="replay-event-row" type="button" data-event-t="' + t.toFixed(3) + '" data-event-id="' + escapeHtml(String(action.id || '')) + '">'
+            + '<span class="replay-event-time">' + escapeHtml(fmtTime(t)) + '</span>'
+            + '<span class="replay-event-main"><span class="replay-event-title">' + title + '</span></span>'
+            + '<span class="replay-event-badge is-' + escapeHtml(category) + '">' + categoryBadgeLabel(category) + '</span>'
+            + '</button>';
+        }).join('');
+      }
+    }
+    renderTimelineMarkers(actions);
+  }
+
+  function renderTimelineMarkers(actions) {
+    if (!timelineMarkers || !timeline) return;
+    const maxT = Math.max(Number(timeline.max) || 0, 1);
+    const markable = (actions || []).filter((action) => {
+      const marker = String(action.marker || '');
+      return marker === 'red' || marker === 'blue' || marker === 'green' || marker === 'amber';
+    });
+    timelineMarkers.innerHTML = markable.map((action) => {
+      const t = Number(action.t) || 0;
+      const pct = clamp((t / maxT) * 100, 0, 100);
+      const marker = String(action.marker || 'amber');
+      const title = escapeHtml(String(action.title || action.event_type || 'Event'));
+      const tip = title + ' · ' + escapeHtml(fmtTime(t));
+      return '<span class="replay-timeline-marker is-' + escapeHtml(marker) + '" style="left:' + pct.toFixed(3) + '%" data-event-t="' + t.toFixed(3) + '">'
+        + '<span class="replay-timeline-marker-stem" aria-hidden="true"></span>'
+        + '<button class="replay-timeline-marker-head" type="button" aria-label="' + title + '" title="' + tip + '" data-event-t="' + t.toFixed(3) + '"></button>'
+        + '<span class="replay-timeline-marker-tip" role="tooltip">' + tip + '</span>'
+        + '</span>';
+    }).join('');
+  }
+
+  function jumpToReplayAction(t, { play = true, leadInSec = 5 } = {}) {
+    const target = Math.max(0, (Number(t) || 0) - Math.max(0, Number(leadInSec) || 0));
+    seek(target, !standaloneReplay, true);
+    if (eventsList) {
+      eventsList.querySelectorAll('.replay-event-row').forEach((row) => {
+        const rowT = Number(row.getAttribute('data-event-t'));
+        row.classList.toggle('is-active', Math.abs(rowT - Number(t)) < 0.05);
+      });
+    }
+    if (play && !isPlaybackActive()) {
+      togglePlayback();
+    }
   }
 
   function isPlaybackActive() {
@@ -6573,7 +7204,8 @@ if ($isPublicReplay) {
       setElementHidden(insetMap, true);
       return false;
     }
-    const desiredLeft = airspeedRect ? airspeedRect.left : rootRect.left + 18;
+    const gMeterReserve = gMeterReservePx();
+    const desiredLeft = (airspeedRect ? airspeedRect.left : rootRect.left + 18) + gMeterReserve;
     const profileHeight = clamp(Math.round(hsiRect.height * 0.17), 42, 58);
     const verticalSize = clamp(Math.round(hsiRect.height - profileHeight - 4), 170, 240);
     const hsiScaleX = hsiRect.width / 390;
@@ -6594,6 +7226,7 @@ if ($isPublicReplay) {
     if (!insetMap || !insetMapSvg || !insetAltitudeSvg) return;
     if (!sample || !instrumentEnabled('inset_map')) {
       setElementHidden(insetMap, true);
+      setElementHidden(gMeter, true);
       insetMapSignature = '';
       insetMapProjection = null;
       return;
@@ -6601,6 +7234,7 @@ if ($isPublicReplay) {
     const track = insetTrackSamples();
     if (track.length < 2 || !updateInsetMapPlacement()) {
       setElementHidden(insetMap, true);
+      setElementHidden(gMeter, true);
       insetMapSignature = '';
       insetMapProjection = null;
       return;
@@ -6610,6 +7244,7 @@ if ($isPublicReplay) {
     const projector = insetProjector(track, sample, rawTrafficTargets);
     if (!projector) {
       setElementHidden(insetMap, true);
+      setElementHidden(gMeter, true);
       return;
     }
     const currentIndex = nearestInsetTrackIndex(track, activeTime);
@@ -7216,6 +7851,7 @@ if ($isPublicReplay) {
       updateHsiOverlay(freeSample, 1 / 60, true);
       updateEnginePanel(freeSample, 1 / 60, true);
       updateInsetMap(freeSample, true);
+      updateGMeter(freeSample);
       updateAvionicsHeader(freeSample);
       updateCesiumTraffic(freeSample);
       updateCesiumPapiGuidance(freeSample);
@@ -7241,6 +7877,7 @@ if ($isPublicReplay) {
       updateHsiOverlay(sample, dtSec, snap);
       updateEnginePanel(sample, dtSec, snap);
       updateInsetMap(sample, snap);
+      updateGMeter(sample);
       updateAvionicsHeader(sample);
       updateCesiumTraffic(sample);
       updateCesiumPapiGuidance(sample);
@@ -7309,6 +7946,7 @@ if ($isPublicReplay) {
     updateHsiOverlay(sample, dtSec, snap);
     updateEnginePanel(sample, dtSec, snap);
     updateInsetMap(sample, snap);
+    updateGMeter(sample);
     updateAvionicsHeader(sample);
     updateCesiumTraffic(sample);
     updateCesiumPapiGuidance(sample);
@@ -8045,6 +8683,7 @@ if ($isPublicReplay) {
     insetMapZoom = clamp(Number(nextZoom) || 1, 1, 16);
     insetMapSignature = '';
     updateInsetMap(sampleAt(activeT), true);
+    updateGMeter(sampleAt(activeT));
   }
 
   function startInsetMapPan(event) {
@@ -8193,6 +8832,31 @@ if ($isPublicReplay) {
       event.preventDefault();
       event.stopPropagation();
       toggleSettings();
+    });
+  }
+  if (eventsButton) {
+    eventsButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleEvents();
+    });
+  }
+  if (eventsList) {
+    eventsList.addEventListener('click', (event) => {
+      const row = event.target.closest('[data-event-t]');
+      if (!row) return;
+      event.preventDefault();
+      event.stopPropagation();
+      jumpToReplayAction(Number(row.getAttribute('data-event-t')), { play: true, leadInSec: 5 });
+    });
+  }
+  if (timelineMarkers) {
+    timelineMarkers.addEventListener('click', (event) => {
+      const marker = event.target.closest('[data-event-t]');
+      if (!marker) return;
+      event.preventDefault();
+      event.stopPropagation();
+      jumpToReplayAction(Number(marker.getAttribute('data-event-t')), { play: true, leadInSec: 2 });
     });
   }
   settingsTabButtons.forEach((button) => {
@@ -8388,7 +9052,7 @@ if ($isPublicReplay) {
   rewindButton.addEventListener('click', () => skipBy(-10));
   forwardButton.addEventListener('click', () => skipBy(10));
   root.addEventListener('click', (event) => {
-    if (event.target.closest('.replay-dock, .replay-menu, .replay-settings-panel, .replay-camera-panel, .replay-calibration-panel, .replay-debug, .cesium-viewer-toolbar, .altimeter-footer, .replay-inset-map')) {
+    if (event.target.closest('.replay-dock, .replay-menu, .replay-settings-panel, .replay-events-panel, .replay-camera-panel, .replay-calibration-panel, .replay-debug, .cesium-viewer-toolbar, .altimeter-footer, .replay-inset-map')) {
       return;
     }
     togglePlayback();
@@ -8564,6 +9228,8 @@ if ($isPublicReplay) {
     const audioSegmentMaxT = sessionAudioSegments.reduce((max, segment) => Math.max(max, (Number(segment.start_offset_seconds) || 0) + (Number(segment.duration_seconds) || 0)), 0);
     const maxT = Math.max(Number(payload.recording.duration) || 0, payload.samples.reduce((max, s) => Math.max(max, Number(s.t) || 0), 1), audioSegmentMaxT, 1);
     timeline.max = String(maxT);
+    payload.replay_actions = replayActionsFromPayload(payload);
+    renderEventsUi();
     setReplayLoadProgress(97, 'starting visual engine');
     try {
       await initCesium();

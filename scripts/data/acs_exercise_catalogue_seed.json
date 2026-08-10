@@ -1,0 +1,2518 @@
+{
+  "source": "FAA-S-ACS-6C / 7B / 8C task inventories",
+  "exercises": [
+    {
+      "exercise_code": "pilot_qualifications",
+      "display_name": "Pilot Qualifications",
+      "description_text": "Preflight Preparation: Pilot Qualifications",
+      "aliases": [
+        "pilot qualifications"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 100
+    },
+    {
+      "exercise_code": "airworthiness_requirements",
+      "display_name": "Airworthiness Requirements",
+      "description_text": "Preflight Preparation: Airworthiness Requirements",
+      "aliases": [
+        "airworthiness requirements"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 110
+    },
+    {
+      "exercise_code": "weather_information",
+      "display_name": "Weather Information",
+      "description_text": "Preflight Preparation: Weather Information",
+      "aliases": [
+        "weather information"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 120
+    },
+    {
+      "exercise_code": "cross_country_flight_planning",
+      "display_name": "Cross-Country Flight Planning",
+      "description_text": "Preflight Preparation: Cross-Country Flight Planning",
+      "aliases": [
+        "cross-country flight planning"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 130
+    },
+    {
+      "exercise_code": "national_airspace_system",
+      "display_name": "National Airspace System",
+      "description_text": "Preflight Preparation: National Airspace System",
+      "aliases": [
+        "national airspace system"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 140
+    },
+    {
+      "exercise_code": "performance_and_limitations",
+      "display_name": "Performance and Limitations",
+      "description_text": "Preflight Preparation: Performance and Limitations",
+      "aliases": [
+        "performance and limitations"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 150
+    },
+    {
+      "exercise_code": "operation_of_systems",
+      "display_name": "Operation of Systems",
+      "description_text": "Preflight Preparation: Operation of Systems",
+      "aliases": [
+        "operation of systems"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 160
+    },
+    {
+      "exercise_code": "human_factors",
+      "display_name": "Human Factors",
+      "description_text": "Preflight Preparation: Human Factors",
+      "aliases": [
+        "human factors"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 170
+    },
+    {
+      "exercise_code": "water_and_seaplane_characteristics_seaplane_bases_mariti",
+      "display_name": "Water and Seaplane Characteristics, Seaplane Bases, Maritime Rules, and Aids to Marine Navigation",
+      "description_text": "Preflight Preparation: Water and Seaplane Characteristics, Seaplane Bases, Maritime Rules, and Aids to Marine Navigation (ASES, AMES)",
+      "aliases": [
+        "water and seaplane characteristics, seaplane bases, maritime rules, and aids to marine navigation"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 180
+    },
+    {
+      "exercise_code": "preflight_assessment",
+      "display_name": "Preflight Assessment",
+      "description_text": "Preflight Procedures: Preflight Assessment",
+      "aliases": [
+        "preflight assessment"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 190
+    },
+    {
+      "exercise_code": "flight_deck_management",
+      "display_name": "Flight Deck Management",
+      "description_text": "Preflight Procedures: Flight Deck Management",
+      "aliases": [
+        "flight deck management"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 200
+    },
+    {
+      "exercise_code": "engine_starting",
+      "display_name": "Engine Starting",
+      "description_text": "Preflight Procedures: Engine Starting",
+      "aliases": [
+        "engine starting"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 210
+    },
+    {
+      "exercise_code": "taxiing",
+      "display_name": "Taxiing",
+      "description_text": "Preflight Procedures: Taxiing (ASEL, AMEL)",
+      "aliases": [
+        "taxiing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 220
+    },
+    {
+      "exercise_code": "taxiing_and_sailing",
+      "display_name": "Taxiing and Sailing",
+      "description_text": "Preflight Procedures: Taxiing and Sailing (ASES, AMES)",
+      "aliases": [
+        "taxiing and sailing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 230
+    },
+    {
+      "exercise_code": "before_takeoff_check",
+      "display_name": "Before Takeoff Check",
+      "description_text": "Preflight Procedures: Before Takeoff Check",
+      "aliases": [
+        "before takeoff check"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 240
+    },
+    {
+      "exercise_code": "communications_light_signals_and_runway_lighting_systems",
+      "display_name": "Communications, Light Signals, and Runway Lighting Systems",
+      "description_text": "Airport and Seaplane Base Operations: Communications, Light Signals, and Runway Lighting Systems",
+      "aliases": [
+        "communications, light signals, and runway lighting systems"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 250
+    },
+    {
+      "exercise_code": "traffic_patterns",
+      "display_name": "Traffic Patterns",
+      "description_text": "Airport and Seaplane Base Operations: Traffic Patterns",
+      "aliases": [
+        "traffic patterns"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 260
+    },
+    {
+      "exercise_code": "normal_takeoff_and_climb",
+      "display_name": "Normal Takeoff and Climb",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Normal Takeoff and Climb",
+      "aliases": [
+        "normal takeoff and climb"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 270
+    },
+    {
+      "exercise_code": "normal_approach_and_landing",
+      "display_name": "Normal Approach and Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Normal Approach and Landing",
+      "aliases": [
+        "normal approach and landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 280
+    },
+    {
+      "exercise_code": "soft_field_takeoff_and_climb",
+      "display_name": "Soft-Field Takeoff and Climb",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Soft-Field Takeoff and Climb (ASEL)",
+      "aliases": [
+        "soft-field takeoff and climb"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 290
+    },
+    {
+      "exercise_code": "soft_field_approach_and_landing",
+      "display_name": "Soft-Field Approach and Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Soft-Field Approach and Landing (ASEL)",
+      "aliases": [
+        "soft-field approach and landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 300
+    },
+    {
+      "exercise_code": "short_field_takeoff_and_maximum_performance_climb",
+      "display_name": "Short-Field Takeoff and Maximum Performance Climb",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Short-Field Takeoff and Maximum Performance Climb (ASEL, AMEL)",
+      "aliases": [
+        "short-field takeoff and maximum performance climb"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 310
+    },
+    {
+      "exercise_code": "short_field_approach_and_landing",
+      "display_name": "Short-Field Approach and Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Short-Field Approach and Landing (ASEL, AMEL)",
+      "aliases": [
+        "short-field approach and landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 320
+    },
+    {
+      "exercise_code": "confined_area_takeoff_and_maximum_performance_climb",
+      "display_name": "Confined Area Takeoff and Maximum Performance Climb",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Confined Area Takeoff and Maximum Performance Climb (ASES, AMES)",
+      "aliases": [
+        "confined area takeoff and maximum performance climb"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 330
+    },
+    {
+      "exercise_code": "confined_area_approach_and_landing",
+      "display_name": "Confined Area Approach and Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Confined Area Approach and Landing (ASES, AMES)",
+      "aliases": [
+        "confined area approach and landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 340
+    },
+    {
+      "exercise_code": "glassy_water_takeoff_and_climb",
+      "display_name": "Glassy Water Takeoff and Climb",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Glassy Water Takeoff and Climb (ASES, AMES)",
+      "aliases": [
+        "glassy water takeoff and climb"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 350
+    },
+    {
+      "exercise_code": "glassy_water_approach_and_landing",
+      "display_name": "Glassy Water Approach and Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Glassy Water Approach and Landing (ASES, AMES)",
+      "aliases": [
+        "glassy water approach and landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 360
+    },
+    {
+      "exercise_code": "rough_water_takeoff_and_climb",
+      "display_name": "Rough Water Takeoff and Climb",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Rough Water Takeoff and Climb (ASES, AMES)",
+      "aliases": [
+        "rough water takeoff and climb"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 370
+    },
+    {
+      "exercise_code": "rough_water_approach_and_landing",
+      "display_name": "Rough Water Approach and Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Rough Water Approach and Landing (ASES, AMES)",
+      "aliases": [
+        "rough water approach and landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 380
+    },
+    {
+      "exercise_code": "forward_slip_to_a_landing",
+      "display_name": "Forward Slip to a Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Forward Slip to a Landing (ASEL, ASES)",
+      "aliases": [
+        "forward slip to a landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 390
+    },
+    {
+      "exercise_code": "go_around_rejected_landing",
+      "display_name": "Go-Around/Rejected Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Go-Around/Rejected Landing",
+      "aliases": [
+        "go-around/rejected landing",
+        "go-around rejected landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 400
+    },
+    {
+      "exercise_code": "steep_turn",
+      "display_name": "Steep Turns",
+      "description_text": "Performance and Ground Reference Maneuvers: Steep Turns",
+      "aliases": [
+        "steep turn",
+        "steep turns",
+        "forty five degree bank",
+        "fifty degree bank"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {
+          "bank_abs_min_deg": 40.0,
+          "min_seconds": 3.0
+        },
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 410
+    },
+    {
+      "exercise_code": "ground_reference_maneuvers",
+      "display_name": "Ground Reference Maneuvers",
+      "description_text": "Performance and Ground Reference Maneuvers: Ground Reference Maneuvers",
+      "aliases": [
+        "ground reference maneuvers"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 420
+    },
+    {
+      "exercise_code": "pilotage_and_dead_reckoning",
+      "display_name": "Pilotage and Dead Reckoning",
+      "description_text": "Navigation: Pilotage and Dead Reckoning",
+      "aliases": [
+        "pilotage and dead reckoning"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 430
+    },
+    {
+      "exercise_code": "navigation_systems_and_radar_services",
+      "display_name": "Navigation Systems and Radar Services",
+      "description_text": "Navigation: Navigation Systems and Radar Services",
+      "aliases": [
+        "navigation systems and radar services"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 440
+    },
+    {
+      "exercise_code": "diversion",
+      "display_name": "Diversion",
+      "description_text": "Navigation: Diversion",
+      "aliases": [
+        "diversion"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 450
+    },
+    {
+      "exercise_code": "lost_procedures",
+      "display_name": "Lost Procedures",
+      "description_text": "Navigation: Lost Procedures",
+      "aliases": [
+        "lost procedures"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 460
+    },
+    {
+      "exercise_code": "slow_flight",
+      "display_name": "Maneuvering During Slow Flight",
+      "description_text": "Slow Flight and Stalls: Maneuvering During Slow Flight",
+      "aliases": [
+        "slow flight",
+        "maneuvering during slow flight",
+        "minimum controllable airspeed"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {
+          "ias_max_kt": 55.0,
+          "min_seconds": 8.0
+        },
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 470
+    },
+    {
+      "exercise_code": "power_off_stall",
+      "display_name": "Power-Off Stalls",
+      "description_text": "Slow Flight and Stalls: Power-Off Stalls",
+      "aliases": [
+        "power off stall",
+        "power-off stall",
+        "full stall power off"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {
+          "rpm_max": 2000,
+          "aoa_cp_min": 0.75,
+          "min_seconds": 2.0,
+          "pitch_min_deg": 12.0,
+          "groundspeed_max_kt": 55.0
+        },
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 480
+    },
+    {
+      "exercise_code": "power_on_stall",
+      "display_name": "Power-On Stalls",
+      "description_text": "Slow Flight and Stalls: Power-On Stalls",
+      "aliases": [
+        "power on stall",
+        "power-on stall",
+        "departure stall",
+        "takeoff configuration stall"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {
+          "rpm_min": 2000,
+          "aoa_cp_min": 0.75,
+          "min_seconds": 2.0,
+          "pitch_min_deg": 15.0
+        },
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 490
+    },
+    {
+      "exercise_code": "spin_awareness",
+      "display_name": "Spin Awareness",
+      "description_text": "Slow Flight and Stalls: Spin Awareness",
+      "aliases": [
+        "spin awareness"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 500
+    },
+    {
+      "exercise_code": "straight_and_level_flight",
+      "display_name": "Straight-and-Level Flight",
+      "description_text": "Basic Instrument Maneuvers: Straight-and-Level Flight",
+      "aliases": [
+        "straight-and-level flight"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 510
+    },
+    {
+      "exercise_code": "constant_airspeed_climbs",
+      "display_name": "Constant Airspeed Climbs",
+      "description_text": "Basic Instrument Maneuvers: Constant Airspeed Climbs",
+      "aliases": [
+        "constant airspeed climbs"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 520
+    },
+    {
+      "exercise_code": "constant_airspeed_descents",
+      "display_name": "Constant Airspeed Descents",
+      "description_text": "Basic Instrument Maneuvers: Constant Airspeed Descents",
+      "aliases": [
+        "constant airspeed descents"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 530
+    },
+    {
+      "exercise_code": "turns_to_headings",
+      "display_name": "Turns to Headings",
+      "description_text": "Basic Instrument Maneuvers: Turns to Headings",
+      "aliases": [
+        "turns to headings"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 540
+    },
+    {
+      "exercise_code": "unusual_attitude_recovery",
+      "display_name": "Recovery from Unusual Flight Attitudes",
+      "description_text": "Basic Instrument Maneuvers: Recovery from Unusual Flight Attitudes",
+      "aliases": [
+        "unusual attitude",
+        "unusual attitudes",
+        "recover from unusual attitude"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 550
+    },
+    {
+      "exercise_code": "radio_communications_navigation_systems_facilities_and_r",
+      "display_name": "Radio Communications, Navigation Systems/Facilities, and Radar Services",
+      "description_text": "Basic Instrument Maneuvers: Radio Communications, Navigation Systems/Facilities, and Radar Services",
+      "aliases": [
+        "radio communications, navigation systems/facilities, and radar services",
+        "radio communications, navigation systems facilities, and radar services"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 560
+    },
+    {
+      "exercise_code": "emergency_descent",
+      "display_name": "Emergency Descent",
+      "description_text": "Emergency Operations: Emergency Descent",
+      "aliases": [
+        "emergency descent"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 570
+    },
+    {
+      "exercise_code": "emergency_approach_and_landing",
+      "display_name": "Emergency Approach and Landing",
+      "description_text": "Emergency Operations: Emergency Approach and Landing (Simulated) (ASEL, ASES)",
+      "aliases": [
+        "emergency approach and landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 580
+    },
+    {
+      "exercise_code": "systems_and_equipment_malfunctions",
+      "display_name": "Systems and Equipment Malfunctions",
+      "description_text": "Emergency Operations: Systems and Equipment Malfunctions",
+      "aliases": [
+        "systems and equipment malfunctions"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 590
+    },
+    {
+      "exercise_code": "emergency_equipment_and_survival_gear",
+      "display_name": "Emergency Equipment and Survival Gear",
+      "description_text": "Emergency Operations: Emergency Equipment and Survival Gear",
+      "aliases": [
+        "emergency equipment and survival gear"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 600
+    },
+    {
+      "exercise_code": "engine_failure_during_takeoff_before_vmc",
+      "display_name": "Engine Failure During Takeoff Before VMC",
+      "description_text": "Emergency Operations: Engine Failure During Takeoff Before VMC (Simulated) (AMEL, AMES)",
+      "aliases": [
+        "engine failure during takeoff before vmc"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 610
+    },
+    {
+      "exercise_code": "engine_failure_after_liftoff",
+      "display_name": "Engine Failure After Liftoff",
+      "description_text": "Emergency Operations: Engine Failure After Liftoff (Simulated) (AMEL, AMES)",
+      "aliases": [
+        "engine failure after liftoff"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 620
+    },
+    {
+      "exercise_code": "inoperative_engine",
+      "display_name": "Approach and Landing with an Inoperative Engine",
+      "description_text": "Emergency Operations: Approach and Landing with an Inoperative Engine (Simulated) (AMEL, AMES)",
+      "aliases": [
+        "approach and landing with an inoperative engine"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 630
+    },
+    {
+      "exercise_code": "one_engine_inoperative",
+      "display_name": "Maneuvering with One Engine Inoperative",
+      "description_text": "Multiengine Operations: Maneuvering with One Engine Inoperative (AMEL, AMES)",
+      "aliases": [
+        "maneuvering with one engine inoperative"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 640
+    },
+    {
+      "exercise_code": "vmc_demonstration",
+      "display_name": "VMC Demonstration",
+      "description_text": "Multiengine Operations: VMC Demonstration (AMEL, AMES)",
+      "aliases": [
+        "vmc demonstration"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 650
+    },
+    {
+      "exercise_code": "one_engine_inoperative_during_straight_and_level_flight",
+      "display_name": "One Engine Inoperative During Straight-and-Level Flight and Turns",
+      "description_text": "Multiengine Operations: One Engine Inoperative (Simulated) (solely by Reference to Instruments) During Straight-and-Level Flight and Turns (AMEL, AMES)",
+      "aliases": [
+        "one engine inoperative during straight-and-level flight and turns"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 660
+    },
+    {
+      "exercise_code": "instrument_approach_and_landing_with_an_inoperative_engi",
+      "display_name": "Instrument Approach and Landing with an Inoperative Engine",
+      "description_text": "Multiengine Operations: Instrument Approach and Landing with an Inoperative Engine (Simulated) (AMEL, AMES)",
+      "aliases": [
+        "instrument approach and landing with an inoperative engine"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 670
+    },
+    {
+      "exercise_code": "night_preparation",
+      "display_name": "Night Preparation",
+      "description_text": "Night Operations: Night Preparation",
+      "aliases": [
+        "night preparation"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 680
+    },
+    {
+      "exercise_code": "after_landing_parking_and_securing",
+      "display_name": "After Landing, Parking and Securing",
+      "description_text": "Postflight Procedures: After Landing, Parking and Securing (ASEL, AMEL)",
+      "aliases": [
+        "after landing, parking and securing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 690
+    },
+    {
+      "exercise_code": "seaplane_post_landing_procedures",
+      "display_name": "Seaplane Post-Landing Procedures",
+      "description_text": "Postflight Procedures: Seaplane Post-Landing Procedures (ASES, AMES)",
+      "aliases": [
+        "seaplane post-landing procedures"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 700
+    },
+    {
+      "exercise_code": "power_off_180_accuracy_approach_and_landing",
+      "display_name": "Power-Off 180\u00b0 Accuracy Approach and Landing",
+      "description_text": "Takeoffs, Landings, and Go-Arounds: Power-Off 180\u00b0 Accuracy Approach and Landing (ASEL, ASES)",
+      "aliases": [
+        "power-off 180\u00b0 accuracy approach and landing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 710
+    },
+    {
+      "exercise_code": "steep_spiral",
+      "display_name": "Steep Spiral",
+      "description_text": "Performance Maneuvers and Ground Reference Maneuvers: Steep Spiral (ASEL, ASES)",
+      "aliases": [
+        "steep spiral"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 720
+    },
+    {
+      "exercise_code": "chandelles",
+      "display_name": "Chandelles",
+      "description_text": "Performance Maneuvers and Ground Reference Maneuvers: Chandelles (ASEL, ASES)",
+      "aliases": [
+        "chandelles"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 730
+    },
+    {
+      "exercise_code": "lazy_eights",
+      "display_name": "Lazy Eights",
+      "description_text": "Performance Maneuvers and Ground Reference Maneuvers: Lazy Eights (ASEL, ASES)",
+      "aliases": [
+        "lazy eights"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 740
+    },
+    {
+      "exercise_code": "eights_on_pylons",
+      "display_name": "Eights on Pylons",
+      "description_text": "Performance Maneuvers and Ground Reference Maneuvers: Eights on Pylons (ASEL, ASES)",
+      "aliases": [
+        "eights on pylons"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 750
+    },
+    {
+      "exercise_code": "accelerated_stalls",
+      "display_name": "Accelerated Stalls",
+      "description_text": "Slow Flight and Stalls: Accelerated Stalls",
+      "aliases": [
+        "accelerated stalls"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 760
+    },
+    {
+      "exercise_code": "supplemental_oxygen",
+      "display_name": "Supplemental Oxygen",
+      "description_text": "High-Altitude Operations: Supplemental Oxygen",
+      "aliases": [
+        "supplemental oxygen"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 770
+    },
+    {
+      "exercise_code": "pressurization",
+      "display_name": "Pressurization",
+      "description_text": "High-Altitude Operations: Pressurization",
+      "aliases": [
+        "pressurization"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 780
+    },
+    {
+      "exercise_code": "ca_xi_a_after_landing_parking_and_securing",
+      "display_name": "After Landing, Parking, and Securing",
+      "description_text": "Postflight Procedures: After Landing, Parking, and Securing (ASEL, AMEL)",
+      "aliases": [
+        "after landing, parking, and securing"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 790
+    },
+    {
+      "exercise_code": "ifr_operations",
+      "display_name": "Aircraft Systems Related to IFR Operations",
+      "description_text": "Preflight Procedures: Aircraft Systems Related to IFR Operations",
+      "aliases": [
+        "aircraft systems related to ifr operations"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 800
+    },
+    {
+      "exercise_code": "aircraft_flight_instruments_and_navigation_equipment",
+      "display_name": "Aircraft Flight Instruments and Navigation Equipment",
+      "description_text": "Preflight Procedures: Aircraft Flight Instruments and Navigation Equipment",
+      "aliases": [
+        "aircraft flight instruments and navigation equipment"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 810
+    },
+    {
+      "exercise_code": "instrument_flight_deck_check",
+      "display_name": "Instrument Flight Deck Check",
+      "description_text": "Preflight Procedures: Instrument Flight Deck Check",
+      "aliases": [
+        "instrument flight deck check"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 820
+    },
+    {
+      "exercise_code": "compliance_with_air_traffic_control_clearances",
+      "display_name": "Compliance with Air Traffic Control Clearances",
+      "description_text": "Air Traffic Control Clearances and Procedures: Compliance with Air Traffic Control Clearances",
+      "aliases": [
+        "compliance with air traffic control clearances"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 830
+    },
+    {
+      "exercise_code": "holding_procedures",
+      "display_name": "Holding Procedures",
+      "description_text": "Air Traffic Control Clearances and Procedures: Holding Procedures",
+      "aliases": [
+        "holding procedures"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 840
+    },
+    {
+      "exercise_code": "instrument_flight",
+      "display_name": "Instrument Flight",
+      "description_text": "Flight by Reference to Instruments: Instrument Flight",
+      "aliases": [
+        "instrument flight"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 850
+    },
+    {
+      "exercise_code": "intercepting_and_tracking_navigational_systems_and_dme_a",
+      "display_name": "Intercepting and Tracking Navigational Systems and DME Arcs",
+      "description_text": "Navigation Systems: Intercepting and Tracking Navigational Systems and DME Arcs",
+      "aliases": [
+        "intercepting and tracking navigational systems and dme arcs"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 860
+    },
+    {
+      "exercise_code": "departure_en_route_and_arrival_operations",
+      "display_name": "Departure, En Route, and Arrival Operations",
+      "description_text": "Navigation Systems: Departure, En Route, and Arrival Operations",
+      "aliases": [
+        "departure, en route, and arrival operations"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 870
+    },
+    {
+      "exercise_code": "nonprecision_approach",
+      "display_name": "Nonprecision Approach",
+      "description_text": "Instrument Approach Procedures: Nonprecision Approach",
+      "aliases": [
+        "nonprecision approach"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 880
+    },
+    {
+      "exercise_code": "precision_approach",
+      "display_name": "Precision Approach",
+      "description_text": "Instrument Approach Procedures: Precision Approach",
+      "aliases": [
+        "precision approach"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 890
+    },
+    {
+      "exercise_code": "missed_approach",
+      "display_name": "Missed Approach",
+      "description_text": "Instrument Approach Procedures: Missed Approach",
+      "aliases": [
+        "missed approach"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 900
+    },
+    {
+      "exercise_code": "circling_approach",
+      "display_name": "Circling Approach",
+      "description_text": "Instrument Approach Procedures: Circling Approach",
+      "aliases": [
+        "circling approach"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 910
+    },
+    {
+      "exercise_code": "landing_from_an_instrument_approach",
+      "display_name": "Landing from an Instrument Approach",
+      "description_text": "Instrument Approach Procedures: Landing from an Instrument Approach",
+      "aliases": [
+        "landing from an instrument approach"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 920
+    },
+    {
+      "exercise_code": "loss_of_communications",
+      "display_name": "Loss of Communications",
+      "description_text": "Emergency Operations: Loss of Communications",
+      "aliases": [
+        "loss of communications"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 930
+    },
+    {
+      "exercise_code": "ir_vii_b_one_engine_inoperative_during_straight_and_level_flight",
+      "display_name": "One Engine Inoperative during Straight-and-Level Flight and Turns",
+      "description_text": "Emergency Operations: One Engine Inoperative (Simulated) during Straight-and-Level Flight and Turns (AMEL, AMES)",
+      "aliases": [
+        "one engine inoperative during straight-and-level flight and turns"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 940
+    },
+    {
+      "exercise_code": "approach_with_loss_of_primary_flight_instrument_indicato",
+      "display_name": "Approach with Loss of Primary Flight Instrument Indicators",
+      "description_text": "Emergency Operations: Approach with Loss of Primary Flight Instrument Indicators",
+      "aliases": [
+        "approach with loss of primary flight instrument indicators"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 950
+    },
+    {
+      "exercise_code": "checking_instruments_and_equipment",
+      "display_name": "Checking Instruments and Equipment",
+      "description_text": "Postflight Procedures: Checking Instruments and Equipment",
+      "aliases": [
+        "checking instruments and equipment"
+      ],
+      "rules": {
+        "crew_event_types": [
+          "exercise_marker"
+        ],
+        "telemetry": {},
+        "transcript_window_sec": 90,
+        "marker_window_sec": 90
+      },
+      "sort_order": 960
+    }
+  ],
+  "acs_bindings": [
+    {
+      "exercise_code": "pilot_qualifications",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.A",
+      "acs_task_title": "Pilot Qualifications",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "airworthiness_requirements",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.B",
+      "acs_task_title": "Airworthiness Requirements",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "weather_information",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.C",
+      "acs_task_title": "Weather Information",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "cross_country_flight_planning",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.D",
+      "acs_task_title": "Cross-Country Flight Planning",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "national_airspace_system",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.E",
+      "acs_task_title": "National Airspace System",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "performance_and_limitations",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.F",
+      "acs_task_title": "Performance and Limitations",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "operation_of_systems",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.G",
+      "acs_task_title": "Operation of Systems",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "human_factors",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.H",
+      "acs_task_title": "Human Factors",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "water_and_seaplane_characteristics_seaplane_bases_mariti",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.I.I",
+      "acs_task_title": "Water and Seaplane Characteristics, Seaplane Bases, Maritime Rules, and Aids to Marine Navigation",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "preflight_assessment",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.II.A",
+      "acs_task_title": "Preflight Assessment",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "flight_deck_management",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.II.B",
+      "acs_task_title": "Flight Deck Management",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "engine_starting",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.II.C",
+      "acs_task_title": "Engine Starting",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "taxiing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.II.D",
+      "acs_task_title": "Taxiing",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "taxiing_and_sailing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.II.E",
+      "acs_task_title": "Taxiing and Sailing",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "before_takeoff_check",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.II.F",
+      "acs_task_title": "Before Takeoff Check",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "communications_light_signals_and_runway_lighting_systems",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.III.A",
+      "acs_task_title": "Communications, Light Signals, and Runway Lighting Systems",
+      "acs_area_title": "Airport and Seaplane Base Operations"
+    },
+    {
+      "exercise_code": "traffic_patterns",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.III.B",
+      "acs_task_title": "Traffic Patterns",
+      "acs_area_title": "Airport and Seaplane Base Operations"
+    },
+    {
+      "exercise_code": "normal_takeoff_and_climb",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.A",
+      "acs_task_title": "Normal Takeoff and Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "normal_approach_and_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.B",
+      "acs_task_title": "Normal Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "soft_field_takeoff_and_climb",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.C",
+      "acs_task_title": "Soft-Field Takeoff and Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "soft_field_approach_and_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.D",
+      "acs_task_title": "Soft-Field Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "short_field_takeoff_and_maximum_performance_climb",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.E",
+      "acs_task_title": "Short-Field Takeoff and Maximum Performance Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "short_field_approach_and_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.F",
+      "acs_task_title": "Short-Field Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "confined_area_takeoff_and_maximum_performance_climb",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.G",
+      "acs_task_title": "Confined Area Takeoff and Maximum Performance Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "confined_area_approach_and_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.H",
+      "acs_task_title": "Confined Area Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "glassy_water_takeoff_and_climb",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.I",
+      "acs_task_title": "Glassy Water Takeoff and Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "glassy_water_approach_and_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.J",
+      "acs_task_title": "Glassy Water Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "rough_water_takeoff_and_climb",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.K",
+      "acs_task_title": "Rough Water Takeoff and Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "rough_water_approach_and_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.L",
+      "acs_task_title": "Rough Water Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "forward_slip_to_a_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.M",
+      "acs_task_title": "Forward Slip to a Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "go_around_rejected_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IV.N",
+      "acs_task_title": "Go-Around/Rejected Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "steep_turn",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.V.A",
+      "acs_task_title": "Steep Turns",
+      "acs_area_title": "Performance and Ground Reference Maneuvers"
+    },
+    {
+      "exercise_code": "ground_reference_maneuvers",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.V.B",
+      "acs_task_title": "Ground Reference Maneuvers",
+      "acs_area_title": "Performance and Ground Reference Maneuvers"
+    },
+    {
+      "exercise_code": "pilotage_and_dead_reckoning",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VI.A",
+      "acs_task_title": "Pilotage and Dead Reckoning",
+      "acs_area_title": "Navigation"
+    },
+    {
+      "exercise_code": "navigation_systems_and_radar_services",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VI.B",
+      "acs_task_title": "Navigation Systems and Radar Services",
+      "acs_area_title": "Navigation"
+    },
+    {
+      "exercise_code": "diversion",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VI.C",
+      "acs_task_title": "Diversion",
+      "acs_area_title": "Navigation"
+    },
+    {
+      "exercise_code": "lost_procedures",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VI.D",
+      "acs_task_title": "Lost Procedures",
+      "acs_area_title": "Navigation"
+    },
+    {
+      "exercise_code": "slow_flight",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VII.A",
+      "acs_task_title": "Maneuvering During Slow Flight",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "power_off_stall",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VII.B",
+      "acs_task_title": "Power-Off Stalls",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "power_on_stall",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VII.C",
+      "acs_task_title": "Power-On Stalls",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "spin_awareness",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VII.D",
+      "acs_task_title": "Spin Awareness",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "straight_and_level_flight",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VIII.A",
+      "acs_task_title": "Straight-and-Level Flight",
+      "acs_area_title": "Basic Instrument Maneuvers"
+    },
+    {
+      "exercise_code": "constant_airspeed_climbs",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VIII.B",
+      "acs_task_title": "Constant Airspeed Climbs",
+      "acs_area_title": "Basic Instrument Maneuvers"
+    },
+    {
+      "exercise_code": "constant_airspeed_descents",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VIII.C",
+      "acs_task_title": "Constant Airspeed Descents",
+      "acs_area_title": "Basic Instrument Maneuvers"
+    },
+    {
+      "exercise_code": "turns_to_headings",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VIII.D",
+      "acs_task_title": "Turns to Headings",
+      "acs_area_title": "Basic Instrument Maneuvers"
+    },
+    {
+      "exercise_code": "unusual_attitude_recovery",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VIII.E",
+      "acs_task_title": "Recovery from Unusual Flight Attitudes",
+      "acs_area_title": "Basic Instrument Maneuvers"
+    },
+    {
+      "exercise_code": "radio_communications_navigation_systems_facilities_and_r",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.VIII.F",
+      "acs_task_title": "Radio Communications, Navigation Systems/Facilities, and Radar Services",
+      "acs_area_title": "Basic Instrument Maneuvers"
+    },
+    {
+      "exercise_code": "emergency_descent",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IX.A",
+      "acs_task_title": "Emergency Descent",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "emergency_approach_and_landing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IX.B",
+      "acs_task_title": "Emergency Approach and Landing",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "systems_and_equipment_malfunctions",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IX.C",
+      "acs_task_title": "Systems and Equipment Malfunctions",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "emergency_equipment_and_survival_gear",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IX.D",
+      "acs_task_title": "Emergency Equipment and Survival Gear",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "engine_failure_during_takeoff_before_vmc",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IX.E",
+      "acs_task_title": "Engine Failure During Takeoff Before VMC",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "engine_failure_after_liftoff",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IX.F",
+      "acs_task_title": "Engine Failure After Liftoff",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "inoperative_engine",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.IX.G",
+      "acs_task_title": "Approach and Landing with an Inoperative Engine",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "one_engine_inoperative",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.X.A",
+      "acs_task_title": "Maneuvering with One Engine Inoperative",
+      "acs_area_title": "Multiengine Operations"
+    },
+    {
+      "exercise_code": "vmc_demonstration",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.X.B",
+      "acs_task_title": "VMC Demonstration",
+      "acs_area_title": "Multiengine Operations"
+    },
+    {
+      "exercise_code": "one_engine_inoperative_during_straight_and_level_flight",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.X.C",
+      "acs_task_title": "One Engine Inoperative During Straight-and-Level Flight and Turns",
+      "acs_area_title": "Multiengine Operations"
+    },
+    {
+      "exercise_code": "instrument_approach_and_landing_with_an_inoperative_engi",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.X.D",
+      "acs_task_title": "Instrument Approach and Landing with an Inoperative Engine",
+      "acs_area_title": "Multiengine Operations"
+    },
+    {
+      "exercise_code": "night_preparation",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.XI.A",
+      "acs_task_title": "Night Preparation",
+      "acs_area_title": "Night Operations"
+    },
+    {
+      "exercise_code": "after_landing_parking_and_securing",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.XII.A",
+      "acs_task_title": "After Landing, Parking and Securing",
+      "acs_area_title": "Postflight Procedures"
+    },
+    {
+      "exercise_code": "seaplane_post_landing_procedures",
+      "qualification_code": "private_pilot_airplane",
+      "acs_task_code": "PA.XII.B",
+      "acs_task_title": "Seaplane Post-Landing Procedures",
+      "acs_area_title": "Postflight Procedures"
+    },
+    {
+      "exercise_code": "pilot_qualifications",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.A",
+      "acs_task_title": "Pilot Qualifications",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "airworthiness_requirements",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.B",
+      "acs_task_title": "Airworthiness Requirements",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "weather_information",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.C",
+      "acs_task_title": "Weather Information",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "cross_country_flight_planning",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.D",
+      "acs_task_title": "Cross-Country Flight Planning",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "national_airspace_system",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.E",
+      "acs_task_title": "National Airspace System",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "performance_and_limitations",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.F",
+      "acs_task_title": "Performance and Limitations",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "operation_of_systems",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.G",
+      "acs_task_title": "Operation of Systems",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "human_factors",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.H",
+      "acs_task_title": "Human Factors",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "water_and_seaplane_characteristics_seaplane_bases_mariti",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.I.I",
+      "acs_task_title": "Water and Seaplane Characteristics, Seaplane Bases, Maritime Rules, and Aids to Marine Navigation",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "preflight_assessment",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.II.A",
+      "acs_task_title": "Preflight Assessment",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "flight_deck_management",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.II.B",
+      "acs_task_title": "Flight Deck Management",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "engine_starting",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.II.C",
+      "acs_task_title": "Engine Starting",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "taxiing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.II.D",
+      "acs_task_title": "Taxiing",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "taxiing_and_sailing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.II.E",
+      "acs_task_title": "Taxiing and Sailing",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "before_takeoff_check",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.II.F",
+      "acs_task_title": "Before Takeoff Check",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "communications_light_signals_and_runway_lighting_systems",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.III.A",
+      "acs_task_title": "Communications, Light Signals, and Runway Lighting Systems",
+      "acs_area_title": "Airport and Seaplane Base Operations"
+    },
+    {
+      "exercise_code": "traffic_patterns",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.III.B",
+      "acs_task_title": "Traffic Patterns",
+      "acs_area_title": "Airport and Seaplane Base Operations"
+    },
+    {
+      "exercise_code": "normal_takeoff_and_climb",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.A",
+      "acs_task_title": "Normal Takeoff and Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "normal_approach_and_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.B",
+      "acs_task_title": "Normal Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "soft_field_takeoff_and_climb",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.C",
+      "acs_task_title": "Soft-Field Takeoff and Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "soft_field_approach_and_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.D",
+      "acs_task_title": "Soft-Field Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "short_field_takeoff_and_maximum_performance_climb",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.E",
+      "acs_task_title": "Short-Field Takeoff and Maximum Performance Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "short_field_approach_and_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.F",
+      "acs_task_title": "Short-Field Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "confined_area_takeoff_and_maximum_performance_climb",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.G",
+      "acs_task_title": "Confined Area Takeoff and Maximum Performance Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "confined_area_approach_and_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.H",
+      "acs_task_title": "Confined Area Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "glassy_water_takeoff_and_climb",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.I",
+      "acs_task_title": "Glassy Water Takeoff and Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "glassy_water_approach_and_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.J",
+      "acs_task_title": "Glassy Water Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "rough_water_takeoff_and_climb",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.K",
+      "acs_task_title": "Rough Water Takeoff and Climb",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "rough_water_approach_and_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.L",
+      "acs_task_title": "Rough Water Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "power_off_180_accuracy_approach_and_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.M",
+      "acs_task_title": "Power-Off 180\u00b0 Accuracy Approach and Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "go_around_rejected_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IV.N",
+      "acs_task_title": "Go-Around/Rejected Landing",
+      "acs_area_title": "Takeoffs, Landings, and Go-Arounds"
+    },
+    {
+      "exercise_code": "steep_turn",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.V.A",
+      "acs_task_title": "Steep Turns",
+      "acs_area_title": "Performance Maneuvers and Ground Reference Maneuvers"
+    },
+    {
+      "exercise_code": "steep_spiral",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.V.B",
+      "acs_task_title": "Steep Spiral",
+      "acs_area_title": "Performance Maneuvers and Ground Reference Maneuvers"
+    },
+    {
+      "exercise_code": "chandelles",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.V.C",
+      "acs_task_title": "Chandelles",
+      "acs_area_title": "Performance Maneuvers and Ground Reference Maneuvers"
+    },
+    {
+      "exercise_code": "lazy_eights",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.V.D",
+      "acs_task_title": "Lazy Eights",
+      "acs_area_title": "Performance Maneuvers and Ground Reference Maneuvers"
+    },
+    {
+      "exercise_code": "eights_on_pylons",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.V.E",
+      "acs_task_title": "Eights on Pylons",
+      "acs_area_title": "Performance Maneuvers and Ground Reference Maneuvers"
+    },
+    {
+      "exercise_code": "pilotage_and_dead_reckoning",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VI.A",
+      "acs_task_title": "Pilotage and Dead Reckoning",
+      "acs_area_title": "Navigation"
+    },
+    {
+      "exercise_code": "navigation_systems_and_radar_services",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VI.B",
+      "acs_task_title": "Navigation Systems and Radar Services",
+      "acs_area_title": "Navigation"
+    },
+    {
+      "exercise_code": "diversion",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VI.C",
+      "acs_task_title": "Diversion",
+      "acs_area_title": "Navigation"
+    },
+    {
+      "exercise_code": "lost_procedures",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VI.D",
+      "acs_task_title": "Lost Procedures",
+      "acs_area_title": "Navigation"
+    },
+    {
+      "exercise_code": "slow_flight",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VII.A",
+      "acs_task_title": "Maneuvering During Slow Flight",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "power_off_stall",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VII.B",
+      "acs_task_title": "Power-Off Stalls",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "power_on_stall",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VII.C",
+      "acs_task_title": "Power-On Stalls",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "accelerated_stalls",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VII.D",
+      "acs_task_title": "Accelerated Stalls",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "spin_awareness",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VII.E",
+      "acs_task_title": "Spin Awareness",
+      "acs_area_title": "Slow Flight and Stalls"
+    },
+    {
+      "exercise_code": "supplemental_oxygen",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VIII.A",
+      "acs_task_title": "Supplemental Oxygen",
+      "acs_area_title": "High-Altitude Operations"
+    },
+    {
+      "exercise_code": "pressurization",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.VIII.B",
+      "acs_task_title": "Pressurization",
+      "acs_area_title": "High-Altitude Operations"
+    },
+    {
+      "exercise_code": "emergency_descent",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IX.A",
+      "acs_task_title": "Emergency Descent",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "emergency_approach_and_landing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IX.B",
+      "acs_task_title": "Emergency Approach and Landing",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "systems_and_equipment_malfunctions",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IX.C",
+      "acs_task_title": "Systems and Equipment Malfunctions",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "emergency_equipment_and_survival_gear",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IX.D",
+      "acs_task_title": "Emergency Equipment and Survival Gear",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "engine_failure_during_takeoff_before_vmc",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IX.E",
+      "acs_task_title": "Engine Failure During Takeoff Before VMC",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "engine_failure_after_liftoff",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IX.F",
+      "acs_task_title": "Engine Failure After Liftoff",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "inoperative_engine",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.IX.G",
+      "acs_task_title": "Approach and Landing with an Inoperative Engine",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "one_engine_inoperative",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.X.A",
+      "acs_task_title": "Maneuvering with One Engine Inoperative",
+      "acs_area_title": "Multiengine Operations"
+    },
+    {
+      "exercise_code": "vmc_demonstration",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.X.B",
+      "acs_task_title": "VMC Demonstration",
+      "acs_area_title": "Multiengine Operations"
+    },
+    {
+      "exercise_code": "one_engine_inoperative_during_straight_and_level_flight",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.X.C",
+      "acs_task_title": "One Engine Inoperative During Straight-and-Level Flight and Turns",
+      "acs_area_title": "Multiengine Operations"
+    },
+    {
+      "exercise_code": "instrument_approach_and_landing_with_an_inoperative_engi",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.X.D",
+      "acs_task_title": "Instrument Approach and Landing with an Inoperative Engine",
+      "acs_area_title": "Multiengine Operations"
+    },
+    {
+      "exercise_code": "ca_xi_a_after_landing_parking_and_securing",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.XI.A",
+      "acs_task_title": "After Landing, Parking, and Securing",
+      "acs_area_title": "Postflight Procedures"
+    },
+    {
+      "exercise_code": "seaplane_post_landing_procedures",
+      "qualification_code": "commercial_pilot_airplane",
+      "acs_task_code": "CA.XI.B",
+      "acs_task_title": "Seaplane Post-Landing Procedures",
+      "acs_area_title": "Postflight Procedures"
+    },
+    {
+      "exercise_code": "pilot_qualifications",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.I.A",
+      "acs_task_title": "Pilot Qualifications",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "weather_information",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.I.B",
+      "acs_task_title": "Weather Information",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "cross_country_flight_planning",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.I.C",
+      "acs_task_title": "Cross-Country Flight Planning",
+      "acs_area_title": "Preflight Preparation"
+    },
+    {
+      "exercise_code": "ifr_operations",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.II.A",
+      "acs_task_title": "Aircraft Systems Related to IFR Operations",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "aircraft_flight_instruments_and_navigation_equipment",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.II.B",
+      "acs_task_title": "Aircraft Flight Instruments and Navigation Equipment",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "instrument_flight_deck_check",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.II.C",
+      "acs_task_title": "Instrument Flight Deck Check",
+      "acs_area_title": "Preflight Procedures"
+    },
+    {
+      "exercise_code": "compliance_with_air_traffic_control_clearances",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.III.A",
+      "acs_task_title": "Compliance with Air Traffic Control Clearances",
+      "acs_area_title": "Air Traffic Control Clearances and Procedures"
+    },
+    {
+      "exercise_code": "holding_procedures",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.III.B",
+      "acs_task_title": "Holding Procedures",
+      "acs_area_title": "Air Traffic Control Clearances and Procedures"
+    },
+    {
+      "exercise_code": "instrument_flight",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.IV.A",
+      "acs_task_title": "Instrument Flight",
+      "acs_area_title": "Flight by Reference to Instruments"
+    },
+    {
+      "exercise_code": "unusual_attitude_recovery",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.IV.B",
+      "acs_task_title": "Recovery from Unusual Flight Attitudes",
+      "acs_area_title": "Flight by Reference to Instruments"
+    },
+    {
+      "exercise_code": "intercepting_and_tracking_navigational_systems_and_dme_a",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.V.A",
+      "acs_task_title": "Intercepting and Tracking Navigational Systems and DME Arcs",
+      "acs_area_title": "Navigation Systems"
+    },
+    {
+      "exercise_code": "departure_en_route_and_arrival_operations",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.V.B",
+      "acs_task_title": "Departure, En Route, and Arrival Operations",
+      "acs_area_title": "Navigation Systems"
+    },
+    {
+      "exercise_code": "nonprecision_approach",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VI.A",
+      "acs_task_title": "Nonprecision Approach",
+      "acs_area_title": "Instrument Approach Procedures"
+    },
+    {
+      "exercise_code": "precision_approach",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VI.B",
+      "acs_task_title": "Precision Approach",
+      "acs_area_title": "Instrument Approach Procedures"
+    },
+    {
+      "exercise_code": "missed_approach",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VI.C",
+      "acs_task_title": "Missed Approach",
+      "acs_area_title": "Instrument Approach Procedures"
+    },
+    {
+      "exercise_code": "circling_approach",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VI.D",
+      "acs_task_title": "Circling Approach",
+      "acs_area_title": "Instrument Approach Procedures"
+    },
+    {
+      "exercise_code": "landing_from_an_instrument_approach",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VI.E",
+      "acs_task_title": "Landing from an Instrument Approach",
+      "acs_area_title": "Instrument Approach Procedures"
+    },
+    {
+      "exercise_code": "loss_of_communications",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VII.A",
+      "acs_task_title": "Loss of Communications",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "ir_vii_b_one_engine_inoperative_during_straight_and_level_flight",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VII.B",
+      "acs_task_title": "One Engine Inoperative during Straight-and-Level Flight and Turns",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "instrument_approach_and_landing_with_an_inoperative_engi",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VII.C",
+      "acs_task_title": "Instrument Approach and Landing with an Inoperative Engine",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "approach_with_loss_of_primary_flight_instrument_indicato",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VII.D",
+      "acs_task_title": "Approach with Loss of Primary Flight Instrument Indicators",
+      "acs_area_title": "Emergency Operations"
+    },
+    {
+      "exercise_code": "checking_instruments_and_equipment",
+      "qualification_code": "instrument_rating_airplane",
+      "acs_task_code": "IR.VIII.A",
+      "acs_task_title": "Checking Instruments and Equipment",
+      "acs_area_title": "Postflight Procedures"
+    }
+  ]
+}

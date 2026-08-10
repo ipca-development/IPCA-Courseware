@@ -1909,6 +1909,7 @@ final class CockpitRecorderService
         $values = array();
         $stringColumns = array(
             'flight_session_uid' => substr(trim((string)($metadata['flight_session_uid'] ?? '')), 0, 96),
+            'operational_session_uuid' => substr(trim((string)($metadata['operational_session_uuid'] ?? '')), 0, 36),
             'previous_segment_uid' => substr(trim((string)($metadata['previous_segment_uid'] ?? '')), 0, 96),
             'source_gap_summary' => substr(trim((string)($metadata['source_gap_summary'] ?? '')), 0, 2000),
         );

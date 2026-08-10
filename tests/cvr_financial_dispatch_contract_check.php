@@ -27,6 +27,26 @@ $checks = array(
         && str_contains($service, 'function computeTotals(')
         && str_contains($service, 'DEFAULT_GROUND_HOURS')
         && str_contains($service, 'CW_FINANCIAL_DISPATCH_UNLOCK_CODE'),
+    'aircraft rental hours follow Hobbs not flight instruction' =>
+        str_contains($service, 'aircraft_rental_hours')
+        && str_contains($service, 'Experience-building / solo flights')
+        && str_contains($intake, 'financialRentalHoursFromHobbs')
+        && str_contains($intake, 'aircraft_rental_hours'),
+    'flight instruction 0 is preserved against hobbs autosync' =>
+        str_contains($intake, 'financialHasPersistedInstructionHours')
+        && str_contains($intake, 'Keep intentional values (including 0.0)')
+        && str_contains($intake, 'array_key_exists(\'flight_instruction_hours\'')
+        && str_contains($intake, 'Preserve the Flight Instruction field as entered'),
+    'rental-only lock does not require instructor' =>
+        str_contains($service, 'Experience-building / rental-only')
+        && str_contains($intake, 'Rental-only / experience building'),
+    'save and lock freezes entire operational leg' =>
+        str_contains($intake, 'This Operational Leg is locked.')
+        && str_contains($intake, 'Unlock Record')
+        && str_contains($intake, 'applyRecordLockState')
+        && str_contains($intake, 'Save and LOCK this Operational Leg?')
+        && str_contains($intake, 'Operational leg saved and locked.')
+        && str_contains($intake, 'id="legs-record-lock"'),
     'Edit Operational Leg modal includes financial dispatch UI' =>
         str_contains($intake, 'Financial Dispatch')
         && str_contains($intake, 'Preflight Briefing')

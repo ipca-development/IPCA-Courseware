@@ -92,6 +92,9 @@ $checks = [
         && str_contains($coordinator, 'minimumEligibleDurationSeconds')
         && str_contains($coordinator, '5 * 60')
         && str_contains($coordinator, 'Too short'),
+    'short CSV test override is explicit and removable' =>
+        str_contains($coordinator, 'TEMPORARY TEST OVERRIDE')
+        && str_contains($coordinator, 'allowShortCSVForPostFlightFlowTesting = true'),
 
     'scan publishes determinate progress' =>
         str_contains($coordinator, 'scanFilesProcessed')

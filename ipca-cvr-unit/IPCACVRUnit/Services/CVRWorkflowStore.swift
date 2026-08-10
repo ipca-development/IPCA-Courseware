@@ -8,17 +8,53 @@ enum CVRWorkflowFailureOutcome: Equatable {
     case technicalReviewRequired
 }
 
+enum CVRScheduleDutySyncPhase: Equatable {
+    case queued
+    case syncing
+    case synced
+    case syncedWithWarning
+    case attention
+}
+
+struct CVRScheduleDutySyncInfo: Equatable {
+    var phase: CVRScheduleDutySyncPhase
+    var message: String
+}
+
 @MainActor
 final class CVRWorkflowStore: ObservableObject {
     static let maximumRequestPayloadSnapshotBytes = 256 * 1024
 
+    private static let inferredEngineStartAvionicsDwellSeconds: TimeInterval = 60
+    private static let inferredEngineStartTaxiSpeedKnots: Double = 3
+    private static let inferredEngineStartTaxiConfirmSeconds: TimeInterval = 5
+    private static let inferredEngineStartWarmUpSeconds: TimeInterval = 180
+    private static let inferredEngineStartMaxLookbackSeconds: TimeInterval = 300
+    private static let iso8601UTC: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
     @Published private(set) var state: CVRWorkflowState = .empty
     @Published private(set) var archives: [CVRWorkflowArchiveRecord] = []
+    /// Soft-voided Log rows (local hide). Includes remote-only flight record IDs.
+    @Published private(set) var voidedFlightRecordIDs: Set<String> = []
     @Published private(set) var lastError = ""
+    @Published private(set) var scheduleRefreshRevision = 0
+
+    func reportSynchronizationMessage(_ message: String) {
+        lastError = message
+    }
 
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private var archiveRewriteSafe = true
+    /// Wall-clock when avionics first came ON for the current power session (arms taxi inference).
+    private var avionicsOnSince: Date?
+    /// Continuous taxi-speed window start for forgotten Engine Start inference.
+    private var taxiMotionAboveThresholdSince: Date?
 
     init() {
         encoder = JSONEncoder()
@@ -40,6 +76,11 @@ final class CVRWorkflowStore: ObservableObject {
             archives = []
             archiveRewriteSafe = false
             diagnostics.append("Historical workflow archive recovery failed: \(error.localizedDescription)")
+        }
+        loadVoidedFlightRecordIDs()
+        // Archives marked voided before the dedicated void set existed.
+        for archive in archives where archive.voidedAt != nil {
+            voidedFlightRecordIDs.insert(archive.flightRecordID.lowercased())
         }
 
         do {
@@ -88,14 +129,35 @@ final class CVRWorkflowStore: ObservableObject {
         selectedAircraft: CockpitAircraft?,
         cvrUnitID: String,
         beaconID: String,
-        canonicalWriteEnabled: Bool = false
+        canonicalWriteEnabled: Bool = false,
+        operationalSessionModelEnabled: Bool = false,
+        missionCode: String = "",
+        crew: [CVRCrewAssignment] = [],
+        informativeRouteAirports: [String] = [],
+        forceNewReservation: Bool = false,
+        scheduledStartTime: Date? = nil,
+        scheduledEndTime: Date? = nil
     ) {
         guard let selectedAircraft else {
             lastError = "Aircraft configuration is required before creating a Dispatch."
             return
         }
+        lastError = ""
         let registration = selectedAircraft.registration
-        if let existing = state.activeDispatch,
+        let routeAirports = informativeRouteAirports.map {
+            CVROperationalIdentityLocal.normalizeAirport($0)
+        }
+        if !routeAirports.isEmpty {
+            guard routeAirports.count >= 2,
+                  routeAirports.allSatisfy({
+                      !$0.isEmpty && CVRLocalDispatchDraft.isValidICAOIdentifier($0)
+                  }) else {
+                lastError = "Complete each airport in the informative route, or leave the route empty."
+                return
+            }
+        }
+        if !forceNewReservation,
+           let existing = state.activeDispatch,
            existing.tailNumber.caseInsensitiveCompare(registration) == .orderedSame,
            Calendar.current.isDate(existing.scheduledDate, inSameDayAs: Date()) {
             mutate {
@@ -103,9 +165,17 @@ final class CVRWorkflowStore: ObservableObject {
             }
             return
         }
-        if state.activeDispatch != nil || state.activeFlightRecord != nil {
+        if state.activeFlightRecord != nil || (state.activeDispatch != nil && !forceNewReservation) {
             lastError = "Finish Check-In for the current leg before creating another Dispatch."
             return
+        }
+        if forceNewReservation {
+            guard let scheduledStartTime,
+                  let scheduledEndTime,
+                  scheduledEndTime > scheduledStartTime else {
+                lastError = "A valid Schedule Start and Schedule End are required."
+                return
+            }
         }
 
         let continuity = state.operationalSession
@@ -113,12 +183,15 @@ final class CVRWorkflowStore: ObservableObject {
         let dispatchID = UUID().uuidString
         // Local same-airport default (e.g. KTRM → KTRM). Blank destination must never be created.
         let homeAirport = CVROperationalIdentityLocal.normalizeAirport(selectedAircraft.homeAirport)
-        guard !homeAirport.isEmpty else {
+        guard operationalSessionModelEnabled || !homeAirport.isEmpty else {
             lastError = "Enter the departure airport."
             return
         }
         var operationalIdentity: CVRLocalOperationalIdentity?
-        if canonicalWriteEnabled {
+        let reservationUUID = (operationalSessionModelEnabled || forceNewReservation)
+            ? UUID().uuidString.lowercased()
+            : continuity?.reservationUUID
+        if canonicalWriteEnabled && !operationalSessionModelEnabled {
             do {
                 operationalIdentity = try CVROperationalIdentityLocal.createOfflineBundle(
                     organizationID: 1,
@@ -126,7 +199,7 @@ final class CVRWorkflowStore: ObservableObject {
                     organizationTimezoneIANA: TimeZone.current.identifier,
                     originAirport: homeAirport,
                     destinationAirport: homeAirport,
-                    reservationUUID: continuity?.reservationUUID
+                    reservationUUID: reservationUUID
                 )
             } catch {
                 CVROperationalIdentityLocal.logSanitized("offline_dispatch_identity_create_failed", fields: [
@@ -138,19 +211,28 @@ final class CVRWorkflowStore: ObservableObject {
             }
         }
 
-        let dispatch = CVRDispatchRecord(
+        let schedulerRecordID = forceNewReservation ? reservationUUID : nil
+        var operationalCalendar = Calendar(identifier: .gregorian)
+        operationalCalendar.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+        var dispatch = CVRDispatchRecord(
             id: dispatchID,
             serverDispatchID: nil,
             organizationID: 1,
-            scheduledDate: Date(),
-            scheduledStartTime: nil,
-            scheduledEndTime: nil,
+            scheduledDate: scheduledStartTime.map { operationalCalendar.startOfDay(for: $0) } ?? Date(),
+            scheduledStartTime: scheduledStartTime,
+            scheduledEndTime: scheduledEndTime,
             tailNumber: registration,
             aircraftID: selectedAircraft.id,
-            missionCode: "",
-            plannedDepartureAirport: homeAirport,
-            plannedDestinationAirport: homeAirport,
-            crew: [],
+            missionCode: missionCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+            plannedDepartureAirport: routeAirports.first ?? homeAirport,
+            plannedDestinationAirport: routeAirports.count >= 2
+                ? (routeAirports.last ?? "")
+                : (operationalSessionModelEnabled ? "" : homeAirport),
+            informativeRouteAirports: routeAirports,
+            informativePlannedLegUUIDs: routeAirports.count >= 2
+                ? (0..<(routeAirports.count - 1)).map { _ in UUID().uuidString.lowercased() }
+                : [],
+            crew: crew,
             startingHobbs: carryover?.endingHobbs,
             startingTacho: carryover?.endingTacho,
             fuelOnboard: carryover?.fuelRemaining ?? "",
@@ -160,7 +242,8 @@ final class CVRWorkflowStore: ObservableObject {
             dispatchSource: continuity?.engineSessionContinuityActive == true
                 ? "transient_stop_carryover"
                 : (carryover == nil ? "iphone_offline_local" : "previous_locally_closed_flight_carryover"),
-            schedulerRecordID: nil,
+            schedulerRecordID: schedulerRecordID,
+            reservationUUID: reservationUUID,
             creatorIdentity: "local_cvr_unit",
             createdAt: Date(),
             modifiedAt: Date(),
@@ -178,17 +261,30 @@ final class CVRWorkflowStore: ObservableObject {
             previousEndingOilUnit: carryover?.oilUnit,
             refueledSincePreviousFlight: nil,
             oilServicedSincePreviousFlight: nil,
+            operationalSessionUUID: nil,
+            operationalSessionModelVersion: operationalSessionModelEnabled
+                ? CVROperationalSessionRecord.modelVersion
+                : nil,
             operationalIdentity: operationalIdentity
         )
 
         let persisted = mutate {
+            if operationalSessionModelEnabled {
+                // A new local reservation must never inherit the previous
+                // execution's legacy planned-leg/continuity context.
+                $0.operationalSession = nil
+            }
+            if forceNewReservation {
+                Self.queueLocalScheduleCreation(dispatch: &dispatch, state: &$0)
+            }
             $0.activeDispatch = dispatch
             $0.activeFlightRecord = nil
+            $0.activeOperationalSession = nil
             $0.consents = []
             $0.recorderVerifications = []
             $0.flightEvents = []
             $0.flightLegs = []
-            $0.uploadComponents = []
+            $0.uploadComponents.removeAll { $0.componentType != "schedule_duty_sync" }
             $0.discrepancies = []
             $0.selectedTab = .dispatch
         }
@@ -378,7 +474,7 @@ final class CVRWorkflowStore: ObservableObject {
             $0.recorderVerifications = []
             $0.flightEvents = []
             $0.flightLegs = []
-            $0.uploadComponents = []
+            $0.uploadComponents.removeAll { $0.componentType != "schedule_duty_sync" }
             $0.discrepancies = []
             $0.selectedTab = .dispatch
         }
@@ -389,20 +485,24 @@ final class CVRWorkflowStore: ObservableObject {
 
     func openDispatchFromScheduledSession(
         _ session: CVRScheduledSession,
+        reservationSessions: [CVRScheduledSession] = [],
         selectedAircraft: CockpitAircraft?,
         cvrUnitID: String,
         beaconID: String,
         isAudioRecording: Bool,
-        canonicalWriteEnabled: Bool = false
+        canonicalWriteEnabled: Bool = false,
+        operationalSessionModelEnabled: Bool = false
     ) {
         openDispatchFromLeg(
             session: session,
+            reservationSessions: reservationSessions,
             plannedLeg: nil,
             selectedAircraft: selectedAircraft,
             cvrUnitID: cvrUnitID,
             beaconID: beaconID,
             isAudioRecording: isAudioRecording,
-            canonicalWriteEnabled: canonicalWriteEnabled
+            canonicalWriteEnabled: canonicalWriteEnabled,
+            operationalSessionModelEnabled: operationalSessionModelEnabled
         )
     }
 
@@ -412,27 +512,32 @@ final class CVRWorkflowStore: ObservableObject {
         cvrUnitID: String,
         beaconID: String,
         isAudioRecording: Bool,
-        canonicalWriteEnabled: Bool = false
+        canonicalWriteEnabled: Bool = false,
+        operationalSessionModelEnabled: Bool = false
     ) {
         openDispatchFromLeg(
             session: nil,
+            reservationSessions: [],
             plannedLeg: plannedLeg,
             selectedAircraft: selectedAircraft,
             cvrUnitID: cvrUnitID,
             beaconID: beaconID,
             isAudioRecording: isAudioRecording,
-            canonicalWriteEnabled: canonicalWriteEnabled
+            canonicalWriteEnabled: canonicalWriteEnabled,
+            operationalSessionModelEnabled: operationalSessionModelEnabled
         )
     }
 
     private func openDispatchFromLeg(
         session: CVRScheduledSession?,
+        reservationSessions: [CVRScheduledSession],
         plannedLeg: CVRPlannedLegRecord?,
         selectedAircraft: CockpitAircraft?,
         cvrUnitID: String,
         beaconID: String,
         isAudioRecording: Bool,
-        canonicalWriteEnabled: Bool
+        canonicalWriteEnabled: Bool,
+        operationalSessionModelEnabled: Bool
     ) {
         let departure = CVROperationalIdentityLocal.normalizeAirport(
             session?.plannedDepartureAirport ?? plannedLeg?.departureAirport ?? ""
@@ -440,22 +545,32 @@ final class CVRWorkflowStore: ObservableObject {
         let destination = CVROperationalIdentityLocal.normalizeAirport(
             session?.plannedDestinationAirport ?? plannedLeg?.destinationAirport ?? ""
         )
-        guard !departure.isEmpty else {
+        guard operationalSessionModelEnabled || !departure.isEmpty else {
             lastError = "Enter the departure airport."
             return
         }
-        guard !destination.isEmpty else {
+        guard operationalSessionModelEnabled || !destination.isEmpty else {
             lastError = "Enter the destination airport."
             return
         }
         let missionCode = session?.missionCode ?? plannedLeg?.missionCode ?? ""
         let schedulerRecordID = session?.schedulerRecordID ?? plannedLeg?.schedulerRecordID
-        let reservationUUID = session?.reservationUUID ?? plannedLeg?.reservationUUID
+        let reservationUUID = session?.reservationUUID
+            ?? plannedLeg?.reservationUUID
+            ?? (operationalSessionModelEnabled ? UUID().uuidString.lowercased() : nil)
         let legUUID = session?.legUUID ?? plannedLeg?.legUUID
         let registration = selectedAircraft?.registration
             ?? session?.aircraftRegistration
             ?? plannedLeg?.tailNumber
             ?? ""
+        let informativeRouteAirports = Self.informativeRouteAirports(
+            sessions: reservationSessions.isEmpty ? [session].compactMap { $0 } : reservationSessions,
+            fallbackDeparture: departure,
+            fallbackDestination: destination
+        )
+        let informativePlannedLegUUIDs = Self.informativePlannedLegUUIDs(
+            sessions: reservationSessions.isEmpty ? [session].compactMap { $0 } : reservationSessions
+        )
 
         guard let selectedAircraft,
               session == nil || scheduledSessionMatchesAircraft(session!, selectedAircraft: selectedAircraft) else {
@@ -464,9 +579,18 @@ final class CVRWorkflowStore: ObservableObject {
         }
 
         if let active = state.activeDispatch {
+            if let legUUID,
+               let activeLeg = active.operationalIdentity?.legUUID,
+               CVROperationalIdentityLocal.normalizeUUID(legUUID)
+                   == CVROperationalIdentityLocal.normalizeUUID(activeLeg) {
+                selectTab(.dispatch)
+                return
+            }
+            // Multi-leg expansions share scheduler_record_id — only treat as already-open
+            // when we cannot distinguish legs (legacy single-leg rows without leg_uuid).
             let sameScheduler = schedulerRecordID != nil && active.schedulerRecordID == schedulerRecordID
-            let sameLeg = legUUID != nil && active.operationalIdentity?.legUUID == legUUID
-            if sameScheduler || sameLeg {
+            let canDistinguishLegs = legUUID != nil && active.operationalIdentity?.legUUID != nil
+            if sameScheduler && !canDistinguishLegs {
                 selectTab(.dispatch)
                 return
             }
@@ -502,7 +626,7 @@ final class CVRWorkflowStore: ObservableObject {
         let carryover = resolvedLegCarryover(for: registration)
         let dispatchID = UUID().uuidString
         var operationalIdentity: CVRLocalOperationalIdentity?
-        if canonicalWriteEnabled {
+        if canonicalWriteEnabled && !operationalSessionModelEnabled {
             do {
                 operationalIdentity = try CVROperationalIdentityLocal.createOfflineBundle(
                     organizationID: 1,
@@ -521,7 +645,7 @@ final class CVRWorkflowStore: ObservableObject {
                 lastError = "Unable to open Dispatch for this leg. Please try again."
                 return
             }
-        } else if let reservationUUID, let legUUID,
+        } else if !operationalSessionModelEnabled, let reservationUUID, let legUUID,
                   let normalizedReservation = CVROperationalIdentityLocal.normalizeUUID(reservationUUID),
                   let normalizedLeg = CVROperationalIdentityLocal.normalizeUUID(legUUID) {
             // Preserve already-minted local/planned leg identity without enabling server canonical writes.
@@ -553,6 +677,8 @@ final class CVRWorkflowStore: ObservableObject {
             missionCode: missionCode,
             plannedDepartureAirport: departure,
             plannedDestinationAirport: destination,
+            informativeRouteAirports: informativeRouteAirports,
+            informativePlannedLegUUIDs: informativePlannedLegUUIDs,
             crew: {
                 // Scheduled sessions must keep the online schedule crew for claim validation.
                 // Meter/fuel/oil carryover is separate and must not replace scheduled crew identity.
@@ -562,7 +688,9 @@ final class CVRWorkflowStore: ObservableObject {
                             id: UUID().uuidString,
                             personID: member.personID,
                             personName: member.personName,
-                            role: Self.crewRole(from: member.role)
+                            role: Self.crewRole(from: member.role),
+                            pilotFunction: Self.pilotFunction(from: member.pilotFunction),
+                            isPIC: member.isPIC
                         )
                     }
                 }
@@ -581,6 +709,7 @@ final class CVRWorkflowStore: ObservableObject {
                 ? "transient_stop_carryover"
                 : (session != nil ? "scheduled_session" : "local_planned_leg"),
             schedulerRecordID: schedulerRecordID,
+            reservationUUID: reservationUUID,
             creatorIdentity: "local_cvr_unit",
             createdAt: Date(),
             modifiedAt: Date(),
@@ -598,6 +727,10 @@ final class CVRWorkflowStore: ObservableObject {
             previousEndingOilUnit: carryover?.oilUnit,
             refueledSincePreviousFlight: nil,
             oilServicedSincePreviousFlight: nil,
+            operationalSessionUUID: nil,
+            operationalSessionModelVersion: operationalSessionModelEnabled
+                ? CVROperationalSessionRecord.modelVersion
+                : nil,
             operationalIdentity: operationalIdentity
         )
 
@@ -606,17 +739,30 @@ final class CVRWorkflowStore: ObservableObject {
             if let reservationUUID {
                 sessionContext.reservationUUID = reservationUUID.lowercased()
             }
-            if let plannedLeg {
+            if operationalSessionModelEnabled {
+                sessionContext.plannedLegs = []
+                sessionContext.currentLegIndex = nil
+            } else if let plannedLeg {
                 Self.activatePlannedLeg(plannedLeg.legUUID, in: &sessionContext)
-            } else if let legUUID, sessionContext.plannedLegs.contains(where: { $0.legUUID == legUUID }) {
-                Self.activatePlannedLeg(legUUID, in: &sessionContext)
             } else if let session {
-                // Seed planned legs from this reservation group if not already local.
-                if sessionContext.plannedLegs.isEmpty, let reservationUUID {
-                    sessionContext.reservationUUID = reservationUUID.lowercased()
+                // Seed from all reservation siblings so Transient Stop / next-leg continuity works
+                // the same as local multi-leg create (Schedule UI already groups by reservation_uuid).
+                Self.seedPlannedLegsFromScheduledReservation(
+                    into: &sessionContext,
+                    openingSession: session,
+                    reservationSessions: reservationSessions,
+                    registration: selectedAircraft.registration
+                )
+                if let legUUID {
+                    Self.activatePlannedLeg(legUUID, in: &sessionContext)
+                } else {
+                    sessionContext.currentLegIndex = sessionContext.plannedLegs.first?.sequenceNumber ?? 1
                 }
-                sessionContext.currentLegIndex = 1
-                _ = session
+            } else if let legUUID, sessionContext.plannedLegs.contains(where: {
+                CVROperationalIdentityLocal.normalizeUUID($0.legUUID)
+                    == CVROperationalIdentityLocal.normalizeUUID(legUUID)
+            }) {
+                Self.activatePlannedLeg(legUUID, in: &sessionContext)
             }
             Self.sanitizePlannedLegStatuses(in: &sessionContext)
             sessionContext.pendingCheckInMode = nil
@@ -630,9 +776,50 @@ final class CVRWorkflowStore: ObservableObject {
             $0.recorderVerifications = []
             $0.flightEvents = []
             $0.flightLegs = $0.flightLegs
-            $0.uploadComponents = []
+            $0.uploadComponents.removeAll { $0.componentType != "schedule_duty_sync" }
             $0.discrepancies = []
             $0.selectedTab = .dispatch
+        }
+    }
+
+    private static func informativeRouteAirports(
+        sessions: [CVRScheduledSession],
+        fallbackDeparture: String,
+        fallbackDestination: String
+    ) -> [String] {
+        let ordered = sessions.sorted {
+            let left = $0.legSequenceNumber ?? Int.max
+            let right = $1.legSequenceNumber ?? Int.max
+            if left != right { return left < right }
+            return ($0.dateTime($0.scheduledStartTime) ?? .distantFuture)
+                < ($1.dateTime($1.scheduledStartTime) ?? .distantFuture)
+        }
+        var airports: [String] = []
+        func append(_ value: String) {
+            let airport = CVROperationalIdentityLocal.normalizeAirport(value)
+            guard !airport.isEmpty, airports.last != airport else { return }
+            airports.append(airport)
+        }
+        for session in ordered {
+            append(session.plannedDepartureAirport)
+            append(session.plannedDestinationAirport)
+        }
+        if airports.isEmpty {
+            append(fallbackDeparture)
+            append(fallbackDestination)
+        }
+        return airports
+    }
+
+    private static func informativePlannedLegUUIDs(sessions: [CVRScheduledSession]) -> [String] {
+        sessions.sorted {
+            let left = $0.legSequenceNumber ?? Int.max
+            let right = $1.legSequenceNumber ?? Int.max
+            if left != right { return left < right }
+            return ($0.dateTime($0.scheduledStartTime) ?? .distantFuture)
+                < ($1.dateTime($1.scheduledStartTime) ?? .distantFuture)
+        }.compactMap {
+            CVROperationalIdentityLocal.normalizeUUID($0.legUUID ?? "")
         }
     }
 
@@ -642,12 +829,19 @@ final class CVRWorkflowStore: ObservableObject {
         isAudioRecording: Bool
     ) -> Bool {
         _ = selectedAircraft
-        if state.activeDispatch?.schedulerRecordID == session.schedulerRecordID {
-            return true
-        }
-        if let legUUID = session.legUUID,
-           state.activeDispatch?.operationalIdentity?.legUUID == legUUID {
-            return true
+        if let active = state.activeDispatch {
+            if let legUUID = session.legUUID,
+               let activeLeg = active.operationalIdentity?.legUUID,
+               CVROperationalIdentityLocal.normalizeUUID(legUUID)
+                   == CVROperationalIdentityLocal.normalizeUUID(activeLeg) {
+                return true
+            }
+            // Shared scheduler_record_id across multi-leg expansions — only treat as
+            // already-open when legs cannot be distinguished.
+            if active.schedulerRecordID == session.schedulerRecordID,
+               session.legUUID == nil || active.operationalIdentity?.legUUID == nil {
+                return true
+            }
         }
         if state.engineSessionContinuityActive {
             return true
@@ -656,16 +850,33 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     func requiresArchivingBeforeScheduledSession(_ session: CVRScheduledSession) -> Bool {
-        guard state.activeDispatch != nil,
-              state.activeDispatch?.schedulerRecordID != session.schedulerRecordID else {
-            return false
-        }
+        guard let active = state.activeDispatch else { return false }
         if let legUUID = session.legUUID,
-           state.activeDispatch?.operationalIdentity?.legUUID == legUUID {
+           let activeLeg = active.operationalIdentity?.legUUID,
+           CVROperationalIdentityLocal.normalizeUUID(legUUID)
+               == CVROperationalIdentityLocal.normalizeUUID(activeLeg) {
             return false
         }
-        if let flightRecord = state.activeFlightRecord {
-            return flightRecord.endingHobbs == nil || flightRecord.endingTacho == nil
+        // Same scheduler_record_id is normal for multi-leg siblings — do not force archive
+        // solely on that match when leg UUIDs differ.
+        if active.schedulerRecordID == session.schedulerRecordID,
+           session.legUUID == nil || active.operationalIdentity?.legUUID == nil {
+            return false
+        }
+        if active.schedulerRecordID == session.schedulerRecordID,
+           session.legUUID != nil,
+           active.operationalIdentity?.legUUID != nil {
+            // Sibling leg of the same reservation — only archive if unfinished flight meters exist.
+            if let flightRecord = state.activeFlightRecord {
+                return flightRecord.endingHobbs == nil || flightRecord.endingTacho == nil
+            }
+            return false
+        }
+        if active.schedulerRecordID != session.schedulerRecordID {
+            if let flightRecord = state.activeFlightRecord {
+                return flightRecord.endingHobbs == nil || flightRecord.endingTacho == nil
+            }
+            return false
         }
         return false
     }
@@ -687,10 +898,12 @@ final class CVRWorkflowStore: ObservableObject {
         mutate {
             guard var dispatch = $0.activeDispatch else { return }
             let previousMaterialSignature = Self.materialSignature(dispatch)
+            let previousDutySignature = Self.dutyMaterialSignature(dispatch)
             let previousStatus = dispatch.status
             update(&dispatch)
             dispatch.modifiedAt = Date()
             let materialChanged = previousMaterialSignature != Self.materialSignature(dispatch)
+            let dutyChanged = previousDutySignature != Self.dutyMaterialSignature(dispatch)
             if materialChanged {
                 dispatch.version += 1
                 $0.consents = []
@@ -698,6 +911,9 @@ final class CVRWorkflowStore: ObservableObject {
                 if $0.activeFlightRecord?.status == .recorderVerificationRequired {
                     $0.activeFlightRecord = nil
                 }
+            }
+            if dutyChanged {
+                Self.remintAndQueueScheduledDutyReplacement(dispatch: &dispatch, state: &$0)
             }
             dispatch.status = Self.dispatchStatus(for: dispatch, consents: $0.consents)
             if !materialChanged,
@@ -708,6 +924,88 @@ final class CVRWorkflowStore: ObservableObject {
             }
             $0.activeDispatch = dispatch
         }
+    }
+
+    @discardableResult
+    func updateActiveScheduleWindow(start: Date, end: Date) -> Bool {
+        var scheduleCalendar = Calendar(identifier: .gregorian)
+        scheduleCalendar.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+        guard !isDispatchLocked else {
+            lastError = "Schedule times cannot be changed after Dispatch."
+            return false
+        }
+        guard end > start,
+              scheduleCalendar.isDate(start, inSameDayAs: end) else {
+            lastError = "Scheduled Arrival must be later than Scheduled Departure on the same day."
+            return false
+        }
+        var shouldStartUpload = false
+        mutate {
+            guard var dispatch = $0.activeDispatch,
+                  $0.activeFlightRecord == nil,
+                  dispatch.schedulerRecordID != nil,
+                  dispatch.reservationUUID != nil else {
+                return
+            }
+            dispatch.scheduledDate = scheduleCalendar.startOfDay(for: start)
+            dispatch.scheduledStartTime = start
+            dispatch.scheduledEndTime = end
+            dispatch.modifiedAt = Date()
+            let schedulerKey = dispatch.schedulerRecordID?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if var session = $0.operationalSession {
+                for index in session.plannedLegs.indices {
+                    let plannedScheduler = session.plannedLegs[index].schedulerRecordID?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+                    guard plannedScheduler == schedulerKey else { continue }
+                    session.plannedLegs[index].plannedStartAt = start
+                    session.plannedLegs[index].plannedEndAt = end
+                }
+                $0.operationalSession = session
+            }
+            Self.queueScheduledDutyWindowUpdate(dispatch: dispatch, state: &$0)
+            shouldStartUpload = !$0.uploadComponents.contains {
+                $0.componentType == "schedule_duty_sync" && $0.state == .uploading
+            }
+            $0.activeDispatch = dispatch
+        }
+        lastError = ""
+        return shouldStartUpload
+    }
+
+    @discardableResult
+    func updateActiveInformativeRoute(airports: [String]) -> Bool {
+        guard !isDispatchLocked, var dispatch = state.activeDispatch else {
+            lastError = "The informative route can only be edited before Dispatch."
+            return false
+        }
+        let normalized = airports.map(CVROperationalIdentityLocal.normalizeAirport)
+        if !normalized.isEmpty {
+            guard normalized.count >= 2,
+                  normalized.allSatisfy(CVRLocalDispatchDraft.isValidICAOIdentifier) else {
+                lastError = "Enter at least two valid airport identifiers, or leave the route empty."
+                return false
+            }
+        }
+        dispatch.informativeRouteAirports = normalized
+        dispatch.informativePlannedLegUUIDs = normalized.count >= 2
+            ? (0..<(normalized.count - 1)).map { _ in UUID().uuidString.lowercased() }
+            : []
+        dispatch.plannedDepartureAirport = normalized.first ?? ""
+        dispatch.plannedDestinationAirport = normalized.last ?? ""
+        dispatch.modifiedAt = Date()
+        var shouldStartUpload = false
+        _ = mutate {
+            $0.activeDispatch = dispatch
+            Self.queueScheduledDutyWindowUpdate(dispatch: dispatch, state: &$0)
+            shouldStartUpload = !$0.uploadComponents.contains {
+                $0.componentType == "schedule_duty_sync" && $0.state == .uploading
+            }
+        }
+        lastError = ""
+        return shouldStartUpload
     }
 
     func recordConsent(for assignment: CVRCrewAssignment, accepted: Bool, appVersion: String, deviceID: String) {
@@ -774,6 +1072,49 @@ final class CVRWorkflowStore: ObservableObject {
             createdAt: Date(),
             updatedAt: Date()
         )
+        var operationalSession = state.activeOperationalSession
+        if dispatch.operationalSessionModelVersion == CVROperationalSessionRecord.modelVersion {
+            guard let reservationUUID = dispatch.reservationUUID
+                    ?? dispatch.operationalIdentity?.reservationUUID,
+                  CVROperationalIdentityLocal.normalizeUUID(reservationUUID) != nil,
+                  let startingHobbs = dispatch.startingHobbs,
+                  let startingTacho = dispatch.startingTacho else {
+                lastError = "Reservation and starting meters are required to confirm this Dispatch."
+                return
+            }
+            let sessionUUID = dispatch.operationalSessionUUID
+                ?? operationalSession?.id
+                ?? UUID().uuidString.lowercased()
+            if let existing = operationalSession,
+               existing.id.lowercased() != sessionUUID.lowercased()
+                    || existing.dispatchID.lowercased() != dispatch.id.lowercased()
+                    || existing.workflowFlightRecordUUID.lowercased() != flightRecord.id.lowercased()
+                    || existing.modelVersion != CVROperationalSessionRecord.modelVersion {
+                lastError = "The saved Operational Session identity does not match this Dispatch."
+                return
+            }
+            dispatch.operationalSessionUUID = sessionUUID
+            operationalSession = operationalSession ?? CVROperationalSessionRecord(
+                id: sessionUUID,
+                reservationUUID: reservationUUID.lowercased(),
+                dispatchID: dispatch.id.lowercased(),
+                workflowFlightRecordUUID: flightRecord.id.lowercased(),
+                modelVersion: CVROperationalSessionRecord.modelVersion,
+                state: .intended,
+                dispatchConfirmedAtUTC: Date(),
+                aircraftID: dispatch.aircraftID,
+                aircraftRegistration: dispatch.tailNumber,
+                startingHobbs: startingHobbs,
+                startingTacho: startingTacho,
+                startingFuelQuantity: Self.decimalQuantity(from: dispatch.fuelOnboard),
+                startingFuelUnit: "USG",
+                startingOilQuantity: dispatch.startingOilQuantity
+                    ?? dispatch.oilPercentage.map(Double.init),
+                startingOilUnit: dispatch.startingOilQuantity != nil
+                    ? dispatch.startingOilUnit
+                    : (dispatch.oilPercentage == nil ? nil : "PERCENT")
+            )
+        }
         if var identity = dispatch.operationalIdentity {
             do {
                 identity = try CVROperationalIdentityLocal.appendingWorkflowFlightRecordAlias(
@@ -809,28 +1150,73 @@ final class CVRWorkflowStore: ObservableObject {
 
         mutate {
             dispatch.status = .flightRecordLoggingEnabled
-            dispatch.consentStatus = "complete"
+            dispatch.consentStatus = dispatch.operationalSessionModelVersion
+                == CVROperationalSessionRecord.modelVersion ? "not_required" : "complete"
             dispatch.modifiedAt = Date()
             $0.activeDispatch = dispatch
             $0.activeFlightRecord = flightRecord
-            // Phase 3: no consent UI — mint accepted operational-test consents so server intake succeeds.
-            $0.consents = Self.ensuredOperationalConsents(
-                for: dispatch,
-                existing: $0.consents,
-                deviceID: dispatch.configuredCVRUnitID,
-                appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-            )
+            $0.activeOperationalSession = operationalSession
+            if dispatch.operationalSessionModelVersion == CVROperationalSessionRecord.modelVersion {
+                $0.consents.removeAll { $0.dispatchID == dispatch.id }
+            } else {
+                $0.consents = Self.ensuredOperationalConsents(
+                    for: dispatch,
+                    existing: $0.consents,
+                    deviceID: dispatch.configuredCVRUnitID,
+                    appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+                )
+            }
             if !$0.uploadComponents.contains(where: { $0.id == dispatchComponent.id }) {
                 $0.uploadComponents.append(dispatchComponent)
             }
             var session = $0.operationalSession ?? .empty
             Self.markCurrentPlannedLeg(dispatchedIn: &session, dispatch: dispatch)
             $0.operationalSession = session
-            $0.selectedTab = .recorder
+            // In-Flight is opened after auto recorder verification at Dispatch confirm.
         }
         // Continuity legs must create Off Block locally as soon as the Flight Record exists.
         if state.engineSessionContinuityActive {
             _ = synthesizeEngineContinuityIfNeeded(gpsSample: nil)
+        }
+    }
+
+    private static func decimalQuantity(from value: String) -> Double? {
+        Double(value.split(whereSeparator: { $0 == " " || $0 == "\t" }).first ?? "")
+    }
+
+    /// Cancel unused planned legs while keeping the active Engine Shutdown Check-In open.
+    @discardableResult
+    func cancelRemainingPlannedLegsForEarlyShutdown() -> Bool {
+        guard hasRemainingPlannedLegAfterCurrent else { return true }
+        return mutate {
+            guard var session = $0.operationalSession else { return }
+            let currentUUID = ($0.activeDispatch?.operationalIdentity?.legUUID)
+                .flatMap { CVROperationalIdentityLocal.normalizeUUID($0) }
+            let currentIndex = session.currentLegIndex
+            for index in session.plannedLegs.indices {
+                let status = session.plannedLegs[index].status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if status == "checked_in" || status == "cancelled" || status == "canceled" {
+                    continue
+                }
+                let legUUID = CVROperationalIdentityLocal.normalizeUUID(session.plannedLegs[index].legUUID)
+                    ?? session.plannedLegs[index].legUUID.lowercased()
+                let isCurrent: Bool
+                if let currentUUID {
+                    isCurrent = legUUID == currentUUID
+                } else if let currentIndex {
+                    isCurrent = session.plannedLegs[index].sequenceNumber == currentIndex
+                } else {
+                    isCurrent = false
+                }
+                if isCurrent {
+                    continue
+                }
+                session.plannedLegs[index].status = "cancelled"
+            }
+            session.engineSessionContinuityActive = false
+            session.pendingSoftStartRecording = false
+            session.continuityEngineStartSynthesized = false
+            $0.operationalSession = session
         }
     }
 
@@ -922,7 +1308,7 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord: flightRecord,
             eventType: "transient_stop_on_block",
             source: "manual_transient_stop_hold",
-            creationMethod: "three_second_hold",
+            creationMethod: "two_second_hold",
             gpsSample: gpsSample
         )
 
@@ -957,6 +1343,102 @@ final class CVRWorkflowStore: ObservableObject {
     /// Persists Engine Start / Off Block locally before UI confirmation. Returns false if not saved.
     @discardableResult
     func recordEngineStartOffBlock(gpsSample: GPSSample?) -> Bool {
+        persistEngineStartOffBlock(
+            gpsSample: gpsSample,
+            timestamp: Date(),
+            source: "manual_engine_start_hold",
+            creationMethod: "two_second_hold",
+            confidence: 1.0,
+            extraMetadata: [:]
+        )
+    }
+
+    /// Beacon avionics power edge — arms taxi-inferred Off Block after dwell.
+    func noteAvionicsPowerState(isOn: Bool, at date: Date = Date()) {
+        if isOn {
+            if avionicsOnSince == nil {
+                avionicsOnSince = date
+            }
+        } else {
+            avionicsOnSince = nil
+            taxiMotionAboveThresholdSince = nil
+        }
+    }
+
+    /// Dummy-proof: if Engine Start was forgotten, infer Off Block once sustained taxi is detected.
+    /// No user confirmation — UI Engine Start button disappears when continuity becomes active.
+    @discardableResult
+    func considerInferredEngineStartFromTaxi(gpsSample: GPSSample?) -> Bool {
+        guard needsEngineStart,
+              state.activeFlightRecord != nil,
+              let sample = gpsSample else {
+            taxiMotionAboveThresholdSince = nil
+            return false
+        }
+        guard sample.horizontalAccuracy >= 0,
+              sample.horizontalAccuracy <= 50,
+              sample.speedMetersPerSecond >= 0 else {
+            return false
+        }
+
+        let now = sample.timestamp
+        let avionicsSince = avionicsOnSince ?? state.activeFlightRecord?.recordingStartedAt
+        guard let avionicsSince,
+              now.timeIntervalSince(avionicsSince) >= Self.inferredEngineStartAvionicsDwellSeconds else {
+            taxiMotionAboveThresholdSince = nil
+            return false
+        }
+
+        if sample.speedKnots > Self.inferredEngineStartTaxiSpeedKnots {
+            if taxiMotionAboveThresholdSince == nil {
+                taxiMotionAboveThresholdSince = now
+            }
+        } else {
+            taxiMotionAboveThresholdSince = nil
+            return false
+        }
+
+        guard let motionSince = taxiMotionAboveThresholdSince,
+              now.timeIntervalSince(motionSince) >= Self.inferredEngineStartTaxiConfirmSeconds else {
+            return false
+        }
+
+        let warmUp = now.addingTimeInterval(-Self.inferredEngineStartWarmUpSeconds)
+        let earliest = now.addingTimeInterval(-Self.inferredEngineStartMaxLookbackSeconds)
+        var offBlock = warmUp
+        offBlock = max(offBlock, avionicsSince)
+        offBlock = max(offBlock, earliest)
+        offBlock = min(offBlock, now)
+
+        let saved = persistEngineStartOffBlock(
+            gpsSample: sample,
+            timestamp: offBlock,
+            source: "auto_motion_inferred",
+            creationMethod: "taxi_motion_after_avionics",
+            confidence: 0.85,
+            extraMetadata: [
+                "inferred": "true",
+                "avionics_on_utc": Self.iso8601UTC.string(from: avionicsSince),
+                "taxi_detected_utc": Self.iso8601UTC.string(from: now),
+                "taxi_speed_kt": String(format: "%.1f", sample.speedKnots),
+                "warm_up_seconds": String(Int(Self.inferredEngineStartWarmUpSeconds)),
+            ]
+        )
+        if saved {
+            taxiMotionAboveThresholdSince = nil
+        }
+        return saved
+    }
+
+    @discardableResult
+    private func persistEngineStartOffBlock(
+        gpsSample: GPSSample?,
+        timestamp: Date,
+        source: String,
+        creationMethod: String,
+        confidence: Double,
+        extraMetadata: [String: String]
+    ) -> Bool {
         guard var flightRecord = state.activeFlightRecord else {
             lastError = "Off Block could not be recorded. Open Dispatch first."
             return false
@@ -965,10 +1447,12 @@ final class CVRWorkflowStore: ObservableObject {
             return true
         }
 
-        let now = Date()
         var metadata: [String: String] = [
             "flight_record_uuid": flightRecord.id.lowercased(),
         ]
+        for (key, value) in extraMetadata {
+            metadata[key] = value
+        }
         if let legUUID = state.activeDispatch?.operationalIdentity?.legUUID,
            let normalizedLeg = CVROperationalIdentityLocal.normalizeUUID(legUUID) {
             metadata["leg_uuid"] = normalizedLeg
@@ -978,24 +1462,24 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecordID: flightRecord.id,
             recordingSessionID: flightRecord.recordingSessionID,
             eventType: "engine_start_off_block",
-            timestampUTC: now,
-            timestampLocal: now,
+            timestampUTC: timestamp,
+            timestampLocal: timestamp,
             deviceMonotonicTime: ProcessInfo.processInfo.systemUptime,
-            audioOffset: flightRecord.recordingStartedAt.map { max(0, now.timeIntervalSince($0)) },
+            audioOffset: flightRecord.recordingStartedAt.map { max(0, timestamp.timeIntervalSince($0)) },
             latitude: gpsSample?.latitude,
             longitude: gpsSample?.longitude,
             altitude: gpsSample?.altitude,
             groundSpeed: gpsSample?.speedKnots,
-            source: "manual_engine_start_hold",
-            confidence: 1.0,
-            creationMethod: "three_second_hold",
+            source: source,
+            confidence: confidence,
+            creationMethod: creationMethod,
             userIdentity: "local_cvr_unit",
             metadata: metadata
         )
 
         let persisted = mutate {
             flightRecord.status = .recording
-            flightRecord.updatedAt = now
+            flightRecord.updatedAt = Date()
             $0.activeFlightRecord = flightRecord
             $0.flightEvents.append(event)
             $0.uploadComponents.append(eventUploadComponent(event))
@@ -1081,6 +1565,99 @@ final class CVRWorkflowStore: ObservableObject {
 
     var pendingCheckInMode: CVRCheckInMode? {
         state.operationalSession?.pendingCheckInMode ?? state.activeFlightRecord?.checkInMode
+    }
+
+    /// Uses the immutable model version saved on this execution rather than the
+    /// current rollout flag, so a policy rollback cannot change a session in flight.
+    var usesOperationalSessionModelV1: Bool {
+        state.activeOperationalSession?.modelVersion == CVROperationalSessionRecord.modelVersion
+            || state.activeDispatch?.operationalSessionModelVersion == CVROperationalSessionRecord.modelVersion
+    }
+
+    /// Stage 2: durably secure authoritative session endpoint evidence while
+    /// cockpit audio and GPS continue until actual Avionics OFF.
+    @discardableResult
+    func secureOperationalSessionEndingValues(
+        endingHobbs: Double?,
+        endingTacho: Double?,
+        fuelRemaining: String?,
+        gpsSample: GPSSample?
+    ) -> Bool {
+        guard usesOperationalSessionModelV1,
+              var flightRecord = state.activeFlightRecord,
+              let dispatch = state.activeDispatch,
+              var operationalSession = state.activeOperationalSession else {
+            lastError = "No active Operational Session is available."
+            return false
+        }
+        guard state.flightEvents.contains(where: {
+            $0.flightRecordID == flightRecord.id && $0.eventType == "engine_shutdown_on_block"
+        }) else {
+            lastError = "Engine Shutdown must be confirmed before flight data can be secured."
+            return false
+        }
+        guard let endingHobbs, endingHobbs >= (dispatch.startingHobbs ?? 0) else {
+            lastError = "Ending Hobbs must be present and cannot be lower than Starting Hobbs."
+            return false
+        }
+        guard let endingTacho, endingTacho >= (dispatch.startingTacho ?? 0) else {
+            lastError = "Ending Tacho must be present and cannot be lower than Starting Tacho."
+            return false
+        }
+        let fuel = (fuelRemaining ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let fuelQuantity = Self.decimalQuantity(from: fuel), fuelQuantity >= 0 else {
+            lastError = "Fuel Remaining is required."
+            return false
+        }
+
+        let now = Date()
+        let event = makeFlightEvent(
+            flightRecord: flightRecord,
+            eventType: "ending_aircraft_state_secured",
+            source: "crew_secured_ending_state",
+            creationMethod: "secure_flight_data",
+            gpsSample: gpsSample,
+            metadata: [
+                "ending_hobbs": String(format: "%.1f", endingHobbs),
+                "ending_tacho": String(format: "%.1f", endingTacho),
+                "ending_fuel": String(format: "%.1f", fuelQuantity),
+                "fuel_unit": operationalSession.startingFuelUnit,
+            ]
+        )
+
+        let persisted = mutate {
+            flightRecord.endingHobbs = endingHobbs
+            flightRecord.endingTacho = endingTacho
+            flightRecord.fuelRemaining = String(format: "%.1f", fuelQuantity)
+            flightRecord.checkInMode = .engineShutdown
+            flightRecord.status = .awaitingAvionicsOff
+            flightRecord.updatedAt = now
+            $0.activeFlightRecord = flightRecord
+
+            operationalSession.endingHobbs = endingHobbs
+            operationalSession.endingTacho = endingTacho
+            operationalSession.endingFuelQuantity = fuelQuantity
+            operationalSession.endingFuelUnit = operationalSession.startingFuelUnit
+            operationalSession.endingStateSecuredAtUTC = now
+            operationalSession.state = .endingStateSecured
+            $0.activeOperationalSession = operationalSession
+
+            var continuity = $0.operationalSession ?? .empty
+            continuity.pendingCheckInMode = .engineShutdown
+            continuity.engineSessionContinuityActive = false
+            continuity.awaitingAvionicsOffConfirmation = true
+            continuity.carryoverHobbs = endingHobbs
+            continuity.carryoverTacho = endingTacho
+            continuity.carryoverFuel = String(format: "%.1f", fuelQuantity)
+            $0.operationalSession = continuity
+
+            $0.flightEvents.append(event)
+            $0.uploadComponents.append(eventUploadComponent(event))
+        }
+        if persisted {
+            lastError = ""
+        }
+        return persisted
     }
 
     var needsEngineStart: Bool {
@@ -1250,7 +1827,7 @@ final class CVRWorkflowStore: ObservableObject {
             flightRecord: flightRecord,
             eventType: "engine_shutdown_on_block",
             source: "manual_engine_shutdown_hold",
-            creationMethod: "three_second_hold",
+            creationMethod: "two_second_hold",
             gpsSample: gpsSample
         )
 
@@ -1637,10 +2214,11 @@ final class CVRWorkflowStore: ObservableObject {
             $0.operationalSession = session
             $0.activeDispatch = nil
             $0.activeFlightRecord = nil
+            $0.activeOperationalSession = nil
             $0.consents = []
             $0.recorderVerifications = []
             $0.flightEvents = []
-            $0.uploadComponents = []
+            $0.uploadComponents.removeAll { $0.componentType != "schedule_duty_sync" }
             $0.discrepancies = []
             $0.selectedTab = .scheduled
         }
@@ -1669,12 +2247,250 @@ final class CVRWorkflowStore: ObservableObject {
             }
             $0.activeDispatch = nil
             $0.activeFlightRecord = nil
+            $0.activeOperationalSession = nil
             $0.consents = []
             $0.recorderVerifications = []
             $0.flightEvents = []
             $0.flightLegs = []
-            $0.uploadComponents = []
+            $0.uploadComponents.removeAll { $0.componentType != "schedule_duty_sync" }
             $0.discrepancies = []
+            $0.selectedTab = .scheduled
+        }
+    }
+
+    @discardableResult
+    func beginPostFlightGarminCountdown(now: Date = Date()) -> Bool {
+        guard let dispatch = state.activeDispatch,
+              let flight = state.activeFlightRecord,
+              flight.endingHobbs != nil,
+              flight.endingTacho != nil,
+              flight.checkInMode == .engineShutdown
+                || state.operationalSession?.pendingCheckInMode == .engineShutdown else {
+            return false
+        }
+        if state.postFlightGarminHandoff?.flightRecordUUID == flight.id {
+            return true
+        }
+        return mutate {
+            $0.postFlightGarminHandoff = CVRPostFlightGarminHandoff(
+                flightRecordUUID: flight.id.lowercased(),
+                dispatchUUID: dispatch.id.lowercased(),
+                reservationUUID: dispatch.reservationUUID?.lowercased(),
+                operationalSessionUUID: dispatch.operationalSessionUUID?.lowercased(),
+                aircraftRegistration: dispatch.tailNumber,
+                phase: .waitingForGarminData,
+                beaconLossConfirmedAt: now,
+                countdownEndsAt: now.addingTimeInterval(30),
+                selectedCSVHash: nil,
+                uploadReceiptID: nil,
+                legReviewRevisionUUID: nil,
+                cardReturnedConfirmedAt: nil
+            )
+            $0.selectedTab = .inFlight
+        }
+    }
+
+    func cancelPostFlightGarminCountdownIfBeaconReturned(now: Date = Date()) {
+        guard let handoff = state.postFlightGarminHandoff,
+              handoff.phase == .waitingForGarminData,
+              now < handoff.countdownEndsAt else {
+            return
+        }
+        _ = mutate {
+            if $0.postFlightGarminHandoff?.flightRecordUUID == handoff.flightRecordUUID {
+                $0.postFlightGarminHandoff = nil
+            }
+        }
+    }
+
+    func advancePostFlightGarminHandoff(to phase: CVRPostFlightGarminPhase) {
+        _ = mutate {
+            guard var handoff = $0.postFlightGarminHandoff else { return }
+            handoff.phase = phase
+            $0.postFlightGarminHandoff = handoff
+            if phase == .selectingCSV || phase == .uploadingCSV
+                || phase == .uploadVerified || phase == .verifyingLegs
+                || phase == .returnCardToGarmin {
+                $0.selectedTab = .log
+            }
+        }
+    }
+
+    @discardableResult
+    func reconcilePostFlightGarminUpload(flightRecordIDsWithCSV: Set<String>) -> Bool {
+        guard let handoff = state.postFlightGarminHandoff,
+              handoff.phase == .selectingCSV || handoff.phase == .uploadingCSV,
+              flightRecordIDsWithCSV.contains(handoff.flightRecordUUID.lowercased()) else {
+            return false
+        }
+        advancePostFlightGarminHandoff(to: .uploadVerified)
+        return true
+    }
+
+    func completePostFlightGarminHandoff() {
+        _ = mutate {
+            guard var handoff = $0.postFlightGarminHandoff else { return }
+            handoff.phase = .completed
+            handoff.cardReturnedConfirmedAt = Date()
+            $0.postFlightGarminHandoff = handoff
+        }
+    }
+
+    func markPostFlightLegReviewAccepted(revisionUUID: String) {
+        _ = mutate {
+            guard var handoff = $0.postFlightGarminHandoff else { return }
+            handoff.legReviewRevisionUUID = revisionUUID.lowercased()
+            handoff.phase = .returnCardToGarmin
+            $0.postFlightGarminHandoff = handoff
+        }
+    }
+
+    func acceptOperationalLegReviewLocally(
+        revisionUUID: String,
+        dispatchUUID: String,
+        flightRecordUUID: String,
+        payload: Data,
+        advancesPostFlightHandoff: Bool
+    ) throws {
+        guard payload.count <= Self.maximumRequestPayloadSnapshotBytes else {
+            throw NSError(
+                domain: "IPCACVRUnit.LegReview",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The verified leg revision is too large to store locally."]
+            )
+        }
+        let revision = revisionUUID.lowercased()
+        let component = CVRUploadComponentRecord(
+            id: revision,
+            serverID: nil,
+            flightRecordID: flightRecordUUID.lowercased(),
+            componentType: "operational_leg_review",
+            localFilePath: "leg_review:\(dispatchUUID.lowercased())",
+            sha256: nil,
+            byteCount: Int64(payload.count),
+            state: .queued,
+            progress: 0,
+            attemptCount: 0,
+            lastError: "Legs verified locally · server synchronization pending",
+            lastAttemptAt: nil,
+            serverVerificationAt: nil,
+            serverReceiptID: nil,
+            requestPayloadSnapshot: payload
+        )
+
+        if state.activeFlightRecord?.id.lowercased() == flightRecordUUID.lowercased() {
+            _ = mutate {
+                $0.uploadComponents.removeAll {
+                    $0.componentType == "operational_leg_review"
+                        && $0.flightRecordID.lowercased() == flightRecordUUID.lowercased()
+                }
+                $0.uploadComponents.append(component)
+                if advancesPostFlightHandoff, var handoff = $0.postFlightGarminHandoff {
+                    handoff.legReviewRevisionUUID = revision
+                    handoff.phase = .returnCardToGarmin
+                    $0.postFlightGarminHandoff = handoff
+                }
+            }
+            return
+        }
+
+        guard let archiveIndex = archives.firstIndex(where: {
+            $0.flightRecordID.lowercased() == flightRecordUUID.lowercased()
+        }) else {
+            throw NSError(
+                domain: "IPCACVRUnit.LegReview",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "The local flight record for this leg review could not be found."]
+            )
+        }
+        var updated = archives
+        updated[archiveIndex].uploadComponents.removeAll {
+            $0.componentType == "operational_leg_review"
+        }
+        updated[archiveIndex].uploadComponents.append(component)
+        try saveArchives(updated)
+        archives = updated
+        if advancesPostFlightHandoff {
+            markPostFlightLegReviewAccepted(revisionUUID: revision)
+        }
+    }
+
+    var locallyAcceptedLegReviewDispatchUUIDs: Set<String> {
+        let components = state.uploadComponents + archives.flatMap(\.uploadComponents)
+        return Set(components.compactMap { component in
+            guard component.componentType == "operational_leg_review",
+                  let snapshot = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: snapshot) as? [String: Any],
+                  let dispatchUUID = payload["dispatch_uuid"] as? String else {
+                return nil
+            }
+            return dispatchUUID.lowercased()
+        })
+    }
+
+    func closureSynchronizationPending(for flightRecordUUID: String) -> Bool {
+        let target = flightRecordUUID.lowercased()
+        let components = state.uploadComponents + archives.flatMap(\.uploadComponents)
+        return components.contains {
+            $0.componentType == "flight_record_closure"
+                && $0.flightRecordID.lowercased() == target
+                && $0.state != .serverVerified
+        }
+    }
+
+    /// Check-In is saved but Avionics OFF never arrived — archive anyway so History/Log are not orphaned.
+    @discardableResult
+    func forceFinalizeEngineShutdownAfterCheckIn() -> Bool {
+        guard let flightRecord = state.activeFlightRecord,
+              flightRecord.endingHobbs != nil,
+              flightRecord.endingTacho != nil else {
+            lastError = "Save Engine Shutdown Check-In before finalizing."
+            return false
+        }
+        markAvionicsOffAfterShutdown()
+        return completeEngineShutdownAfterAvionicsOff()
+    }
+
+    var canForceFinalizeEngineShutdown: Bool {
+        guard let flight = state.activeFlightRecord else { return false }
+        guard flight.endingHobbs != nil, flight.endingTacho != nil else { return false }
+        return flight.status == .awaitingAvionicsOff
+            || state.operationalSession?.awaitingAvionicsOffConfirmation == true
+            || flight.checkInMode == .engineShutdown
+    }
+
+    /// Soft-hide a Log row. Does not delete server Master Logbook data.
+    @discardableResult
+    func voidFlightLog(flightRecordID: String) -> Bool {
+        let key = flightRecordID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return false }
+        voidedFlightRecordIDs.insert(key)
+        if let index = archives.firstIndex(where: { $0.flightRecordID.lowercased() == key }) {
+            var updated = archives
+            updated[index].voidedAt = Date()
+            do {
+                try saveArchives(updated)
+                archives = updated
+            } catch {
+                lastError = "Could not save voided Log state: \(error.localizedDescription)"
+                return false
+            }
+        }
+        persistVoidedFlightRecordIDs()
+        return true
+    }
+
+    func isFlightLogVoided(_ flightRecordID: String) -> Bool {
+        voidedFlightRecordIDs.contains(flightRecordID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+
+    /// Drop leftover ROUTE session when every planned leg is already checked in / cancelled and nothing is active.
+    func clearIdleCompletedOperationalSessionIfNeeded() {
+        guard state.activeDispatch == nil, state.activeFlightRecord == nil,
+              let session = state.operationalSession,
+              !Self.hasOpenPlannedLegs(in: session) else { return }
+        _ = mutate {
+            $0.operationalSession = nil
             $0.selectedTab = .scheduled
         }
     }
@@ -1693,6 +2509,109 @@ final class CVRWorkflowStore: ObservableObject {
                 return false
             }
             return true
+        }
+    }
+
+    var hasQueuedScheduleDutyReplacement: Bool {
+        state.uploadComponents.contains { $0.componentType == "schedule_duty_sync" }
+    }
+
+    var scheduleDutySyncInfo: CVRScheduleDutySyncInfo? {
+        var relevantSchedulers = Set(remainingOpenPlannedLegs.compactMap {
+            $0.schedulerRecordID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+        if let active = state.activeDispatch?.schedulerRecordID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(), !active.isEmpty {
+            relevantSchedulers.insert(active)
+        }
+        guard !relevantSchedulers.isEmpty else { return nil }
+        guard let component = state.uploadComponents.last(where: { component in
+            guard component.componentType == "schedule_duty_sync",
+                  let data = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let value = payload["scheduler_record_id"] as? String else {
+                return false
+            }
+            return relevantSchedulers.contains(
+                value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            )
+        }) else {
+            return nil
+        }
+        switch component.state {
+        case .serverVerified, .uploaded:
+            let warning = component.lastError.trimmingCharacters(in: .whitespacesAndNewlines)
+            return CVRScheduleDutySyncInfo(
+                phase: warning.isEmpty ? .synced : .syncedWithWarning,
+                message: warning.isEmpty
+                    ? "This reservation and its identity are confirmed on the online schedule."
+                    : "Reservation synced with overlap warning: \(warning)"
+            )
+        case .uploading:
+            return CVRScheduleDutySyncInfo(
+                phase: .syncing,
+                message: "Sending this reservation to the online schedule now."
+            )
+        case .needsUserAction:
+            let message = component.lastError.trimmingCharacters(in: .whitespacesAndNewlines)
+            return CVRScheduleDutySyncInfo(
+                phase: .attention,
+                message: message.isEmpty
+                    ? "The reservation is saved locally but server synchronization needs attention."
+                    : message
+            )
+        case .failed:
+            if component.retryable != false {
+                return CVRScheduleDutySyncInfo(
+                    phase: .queued,
+                    message: "Saved safely on this CVR Unit. It will retry automatically when internet connectivity returns."
+                )
+            }
+            let message = component.lastError.trimmingCharacters(in: .whitespacesAndNewlines)
+            return CVRScheduleDutySyncInfo(
+                phase: .attention,
+                message: message.isEmpty
+                    ? "The reservation is saved locally but server synchronization needs attention."
+                    : message
+            )
+        case .queued, .notReady:
+            return CVRScheduleDutySyncInfo(
+                phase: .queued,
+                message: "Saved safely on this CVR Unit and queued. It will sync automatically when internet connectivity is available."
+            )
+        case .superseded:
+            return nil
+        }
+    }
+
+    var locallySupersededSchedulerRecordIDs: Set<String> {
+        Set(state.uploadComponents.compactMap { component in
+            guard component.componentType == "schedule_duty_sync",
+                  let data = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let value = payload["supersedes_scheduler_record_id"] as? String else {
+                return nil
+            }
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+    }
+
+    func scheduleDutyReplacementIsPending(schedulerRecordID: String?) -> Bool {
+        let expected = schedulerRecordID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        guard !expected.isEmpty else { return false }
+        return state.uploadComponents.contains { component in
+            guard component.componentType == "schedule_duty_sync",
+                  component.state != .serverVerified,
+                  component.state != .superseded,
+                  let data = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let value = payload["scheduler_record_id"] as? String else {
+                return false
+            }
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == expected
         }
     }
 
@@ -1887,10 +2806,32 @@ final class CVRWorkflowStore: ObservableObject {
 
     func markAvionicsOffAfterShutdown() {
         mutate {
+            let now = Date()
             if var flight = $0.activeFlightRecord, flight.status == .awaitingAvionicsOff {
                 flight.status = .awaitingUpload
-                flight.updatedAt = Date()
+                flight.updatedAt = now
                 $0.activeFlightRecord = flight
+                if $0.activeOperationalSession?.modelVersion == CVROperationalSessionRecord.modelVersion,
+                   flight.endingHobbs != nil,
+                   flight.endingTacho != nil,
+                   !$0.uploadComponents.contains(where: {
+                       $0.flightRecordID == flight.id && $0.componentType == "flight_record_closure"
+                   }) {
+                    // The closure is intentionally queued only after Avionics OFF.
+                    // Securing meters must not close the server Operational Session.
+                    $0.uploadComponents.append(evidenceComponent(
+                        flightRecordID: flight.id,
+                        type: "flight_record_closure",
+                        evidenceID: flight.id
+                    ))
+                }
+            }
+            if var operationalSession = $0.activeOperationalSession,
+               operationalSession.modelVersion == CVROperationalSessionRecord.modelVersion,
+               operationalSession.state == .endingStateSecured {
+                operationalSession.state = .evidenceClosed
+                operationalSession.avionicsOffAtUTC = now
+                $0.activeOperationalSession = operationalSession
             }
             if var session = $0.operationalSession {
                 session.awaitingAvionicsOffConfirmation = false
@@ -1949,10 +2890,11 @@ final class CVRWorkflowStore: ObservableObject {
             }
         }
 
-        let clearEntirely = needsServerRelease
-            || !(dispatch.schedulerRecordID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let flightID = flightRecord.id
         let dispatchID = dispatch.id
+        let replacementDispatchID = UUID().uuidString.lowercased()
+        let returnsToSchedule = needsServerRelease
+            || !(dispatch.schedulerRecordID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         _ = mutate {
             $0.uploadComponents.removeAll { $0.flightRecordID == flightID }
@@ -1961,24 +2903,31 @@ final class CVRWorkflowStore: ObservableObject {
             $0.consents.removeAll { $0.dispatchID == dispatchID }
             $0.discrepancies.removeAll { $0.flightRecordID == flightID }
             $0.activeFlightRecord = nil
-            if clearEntirely {
-                $0.activeDispatch = nil
-                $0.selectedTab = .scheduled
-                if var session = $0.operationalSession {
-                    Self.unmarkDispatchedPlannedLeg(in: &session, dispatchID: dispatchID, flightRecordID: flightID)
-                    $0.operationalSession = session
-                }
-            } else if var draft = $0.activeDispatch {
+            $0.activeOperationalSession = nil
+            if var draft = $0.activeDispatch {
+                // Undispatch revokes the acknowledged execution, not the prepared
+                // aircraft state. Preserve explicit crew decisions and fuel/oil
+                // acknowledgements, but never reuse the released Dispatch UUID.
+                draft.id = replacementDispatchID
                 draft.status = Self.dispatchStatus(for: draft, consents: [])
                 draft.consentStatus = ""
+                draft.createdAt = Date()
                 draft.modifiedAt = Date()
+                draft.version = 1
                 draft.serverDispatchID = nil
+                draft.operationalSessionUUID = nil
                 $0.activeDispatch = draft
+                for index in $0.uploadComponents.indices
+                    where $0.uploadComponents[index].componentType == "schedule_duty_sync"
+                        && $0.uploadComponents[index].flightRecordID == dispatchID {
+                    $0.uploadComponents[index].flightRecordID = replacementDispatchID
+                }
                 if var session = $0.operationalSession {
                     Self.unmarkDispatchedPlannedLeg(in: &session, dispatchID: dispatchID, flightRecordID: flightID)
                     $0.operationalSession = session
                 }
             }
+            $0.selectedTab = returnsToSchedule ? .scheduled : .dispatch
         }
         lastError = ""
         return true
@@ -1991,7 +2940,7 @@ final class CVRWorkflowStore: ObservableObject {
             $0.consents = []
             $0.recorderVerifications = []
             $0.flightEvents = []
-            $0.uploadComponents = []
+            $0.uploadComponents.removeAll { $0.componentType != "schedule_duty_sync" }
             $0.discrepancies = []
             if selectScheduled {
                 $0.selectedTab = .scheduled
@@ -2190,7 +3139,9 @@ final class CVRWorkflowStore: ObservableObject {
                 id: UUID().uuidString,
                 personID: member.personID,
                 personName: member.personName,
-                role: member.role
+                role: member.role,
+                pilotFunction: member.pilotFunction,
+                isPIC: member.isPIC
             )
         }
     }
@@ -2293,7 +3244,7 @@ final class CVRWorkflowStore: ObservableObject {
         requestID: String? = nil
     ) {
         if self.state.uploadComponents.contains(where: { $0.id == id }) {
-            mutate {
+            let persisted = mutate {
                 guard let index = $0.uploadComponents.firstIndex(where: { $0.id == id }) else { return }
                 updateComponent(
                     &$0.uploadComponents[index],
@@ -2306,6 +3257,12 @@ final class CVRWorkflowStore: ObservableObject {
                     userActionRequired: userActionRequired,
                     requestID: requestID
                 )
+            }
+            if persisted && state == .serverVerified,
+               self.state.uploadComponents.contains(where: {
+                   $0.id == id && $0.componentType == "schedule_duty_sync"
+               }) {
+                scheduleRefreshRevision &+= 1
             }
             return
         }
@@ -2338,12 +3295,13 @@ final class CVRWorkflowStore: ObservableObject {
     func workflowComponentsRequiringReconciliation(explicitRetry: Bool = false) -> [CVRUploadComponentRecord] {
         let requiresReconciliation: (CVRUploadComponentRecord) -> Bool = { component in
             guard component.componentType != "garmin_csv",
+                  component.componentType != "schedule_duty_sync",
+                  component.componentType != "operational_leg_review",
                   component.state == .queued || component.state == .serverVerified else {
                 return false
             }
-            if explicitRetry && component.state != .serverVerified {
-                return true
-            }
+            // Explicit Log SYNC must not force reconciliation for never-attempted
+            // components — that blocked Dispatch POST and made SYNC look like a no-op.
             if component.reconciliationRequired == true {
                 return true
             }
@@ -2353,6 +3311,7 @@ final class CVRWorkflowStore: ObservableObject {
             if component.reconciliationRequired == false {
                 return false
             }
+            // Fresh queued components POST normally; only prior uncertain attempts reconcile first.
             return component.attemptCount > 0 && !Self.hasCompleteVerificationMetadata(component)
         }
         return state.uploadComponents.filter(requiresReconciliation)
@@ -2838,12 +3797,21 @@ final class CVRWorkflowStore: ObservableObject {
 
     func linkRecordingSession(recordingID: String, startedAt: Date) {
         guard !recordingID.isEmpty else { return }
+        if avionicsOnSince == nil {
+            avionicsOnSince = startedAt
+        }
         mutate {
             guard var flightRecord = $0.activeFlightRecord else { return }
             flightRecord.recordingSessionID = recordingID
             flightRecord.recordingStartedAt = startedAt
             flightRecord.updatedAt = Date()
             $0.activeFlightRecord = flightRecord
+            if var operationalSession = $0.activeOperationalSession,
+               operationalSession.modelVersion == CVROperationalSessionRecord.modelVersion,
+               operationalSession.state == .intended {
+                operationalSession.state = .evidenceCapturing
+                $0.activeOperationalSession = operationalSession
+            }
             for index in $0.flightEvents.indices where $0.flightEvents[index].flightRecordID == flightRecord.id {
                 $0.flightEvents[index].recordingSessionID = recordingID
                 $0.flightEvents[index].audioOffset = max(0, $0.flightEvents[index].timestampUTC.timeIntervalSince(startedAt))
@@ -3123,16 +4091,18 @@ final class CVRWorkflowStore: ObservableObject {
                 id: UUID().uuidString,
                 personID: member.personID,
                 personName: member.personName,
-                role: Self.crewRole(from: member.role)
+                role: Self.crewRole(from: member.role),
+                pilotFunction: Self.pilotFunction(from: member.pilotFunction),
+                isPIC: member.isPIC
             )
         }
         guard !scheduledCrew.isEmpty else { return false }
         let currentSignature = dispatch.crew
-            .map { "\($0.personID ?? 0):\($0.personName.lowercased()):\($0.role.rawValue)" }
+            .map { "\($0.personID ?? 0):\($0.personName.lowercased()):\($0.role.rawValue):\($0.effectivePilotFunction.rawValue):\($0.hasPICResponsibility)" }
             .sorted()
             .joined(separator: "|")
         let scheduledSignature = scheduledCrew
-            .map { "\($0.personID ?? 0):\($0.personName.lowercased()):\($0.role.rawValue)" }
+            .map { "\($0.personID ?? 0):\($0.personName.lowercased()):\($0.role.rawValue):\($0.effectivePilotFunction.rawValue):\($0.hasPICResponsibility)" }
             .sorted()
             .joined(separator: "|")
         guard currentSignature != scheduledSignature else { return true }
@@ -3186,7 +4156,9 @@ final class CVRWorkflowStore: ObservableObject {
                 id: UUID().uuidString,
                 personID: member.personID,
                 personName: member.personName,
-                role: Self.crewRole(from: member.role)
+                role: Self.crewRole(from: member.role),
+                pilotFunction: Self.pilotFunction(from: member.pilotFunction),
+                isPIC: member.isPIC
             )
         }
         guard !scheduledCrew.isEmpty else { return false }
@@ -3303,6 +4275,137 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    /// User-initiated Log SYNC: recover stuck queued/uploading Dispatch uploads that
+    /// `requeueFailedUploads` ignores (it only resets failed / needsUserAction).
+    @discardableResult
+    func forceRetryPendingUploads(forFlightRecordID flightRecordID: String) -> Bool {
+        var changed = false
+
+        mutate {
+            guard $0.activeFlightRecord?.id == flightRecordID else { return }
+            _ = Self.repairStaleDispatchConsents(in: &$0)
+            if Self.ensureDispatchUploadComponent(in: &$0) {
+                changed = true
+            }
+            for index in $0.uploadComponents.indices {
+                guard Self.shouldForceRetryWorkflowComponent($0.uploadComponents[index]) else { continue }
+                Self.resetWorkflowComponentForForceRetry(&$0.uploadComponents[index])
+                changed = true
+            }
+        }
+
+        guard let archiveIndex = archives.firstIndex(where: { $0.flightRecordID == flightRecordID }) else {
+            return changed
+        }
+        var updated = archives
+        changed = Self.repairArchivedDispatchConsents(in: &updated[archiveIndex]) || changed
+        if Self.ensureArchivedDispatchUploadComponent(in: &updated[archiveIndex]) {
+            changed = true
+        }
+        for componentIndex in updated[archiveIndex].uploadComponents.indices {
+            guard Self.shouldForceRetryWorkflowComponent(updated[archiveIndex].uploadComponents[componentIndex]) else {
+                continue
+            }
+            Self.resetWorkflowComponentForForceRetry(&updated[archiveIndex].uploadComponents[componentIndex])
+            changed = true
+        }
+        guard changed else { return false }
+        updated[archiveIndex].status = .uploadPending
+        do {
+            try saveArchives(updated)
+            archives = updated
+            lastError = ""
+            return true
+        } catch {
+            lastError = "Could not force-retry archived flight uploads: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private static func shouldForceRetryWorkflowComponent(_ component: CVRUploadComponentRecord) -> Bool {
+        switch component.state {
+        case .serverVerified, .superseded, .uploaded, .notReady:
+            return false
+        case .failed, .needsUserAction, .uploading, .queued:
+            return true
+        }
+    }
+
+    private static func resetWorkflowComponentForForceRetry(_ component: inout CVRUploadComponentRecord) {
+        component.state = .queued
+        component.progress = 0
+        component.lastError = ""
+        // User-initiated SYNC must take the normal POST path. Stale reconciliation
+        // flags were leaving Dispatch at 0% with no visible error.
+        component.reconciliationRequired = false
+        if component.componentType != "schedule_duty_sync"
+            && component.componentType != "operational_leg_review" {
+            component.requestPayloadSnapshot = nil
+        }
+        component.userActionRequired = false
+        component.retryable = true
+        if component.componentType == "dispatch_metadata" {
+            component.attemptCount = 0
+        }
+    }
+
+    private static func ensureDispatchUploadComponent(in state: inout CVRWorkflowState) -> Bool {
+        guard let dispatch = state.activeDispatch,
+              let flightRecord = state.activeFlightRecord,
+              flightRecord.dispatchID == dispatch.id else {
+            return false
+        }
+        guard !state.uploadComponents.contains(where: {
+            $0.componentType == "dispatch_metadata" && $0.flightRecordID == flightRecord.id
+        }) else {
+            return false
+        }
+        state.uploadComponents.append(CVRUploadComponentRecord(
+            id: "dispatch-\(dispatch.id)-v\(dispatch.version)",
+            serverID: nil,
+            flightRecordID: flightRecord.id,
+            componentType: "dispatch_metadata",
+            localFilePath: nil,
+            sha256: nil,
+            byteCount: nil,
+            state: .queued,
+            progress: 0,
+            attemptCount: 0,
+            lastError: "",
+            lastAttemptAt: nil,
+            serverVerificationAt: nil,
+            serverReceiptID: nil
+        ))
+        state.updatedAt = Date()
+        return true
+    }
+
+    private static func ensureArchivedDispatchUploadComponent(in archive: inout CVRWorkflowArchiveRecord) -> Bool {
+        guard !archive.uploadComponents.contains(where: { $0.componentType == "dispatch_metadata" }) else {
+            return false
+        }
+        archive.uploadComponents.insert(
+            CVRUploadComponentRecord(
+                id: "dispatch-\(archive.dispatch.id)-v\(archive.dispatch.version)",
+                serverID: nil,
+                flightRecordID: archive.flightRecordID,
+                componentType: "dispatch_metadata",
+                localFilePath: nil,
+                sha256: nil,
+                byteCount: nil,
+                state: .queued,
+                progress: 0,
+                attemptCount: 0,
+                lastError: "",
+                lastAttemptAt: nil,
+                serverVerificationAt: nil,
+                serverReceiptID: nil
+            ),
+            at: 0
+        )
+        return true
+    }
+
     func archiveExportURL(id: String) throws -> URL {
         guard let archive = archives.first(where: { $0.id == id }) else {
             throw CocoaError(.fileNoSuchFile)
@@ -3373,7 +4476,7 @@ final class CVRWorkflowStore: ObservableObject {
             $0.recorderVerifications = []
             $0.flightEvents = []
             $0.flightLegs = []
-            $0.uploadComponents = []
+            $0.uploadComponents.removeAll { $0.componentType != "schedule_duty_sync" }
             $0.discrepancies = []
             $0.selectedTab = .scheduled
         }
@@ -3423,8 +4526,18 @@ final class CVRWorkflowStore: ObservableObject {
     @discardableResult
     func finishSimulationDemo(clearAvionicsSimulation: () -> Void) -> Bool {
         if state.activeFlightRecord == nil {
+            clearIdleCompletedOperationalSessionIfNeeded()
             clearAvionicsSimulation()
             return true
+        }
+        // Never discard a saved Check-In — archive first (same as Avionics OFF).
+        if state.activeFlightRecord?.endingHobbs != nil,
+           state.activeFlightRecord?.endingTacho != nil {
+            completeSimulationFlight()
+            markAvionicsOffAfterShutdown()
+            guard completeEngineShutdownAfterAvionicsOff() else { return false }
+            clearAvionicsSimulation()
+            return state.activeFlightRecord == nil
         }
         completeSimulationFlight()
         guard let flightRecord = state.activeFlightRecord else {
@@ -3436,20 +4549,39 @@ final class CVRWorkflowStore: ObservableObject {
             lastError = "Complete Dispatch and post-flight verification before finishing the simulation demo."
             return false
         }
-        resetForNextFlightIfComplete(archiveCompletedWorkflow: false)
-        clearAvionicsSimulation()
-        return state.activeFlightRecord == nil
+        // No Check-In yet — keep blocking wipe; require Check-In then finalize.
+        lastError = "Save Check-In before finishing the simulation demo so the flight is archived."
+        return false
     }
 
     func resetSimulationWorkflow(clearAvionicsSimulation: () -> Void) {
+        // Prefer archive over discard when Check-In meters already exist.
+        if let flight = state.activeFlightRecord,
+           flight.endingHobbs != nil,
+           flight.endingTacho != nil {
+            completeSimulationFlight()
+            markAvionicsOffAfterShutdown()
+            if !completeEngineShutdownAfterAvionicsOff() {
+                lastError = lastError.isEmpty
+                    ? "Could not archive the checked-in flight before Reset. Fix the archive error first."
+                    : lastError
+                return
+            }
+            clearIdleCompletedOperationalSessionIfNeeded()
+            clearAvionicsSimulation()
+            return
+        }
+        if state.activeFlightRecord != nil || state.activeDispatch != nil {
+            lastError = "Finish or Undispatch the active leg before Reset. Checked-in flights must be archived, not discarded."
+            return
+        }
+        clearIdleCompletedOperationalSessionIfNeeded()
         mutate {
-            $0.activeDispatch = nil
-            $0.activeFlightRecord = nil
             $0.consents = []
             $0.recorderVerifications = []
             $0.flightEvents = []
             $0.flightLegs = []
-            $0.uploadComponents = []
+            $0.uploadComponents.removeAll { $0.componentType != "schedule_duty_sync" }
             $0.discrepancies = []
             $0.selectedTab = .scheduled
         }
@@ -3478,6 +4610,9 @@ final class CVRWorkflowStore: ObservableObject {
     /// Different crew or a PIC role swap requires a new reservation (same rule as online schedule).
     var isReservationCrewLocked: Bool {
         guard let session = state.operationalSession else { return false }
+        if session.engineSessionContinuityActive {
+            return true
+        }
         if session.plannedLegs.contains(where: {
             let status = $0.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             return status == "checked_in"
@@ -3688,6 +4823,9 @@ final class CVRWorkflowStore: ObservableObject {
         component.retryable = retryable
         component.userActionRequired = userActionRequired
         component.requestID = requestID
+        if component.componentType == "schedule_duty_sync", state == .serverVerified {
+            component.reconciliationRequired = false
+        }
     }
 
     private func archiveActiveWorkflow() -> Bool {
@@ -3700,6 +4838,10 @@ final class CVRWorkflowStore: ObservableObject {
             return true
         }
         let components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
+        var completedSession = state.activeOperationalSession
+        if completedSession?.modelVersion == CVROperationalSessionRecord.modelVersion {
+            completedSession?.state = .finalized
+        }
         let archive = CVRWorkflowArchiveRecord(
             id: UUID().uuidString,
             schemaVersion: 2,
@@ -3717,7 +4859,8 @@ final class CVRWorkflowStore: ObservableObject {
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
             status: !components.isEmpty && components.allSatisfy { $0.state == .serverVerified }
                 ? .serverVerified
-                : .uploadPending
+                : .uploadPending,
+            operationalSession: completedSession
         )
         do {
             var updated = archives
@@ -3828,6 +4971,23 @@ final class CVRWorkflowStore: ObservableObject {
         var changed = false
         for index in state.uploadComponents.indices {
             let component = state.uploadComponents[index]
+            if component.componentType == "schedule_duty_sync" {
+                if component.errorCode == "IMMUTABLE_CONFLICT"
+                    && component.lastError.localizedCaseInsensitiveContains(
+                        "Unsupported reconciliation component type"
+                    ) {
+                    let wasAccepted = component.serverReceiptID?.isEmpty == false
+                    state.uploadComponents[index].state = wasAccepted ? .serverVerified : .queued
+                    state.uploadComponents[index].progress = wasAccepted ? 1 : 0
+                    state.uploadComponents[index].lastError = ""
+                    state.uploadComponents[index].errorCode = nil
+                    state.uploadComponents[index].retryable = wasAccepted ? false : true
+                    state.uploadComponents[index].userActionRequired = false
+                    state.uploadComponents[index].reconciliationRequired = false
+                    changed = true
+                }
+                continue
+            }
             guard component.componentType != "garmin_csv" else { continue }
             if component.state == .serverVerified && !Self.hasCompleteVerificationMetadata(component) {
                 state.uploadComponents[index].state = .queued
@@ -4210,6 +5370,39 @@ final class CVRWorkflowStore: ObservableObject {
         return dir.appendingPathComponent("workflow-archives.json")
     }
 
+    private func voidedFlightRecordIDsURL() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let dir = base.appendingPathComponent("IPCACVRUnit", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("voided-flight-log-ids.json")
+    }
+
+    private func loadVoidedFlightRecordIDs() {
+        do {
+            let url = try voidedFlightRecordIDsURL()
+            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            let ids = try decoder.decode([String].self, from: Data(contentsOf: url))
+            voidedFlightRecordIDs = Set(ids.map { $0.lowercased() })
+        } catch {
+            // Non-fatal — void list starts empty.
+        }
+    }
+
+    private func persistVoidedFlightRecordIDs() {
+        do {
+            let url = try voidedFlightRecordIDsURL()
+            let data = try encoder.encode(Array(voidedFlightRecordIDs).sorted())
+            try data.write(to: url, options: [.atomic])
+        } catch {
+            lastError = "Could not persist voided Log IDs: \(error.localizedDescription)"
+        }
+    }
+
     private func garminImportDirectory() throws -> URL {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -4242,6 +5435,19 @@ final class CVRWorkflowStore: ObservableObject {
         guard state.operationalSession != nil else { return }
         _ = mutate {
             var session = $0.operationalSession ?? .empty
+            // Older builds marked a leg Active merely by opening its Dispatch
+            // editor. No operational transition exists until a Flight Record is
+            // created by DISPATCH FLIGHT, so restore those drafts to Scheduled.
+            if $0.activeDispatch != nil && $0.activeFlightRecord == nil {
+                for index in session.plannedLegs.indices {
+                    let status = session.plannedLegs[index].status
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+                    if status == "active" || status == "dispatched" {
+                        session.plannedLegs[index].status = "planned"
+                    }
+                }
+            }
             Self.sanitizePlannedLegStatuses(in: &session)
             $0.operationalSession = session
         }
@@ -4334,6 +5540,101 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    private static func seedPlannedLegsFromScheduledReservation(
+        into session: inout CVROperationalSessionContext,
+        openingSession: CVRScheduledSession,
+        reservationSessions: [CVRScheduledSession],
+        registration: String
+    ) {
+        let reservationKey = (openingSession.reservationUUID ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        var siblings: [CVRScheduledSession]
+        if !reservationKey.isEmpty {
+            siblings = reservationSessions.filter {
+                ($0.reservationUUID ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() == reservationKey
+            }
+            if siblings.isEmpty {
+                siblings = [openingSession]
+            }
+        } else if !reservationSessions.isEmpty {
+            siblings = reservationSessions
+        } else {
+            siblings = [openingSession]
+        }
+
+        siblings.sort(by: CVRScheduledReservationGrouping.compareScheduledSessions)
+        if !reservationKey.isEmpty {
+            session.reservationUUID = reservationKey
+        }
+
+        let seeded: [CVRPlannedLegRecord] = siblings.enumerated().map { index, sibling in
+            let legUUID = sibling.legUUID.flatMap { CVROperationalIdentityLocal.normalizeUUID($0) }
+                ?? UUID().uuidString.lowercased()
+            return CVRPlannedLegRecord(
+                id: legUUID,
+                reservationUUID: session.reservationUUID ?? reservationKey,
+                legUUID: legUUID,
+                sequenceNumber: sibling.legSequenceNumber ?? (index + 1),
+                departureAirport: CVROperationalIdentityLocal.normalizeAirport(sibling.plannedDepartureAirport),
+                destinationAirport: CVROperationalIdentityLocal.normalizeAirport(sibling.plannedDestinationAirport),
+                missionCode: sibling.missionCode,
+                tailNumber: registration.isEmpty ? sibling.aircraftRegistration : registration,
+                schedulerRecordID: sibling.schedulerRecordID,
+                plannedStartAt: sibling.dateTime(sibling.scheduledStartTime),
+                plannedEndAt: sibling.dateTime(sibling.scheduledEndTime),
+                status: "planned"
+            )
+        }
+        // Contiguous 1-based sequence after stable sort.
+        let normalizedSeeded = seeded.enumerated().map { index, leg -> CVRPlannedLegRecord in
+            var copy = leg
+            copy.sequenceNumber = index + 1
+            return copy
+        }
+
+        guard !normalizedSeeded.isEmpty else { return }
+
+        if session.plannedLegs.isEmpty {
+            session.plannedLegs = normalizedSeeded
+            return
+        }
+
+        let existingReservation = (session.reservationUUID ?? "").lowercased()
+        if !reservationKey.isEmpty, existingReservation == reservationKey || existingReservation.isEmpty {
+            session.reservationUUID = reservationKey.isEmpty ? session.reservationUUID : reservationKey
+            var byUUID: [String: CVRPlannedLegRecord] = [:]
+            for leg in session.plannedLegs {
+                let key = CVROperationalIdentityLocal.normalizeUUID(leg.legUUID) ?? leg.legUUID.lowercased()
+                byUUID[key] = leg
+            }
+            session.plannedLegs = normalizedSeeded.map { seededLeg in
+                let key = CVROperationalIdentityLocal.normalizeUUID(seededLeg.legUUID)
+                    ?? seededLeg.legUUID.lowercased()
+                if var existing = byUUID[key] {
+                    // Keep checked_in / cancelled progress; refresh route metadata from schedule.
+                    existing.sequenceNumber = seededLeg.sequenceNumber
+                    existing.departureAirport = seededLeg.departureAirport
+                    existing.destinationAirport = seededLeg.destinationAirport
+                    existing.missionCode = seededLeg.missionCode
+                    existing.schedulerRecordID = seededLeg.schedulerRecordID ?? existing.schedulerRecordID
+                    existing.plannedStartAt = seededLeg.plannedStartAt ?? existing.plannedStartAt
+                    existing.plannedEndAt = seededLeg.plannedEndAt ?? existing.plannedEndAt
+                    return existing
+                }
+                return seededLeg
+            }
+            return
+        }
+
+        if !session.engineSessionContinuityActive {
+            session.plannedLegs = normalizedSeeded
+        }
+    }
+
     private static func activatePlannedLeg(_ legUUID: String, in session: inout CVROperationalSessionContext) {
         let normalized = CVROperationalIdentityLocal.normalizeUUID(legUUID) ?? legUUID.lowercased()
         for index in session.plannedLegs.indices {
@@ -4342,10 +5643,12 @@ final class CVRWorkflowStore: ObservableObject {
             let status = session.plannedLegs[index].status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if legNormalized == normalized {
                 if status != "checked_in" && status != "cancelled" && status != "canceled" {
-                    session.plannedLegs[index].status = "active"
+                    // Opening the Dispatch editor only selects the planned leg.
+                    // DISPATCH FLIGHT performs the actual status transition.
+                    session.plannedLegs[index].status = "planned"
                 }
                 session.currentLegIndex = session.plannedLegs[index].sequenceNumber
-            } else if status == "active" {
+            } else if status == "active" || status == "dispatched" {
                 session.plannedLegs[index].status = "planned"
             }
         }
@@ -4388,7 +5691,7 @@ final class CVRWorkflowStore: ObservableObject {
         for index in session.plannedLegs.indices {
             let status = session.plannedLegs[index].status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if status == "dispatched" {
-                session.plannedLegs[index].status = "active"
+                session.plannedLegs[index].status = "planned"
             }
         }
         sanitizePlannedLegStatuses(in: &session)
@@ -4493,6 +5796,22 @@ final class CVRWorkflowStore: ObservableObject {
             return false
         }
 
+        if dispatch.operationalSessionModelVersion == CVROperationalSessionRecord.modelVersion {
+            workflow.consents.removeAll { $0.dispatchID == dispatch.id }
+            dispatch.consentStatus = "not_required"
+            workflow.activeDispatch = dispatch
+            for index in workflow.uploadComponents.indices
+            where workflow.uploadComponents[index].componentType == "dispatch_metadata"
+                && workflow.uploadComponents[index].lastError.localizedCaseInsensitiveContains("consent") {
+                workflow.uploadComponents[index].requestPayloadSnapshot = nil
+                workflow.uploadComponents[index].reconciliationRequired = true
+                workflow.uploadComponents[index].state = .queued
+                workflow.uploadComponents[index].progress = 0
+                workflow.uploadComponents[index].lastError = "Dispatch is queued for server verification."
+            }
+            return true
+        }
+
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let repairedConsents = ensuredOperationalConsents(
             for: dispatch,
@@ -4539,6 +5858,20 @@ final class CVRWorkflowStore: ObservableObject {
         let hasDispatchUpload = archive.uploadComponents.contains { $0.componentType == "dispatch_metadata" }
         guard !consentFailedComponents.isEmpty || (hasDispatchUpload && missingCrewConsents) else {
             return false
+        }
+
+        if archive.dispatch.operationalSessionModelVersion == CVROperationalSessionRecord.modelVersion {
+            archive.consents.removeAll { $0.dispatchID == archive.dispatch.id }
+            archive.dispatch.consentStatus = "not_required"
+            for index in archive.uploadComponents.indices
+            where archive.uploadComponents[index].componentType == "dispatch_metadata" {
+                archive.uploadComponents[index].requestPayloadSnapshot = nil
+                archive.uploadComponents[index].reconciliationRequired = true
+                archive.uploadComponents[index].state = .queued
+                archive.uploadComponents[index].progress = 0
+                archive.uploadComponents[index].lastError = "Dispatch is queued for server verification."
+            }
+            return true
         }
 
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -4593,7 +5926,13 @@ final class CVRWorkflowStore: ObservableObject {
 
     private static func materialSignature(_ dispatch: CVRDispatchRecord) -> String {
         let crewSignature = dispatch.crew
-            .map { assignment in assignment.personName + ":" + assignment.role.rawValue }
+            .map { assignment in
+                assignment.personName
+                    + ":" + assignment.role.rawValue
+                    + ":" + assignment.effectivePilotFunction.rawValue
+                    + ":" + String(assignment.hasPICResponsibility)
+            }
+            .sorted()
             .joined(separator: "|")
         let values: [String] = [
             dispatch.tailNumber,
@@ -4611,6 +5950,445 @@ final class CVRWorkflowStore: ObservableObject {
         return values.joined(separator: "#")
     }
 
+    /// Duty-only signature. Route, meters, fuel, oil and remarks intentionally do
+    /// not create a new reservation.
+    private static func dutyMaterialSignature(_ dispatch: CVRDispatchRecord) -> String {
+        let crew = dispatch.crew.map { assignment in
+            let identity = assignment.personID.map(String.init)
+                ?? assignment.personName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return [
+                identity,
+                assignment.role.rawValue,
+                assignment.effectivePilotFunction.rawValue,
+                assignment.hasPICResponsibility ? "1" : "0",
+                assignment.role == .student && assignment.effectivePilotFunction == .pilotFlying ? "1" : "0",
+            ].joined(separator: ":")
+        }.sorted().joined(separator: "|")
+        return [
+            String(dispatch.organizationID),
+            String(dispatch.aircraftID ?? 0),
+            normalizedTail(dispatch.tailNumber),
+            dispatch.operationalIdentity?.reservationType.lowercased() ?? "flight_training",
+            dispatch.missionCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+            crew,
+        ].joined(separator: "#")
+    }
+
+    /// Queue a brand-new Local Dispatch reservation for idempotent scheduler creation.
+    /// The frozen snapshot is authoritative across offline retries and app restarts.
+    private static func queueLocalScheduleCreation(
+        dispatch: inout CVRDispatchRecord,
+        state: inout CVRWorkflowState
+    ) {
+        guard let schedulerRecordID = dispatch.schedulerRecordID,
+              let reservationUUID = dispatch.reservationUUID,
+              schedulerRecordID.lowercased() == reservationUUID.lowercased(),
+              let start = dispatch.scheduledStartTime,
+              let end = dispatch.scheduledEndTime,
+              end > start,
+              !dispatch.crew.isEmpty else {
+            return
+        }
+        let airports = dispatch.informativeRouteAirports ?? []
+        let legUUIDs = dispatch.informativePlannedLegUUIDs ?? []
+        var legs: [[String: Any]] = []
+        if airports.count >= 2 {
+            for index in 0..<(airports.count - 1) {
+                legs.append([
+                    "leg_uuid": index < legUUIDs.count ? legUUIDs[index] : UUID().uuidString.lowercased(),
+                    "sequence_number": index + 1,
+                    "origin_airport": airports[index],
+                    "destination_airport": airports[index + 1],
+                ])
+            }
+        }
+        let crew: [[String: Any]] = dispatch.crew.map { assignment in
+            var member: [String: Any] = [
+                "person_name": assignment.personName,
+                "role": assignment.role.rawValue,
+                "pilot_function": assignment.effectivePilotFunction.rawValue,
+                "is_pic": assignment.hasPICResponsibility,
+                "is_primary_customer": assignment.role == .student
+                    && assignment.effectivePilotFunction == .pilotFlying,
+            ]
+            if let personID = assignment.personID {
+                member["user_id"] = personID
+            }
+            return member
+        }
+        let componentID = "schedule-duty-\(schedulerRecordID.lowercased())"
+        let payload: [String: Any] = [
+            "operation": "create",
+            "request_id": componentID,
+            "scheduler_record_id": schedulerRecordID.lowercased(),
+            "reservation_uuid": reservationUUID.lowercased(),
+            "aircraft_id": dispatch.aircraftID ?? 0,
+            "aircraft_registration": dispatch.tailNumber,
+            "reservation_type": "flight_training",
+            "mission_code": dispatch.missionCode,
+            "scheduled_date": scheduleLocalDateString(start),
+            "scheduled_start_time": scheduleLocalTimestampString(start),
+            "scheduled_end_time": scheduleLocalTimestampString(end),
+            "crew": crew,
+            "legs": legs,
+        ]
+        guard let snapshot = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+            return
+        }
+        let component = CVRUploadComponentRecord(
+            id: componentID,
+            serverID: nil,
+            flightRecordID: dispatch.id,
+            componentType: "schedule_duty_sync",
+            localFilePath: nil,
+            sha256: nil,
+            byteCount: Int64(snapshot.count),
+            state: .queued,
+            progress: 0,
+            attemptCount: 0,
+            lastError: "",
+            lastAttemptAt: nil,
+            serverVerificationAt: nil,
+            serverReceiptID: nil,
+            requestPayloadSnapshot: snapshot
+        )
+        state.uploadComponents.removeAll {
+            $0.componentType == "schedule_duty_sync" && $0.flightRecordID == dispatch.id
+        }
+        state.uploadComponents.append(component)
+    }
+
+    private static func queueScheduledDutyWindowUpdate(
+        dispatch: CVRDispatchRecord,
+        state: inout CVRWorkflowState
+    ) {
+        guard let schedulerRecordID = dispatch.schedulerRecordID?.lowercased(),
+              let reservationUUID = dispatch.reservationUUID?.lowercased(),
+              schedulerRecordID == reservationUUID,
+              let start = dispatch.scheduledStartTime,
+              let end = dispatch.scheduledEndTime,
+              end > start else {
+            return
+        }
+        let routeAirports = dispatch.informativeRouteAirports ?? []
+        let routeLegs: [[String: Any]] = routeAirports.count >= 2
+            ? (0..<(routeAirports.count - 1)).map { index in
+                let legUUIDs = dispatch.informativePlannedLegUUIDs ?? []
+                return [
+                    "sequence_number": index + 1,
+                    "leg_uuid": index < legUUIDs.count
+                        ? legUUIDs[index]
+                        : UUID().uuidString.lowercased(),
+                    "origin_airport": routeAirports[index],
+                    "destination_airport": routeAirports[index + 1],
+                ] as [String: Any]
+            }
+            : []
+        let mutableIndex = state.uploadComponents.firstIndex { component in
+            guard component.componentType == "schedule_duty_sync",
+                  component.flightRecordID == dispatch.id,
+                  component.state != .serverVerified,
+                  component.state != .uploaded,
+                  component.state != .uploading,
+                  component.state != .superseded,
+                  let data = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return false
+            }
+            return (payload["scheduler_record_id"] as? String)?.lowercased() == schedulerRecordID
+        }
+        if let mutableIndex,
+           let data = state.uploadComponents[mutableIndex].requestPayloadSnapshot,
+           var payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            payload["scheduled_date"] = scheduleLocalDateString(start)
+            payload["scheduled_start_time"] = scheduleLocalTimestampString(start)
+            payload["scheduled_end_time"] = scheduleLocalTimestampString(end)
+            payload["legs"] = routeLegs
+            guard let snapshot = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+                return
+            }
+            state.uploadComponents[mutableIndex].requestPayloadSnapshot = snapshot
+            state.uploadComponents[mutableIndex].byteCount = Int64(snapshot.count)
+            state.uploadComponents[mutableIndex].state = .queued
+            state.uploadComponents[mutableIndex].progress = 0
+            state.uploadComponents[mutableIndex].lastError = ""
+            state.uploadComponents[mutableIndex].errorCode = nil
+            state.uploadComponents[mutableIndex].retryable = nil
+            state.uploadComponents[mutableIndex].userActionRequired = nil
+            return
+        }
+
+        let componentID = "schedule-window-\(UUID().uuidString.lowercased())"
+        let payload: [String: Any] = [
+            "operation": "update_window",
+            "request_id": componentID,
+            "scheduler_record_id": schedulerRecordID,
+            "reservation_uuid": reservationUUID,
+            "aircraft_id": dispatch.aircraftID ?? 0,
+            "scheduled_date": scheduleLocalDateString(start),
+            "scheduled_start_time": scheduleLocalTimestampString(start),
+            "scheduled_end_time": scheduleLocalTimestampString(end),
+            "legs": routeLegs,
+        ]
+        guard let snapshot = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+            return
+        }
+        state.uploadComponents.removeAll { component in
+            guard component.componentType == "schedule_duty_sync",
+                  component.flightRecordID == dispatch.id,
+                  component.state != .serverVerified,
+                  component.state != .uploaded,
+                  let data = component.requestPayloadSnapshot,
+                  let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return false
+            }
+            return (existing["operation"] as? String) == "update_window"
+        }
+        state.uploadComponents.append(CVRUploadComponentRecord(
+            id: componentID,
+            serverID: nil,
+            flightRecordID: dispatch.id,
+            componentType: "schedule_duty_sync",
+            localFilePath: nil,
+            sha256: nil,
+            byteCount: Int64(snapshot.count),
+            state: .queued,
+            progress: 0,
+            attemptCount: 0,
+            lastError: "",
+            lastAttemptAt: nil,
+            serverVerificationAt: nil,
+            serverReceiptID: nil,
+            requestPayloadSnapshot: snapshot
+        ))
+    }
+
+    private static func scheduleLocalDateString(_ date: Date) -> String {
+        scheduleLocalFormatter("yyyy-MM-dd").string(from: date)
+    }
+
+    private static func scheduleLocalTimestampString(_ date: Date) -> String {
+        scheduleLocalFormatter("yyyy-MM-dd HH:mm:ss").string(from: date)
+    }
+
+    private static func scheduleLocalFormatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "America/Los_Angeles")
+        formatter.dateFormat = format
+        return formatter
+    }
+
+    /// A material edit to an online scheduled Duty Assignment creates a new local
+    /// reservation immediately and queues an idempotent server supersession. The
+    /// queue is deliberately independent from Dispatch confirmation.
+    private static func remintAndQueueScheduledDutyReplacement(
+        dispatch: inout CVRDispatchRecord,
+        state: inout CVRWorkflowState
+    ) {
+        guard state.activeFlightRecord == nil else { return }
+        let currentScheduler = dispatch.schedulerRecordID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        guard !currentScheduler.isEmpty else { return }
+
+        let hasUnsynchronizedLocalCreate = state.uploadComponents.contains { component in
+            guard component.componentType == "schedule_duty_sync",
+                  component.flightRecordID == dispatch.id,
+                  component.state != .serverVerified,
+                  component.state != .uploaded,
+                  let data = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return false
+            }
+            return (payload["operation"] as? String) == "create"
+                && (payload["scheduler_record_id"] as? String)?.lowercased() == currentScheduler
+        }
+        if hasUnsynchronizedLocalCreate {
+            // The original local draft never existed online. Retire its queued
+            // identity and freeze a fresh create instead of superseding a row
+            // the server cannot possibly find.
+            let replacementUUID = UUID().uuidString.lowercased()
+            dispatch.schedulerRecordID = replacementUUID
+            dispatch.reservationUUID = replacementUUID
+            dispatch.supersedesSchedulerRecordID = nil
+            dispatch.supersedesReservationUUID = nil
+            let routeSegmentCount = max(0, (dispatch.informativeRouteAirports?.count ?? 0) - 1)
+            dispatch.informativePlannedLegUUIDs = (0..<routeSegmentCount).map { _ in
+                UUID().uuidString.lowercased()
+            }
+            if var session = state.operationalSession {
+                session.reservationUUID = replacementUUID
+                for index in session.plannedLegs.indices {
+                    let legUUID = UUID().uuidString.lowercased()
+                    session.plannedLegs[index].id = legUUID
+                    session.plannedLegs[index].reservationUUID = replacementUUID
+                    session.plannedLegs[index].legUUID = legUUID
+                    session.plannedLegs[index].schedulerRecordID = replacementUUID
+                }
+                state.operationalSession = session
+            }
+            queueLocalScheduleCreation(dispatch: &dispatch, state: &state)
+            return
+        }
+
+        let priorReplacementWasAccepted = state.uploadComponents.contains { component in
+            guard component.componentType == "schedule_duty_sync",
+                  component.flightRecordID == dispatch.id,
+                  component.state == .serverVerified || component.state == .uploaded,
+                  let data = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let replacement = payload["scheduler_record_id"] as? String else {
+                return false
+            }
+            return replacement.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == currentScheduler
+        }
+        if priorReplacementWasAccepted {
+            // A later material edit is a new Duty replacement in the chain.
+            // Never reuse the UUID that the server has already accepted.
+            dispatch.supersedesSchedulerRecordID = nil
+            dispatch.supersedesReservationUUID = nil
+        }
+
+        let supersededScheduler = dispatch.supersedesSchedulerRecordID ?? currentScheduler
+        let supersededReservation = dispatch.supersedesReservationUUID
+            ?? dispatch.operationalIdentity?.reservationUUID
+            ?? state.operationalSession?.reservationUUID
+            ?? currentScheduler
+
+        if dispatch.supersedesSchedulerRecordID == nil {
+            let replacementUUID = UUID().uuidString.lowercased()
+            dispatch.supersedesSchedulerRecordID = supersededScheduler
+            dispatch.supersedesReservationUUID = supersededReservation.lowercased()
+            dispatch.schedulerRecordID = replacementUUID
+            dispatch.reservationUUID = replacementUUID
+            let routeSegmentCount = max(0, (dispatch.informativeRouteAirports?.count ?? 0) - 1)
+            dispatch.informativePlannedLegUUIDs = (0..<routeSegmentCount).map { _ in
+                UUID().uuidString.lowercased()
+            }
+
+            var session = state.operationalSession ?? .empty
+            session.reservationUUID = replacementUUID
+            for index in session.plannedLegs.indices {
+                let legUUID = UUID().uuidString.lowercased()
+                session.plannedLegs[index].id = legUUID
+                session.plannedLegs[index].reservationUUID = replacementUUID
+                session.plannedLegs[index].legUUID = legUUID
+                session.plannedLegs[index].schedulerRecordID = replacementUUID
+                session.plannedLegs[index].status = "planned"
+            }
+            state.operationalSession = session
+
+            let firstLeg = session.plannedLegs.sorted { $0.sequenceNumber < $1.sequenceNumber }.first
+            if dispatch.operationalSessionModelVersion != CVROperationalSessionRecord.modelVersion,
+               let firstLeg,
+               let identity = try? CVROperationalIdentityLocal.createOfflineBundle(
+                   organizationID: dispatch.organizationID,
+                   dispatchUUID: dispatch.id,
+                   reservationType: dispatch.operationalIdentity?.reservationType ?? "flight_training",
+                   activityDomain: "flight",
+                   organizationTimezoneIANA: dispatch.operationalIdentity?.organizationTimezoneIANA
+                       ?? TimeZone.current.identifier,
+                   originAirport: firstLeg.departureAirport,
+                   destinationAirport: firstLeg.destinationAirport,
+                   schedulerRecordID: replacementUUID,
+                   reservationUUID: replacementUUID,
+                   legUUID: firstLeg.legUUID
+               ) {
+                dispatch.operationalIdentity = identity
+            }
+        }
+
+        guard let replacementScheduler = dispatch.schedulerRecordID,
+              let replacementReservation = dispatch.reservationUUID
+                ?? dispatch.operationalIdentity?.reservationUUID,
+              let session = state.operationalSession else { return }
+        let legs: [[String: Any]]
+        if !session.plannedLegs.isEmpty {
+            legs = session.plannedLegs.sorted { $0.sequenceNumber < $1.sequenceNumber }.map { leg in
+                [
+                    "leg_uuid": leg.legUUID,
+                    "sequence_number": leg.sequenceNumber,
+                    "origin_airport": leg.departureAirport,
+                    "destination_airport": leg.destinationAirport,
+                ] as [String: Any]
+            }
+        } else {
+            let airports = dispatch.informativeRouteAirports ?? []
+            let legUUIDs = dispatch.informativePlannedLegUUIDs ?? []
+            var generatedLegs: [[String: Any]] = []
+            if airports.count >= 2 {
+                for index in 0..<(airports.count - 1) {
+                    let legUUID = index < legUUIDs.count
+                        ? legUUIDs[index]
+                        : UUID().uuidString.lowercased()
+                    let leg: [String: Any] = [
+                    "leg_uuid": legUUID,
+                    "sequence_number": index + 1,
+                    "origin_airport": airports[index],
+                    "destination_airport": airports[index + 1],
+                    ]
+                    generatedLegs.append(leg)
+                }
+            }
+            legs = generatedLegs
+        }
+        let crew = dispatch.crew.map { assignment in
+            var member: [String: Any] = [
+                "person_name": assignment.personName,
+                "role": assignment.role.rawValue,
+                "pilot_function": assignment.effectivePilotFunction.rawValue,
+                "is_pic": assignment.hasPICResponsibility,
+                "is_primary_customer": assignment.role == .student
+                    && assignment.effectivePilotFunction == .pilotFlying,
+            ]
+            if let personID = assignment.personID {
+                member["user_id"] = personID
+            }
+            return member
+        }
+        let componentID = "schedule-duty-\(replacementScheduler)"
+        let payload: [String: Any] = [
+            "request_id": componentID,
+            "supersedes_scheduler_record_id": supersededScheduler,
+            "supersedes_reservation_uuid": supersededReservation,
+            "scheduler_record_id": replacementScheduler,
+            "reservation_uuid": replacementReservation,
+            "aircraft_id": dispatch.aircraftID ?? 0,
+            "aircraft_registration": dispatch.tailNumber,
+            "reservation_type": dispatch.operationalIdentity?.reservationType ?? "flight_training",
+            "mission_code": dispatch.missionCode,
+            "crew": crew,
+            "legs": legs,
+        ]
+        guard let snapshot = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+            return
+        }
+        let component = CVRUploadComponentRecord(
+            id: componentID,
+            serverID: nil,
+            flightRecordID: dispatch.id,
+            componentType: "schedule_duty_sync",
+            localFilePath: nil,
+            sha256: nil,
+            byteCount: Int64(snapshot.count),
+            state: .queued,
+            progress: 0,
+            attemptCount: 0,
+            lastError: "",
+            lastAttemptAt: nil,
+            serverVerificationAt: nil,
+            serverReceiptID: nil,
+            requestPayloadSnapshot: snapshot
+        )
+        state.uploadComponents.removeAll {
+            $0.componentType == "schedule_duty_sync" && $0.flightRecordID == dispatch.id
+        }
+        state.uploadComponents.append(component)
+    }
+
     private static func crewRole(from value: String) -> CVRCrewRole {
         let normalized = value
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4621,5 +6399,10 @@ final class CVRWorkflowStore: ObservableObject {
             $0.rawValue.replacingOccurrences(of: "_", with: "").lowercased() == normalized
                 || $0.label.replacingOccurrences(of: " ", with: "").lowercased() == normalized
         } ?? .unknown
+    }
+
+    private static func pilotFunction(from value: String?) -> CVRPilotFunction {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "NONE"
+        return CVRPilotFunction(rawValue: normalized) ?? .none
     }
 }

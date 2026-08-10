@@ -44,6 +44,8 @@ struct CVRScheduledCrewMember: Codable, Equatable {
     var personID: Int?
     var personName: String
     var role: String
+    var pilotFunction: String?
+    var isPIC: Bool?
 
     enum CodingKeys: String, CodingKey {
         case personID = "person_id"
@@ -51,6 +53,8 @@ struct CVRScheduledCrewMember: Codable, Equatable {
         case personName = "person_name"
         case name
         case role
+        case pilotFunction = "pilot_function"
+        case isPIC = "is_pic"
     }
 
     init(from decoder: Decoder) throws {
@@ -61,6 +65,8 @@ struct CVRScheduledCrewMember: Codable, Equatable {
             ?? container.decodeIfPresent(String.self, forKey: .name)
             ?? ""
         role = try container.decodeIfPresent(String.self, forKey: .role) ?? "unknown"
+        pilotFunction = try container.decodeIfPresent(String.self, forKey: .pilotFunction)
+        isPIC = try container.decodeIfPresent(Bool.self, forKey: .isPIC)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -68,6 +74,8 @@ struct CVRScheduledCrewMember: Codable, Equatable {
         try container.encodeIfPresent(personID, forKey: .personID)
         try container.encode(personName, forKey: .personName)
         try container.encode(role, forKey: .role)
+        try container.encodeIfPresent(pilotFunction, forKey: .pilotFunction)
+        try container.encodeIfPresent(isPIC, forKey: .isPIC)
     }
 }
 
@@ -79,6 +87,7 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
 
     private struct MissionReference: Decodable {
         var code: String
+        var name: String?
     }
 
     var schedulerRecordID: String
@@ -88,6 +97,7 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
     var aircraftID: Int
     var aircraftRegistration: String
     var missionCode: String
+    var missionDescription: String = ""
     var plannedDepartureAirport: String
     var plannedDestinationAirport: String
     var crew: [CVRScheduledCrewMember]
@@ -95,9 +105,12 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
     /// Phase 2B dual-read / Phase 3 multi-leg. Optional for legacy cache compatibility.
     var reservationUUID: String?
     var legUUID: String?
+    /// 1-based hop order when the server expands one reservation into N device sessions.
+    var legSequenceNumber: Int?
     var identitySource: String?
 
-    var id: String { schedulerRecordID }
+    /// Multi-leg expansions share `scheduler_record_id`; prefer `leg_uuid` for identity.
+    var id: String { legUUID ?? schedulerRecordID }
 
     enum CodingKeys: String, CodingKey {
         case schedulerRecordID = "scheduler_record_id"
@@ -108,6 +121,7 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
         case aircraftRegistration = "aircraft_registration"
         case aircraft
         case missionCode = "mission_code"
+        case missionDescription = "mission_description"
         case mission
         case plannedDepartureAirport = "planned_departure_airport"
         case plannedDestinationAirport = "planned_destination_airport"
@@ -115,6 +129,7 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
         case status
         case reservationUUID = "reservation_uuid"
         case legUUID = "leg_uuid"
+        case legSequenceNumber = "leg_sequence_number"
         case identitySource = "identity_source"
     }
 
@@ -135,12 +150,16 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
             ?? ""
         let missionReference = try container.decodeIfPresent(MissionReference.self, forKey: .mission)
         missionCode = try container.decodeIfPresent(String.self, forKey: .missionCode) ?? missionReference?.code ?? ""
+        missionDescription = try container.decodeIfPresent(String.self, forKey: .missionDescription)
+            ?? missionReference?.name
+            ?? ""
         plannedDepartureAirport = try container.decodeIfPresent(String.self, forKey: .plannedDepartureAirport) ?? ""
         plannedDestinationAirport = try container.decodeIfPresent(String.self, forKey: .plannedDestinationAirport) ?? ""
         crew = try container.decodeIfPresent([CVRScheduledCrewMember].self, forKey: .crew) ?? []
         status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
         reservationUUID = try container.decodeIfPresent(String.self, forKey: .reservationUUID)
         legUUID = try container.decodeIfPresent(String.self, forKey: .legUUID)
+        legSequenceNumber = try container.decodeIfPresent(Int.self, forKey: .legSequenceNumber)
         identitySource = try container.decodeIfPresent(String.self, forKey: .identitySource)
     }
 
@@ -153,12 +172,14 @@ struct CVRScheduledSession: Identifiable, Codable, Equatable {
         try container.encode(aircraftID, forKey: .aircraftID)
         try container.encode(aircraftRegistration, forKey: .aircraftRegistration)
         try container.encode(missionCode, forKey: .missionCode)
+        try container.encode(missionDescription, forKey: .missionDescription)
         try container.encode(plannedDepartureAirport, forKey: .plannedDepartureAirport)
         try container.encode(plannedDestinationAirport, forKey: .plannedDestinationAirport)
         try container.encode(crew, forKey: .crew)
         try container.encode(status, forKey: .status)
         try container.encodeIfPresent(reservationUUID, forKey: .reservationUUID)
         try container.encodeIfPresent(legUUID, forKey: .legUUID)
+        try container.encodeIfPresent(legSequenceNumber, forKey: .legSequenceNumber)
         try container.encodeIfPresent(identitySource, forKey: .identitySource)
     }
 
@@ -214,6 +235,28 @@ struct CVRScheduledReservationGroup: Identifiable, Equatable {
         }
         return unique.isEmpty ? "ROUTE TBD" : unique.joined(separator: " → ")
     }
+
+    var scheduledSession: CVRScheduledSession? {
+        legs.compactMap(\.session).first
+    }
+
+    var crewNames: [String] {
+        scheduledSession?.crew.compactMap { member in
+            let name = member.personName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? nil : name
+        } ?? []
+    }
+
+    var missionDisplay: String {
+        guard let session = scheduledSession else {
+            return legs.first?.missionCode.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+        let code = session.missionCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = session.missionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if code.isEmpty { return description }
+        if description.isEmpty { return code }
+        return "\(code) — \(description)"
+    }
 }
 
 enum CVRScheduledLegSource: String, Codable, Equatable {
@@ -264,16 +307,13 @@ enum CVRScheduledReservationGrouping {
         }
 
         for (reservationUUID, reservationSessions) in byReservation {
-            let ordered = reservationSessions.sorted {
-                ($0.dateTime($0.scheduledStartTime) ?? .distantFuture)
-                    < ($1.dateTime($1.scheduledStartTime) ?? .distantFuture)
-            }
+            let ordered = reservationSessions.sorted(by: Self.compareScheduledSessions)
             guard let first = ordered.first else { continue }
             let day = calendar.startOfDay(for: first.dateTime(nil) ?? Date())
             let legs: [CVRScheduledLegItem] = ordered.enumerated().map { index, session in
                 CVRScheduledLegItem(
-                    id: session.legUUID ?? session.schedulerRecordID,
-                    sequenceNumber: index + 1,
+                    id: session.legUUID ?? "\(session.schedulerRecordID)-\(index + 1)",
+                    sequenceNumber: session.legSequenceNumber ?? (index + 1),
                     departureAirport: session.plannedDepartureAirport,
                     destinationAirport: session.plannedDestinationAirport,
                     missionCode: session.missionCode,
@@ -284,7 +324,7 @@ enum CVRScheduledReservationGrouping {
                     schedulerRecordID: session.schedulerRecordID,
                     source: .scheduledSession,
                     session: session,
-                    status: "scheduled"
+                    status: session.status
                 )
             }
             groups.append(
@@ -320,7 +360,7 @@ enum CVRScheduledReservationGrouping {
                             schedulerRecordID: session.schedulerRecordID,
                             source: .scheduledSession,
                             session: session,
-                            status: "scheduled"
+                            status: session.status
                         )
                     ]
                 )
@@ -373,17 +413,36 @@ enum CVRScheduledReservationGrouping {
             return $0.dayStart < $1.dayStart
         }
     }
+
+    /// Prefer server leg sequence, then start time, then route label for stable multi-leg order.
+    static func compareScheduledSessions(_ lhs: CVRScheduledSession, _ rhs: CVRScheduledSession) -> Bool {
+        let leftSeq = lhs.legSequenceNumber ?? Int.max
+        let rightSeq = rhs.legSequenceNumber ?? Int.max
+        if leftSeq != rightSeq {
+            return leftSeq < rightSeq
+        }
+        let leftStart = lhs.dateTime(lhs.scheduledStartTime) ?? .distantFuture
+        let rightStart = rhs.dateTime(rhs.scheduledStartTime) ?? .distantFuture
+        if leftStart != rightStart {
+            return leftStart < rightStart
+        }
+        let leftRoute = "\(lhs.plannedDepartureAirport)>\(lhs.plannedDestinationAirport)"
+        let rightRoute = "\(rhs.plannedDepartureAirport)>\(rhs.plannedDestinationAirport)"
+        return leftRoute < rightRoute
+    }
 }
 
 struct ScheduledSessionsResponse: Codable {
     var ok: Bool
     var sessions: [CVRScheduledSession]
+    var operationalSessionModelEnabled: Bool?
     var error: String?
 
     enum CodingKeys: String, CodingKey {
         case ok
         case sessions
         case scheduledSessions = "scheduled_sessions"
+        case operationalSessionModelEnabled = "operational_session_model_enabled"
         case error
     }
 
@@ -393,6 +452,10 @@ struct ScheduledSessionsResponse: Codable {
         sessions = try container.decodeIfPresent([CVRScheduledSession].self, forKey: .sessions)
             ?? container.decodeIfPresent([CVRScheduledSession].self, forKey: .scheduledSessions)
             ?? []
+        operationalSessionModelEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .operationalSessionModelEnabled
+        )
         error = try container.decodeIfPresent(String.self, forKey: .error)
     }
 
@@ -400,6 +463,7 @@ struct ScheduledSessionsResponse: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(ok, forKey: .ok)
         try container.encode(sessions, forKey: .sessions)
+        try container.encodeIfPresent(operationalSessionModelEnabled, forKey: .operationalSessionModelEnabled)
         try container.encodeIfPresent(error, forKey: .error)
     }
 }
@@ -464,6 +528,9 @@ final class ScheduledSessionsStore: ObservableObject {
             }
             // Server already scopes by enrolled device aircraft. Replace cache entirely.
             sessions = response.sessions
+            if let enabled = response.operationalSessionModelEnabled {
+                settings.operationalSessionModelEnabled = enabled
+            }
             try JSONEncoder().encode(sessions).write(to: cacheURL(), options: [.atomic])
             lastError = ""
         } catch {

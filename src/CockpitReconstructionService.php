@@ -10,6 +10,7 @@ require_once __DIR__ . '/CockpitAircraftService.php';
 require_once __DIR__ . '/AircraftSettingsService.php';
 require_once __DIR__ . '/AdsbTrafficArchiveService.php';
 require_once __DIR__ . '/LocalTrafficArchiveRepository.php';
+require_once __DIR__ . '/FlightExerciseIdentificationService.php';
 require_once __DIR__ . '/tv_adsb_status.php';
 
 /**
@@ -362,6 +363,21 @@ final class CockpitReconstructionService
             $this->pdo->commit();
             $inTransaction = false;
 
+            // Identify exercises after derived samples exist (markers + transcript + CSV).
+            // ACS/SOP evaluation stays disabled; this only names maneuvers for Events.
+            try {
+                $exerciseService = new FlightExerciseIdentificationService($this->pdo);
+                if ($exerciseService->tablesPresent()) {
+                    $telemetry = $replayResult !== null && isset($replayResult['samples']) && is_array($replayResult['samples'])
+                        ? $exerciseService->slimTelemetrySamples($replayResult['samples'], 5)
+                        : array();
+                    $exerciseService->identifyForRecording($recording, $telemetry);
+                }
+            } catch (Throwable $exerciseError) {
+                // Identification must never fail reconstruction readiness.
+                error_log('Flight exercise identification failed for recording ' . $recordingId . ': ' . $exerciseError->getMessage());
+            }
+
             $totalDuration = round(microtime(true) - $runStarted, 3);
             $readyMessage = 'Reconstruction complete: '
                 . number_format(count($samples)) . ' canonical samples'
@@ -690,6 +706,10 @@ final class CockpitReconstructionService
         $warnings = isset($diagnostics['warnings']) && is_array($diagnostics['warnings']) ? $diagnostics['warnings'] : array();
         $aircraftSettings = (new AircraftSettingsService($this->pdo))->resolvedForRecording($recording);
         $endpointAirports = $this->replayEndpointAirports($recordingId);
+        $detectedEvents = $this->eventRows($recordingId);
+        $crewEvents = $this->crewEventRowsForRecording($recording);
+        $identifiedExercises = $this->identifiedExerciseRowsForRecording($recording);
+        $replayActions = $this->buildReplayActions($recording, $detectedEvents, $crewEvents, $identifiedExercises);
 
         return array(
             'ok' => true,
@@ -699,6 +719,7 @@ final class CockpitReconstructionService
                 'recording_id' => (string)$recording['recording_uid'],
                 'duration' => (float)($recording['duration_seconds'] ?? 0),
                 'started_at' => $recording['started_at'] ?? null,
+                'flight_session_uid' => (string)($recording['flight_session_uid'] ?? ''),
                 'aircraft' => array(
                     'registration' => (string)($recording['aircraft_registration'] ?? ''),
                     'display_name' => (string)($recording['aircraft_display_name'] ?? ''),
@@ -726,8 +747,41 @@ final class CockpitReconstructionService
             'diagnostics' => $diagnostics,
             'warnings' => $warnings,
             'phases' => $this->phaseRows($recordingId),
-            'events' => $this->eventRows($recordingId),
+            'events' => $detectedEvents,
+            'crew_events' => $crewEvents,
+            'identified_exercises' => $identifiedExercises,
+            'replay_actions' => $replayActions,
         );
+    }
+
+    /**
+     * Load stored exercise IDs; lazily identify when catalog is present but no rows yet.
+     *
+     * @param array<string,mixed> $recording
+     * @return list<array<string,mixed>>
+     */
+    public function identifiedExerciseRowsForRecording(array $recording): array
+    {
+        $recordingId = (int)($recording['id'] ?? 0);
+        if ($recordingId <= 0) {
+            return array();
+        }
+        try {
+            $service = new FlightExerciseIdentificationService($this->pdo);
+            if (!$service->tablesPresent()) {
+                return array();
+            }
+            $rows = $service->detectedRowsForRecording($recordingId);
+            if ($rows !== array()) {
+                return $rows;
+            }
+            // Existing ready recordings: identify once without full reconstruct.
+            $service->identifyForRecording($recording);
+            return $service->detectedRowsForRecording($recordingId);
+        } catch (Throwable $e) {
+            error_log('Flight exercise identification load failed for recording ' . $recordingId . ': ' . $e->getMessage());
+            return array();
+        }
     }
 
     public function streamReplayPayloadV2Json(string $id, bool $compact = false, int $sampleStride = 1): void
@@ -1593,6 +1647,298 @@ final class CockpitReconstructionService
     }
 
     /**
+     * Crew-marked in-flight actions linked via recording.flight_session_uid → workflow FR UUID.
+     *
+     * @param array<string,mixed> $recording
+     * @return list<array<string,mixed>>
+     */
+    public function crewEventRowsForRecording(array $recording): array
+    {
+        $flightSessionUid = strtolower(trim((string)($recording['flight_session_uid'] ?? '')));
+        if ($flightSessionUid === '' || !$this->tableExists('ipca_cvr_flight_events')) {
+            return array();
+        }
+
+        $startedAt = trim((string)($recording['started_at'] ?? ''));
+        $startedMs = $startedAt !== '' ? strtotime($startedAt) : false;
+        $duration = max(0.0, (float)($recording['duration_seconds'] ?? 0));
+
+        $stmt = $this->pdo->prepare(
+            'SELECT event_uuid, event_type, timestamp_utc, audio_offset_seconds, creation_method,
+                    source, confidence, latitude, longitude
+               FROM ipca_cvr_flight_events
+              WHERE workflow_flight_record_uuid = ?
+              ORDER BY COALESCE(audio_offset_seconds, 0) ASC, timestamp_utc ASC, id ASC'
+        );
+        $stmt->execute(array($flightSessionUid));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows) || $rows === array()) {
+            return array();
+        }
+
+        $out = array();
+        foreach ($rows as $row) {
+            $eventType = trim((string)($row['event_type'] ?? ''));
+            if ($eventType === '') {
+                continue;
+            }
+            $t = null;
+            if ($row['audio_offset_seconds'] !== null && $row['audio_offset_seconds'] !== '') {
+                $t = (float)$row['audio_offset_seconds'];
+            } elseif ($startedMs !== false) {
+                $eventMs = strtotime((string)($row['timestamp_utc'] ?? ''));
+                if ($eventMs !== false) {
+                    $t = (float)($eventMs - $startedMs);
+                }
+            }
+            if ($t === null || !is_finite($t)) {
+                continue;
+            }
+            if ($duration > 0.0 && ($t < -5.0 || $t > ($duration + 30.0))) {
+                // Keep near-window events; drop clearly out-of-recording noise.
+                continue;
+            }
+            $t = max(0.0, $t);
+            $out[] = array(
+                'event_uuid' => (string)($row['event_uuid'] ?? ''),
+                'event_type' => $eventType,
+                't' => round($t, 3),
+                'timestamp_utc' => (string)($row['timestamp_utc'] ?? ''),
+                'creation_method' => (string)($row['creation_method'] ?? ''),
+                'source' => (string)($row['source'] ?? 'crew'),
+                'confidence' => isset($row['confidence']) ? (float)$row['confidence'] : 1.0,
+                'latitude' => $row['latitude'] !== null ? (float)$row['latitude'] : null,
+                'longitude' => $row['longitude'] !== null ? (float)$row['longitude'] : null,
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * Unified chronological replay actions for Events modal + scrub markers.
+     *
+     * @param array<string,mixed> $recording
+     * @param list<array<string,mixed>>|null $detectedEvents
+     * @param list<array<string,mixed>>|null $crewEvents
+     * @param list<array<string,mixed>>|null $identifiedExercises
+     * @return list<array<string,mixed>>
+     */
+    public function buildReplayActions(
+        array $recording,
+        ?array $detectedEvents = null,
+        ?array $crewEvents = null,
+        ?array $identifiedExercises = null
+    ): array {
+        $recordingId = (int)($recording['id'] ?? 0);
+        $detected = $detectedEvents ?? ($recordingId > 0 ? $this->eventRows($recordingId) : array());
+        $crew = $crewEvents ?? $this->crewEventRowsForRecording($recording);
+        $identified = $identifiedExercises ?? ($recordingId > 0 ? $this->identifiedExerciseRowsForRecording($recording) : array());
+        $actions = array();
+
+        $identifiedMarkerUuids = array();
+        $identifiedWindows = array();
+        foreach ($identified as $exercise) {
+            $uuid = trim((string)($exercise['source_marker_event_uuid'] ?? ''));
+            if ($uuid !== '') {
+                $identifiedMarkerUuids[$uuid] = true;
+            }
+            $t0 = (float)($exercise['t'] ?? $exercise['t_start_seconds'] ?? 0);
+            $t1 = isset($exercise['end']) && $exercise['end'] !== null
+                ? (float)$exercise['end']
+                : (isset($exercise['t_end_seconds']) && $exercise['t_end_seconds'] !== null
+                    ? (float)$exercise['t_end_seconds']
+                    : $t0);
+            $identifiedWindows[] = array(
+                'code' => (string)($exercise['exercise_code'] ?? ''),
+                't0' => $t0,
+                't1' => $t1,
+            );
+            $actions[] = array(
+                'id' => 'exercise:' . ((string)($exercise['detection_uuid'] ?? '') !== ''
+                    ? (string)$exercise['detection_uuid']
+                    : ((string)($exercise['exercise_code'] ?? 'unknown') . ':' . round($t0, 3))),
+                't' => round($t0, 3),
+                'end' => $t1 > $t0 ? round($t1, 3) : null,
+                'category' => 'exercise',
+                'marker' => 'green',
+                'source' => 'identified_exercise',
+                'event_type' => (string)($exercise['event_type'] ?? ('identified_exercise:' . (string)($exercise['exercise_code'] ?? ''))),
+                'title' => (string)($exercise['title'] ?? $exercise['display_name'] ?? 'Exercise'),
+                'subtitle' => '',
+                'confidence' => isset($exercise['confidence']) ? (float)$exercise['confidence'] : null,
+                'exercise_code' => (string)($exercise['exercise_code'] ?? ''),
+            );
+        }
+
+        foreach ($crew as $event) {
+            $type = (string)($event['event_type'] ?? '');
+            $meta = $this->classifyReplayAction($type, 'crew');
+            if ($meta === null) {
+                continue;
+            }
+            // Prefer named identified exercises over generic "Start of Exercises".
+            if ($type === 'exercise_marker') {
+                $uuid = trim((string)($event['event_uuid'] ?? ''));
+                if ($uuid !== '' && isset($identifiedMarkerUuids[$uuid])) {
+                    continue;
+                }
+                $t = (float)$event['t'];
+                foreach ($identifiedWindows as $window) {
+                    if ($t >= ($window['t0'] - 90.0) && $t <= ($window['t1'] + 90.0)) {
+                        continue 2;
+                    }
+                }
+            }
+            $actions[] = array(
+                'id' => 'crew:' . ((string)($event['event_uuid'] ?? '') !== '' ? (string)$event['event_uuid'] : ($type . ':' . (string)$event['t'])),
+                't' => (float)$event['t'],
+                'end' => null,
+                'category' => $meta['category'],
+                'marker' => $meta['marker'],
+                'source' => 'crew',
+                'event_type' => $type,
+                'title' => $meta['title'],
+                'subtitle' => $meta['subtitle'],
+                'confidence' => isset($event['confidence']) ? (float)$event['confidence'] : 1.0,
+            );
+        }
+
+        foreach ($detected as $event) {
+            $type = (string)($event['event_type'] ?? '');
+            $meta = $this->classifyReplayAction($type, 'detected');
+            if ($meta === null) {
+                continue;
+            }
+            $start = isset($event['start']) ? (float)$event['start'] : (isset($event['start_seconds']) ? (float)$event['start_seconds'] : null);
+            if ($start === null || !is_finite($start)) {
+                continue;
+            }
+            $typeLower = strtolower($type);
+            $suppressCode = null;
+            if (str_contains($typeLower, 'power-off stall') || str_contains($typeLower, 'power off stall')) {
+                $suppressCode = 'power_off_stall';
+            } elseif (str_contains($typeLower, 'steep turn')) {
+                $suppressCode = 'steep_turn';
+            }
+            if ($suppressCode !== null) {
+                foreach ($identifiedWindows as $window) {
+                    if ($window['code'] === $suppressCode
+                        && $start >= ($window['t0'] - 60.0)
+                        && $start <= ($window['t1'] + 60.0)) {
+                        continue 2;
+                    }
+                }
+            }
+            $end = isset($event['end']) && $event['end'] !== null ? (float)$event['end'] : null;
+            $actions[] = array(
+                'id' => 'detected:' . $type . ':' . round($start, 3),
+                't' => round($start, 3),
+                'end' => $end !== null && is_finite($end) ? round($end, 3) : null,
+                'category' => $meta['category'],
+                'marker' => $meta['marker'],
+                'source' => 'detected',
+                'event_type' => $type,
+                'title' => $meta['title'],
+                'subtitle' => $meta['subtitle'] !== '' ? $meta['subtitle'] : trim((string)($event['notes'] ?? '')),
+                'confidence' => isset($event['confidence']) ? (float)$event['confidence'] : null,
+            );
+        }
+
+        usort($actions, static function (array $a, array $b): int {
+            $cmp = ((float)$a['t'] <=> (float)$b['t']);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            $rank = array('safety' => 0, 'exercise' => 1, 'training' => 2, 'ops' => 3);
+            return ($rank[(string)$a['category']] ?? 9) <=> ($rank[(string)$b['category']] ?? 9);
+        });
+
+        return array_values($actions);
+    }
+
+    /**
+     * @return array{category:string,marker:string,title:string,subtitle:string}|null
+     */
+    private function classifyReplayAction(string $eventType, string $source): ?array
+    {
+        $type = strtolower(trim($eventType));
+        if ($type === '') {
+            return null;
+        }
+
+        $map = array(
+            'safety_event' => array('category' => 'safety', 'marker' => 'red', 'title' => 'Safety Occurrence', 'subtitle' => ''),
+            'training_remark_marker' => array('category' => 'training', 'marker' => 'blue', 'title' => 'Flight Training Event', 'subtitle' => ''),
+            'exercise_marker' => array('category' => 'exercise', 'marker' => 'blue', 'title' => 'Start of Exercises', 'subtitle' => ''),
+            'gps_takeoff_provisional' => array('category' => 'ops', 'marker' => 'amber', 'title' => 'Takeoff', 'subtitle' => ''),
+            'gps_landing_provisional' => array('category' => 'ops', 'marker' => 'amber', 'title' => 'Landing', 'subtitle' => ''),
+            'engine_start_off_block' => array('category' => 'ops', 'marker' => 'amber', 'title' => 'Engine Start / Off Block', 'subtitle' => ''),
+            'engine_shutdown_on_block' => array('category' => 'ops', 'marker' => 'amber', 'title' => 'Engine Shutdown / On Block', 'subtitle' => ''),
+            'shutdown_verification_completed' => array('category' => 'ops', 'marker' => 'amber', 'title' => 'Check-In Complete', 'subtitle' => ''),
+        );
+        if (isset($map[$type])) {
+            return $map[$type];
+        }
+
+        // Detected reconstruction labels (mixed case titles).
+        $detectedTraining = array(
+            'possible power-off stall',
+            'possible steep turn left',
+            'possible steep turn right',
+        );
+        if (in_array($type, $detectedTraining, true) || str_contains($type, 'stall') || str_contains($type, 'steep turn')) {
+            return array(
+                'category' => 'training',
+                'marker' => 'blue',
+                'title' => trim($eventType),
+                'subtitle' => '',
+            );
+        }
+        if (in_array($type, array('takeoff roll', 'rotation', 'liftoff', 'taxi begin', 'full stop'), true)) {
+            return array(
+                'category' => 'ops',
+                'marker' => 'amber',
+                'title' => trim($eventType),
+                'subtitle' => '',
+            );
+        }
+
+        if ($source === 'detected') {
+            return array(
+                'category' => 'ops',
+                'marker' => 'amber',
+                'title' => trim($eventType),
+                'subtitle' => '',
+            );
+        }
+
+        return array(
+            'category' => 'ops',
+            'marker' => 'amber',
+            'title' => trim($eventType),
+            'subtitle' => '',
+        );
+    }
+
+    private function tableExists(string $table): bool
+    {
+        static $cache = array();
+        if (array_key_exists($table, $cache)) {
+            return $cache[$table];
+        }
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1'
+            );
+            $stmt->execute(array($table));
+            $cache[$table] = (bool)$stmt->fetchColumn();
+        } catch (Throwable) {
+            $cache[$table] = false;
+        }
+        return $cache[$table];
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
     public function sampleRows(int $recordingId, int $limit = 5000): array
@@ -2025,6 +2371,10 @@ final class CockpitReconstructionService
         $tables = array(self::SAMPLE_TABLE, self::PHASE_TABLE, self::EVENT_TABLE);
         foreach ($tables as $table) {
             $stmt = $this->pdo->prepare('DELETE FROM ' . $table . ' WHERE recording_id = ?');
+            $stmt->execute(array($recordingId));
+        }
+        if ($this->tableExists('ipca_detected_flight_exercises')) {
+            $stmt = $this->pdo->prepare('DELETE FROM ipca_detected_flight_exercises WHERE recording_id = ?');
             $stmt->execute(array($recordingId));
         }
     }

@@ -64,7 +64,7 @@ cw_header('Flight Record Logbook Proposals');
 <div class="flp-page">
   <section class="flp-card">
     <h2 style="margin-top:0">Flight Record Logbook Proposals</h2>
-    <p class="flp-muted">Accepting a proposal creates an official Student Pilot Logbook entry through the existing Admin logbook service, then links it back to the exact Flight Record version and leg.</p>
+    <p class="flp-muted">Accepting a proposal creates an official Student Pilot Logbook entry through the existing Admin logbook service, then links it back to the exact Flight Record version and leg. For Master Logbook CVR legs, use <a href="/admin/cvr_logbook_proposals.php">CVR Logbook Proposals</a>.</p>
   </section>
   <?php if ($notice !== ''): ?><div class="flp-notice"><?= h($notice) ?></div><?php endif; ?>
   <?php if ($error !== ''): ?><div class="flp-error"><?= h($error) ?></div><?php endif; ?>

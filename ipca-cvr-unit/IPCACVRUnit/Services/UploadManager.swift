@@ -32,6 +32,8 @@ final class UploadManager: ObservableObject {
     private var workflowReconciliationScanInFlight = false
     private var reconcilingWorkflowComponentIDs: Set<String> = []
     private var deferredWorkflowReconciliationIDs: Set<String> = []
+    /// Bumped on Log SYNC so a hung prior upload Task cannot overwrite a newer attempt.
+    private var workflowUploadEpochs: [String: Int] = [:]
 
     private struct WorkflowAcceptedMetadata {
         var receiptID: String
@@ -138,7 +140,19 @@ final class UploadManager: ObservableObject {
         settings: SettingsStore,
         trigger: CVRWorkflowUploadTrigger = .routine
     ) {
-        guard !settings.isSimulationModeEnabled else { return }
+        guard !settings.isSimulationModeEnabled else {
+            if trigger == .explicitRetry {
+                for component in workflow.queuedWorkflowComponents() where component.componentType == "dispatch_metadata" {
+                    workflow.updateUploadComponent(
+                        id: component.id,
+                        state: .needsUserAction,
+                        progress: component.progress ?? 0,
+                        lastError: "Simulation mode is on. Turn it off in Admin, then tap SYNC again."
+                    )
+                }
+            }
+            return
+        }
         let currentCredential = settings.deviceCredential ?? ""
         if trigger == .enrollmentSucceeded
             || (workflowAuthenticationPausedCredential != nil
@@ -147,20 +161,65 @@ final class UploadManager: ObservableObject {
         }
         if trigger != .routine {
             deferredWorkflowReconciliationIDs = []
+            // Explicit SYNC must not stay parked on auth-pause forever.
+            if trigger == .explicitRetry {
+                clearWorkflowAuthenticationPause()
+            }
         }
         let workflowSyncAuthenticationPaused = workflowAuthenticationPausedCredential == currentCredential
         if let networkMonitor,
            !networkMonitor.canUpload(allowCellular: settings.allowCellularUpload) {
+            if trigger == .explicitRetry {
+                for component in workflow.queuedWorkflowComponents() where component.componentType == "dispatch_metadata" {
+                    workflow.updateUploadComponent(
+                        id: component.id,
+                        state: .needsUserAction,
+                        progress: component.progress ?? 0,
+                        lastError: settings.allowCellularUpload
+                            ? "No network path is available for upload. Reconnect Wi‑Fi/cellular, then tap SYNC."
+                            : "Cellular upload is disabled and Wi‑Fi is unavailable. Enable cellular upload in Admin or join Wi‑Fi, then tap SYNC."
+                    )
+                }
+            }
             return
         }
         let supportedTypes = Set([
-            "dispatch_metadata", "garmin_csv", "flight_events",
-            "recorder_verification", "flight_record_closure"
+            "schedule_duty_sync", "dispatch_metadata", "garmin_csv", "flight_events",
+            "recorder_verification", "flight_record_closure", "operational_leg_review"
         ])
         let components = workflow.queuedWorkflowComponents().filter {
             supportedTypes.contains($0.componentType)
         }
-        guard !components.isEmpty else { return }
+        let scheduleBlockedSchedulerIDs = Set(workflow.state.uploadComponents.compactMap { component -> String? in
+            guard component.componentType == "schedule_duty_sync",
+                  component.state != .serverVerified,
+                  component.state != .uploaded,
+                  component.state != .superseded,
+                  let data = component.requestPayloadSnapshot,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let schedulerRecordID = payload["scheduler_record_id"] as? String else {
+                return nil
+            }
+            return schedulerRecordID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        })
+        if trigger == .explicitRetry {
+            // A hung prior Task can leave IDs in activeUploads while Log force-retry
+            // already reset those components to queued — SYNC then looks like a no-op.
+            for component in components {
+                workflowUploadEpochs[component.id, default: 0] += 1
+                activeUploads.remove(component.id)
+                activeWorkflowUploadIDs.remove(component.id)
+                activeWorkflowAuthenticationRequestIDs.remove(component.id)
+            }
+        }
+        guard !components.isEmpty else {
+            if trigger == .explicitRetry {
+                workflow.reportSynchronizationMessage(
+                    "No queued Dispatch uploads were found to retry. Open Log again after a moment, or export History for support."
+                )
+            }
+            return
+        }
         var rescanForClosureReconciliation = false
         guard let baseURL = settings.normalizedServerURL else {
             for component in components where component.componentType == "dispatch_metadata" {
@@ -236,7 +295,56 @@ final class UploadManager: ObservableObject {
                     continue
                 }
             }
-            guard let context = workflow.workflowUploadContext(componentID: component.id) else { continue }
+            if component.componentType == "schedule_duty_sync" {
+                uploadQueuedScheduleDutyComponent(
+                    component,
+                    workflow: workflow,
+                    settings: settings,
+                    baseURL: baseURL,
+                    credential: currentCredential
+                )
+                continue
+            }
+            if component.componentType == "operational_leg_review" {
+                uploadQueuedOperationalLegReviewComponent(
+                    component,
+                    workflow: workflow,
+                    settings: settings,
+                    baseURL: baseURL,
+                    credential: currentCredential
+                )
+                continue
+            }
+            guard let context = workflow.workflowUploadContext(componentID: component.id) else {
+                if trigger == .explicitRetry {
+                    workflow.updateUploadComponent(
+                        id: component.id,
+                        state: .needsUserAction,
+                        progress: component.progress ?? 0,
+                        lastError: "Local Dispatch evidence for this flight could not be loaded. Export History for support."
+                    )
+                }
+                continue
+            }
+            if component.componentType == "dispatch_metadata",
+               let schedulerRecordID = context.dispatch.schedulerRecordID?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased(),
+               scheduleBlockedSchedulerIDs.contains(schedulerRecordID) {
+                // A material reservation edit or schedule-window update must be
+                // acknowledged first; otherwise Dispatch can race a UUID that
+                // the scheduler has not created yet. Schedule completion invokes
+                // this uploader again and releases the queued Dispatch.
+                continue
+            }
+            if component.componentType == "dispatch_metadata",
+               workflow.scheduleDutyReplacementIsPending(
+                   schedulerRecordID: context.dispatch.schedulerRecordID
+               ) {
+                // Preserve causal order after offline edits: the replacement
+                // scheduler row must exist before its Dispatch claims it.
+                continue
+            }
             if component.componentType == "flight_record_closure",
                !workflow.flightClosureIsComplete(context.flightRecord, dispatch: context.dispatch) {
                 // Restored/admin closures may already exist under a different component_uuid.
@@ -267,6 +375,7 @@ final class UploadManager: ObservableObject {
             if isAuthenticationProbe {
                 workflowAuthenticationProbeInFlight = true
             }
+            let uploadEpoch = workflowUploadEpochs[component.id] ?? 0
             activeUploads.insert(component.id)
             activeWorkflowUploadIDs.insert(component.id)
             if usesWorkflowAuthentication {
@@ -289,18 +398,18 @@ final class UploadManager: ObservableObject {
             Task {
                 var triggerReconciliationAfterCompletion = false
                 defer {
-                    Task { @MainActor in
-                        self.activeWorkflowUploadIDs.remove(component.id)
-                        self.activeUploads.remove(component.id)
-                        self.activeWorkflowAuthenticationRequestIDs.remove(component.id)
+                    if workflowUploadEpochs[component.id] == uploadEpoch {
+                        activeWorkflowUploadIDs.remove(component.id)
+                        activeUploads.remove(component.id)
+                        activeWorkflowAuthenticationRequestIDs.remove(component.id)
                         if isAuthenticationProbe {
-                            self.workflowAuthenticationProbeInFlight = false
+                            workflowAuthenticationProbeInFlight = false
                         }
                         if triggerReconciliationAfterCompletion {
                             workflow.recoverOrphanedUploads(
-                                activeComponentIDs: self.activeWorkflowUploadIDs
+                                activeComponentIDs: activeWorkflowUploadIDs
                             )
-                            self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                            uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         }
                     }
                 }
@@ -313,31 +422,26 @@ final class UploadManager: ObservableObject {
                             baseURL: baseURL,
                             workflow: workflow
                         )
-                        await MainActor.run {
-                            self.clearWorkflowAuthenticationPause()
-                        }
-                        let persisted = await MainActor.run {
-                            workflow.persistReconciliationMatch(
-                                componentID: component.id,
-                                serverReceiptID: result.receiptID,
-                                authoritativePayloadSHA256: result.payloadSHA256,
-                                serverVerificationAt: result.verifiedAt,
-                                canonicalIdentifiers: result.canonicalIdentifiers
-                            )
-                        }
+                        guard workflowUploadEpochs[component.id] == uploadEpoch else { return }
+                        clearWorkflowAuthenticationPause()
+                        guard workflowUploadEpochs[component.id] == uploadEpoch else { return }
+                        let persisted = workflow.persistReconciliationMatch(
+                            componentID: component.id,
+                            serverReceiptID: result.receiptID,
+                            authoritativePayloadSHA256: result.payloadSHA256,
+                            serverVerificationAt: result.verifiedAt,
+                            canonicalIdentifiers: result.canonicalIdentifiers
+                        )
+                        guard workflowUploadEpochs[component.id] == uploadEpoch else { return }
                         guard persisted else {
                             triggerReconciliationAfterCompletion = true
-                            await MainActor.run {
-                                _ = workflow.markReconciliationRequired(
-                                    id: component.id,
-                                    message: "Server accepted Dispatch; local receipt persistence will reconcile automatically."
-                                )
-                            }
+                            _ = workflow.markReconciliationRequired(
+                                id: component.id,
+                                message: "Server accepted Dispatch; local receipt persistence will reconcile automatically."
+                            )
                             return
                         }
-                        await MainActor.run {
-                            self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
-                        }
+                        uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                         return
                     } else if component.componentType == "garmin_csv" {
                         let serverReceiptID = try await uploadWorkflowGarminComponent(
@@ -346,15 +450,14 @@ final class UploadManager: ObservableObject {
                             baseURL: baseURL,
                             workflow: workflow
                         )
-                        await MainActor.run {
-                            workflow.updateUploadComponent(
-                                id: component.id,
-                                state: .serverVerified,
-                                progress: 1,
-                                lastError: "",
-                                serverReceiptID: serverReceiptID
-                            )
-                        }
+                        guard workflowUploadEpochs[component.id] == uploadEpoch else { return }
+                        workflow.updateUploadComponent(
+                            id: component.id,
+                            state: .serverVerified,
+                            progress: 1,
+                            lastError: "",
+                            serverReceiptID: serverReceiptID
+                        )
                     } else {
                         let result = try await uploadWorkflowEvidenceComponent(
                             component: component,
@@ -363,71 +466,61 @@ final class UploadManager: ObservableObject {
                             baseURL: baseURL,
                             workflow: workflow
                         )
-                        let persisted = await MainActor.run {
-                            self.clearWorkflowAuthenticationPause()
-                            return workflow.persistVerifiedWorkflowComponent(
-                                componentID: component.id,
-                                serverReceiptID: result.receiptID,
-                                authoritativePayloadSHA256: result.payloadSHA256,
-                                serverVerificationAt: result.verifiedAt,
-                                canonicalIdentifiers: result.canonicalIdentifiers
-                            )
-                        }
+                        guard workflowUploadEpochs[component.id] == uploadEpoch else { return }
+                        clearWorkflowAuthenticationPause()
+                        let persisted = workflow.persistVerifiedWorkflowComponent(
+                            componentID: component.id,
+                            serverReceiptID: result.receiptID,
+                            authoritativePayloadSHA256: result.payloadSHA256,
+                            serverVerificationAt: result.verifiedAt,
+                            canonicalIdentifiers: result.canonicalIdentifiers
+                        )
+                        guard workflowUploadEpochs[component.id] == uploadEpoch else { return }
                         if !persisted {
                             triggerReconciliationAfterCompletion = true
-                            await MainActor.run {
-                                _ = workflow.markReconciliationRequired(
-                                    id: component.id,
-                                    message: "Server accepted workflow evidence; local metadata persistence will reconcile automatically."
-                                )
-                            }
+                            _ = workflow.markReconciliationRequired(
+                                id: component.id,
+                                message: "Server accepted workflow evidence; local metadata persistence will reconcile automatically."
+                            )
                         }
                     }
                 } catch {
+                    guard workflowUploadEpochs[component.id] == uploadEpoch else { return }
                     if component.componentType == "garmin_csv" {
-                        await MainActor.run {
-                            workflow.updateUploadComponent(
-                                id: component.id,
-                                state: .failed,
-                                progress: component.progress ?? 0,
-                                lastError: error.localizedDescription
-                            )
-                        }
+                        workflow.updateUploadComponent(
+                            id: component.id,
+                            state: .failed,
+                            progress: component.progress ?? 0,
+                            lastError: error.localizedDescription
+                        )
                         return
                     }
                     if case APIClientError.synchronization(let failure) = error,
                        failure.errorCode == "DUPLICATE_ALREADY_VERIFIED" {
                         triggerReconciliationAfterCompletion = true
-                        await MainActor.run {
-                            self.clearWorkflowAuthenticationPause()
-                            _ = workflow.markReconciliationRequired(
-                                id: component.id,
-                                message: "Server reports an existing immutable item; authoritative metadata reconciliation is required."
-                            )
-                        }
+                        clearWorkflowAuthenticationPause()
+                        _ = workflow.markReconciliationRequired(
+                            id: component.id,
+                            message: "Server reports an existing immutable item; authoritative metadata reconciliation is required."
+                        )
                         return
                     }
                     if Self.isUncertainTransportFailure(error)
                         || error.localizedDescription.contains("authoritative verification metadata") {
                         triggerReconciliationAfterCompletion = true
-                        await MainActor.run {
-                            _ = workflow.markReconciliationRequired(
-                                id: component.id,
-                                message: "The request outcome is uncertain; reconciliation will run before another upload."
-                            )
-                        }
-                    }
-                    let outcome = await MainActor.run {
-                        workflow.recordWorkflowUploadFailure(
+                        _ = workflow.markReconciliationRequired(
                             id: component.id,
-                            progress: component.progress ?? 0,
-                            error: error
+                            message: "The request outcome is uncertain; reconciliation will run before another upload."
                         )
                     }
+                    guard workflowUploadEpochs[component.id] == uploadEpoch else { return }
+                    let outcome = workflow.recordWorkflowUploadFailure(
+                        id: component.id,
+                        progress: component.progress ?? 0,
+                        error: error
+                    )
                     if outcome == .authenticationPaused {
-                        await MainActor.run {
-                            self.workflowAuthenticationPausedCredential = currentCredential
-                        }
+                        workflowAuthenticationPausedCredential = currentCredential
                     }
                 }
             }
@@ -438,6 +531,173 @@ final class UploadManager: ObservableObject {
                 self.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings, trigger: trigger)
             }
         }
+    }
+
+    private func uploadQueuedScheduleDutyComponent(
+        _ component: CVRUploadComponentRecord,
+        workflow: CVRWorkflowStore,
+        settings: SettingsStore,
+        baseURL: URL,
+        credential: String
+    ) {
+        guard !activeUploads.contains(component.id) else { return }
+        guard !credential.isEmpty else {
+            workflow.updateUploadComponent(
+                id: component.id,
+                state: .queued,
+                progress: component.progress ?? 0,
+                lastError: "Schedule update is queued until this CVR Unit is enrolled."
+            )
+            return
+        }
+        guard let snapshot = component.requestPayloadSnapshot,
+              let payload = try? JSONSerialization.jsonObject(with: snapshot) as? [String: Any] else {
+            workflow.updateUploadComponent(
+                id: component.id,
+                state: .needsUserAction,
+                progress: component.progress ?? 0,
+                lastError: "The queued reservation payload is unavailable."
+            )
+            return
+        }
+        activeUploads.insert(component.id)
+        activeWorkflowUploadIDs.insert(component.id)
+        activeWorkflowAuthenticationRequestIDs.insert(component.id)
+        workflow.updateUploadComponent(
+            id: component.id,
+            state: .uploading,
+            progress: 0.1,
+            lastError: "Synchronizing reservation..."
+        )
+        Task {
+            defer {
+                activeUploads.remove(component.id)
+                activeWorkflowUploadIDs.remove(component.id)
+                activeWorkflowAuthenticationRequestIDs.remove(component.id)
+            }
+            do {
+                let response = try await APIClient(serverURL: baseURL).syncScheduleDuty(
+                    payload: payload,
+                    credential: credential
+                )
+                guard response.ok else {
+                    throw APIClientError.badResponse(response.error ?? "Schedule reservation was not accepted.")
+                }
+                clearWorkflowAuthenticationPause()
+                workflow.updateUploadComponent(
+                    id: component.id,
+                    state: .serverVerified,
+                    progress: 1,
+                    lastError: (response.warnings ?? []).joined(separator: " "),
+                    serverReceiptID: response.schedulerRecordID,
+                    requestID: response.requestID
+                )
+                uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+            } catch {
+                let outcome = workflow.recordWorkflowUploadFailure(
+                    id: component.id,
+                    progress: component.progress ?? 0,
+                    error: error
+                )
+                if outcome == .authenticationPaused {
+                    workflowAuthenticationPausedCredential = credential
+                }
+            }
+        }
+        _ = settings
+    }
+
+    private func uploadQueuedOperationalLegReviewComponent(
+        _ component: CVRUploadComponentRecord,
+        workflow: CVRWorkflowStore,
+        settings: SettingsStore,
+        baseURL: URL,
+        credential: String
+    ) {
+        guard !activeUploads.contains(component.id) else { return }
+        guard !credential.isEmpty else {
+            workflow.updateUploadComponent(
+                id: component.id,
+                state: .queued,
+                progress: component.progress ?? 0,
+                lastError: "Legs are verified locally · server synchronization waits for enrollment."
+            )
+            return
+        }
+        if workflow.closureSynchronizationPending(for: component.flightRecordID) {
+            workflow.updateUploadComponent(
+                id: component.id,
+                state: .queued,
+                progress: component.progress ?? 0,
+                lastError: "Legs are verified locally · waiting to synchronize Check-In first."
+            )
+            return
+        }
+        guard let snapshot = component.requestPayloadSnapshot,
+              let payload = try? JSONSerialization.jsonObject(with: snapshot) as? [String: Any] else {
+            workflow.updateUploadComponent(
+                id: component.id,
+                state: .needsUserAction,
+                progress: component.progress ?? 0,
+                lastError: "The locally verified leg revision could not be loaded."
+            )
+            return
+        }
+
+        activeUploads.insert(component.id)
+        activeWorkflowUploadIDs.insert(component.id)
+        activeWorkflowAuthenticationRequestIDs.insert(component.id)
+        workflow.updateUploadComponent(
+            id: component.id,
+            state: .uploading,
+            progress: 0.1,
+            lastError: "Synchronizing locally verified legs..."
+        )
+        Task {
+            defer {
+                activeUploads.remove(component.id)
+                activeWorkflowUploadIDs.remove(component.id)
+                activeWorkflowAuthenticationRequestIDs.remove(component.id)
+            }
+            do {
+                let response = try await APIClient(serverURL: baseURL).acceptOperationalLegReview(
+                    payload: payload,
+                    credential: credential
+                )
+                clearWorkflowAuthenticationPause()
+                workflow.updateUploadComponent(
+                    id: component.id,
+                    state: .serverVerified,
+                    progress: 1,
+                    lastError: "",
+                    serverReceiptID: response.revisionUUID
+                )
+            } catch {
+                let message = error.localizedDescription.lowercased()
+                if message.contains("check-in must be synchronized")
+                    || message.contains("completed check-in")
+                    || message.contains("flight closure") {
+                    workflow.updateUploadComponent(
+                        id: component.id,
+                        state: .queued,
+                        progress: 0,
+                        lastError: "Legs are verified locally · server synchronization waits for Check-In.",
+                        errorCode: "DEPENDENCY_PENDING",
+                        retryable: true
+                    )
+                } else {
+                    let outcome = workflow.recordWorkflowUploadFailure(
+                        id: component.id,
+                        progress: component.progress ?? 0,
+                        error: error
+                    )
+                    if outcome == .authenticationPaused {
+                        workflowAuthenticationPausedCredential = credential
+                    }
+                }
+            }
+        }
+        _ = settings
     }
 
     func retryWorkflowSynchronization(workflow: CVRWorkflowStore, settings: SettingsStore) {
@@ -783,7 +1043,7 @@ final class UploadManager: ObservableObject {
             id: component.id,
             state: .uploading,
             progress: 0.25,
-            lastError: "Sending Dispatch metadata and consent evidence..."
+            lastError: "Sending Dispatch metadata..."
         )
         let generatedPayload = try workflowDispatchPayload(
             dispatch: dispatch,
@@ -845,7 +1105,9 @@ final class UploadManager: ObservableObject {
         let operationalConfig = settings.selectedAircraft?.operationalConfig ?? .safeDefaults
         let plannedDeparture = CVROperationalIdentityLocal.normalizeAirport(dispatch.plannedDepartureAirport)
         let plannedDestination = CVROperationalIdentityLocal.normalizeAirport(dispatch.plannedDestinationAirport)
-        guard !plannedDeparture.isEmpty, !plannedDestination.isEmpty else {
+        let isOperationalSession = dispatch.operationalSessionModelVersion
+            == CVROperationalSessionRecord.modelVersion
+        guard isOperationalSession || (!plannedDeparture.isEmpty && !plannedDestination.isEmpty) else {
             throw APIClientError.badResponse(
                 "Departure and destination airports are required before Dispatch can synchronize."
             )
@@ -863,7 +1125,11 @@ final class UploadManager: ObservableObject {
                 var member: [String: Any] = [
                     "id": assignment.id,
                     "person_name": assignment.personName,
-                    "role": assignment.role.rawValue
+                    "role": assignment.role.rawValue,
+                    "pilot_function": assignment.effectivePilotFunction.rawValue,
+                    "is_pic": assignment.hasPICResponsibility,
+                    "is_primary_customer": assignment.role == .student
+                        && assignment.effectivePilotFunction == .pilotFlying
                 ]
                 if let personID = assignment.personID {
                     member["person_id"] = personID
@@ -878,7 +1144,7 @@ final class UploadManager: ObservableObject {
             "created_at": iso.string(from: dispatch.createdAt),
             "modified_at": iso.string(from: dispatch.modifiedAt),
             "version": dispatch.version,
-            "consent_status": dispatch.consentStatus,
+            "consent_status": isOperationalSession ? "not_required" : dispatch.consentStatus,
             "status": dispatch.status.rawValue,
             "configured_cvr_unit_id": dispatch.configuredCVRUnitID,
             "configured_beacon_id": dispatch.configuredBeaconID
@@ -927,11 +1193,21 @@ final class UploadManager: ObservableObject {
             dispatchPayload["reservation_uuid"] = identity.reservationUUID
             dispatchPayload["leg_uuid"] = identity.legUUID
         }
+        if let reservationUUID = dispatch.reservationUUID {
+            dispatchPayload["reservation_uuid"] = reservationUUID.lowercased()
+        }
+        if isOperationalSession {
+            guard let operationalSessionUUID = dispatch.operationalSessionUUID else {
+                throw APIClientError.badResponse("Operational Session identity is missing.")
+            }
+            dispatchPayload["operational_session_uuid"] = operationalSessionUUID.lowercased()
+            dispatchPayload["session_model_version"] = CVROperationalSessionRecord.modelVersion
+        }
 
-        return [
+        var payload: [String: Any] = [
             "flight_record_uuid": flightRecord.id.lowercased(),
             "dispatch": dispatchPayload,
-            "consents": consents.map { consent in
+            "consents": isOperationalSession ? [] : consents.map { consent in
                 var consentPayload: [String: Any] = [
                     "id": consent.id.lowercased(),
                     "person_name": consent.personName,
@@ -950,6 +1226,11 @@ final class UploadManager: ObservableObject {
                 return consentPayload
             }
         ]
+        if isOperationalSession, let operationalSessionUUID = dispatch.operationalSessionUUID {
+            payload["operational_session_uuid"] = operationalSessionUUID.lowercased()
+            payload["session_model_version"] = CVROperationalSessionRecord.modelVersion
+        }
+        return payload
     }
 
     private func uploadWorkflowEvidenceComponent(
@@ -1116,7 +1397,7 @@ final class UploadManager: ObservableObject {
             throw APIClientError.badResponse("Unsupported workflow evidence component.")
         }
 
-        return [
+        var payload: [String: Any] = [
             "schema_version": 1,
             "component_uuid": component.id.lowercased(),
             "component_type": component.componentType,
@@ -1124,6 +1405,10 @@ final class UploadManager: ObservableObject {
             "dispatch_uuid": context.dispatch.id.lowercased(),
             "evidence": evidence
         ]
+        if let operationalSessionUUID = context.dispatch.operationalSessionUUID {
+            payload["operational_session_uuid"] = operationalSessionUUID.lowercased()
+        }
+        return payload
     }
 
     func uploadGarminCSVAttachment(

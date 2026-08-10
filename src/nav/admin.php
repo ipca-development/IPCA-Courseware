@@ -136,6 +136,7 @@ return [
                 'match_paths' => [
                     '/admin/flight_records.php',
                     '/admin/flight_record_logbook_proposals.php',
+                    '/admin/cvr_logbook_proposals.php',
                 ],
             ],
             [
@@ -163,6 +164,15 @@ return [
                 'href' => '/admin/missions.php',
                 'match_paths' => [
                     '/admin/missions.php',
+                ],
+            ],
+            [
+                'key' => 'exercise_catalogue',
+                'label' => 'Exercise Catalogue',
+                'icon' => 'documents',
+                'href' => '/admin/exercise_catalogue.php',
+                'match_paths' => [
+                    '/admin/exercise_catalogue.php',
                 ],
             ],
             [

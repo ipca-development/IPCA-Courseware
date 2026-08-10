@@ -12,7 +12,17 @@ $identitySource = file_get_contents($root . '/src/CvrOperationalIdentityService.
 $scheduleSource = file_get_contents($root . '/src/FlightScheduleService.php') ?: '';
 $readSource = file_get_contents($root . '/src/CvrOperationalIdentityReadService.php') ?: '';
 $backfillSource = file_get_contents($root . '/src/CvrOperationalIdentityBackfillService.php') ?: '';
+$dutySource = file_get_contents($root . '/src/CvrDutyAssignmentIdentityService.php') ?: '';
 $docs = file_get_contents($root . '/docs/cvr_phase2a_operational_identity.md') ?: '';
+$saveSlotStart = strpos($scheduleSource, 'public function saveSlot(');
+$saveSlotEnd = strpos($scheduleSource, 'public function createScheduledDutyFromDevice(', $saveSlotStart ?: 0);
+$saveSlotSource = $saveSlotStart !== false
+    ? substr(
+        $scheduleSource,
+        $saveSlotStart,
+        $saveSlotEnd !== false ? $saveSlotEnd - $saveSlotStart : null
+    )
+    : '';
 
 $pdo = new PDO('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -143,16 +153,21 @@ $checks['online create helper and atomic create wiring exist'] =
         || str_contains($scheduleSource, 'if ($canonicalWrite)')
     );
 
+$checks['Stage 1 duty snapshot is atomic and feature gated'] =
+    str_contains($scheduleSource, 'writeSnapshot($recordId, $dutyInput)')
+    && str_contains($scheduleSource, 'assertReservationMatches($recordId, $dutyInput)')
+    && str_contains($scheduleSource, 'isSnapshotWriteEnabled()')
+    && str_contains($dutySource, 'duty_assignment_snapshot_write_enabled')
+    && str_contains($dutySource, 'duty_assignment_enforcement_enabled')
+    && str_contains($dutySource, 'Material Duty Assignment change requires a new reservation');
+
 $checks['updates do not call online create helper'] =
-    preg_match(
-        '/if \(\$isCreate\) \{[\s\S]*createOnlineScheduleReservationIdentity[\s\S]*\} else \{/',
-        $scheduleSource
+    str_contains($saveSlotSource, '$isCreate = !is_array($row);')
+    && preg_match(
+        '/if \(!\$isCreate\) \{[\s\S]*UPDATE ipca_flight_schedule_slots[\s\S]*\} else \{[\s\S]*createOnlineScheduleReservationIdentity/',
+        $saveSlotSource
     ) === 1
-    || (
-        str_contains($scheduleSource, '$isCreate = !is_array($row);')
-        && str_contains($scheduleSource, '} else {')
-        && substr_count($scheduleSource, 'createOnlineScheduleReservationIdentity') === 1
-    );
+    && substr_count($saveSlotSource, 'createOnlineScheduleReservationIdentity') === 1;
 
 $checks['dual-read projects flight reservation with one or more legs'] =
     str_contains($readSource, 'Multi-leg is valid')

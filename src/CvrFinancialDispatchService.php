@@ -268,14 +268,31 @@ final class CvrFinancialDispatchService
         $flightHours = $this->hours($input['flight_instruction_hours'] ?? null, 0.0);
         $groundHours = $this->hours($input['ground_instruction_hours'] ?? null, self::DEFAULT_GROUND_HOURS);
         $preflightHours = $this->hours($input['preflight_briefing_hours'] ?? null, 0.0);
+        // Aircraft rental follows Hobbs (or an explicit rental hours override), not instruction hours.
+        // Experience-building / solo flights can bill rental with flight_instruction_hours = 0.
+        $rentalSource = $input['aircraft_rental_hours'] ?? $input['hobbs_delta'] ?? null;
+        if ($rentalSource === null || $rentalSource === '') {
+            $rentalHours = $flightHours;
+        } else {
+            $rentalHours = $this->hours($rentalSource, 0.0);
+        }
 
         $rate = $this->rateById($rateId);
         if ($rate === null && $rateId <= 0) {
             $rates = $this->instructionalRates();
             $rate = $rates[0] ?? null;
         }
-        if ($rate === null) {
+        $instructionHoursTotal = $flightHours + $groundHours + $preflightHours;
+        if ($rate === null && $instructionHoursTotal > 0) {
             throw new RuntimeException('Select an instructor rate.');
+        }
+        if ($rate === null) {
+            $rate = array(
+                'id' => 0,
+                'rate_code' => '',
+                'label' => '',
+                'rate_usd_per_hour' => 0.0,
+            );
         }
 
         $rentalMap = $this->aircraftRentalRateMap();
@@ -287,7 +304,7 @@ final class CvrFinancialDispatchService
         $aircraftLabel = trim((string)($rental['display_label'] ?? '')) ?: $registration;
         $instrRate = (float)($rate['rate_usd_per_hour'] ?? 0);
 
-        $aircraftTotal = round($flightHours * $aircraftRate, 2);
+        $aircraftTotal = round($rentalHours * $aircraftRate, 2);
         $flightInstrTotal = round($flightHours * $instrRate, 2);
         $groundInstrTotal = round($groundHours * $instrRate, 2);
         $preflightTotal = round($preflightHours * $instrRate, 2);
@@ -298,7 +315,7 @@ final class CvrFinancialDispatchService
         $overview = array(
             'aircraft_rental' => array(
                 'label' => '#' . $registration . ' ' . $aircraftLabel,
-                'hours' => $flightHours,
+                'hours' => $rentalHours,
                 'total' => $aircraftTotal,
             ),
             'instruction' => array(),
@@ -344,6 +361,7 @@ final class CvrFinancialDispatchService
             'instructional_rate_label' => (string)($rate['label'] ?? ''),
             'instructional_rate_usd_per_hour' => $instrRate,
             'aircraft_rate_usd_per_hour' => $aircraftRate,
+            'aircraft_rental_hours' => $rentalHours,
             'aircraft_rental_total_usd' => $aircraftTotal,
             'flight_instruction_total_usd' => $flightInstrTotal,
             'ground_instruction_total_usd' => $groundInstrTotal,
@@ -356,6 +374,8 @@ final class CvrFinancialDispatchService
                 'instructor_user_id' => $instructorUserId,
                 'instructional_rate_id' => (int)($rate['id'] ?? 0),
                 'flight_instruction_hours' => $flightHours,
+                'ground_instruction_hours' => $groundHours,
+                'preflight_briefing_hours' => $preflightHours,
                 'aircraft_registration' => $registration,
             )),
         );
@@ -366,12 +386,22 @@ final class CvrFinancialDispatchService
      */
     public function isComplete(array $fields): bool
     {
-        return (int)($fields['customer_user_id'] ?? 0) > 0
-            && (int)($fields['instructor_user_id'] ?? 0) > 0
-            && (int)($fields['instructional_rate_id'] ?? 0) > 0
-            && trim((string)($fields['aircraft_registration'] ?? '')) !== ''
-            && is_numeric($fields['flight_instruction_hours'] ?? null)
-            && (float)$fields['flight_instruction_hours'] >= 0;
+        $customerOk = (int)($fields['customer_user_id'] ?? 0) > 0;
+        $aircraftOk = trim((string)($fields['aircraft_registration'] ?? '')) !== '';
+        $flightHours = $fields['flight_instruction_hours'] ?? null;
+        $hoursOk = is_numeric($flightHours) && (float)$flightHours >= 0;
+        if (!$customerOk || !$aircraftOk || !$hoursOk) {
+            return false;
+        }
+        $instructionHours = (float)$flightHours
+            + (float)($fields['ground_instruction_hours'] ?? 0)
+            + (float)($fields['preflight_briefing_hours'] ?? 0);
+        // Experience-building / rental-only: no instructor or instructional rate required.
+        if ($instructionHours <= 0) {
+            return true;
+        }
+        return (int)($fields['instructor_user_id'] ?? 0) > 0
+            && (int)($fields['instructional_rate_id'] ?? 0) > 0;
     }
 
     public function unlock(int $dispatchId, ?int $actorUserId, string $audience, string $unlockCode = '', string $reason = ''): array

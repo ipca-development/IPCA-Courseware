@@ -36,6 +36,8 @@ function require_absent(string $path, string $needle, string $label, array &$fai
 $views = $root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift';
 $design = $root . '/ipca-cvr-unit/IPCACVRUnit/Views/CVROperationalDesign.swift';
 $route = $root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRDispatchRouteOverview.swift';
+$workflow = $root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift';
+$models = $root . '/ipca-cvr-unit/IPCACVRUnit/Models/CVRWorkflowModels.swift';
 $pbx = $root . '/ipca-cvr-unit/IPCACVRUnit.xcodeproj/project.pbxproj';
 $swiftTest = $root . '/tests/cvr_dispatch_page_ui_contract_check.swift';
 
@@ -45,21 +47,32 @@ require_contains($views, 'Tap to add crew', '3 crew empty hint', $failures);
 require_contains($views, 'Starting meters required', '5 meters missing inside block', $failures);
 require_contains($views, 'Fuel and oil required', '6 fuel/oil missing inside block', $failures);
 require_contains($views, 'routeOverview', '7 route overview present', $failures);
-require_contains($views, 'CURRENT LEG', '9 current leg label', $failures);
+require_contains($workflow, 'session.plannedLegs[index].status = "planned"', 'opening Dispatch keeps route leg scheduled', $failures);
+require_contains($workflow, 'markCurrentPlannedLeg(dispatchedIn:', 'Dispatch acknowledgement changes route state', $failures);
 require_contains($route, 'Checked In', '10 checked-in display status', $failures);
 require_contains($route, 'checkedInStatusIcon', 'checked-in status icon helper', $failures);
 require_contains($route, 'checkmark.seal.fill', 'checked-in uses Log COMPLETE seal', $failures);
-require_contains($views, 'CVRDispatchRouteOverview.checkedInStatusIcon', 'dispatch route shows checked-in seal', $failures);
-require_contains($views, 'CVROperationalPalette.success', 'checked-in status uses success green', $failures);
-require_contains($views, 'EDIT ROUTE', 'route edit entry on dispatch', $failures);
+require_contains($views, 'informativeDispatchRoute', 'Dispatch shows one informative scheduled route', $failures);
+require_contains($models, 'informativeRouteAirports', 'Dispatch persists the full informative scheduler route', $failures);
+require_contains($views, 'Text("MISSION")', 'Mission heading matches uppercase Route style', $failures);
+require_absent($views, '@State private var showRouteEditor', 'Dispatch route editor state removed', $failures);
+require_absent($views, 'Text("EDIT LEGS")', 'Dispatch leg edit action removed', $failures);
+require_absent($views, 'Text("Add or edit legs")', 'Dispatch add-leg action removed', $failures);
 require_contains($views, 'LocalRouteEditorSheet', 'route editor sheet', $failures);
 require_contains($views, 'applyLocalRouteDraft', 'route draft apply path', $failures);
+require_contains($workflow, 'if $0.activeDispatch != nil && $0.activeFlightRecord == nil', 'legacy pre-dispatch route status correction', $failures);
 require_contains($views, 'Label("ERASE"', 'erase swipe label', $failures);
 require_contains($views, 'padding(.bottom, 132)', '14 button above tab bar padding', $failures);
-require_contains($views, 'Quick Verification', 'quick verification section', $failures);
+require_absent($views, 'Quick Verification', 'quick verification list removed', $failures);
+require_absent($views, 'quickVerification', 'quick verification property removed', $failures);
 require_contains($views, 'DispatchBlockEditor', 'focused block editors', $failures);
 require_contains($views, 'activeBlockEditor', 'tappable blocks open focused editors', $failures);
 require_contains($views, 'case .meters:', 'dispatch meters editor present', $failures);
+require_contains($models, 'return "VERIFY AND DISPATCH"', 'pre-dispatch title', $failures);
+require_contains($models, 'return "DISPATCHED"', 'acknowledged Dispatch title', $failures);
+require_contains($views, 'Text("WARNINGS")', 'warnings section heading', $failures);
+require_contains($views, 'acceptedWarnings: acceptedWarnings', 'Dispatch click acknowledges displayed warnings', $failures);
+require_absent($views, 'title: "Dispatch Confirmed"', 'green Dispatch Confirmed button removed', $failures);
 
 require_contains($design, 'var caption: String? = nil', 'tappable tile caption', $failures);
 require_contains($design, 'var action: (() -> Void)? = nil', 'tappable tile action', $failures);
@@ -97,8 +110,12 @@ if ($start === false || $end === false) {
     if (!str_contains($slice, 'routeOverview')) {
         $failures[] = '7 Route Overview must appear on Dispatch page';
     }
-    if (!str_contains($slice, 'DISPATCH FLIGHT')) {
-        $failures[] = '14 DISPATCH FLIGHT button must remain on Dispatch page';
+    if (!str_contains($slice, 'title: "DISPATCH NOW"')
+        || !str_contains($slice, 'subtitle: "Hold 2 seconds to confirm"')) {
+        $failures[] = '14 Dispatch must use the two-second DISPATCH NOW hold control';
+    }
+    if (!preg_match('/dispatchTiles\\(metrics\\).*missionSelector.*routeOverview.*dispatchWarningsSection.*actionButtons/s', $slice)) {
+        $failures[] = 'Dispatch page order must be blocks, mission, route, warnings, actions';
     }
     // Long-form competing path: unfocused DispatchEditorView() open.
     if (preg_match('/DispatchEditorView\(\s*\)/', $slice)) {

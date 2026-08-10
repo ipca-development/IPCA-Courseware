@@ -23,7 +23,10 @@ final class CvrAdminLegCorrectionService
             throw new InvalidArgumentException('dispatch_id is required.');
         }
 
-        $this->pdo->beginTransaction();
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
         try {
             $dispatchStmt = $this->pdo->prepare(
                 'SELECT * FROM ipca_cvr_dispatches WHERE id = ? LIMIT 1 FOR UPDATE'
@@ -184,7 +187,20 @@ final class CvrAdminLegCorrectionService
                 // Audit table may be unavailable in some environments.
             }
 
-            $this->pdo->commit();
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+
+            if ($flightUuid !== '') {
+                try {
+                    require_once __DIR__ . '/MasterLogbookLogbookProposalService.php';
+                    (new MasterLogbookLogbookProposalService($this->pdo))
+                        ->createProposalsForFlightRecord($flightUuid);
+                } catch (Throwable $e) {
+                    error_log('[CvrAdminLegCorrection] logbook proposal create failed: ' . $e->getMessage());
+                }
+            }
+
             return array(
                 'dispatch_id' => $dispatchId,
                 'workflow_flight_record_uuid' => $flightUuid,
@@ -192,11 +208,333 @@ final class CvrAdminLegCorrectionService
                 'on_block_utc' => $onBlockUtc,
             );
         } catch (Throwable $e) {
-            if ($this->pdo->inTransaction()) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
             throw $e;
         }
+    }
+
+    /**
+     * Persist per-leg meters, fuel, and TO/LDG for one sibling Dispatch.
+     *
+     * @param array{
+     *   starting_hobbs?:mixed,
+     *   ending_hobbs?:mixed,
+     *   starting_tacho?:mixed,
+     *   ending_tacho?:mixed,
+     *   fuel_onboard?:mixed,
+     *   fuel_remaining?:mixed,
+     *   takeoff_count?:mixed,
+     *   landing_count?:mixed
+     * } $fields
+     */
+    public function saveSegmentOperationalValues(
+        int $dispatchId,
+        array $fields,
+        ?int $actorUserId = null
+    ): void {
+        if ($dispatchId <= 0) {
+            throw new InvalidArgumentException('dispatch_id is required.');
+        }
+        $startingHobbs = array_key_exists('starting_hobbs', $fields)
+            ? $this->oneDecimal($fields['starting_hobbs'] ?? null)
+            : null;
+        $endingHobbs = array_key_exists('ending_hobbs', $fields)
+            ? $this->oneDecimal($fields['ending_hobbs'] ?? null)
+            : null;
+        $startingTacho = array_key_exists('starting_tacho', $fields)
+            ? $this->oneDecimal($fields['starting_tacho'] ?? null)
+            : null;
+        $endingTacho = array_key_exists('ending_tacho', $fields)
+            ? $this->oneDecimal($fields['ending_tacho'] ?? null)
+            : null;
+        $fuelOnboard = array_key_exists('fuel_onboard', $fields)
+            ? $this->formatFuel($fields['fuel_onboard'] ?? '')
+            : null;
+        $fuelRemaining = array_key_exists('fuel_remaining', $fields)
+            ? $this->formatFuel($fields['fuel_remaining'] ?? '')
+            : null;
+        $takeoffs = array_key_exists('takeoff_count', $fields)
+            ? max(0, (int)$fields['takeoff_count'])
+            : null;
+        $landings = array_key_exists('landing_count', $fields)
+            ? max(0, (int)$fields['landing_count'])
+            : null;
+
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+        try {
+            $dispatchStmt = $this->pdo->prepare(
+                'SELECT * FROM ipca_cvr_dispatches WHERE id = ? LIMIT 1 FOR UPDATE'
+            );
+            $dispatchStmt->execute(array($dispatchId));
+            $dispatch = $dispatchStmt->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($dispatch)) {
+                throw new RuntimeException('Dispatch leg not found.');
+            }
+            $flightUuid = strtolower(trim((string)($dispatch['workflow_flight_record_uuid'] ?? '')));
+            if ($flightUuid === '') {
+                throw new RuntimeException('Dispatch is missing a Flight Record UUID.');
+            }
+
+            $closureStmt = $this->pdo->prepare(
+                'SELECT * FROM ipca_cvr_flight_closures
+                 WHERE LOWER(workflow_flight_record_uuid) = ?
+                 ORDER BY id DESC LIMIT 1 FOR UPDATE'
+            );
+            $closureStmt->execute(array($flightUuid));
+            $closure = $closureStmt->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($closure)) {
+                throw new RuntimeException('Meter and fuel edits require a completed Check-In for this leg.');
+            }
+
+            if ($startingHobbs === null) {
+                $startingHobbs = $this->oneDecimal($dispatch['starting_hobbs'] ?? null);
+            }
+            if ($startingTacho === null) {
+                $startingTacho = $this->oneDecimal($dispatch['starting_tacho'] ?? null);
+            }
+            if ($fuelOnboard === null) {
+                $fuelOnboard = $this->formatFuel($dispatch['fuel_onboard'] ?? '');
+            }
+            if ($endingHobbs === null) {
+                $endingHobbs = $this->oneDecimal($closure['ending_hobbs'] ?? null);
+            }
+            if ($endingTacho === null) {
+                $endingTacho = $this->oneDecimal($closure['ending_tacho'] ?? null);
+            }
+            if ($fuelRemaining === null) {
+                $fuelRemaining = $this->formatFuel($closure['fuel_remaining'] ?? '');
+            }
+            if ($takeoffs === null || $landings === null) {
+                $closurePayload = json_decode((string)($closure['payload_json'] ?? '{}'), true);
+                $evidence = is_array($closurePayload['evidence'] ?? null) ? $closurePayload['evidence'] : array();
+                if ($takeoffs === null) {
+                    $takeoffs = max(0, (int)($evidence['verified_takeoff_count'] ?? 0));
+                }
+                if ($landings === null) {
+                    $landings = max(0, (int)($evidence['verified_landing_count'] ?? 0));
+                }
+            }
+            if ($startingHobbs !== null && $endingHobbs !== null && $endingHobbs < $startingHobbs) {
+                throw new InvalidArgumentException('Hobbs End cannot be lower than Hobbs Start.');
+            }
+            if ($startingTacho !== null && $endingTacho !== null && $endingTacho < $startingTacho) {
+                throw new InvalidArgumentException('Tacho End cannot be lower than Tacho Start.');
+            }
+            if ($fuelOnboard !== '' && $fuelRemaining !== ''
+                && is_numeric($fuelOnboard) && is_numeric($fuelRemaining)
+                && (float)$fuelRemaining > (float)$fuelOnboard) {
+                throw new InvalidArgumentException('Landing fuel cannot exceed departure fuel.');
+            }
+
+            $updateDispatch = $this->pdo->prepare(
+                'UPDATE ipca_cvr_dispatches
+                 SET starting_hobbs = ?,
+                     starting_tacho = ?,
+                     fuel_onboard = ?,
+                     updated_at = CURRENT_TIMESTAMP(3)
+                 WHERE id = ?'
+            );
+            $updateDispatch->execute(array(
+                $startingHobbs,
+                $startingTacho,
+                $fuelOnboard !== '' ? $fuelOnboard : null,
+                $dispatchId,
+            ));
+
+            $payload = json_decode((string)($closure['payload_json'] ?? '{}'), true);
+            if (!is_array($payload)) {
+                $payload = array();
+            }
+            if (!isset($payload['evidence']) || !is_array($payload['evidence'])) {
+                $payload['evidence'] = array();
+            }
+            $payload['evidence']['verified_takeoff_count'] = $takeoffs;
+            $payload['evidence']['verified_landing_count'] = $landings;
+            $json = AuditEventService::jsonEncode($payload);
+            $hash = hash('sha256', $json);
+            $updateClosure = $this->pdo->prepare(
+                'UPDATE ipca_cvr_flight_closures
+                 SET ending_hobbs = ?, ending_tacho = ?, fuel_remaining = ?,
+                     payload_sha256 = ?, payload_json = ?
+                 WHERE id = ?'
+            );
+            $updateClosure->execute(array(
+                $endingHobbs,
+                $endingTacho,
+                $fuelRemaining !== '' ? $fuelRemaining : null,
+                $hash,
+                $json,
+                (int)$closure['id'],
+            ));
+
+            $departure = strtoupper(trim((string)($fields['departure_airport'] ?? '')));
+            $arrival = strtoupper(trim((string)($fields['arrival_airport'] ?? '')));
+            if ($departure !== '' && $arrival !== '') {
+                $this->upsertFlightLogAdjustment(
+                    $dispatch,
+                    $flightUuid,
+                    $departure,
+                    $arrival,
+                    array(),
+                    $startingHobbs,
+                    $startingTacho,
+                    $endingHobbs,
+                    $endingTacho,
+                    $fuelRemaining
+                );
+            }
+
+            try {
+                (new AuditEventService($this->pdo))->record(
+                    'admin_operational_leg_segment_values',
+                    'ipca_cvr_dispatches',
+                    (string)$dispatchId,
+                    null,
+                    array(
+                        'starting_hobbs' => $startingHobbs,
+                        'ending_hobbs' => $endingHobbs,
+                        'starting_tacho' => $startingTacho,
+                        'ending_tacho' => $endingTacho,
+                        'fuel_onboard' => $fuelOnboard,
+                        'fuel_remaining' => $fuelRemaining,
+                        'takeoff_count' => $takeoffs,
+                        'landing_count' => $landings,
+                        'workflow_flight_record_uuid' => $flightUuid,
+                    ),
+                    'Master Logbook per-leg meter/fuel/ops correction',
+                    'user',
+                    $actorUserId
+                );
+            } catch (Throwable) {
+            }
+
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Update verified takeoff/landing counts on one Dispatch's flight closure only.
+     * @deprecated prefer saveSegmentOperationalValues for full per-leg edits
+     */
+    public function saveOperationCounts(
+        int $dispatchId,
+        int $takeoffs,
+        int $landings,
+        ?int $actorUserId = null
+    ): void {
+        $this->saveSegmentOperationalValues($dispatchId, array(
+            'takeoff_count' => $takeoffs,
+            'landing_count' => $landings,
+        ), $actorUserId);
+    }
+
+    /**
+     * Keep annotated payload leg_segments operational fields in sync.
+     *
+     * @param list<array<string,mixed>> $segments
+     */
+    public function patchLegSegmentOperationalFields(int $dispatchId, array $segments): void
+    {
+        if ($dispatchId <= 0 || $segments === array()) {
+            return;
+        }
+        $dispatchStmt = $this->pdo->prepare(
+            'SELECT id, current_version FROM ipca_cvr_dispatches WHERE id = ? LIMIT 1'
+        );
+        $dispatchStmt->execute(array($dispatchId));
+        $dispatch = $dispatchStmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($dispatch)) {
+            return;
+        }
+        $version = (int)($dispatch['current_version'] ?? 1);
+        $stmt = $this->pdo->prepare(
+            'SELECT id, payload_json FROM ipca_cvr_dispatch_versions
+             WHERE dispatch_id = ? AND dispatch_version = ? LIMIT 1'
+        );
+        $stmt->execute(array($dispatchId, $version));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return;
+        }
+        $payload = json_decode((string)($row['payload_json'] ?? '{}'), true);
+        if (!is_array($payload) || !is_array($payload['leg_segments'] ?? null) || $payload['leg_segments'] === array()) {
+            return;
+        }
+        $bySequence = array();
+        foreach ($segments as $segment) {
+            if (!is_array($segment)) {
+                continue;
+            }
+            $seq = (int)($segment['sequence_number'] ?? 0);
+            if ($seq <= 0) {
+                continue;
+            }
+            $startHobbs = $this->oneDecimal($segment['starting_hobbs'] ?? null);
+            $endHobbs = $this->oneDecimal($segment['ending_hobbs'] ?? null);
+            $startTacho = $this->oneDecimal($segment['starting_tacho'] ?? null);
+            $endTacho = $this->oneDecimal($segment['ending_tacho'] ?? null);
+            $fuelOn = $this->formatFuel($segment['fuel_onboard'] ?? '');
+            $fuelRem = $this->formatFuel($segment['fuel_remaining'] ?? '');
+            $bySequence[$seq] = array(
+                'takeoff_count' => max(0, (int)($segment['takeoff_count'] ?? 0)),
+                'landing_count' => max(0, (int)($segment['landing_count'] ?? 0)),
+                'starting_hobbs' => $startHobbs,
+                'ending_hobbs' => $endHobbs,
+                'hobbs_delta' => ($startHobbs !== null && $endHobbs !== null)
+                    ? round(max(0.0, $endHobbs - $startHobbs), 1)
+                    : null,
+                'starting_tacho' => $startTacho,
+                'ending_tacho' => $endTacho,
+                'tacho_delta' => ($startTacho !== null && $endTacho !== null)
+                    ? round(max(0.0, $endTacho - $startTacho), 1)
+                    : null,
+                'fuel_onboard' => $fuelOn !== '' ? $fuelOn : null,
+                'fuel_remaining' => $fuelRem !== '' ? $fuelRem : null,
+                'fuel_burn' => (is_numeric($fuelOn) && is_numeric($fuelRem))
+                    ? round((float)$fuelOn - (float)$fuelRem, 1)
+                    : null,
+            );
+        }
+        $changed = false;
+        foreach ($payload['leg_segments'] as $index => $existing) {
+            if (!is_array($existing)) {
+                continue;
+            }
+            $seq = (int)($existing['sequence_number'] ?? ($index + 1));
+            if (!isset($bySequence[$seq])) {
+                continue;
+            }
+            foreach ($bySequence[$seq] as $field => $value) {
+                $payload['leg_segments'][$index][$field] = $value;
+            }
+            $changed = true;
+        }
+        if (!$changed) {
+            return;
+        }
+        $update = $this->pdo->prepare('UPDATE ipca_cvr_dispatch_versions SET payload_json = ? WHERE id = ?');
+        $update->execute(array(AuditEventService::jsonEncode($payload), (int)$row['id']));
+    }
+
+    /**
+     * @deprecated use patchLegSegmentOperationalFields
+     * @param list<array<string,mixed>> $segments
+     */
+    public function patchLegSegmentOperationCounts(int $dispatchId, array $segments): void
+    {
+        $this->patchLegSegmentOperationalFields($dispatchId, $segments);
     }
 
     private function patchDispatchVersionAirports(int $dispatchId, int $version, string $departure, string $arrival): void

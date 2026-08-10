@@ -101,7 +101,7 @@ Wired read paths:
 
 Rules: verified/`DETERMINISTIC_BACKFILL` aliases only; org-scoped; conflicts and identity failures fall back to legacy without mutation; flag off omits the additive fields entirely.
 
-Schedule dual-read (Phase 2C enhancement): when the resolved reservation has `activity_domain = flight` and exactly one org-scoped leg, both `reservation_uuid` and `leg_uuid` are returned. Non-flight reservations return `reservation_uuid` only. Zero or multiple legs for a flight reservation → `canonical_conflict` (legacy response) plus a technical integrity diagnostic.
+Schedule dual-read (Phase 2C enhancement): a flight reservation may have one or more ordered org-scoped legs. The projection returns `reservation_uuid`, sequence-1 `leg_uuid` for legacy compatibility, and the schedule payload exposes the full `legs[]` collection. Non-flight reservations return `reservation_uuid` only. Zero legs for a flight reservation → `canonical_conflict` plus a technical integrity diagnostic.
 
 ## Phase 2C — online scheduler canonical writes
 
@@ -166,6 +166,25 @@ Contracts:
 
 - `tests/cvr_phase2d_local_dispatch_identity_contract_check.php`
 - `tests/cvr_phase2d_local_dispatch_identity_contract_check.swift`
+
+## Stage 1 — immutable Duty Assignment identity
+
+`reservation_uuid` now represents one scheduled/accountable Duty Assignment. New
+verified reservations may receive a one-to-one immutable snapshot and normalized
+participant rows behind:
+
+- `duty_assignment_snapshot_write_enabled`
+- `duty_assignment_enforcement_enabled`
+
+The fingerprint includes organization, administrative training category/mission,
+primary customer, aircraft/device, accountable participants, participant roles,
+`PF|PM|NONE` pilot function, and independent PIC responsibility. PF/PM and PIC
+are orthogonal, so one participant may be both PF and PIC. It excludes route, schedule
+times, maneuvers/exercises, engine sessions, and evidence artifacts.
+
+Material changes require a new reservation. Normal exercise progression inside
+the same scheduled mission does not. Snapshot/enforcement rollback is flag-only;
+do not delete identity or participant rows.
 
 ## Backfill CLI
 

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrSyncException.php';
+require_once __DIR__ . '/FlightSessionService.php';
 
 /**
  * Release an accidental Dispatch claim so the schedule slot can be used again.
@@ -125,6 +126,19 @@ final class CvrDispatchReleaseService
             }
 
             if (!is_array($slot) && !is_array($dispatch)) {
+                // A device may have minted and persisted a Dispatch locally while its
+                // schedule replacement or Dispatch intake never reached the server.
+                // Releasing that valid device-owned UUID is already satisfied here.
+                if ($dispatchUuid !== null && $dispatchUuid !== '' && ($deviceId ?? 0) > 0) {
+                    $this->pdo->commit();
+                    return array(
+                        'ok' => true,
+                        'already_released' => true,
+                        'scheduler_record_id' => $schedulerRecordId,
+                        'dispatch_uuid' => $dispatchUuid,
+                        'flight_record_uuid' => null,
+                    );
+                }
                 throw new CvrUserCorrectionRequired('No Dispatch claim was found to release.');
             }
 
@@ -160,29 +174,22 @@ final class CvrDispatchReleaseService
                 );
             }
 
-            if (is_array($slot) && (string)($slot['status'] ?? '') === 'completed') {
-                throw new CvrUserCorrectionRequired('Completed flights cannot be undispatched.');
-            }
             if (is_array($slot) && (string)($slot['status'] ?? '') === 'cancelled') {
                 throw new CvrUserCorrectionRequired('Cancelled reservations cannot be undispatched.');
             }
 
+            // Multi-leg reservations share one schedule slot. Earlier hops can mark the slot
+            // completed while a later Dispatch still has no evidence and must remain releaseable.
+            // Block "completed" only when THIS Dispatch itself already has closure/events/audio.
             if ($flightRecordUuid !== '') {
                 $this->assertNoFlightEvidence($flightRecordUuid);
             }
 
-            if (is_array($slot)) {
-                $this->pdo->prepare(
-                    "UPDATE ipca_flight_schedule_slots
-                     SET status = 'scheduled',
-                         claimed_dispatch_uuid = NULL,
-                         claimed_at = NULL,
-                         updated_by = ?
-                     WHERE id = ?"
-                )->execute(array($actorUserId, (int)$slot['id']));
-            }
-
             if (is_array($dispatch)) {
+                $operationalSessionUuid = strtolower(trim((string)($dispatch['operational_session_uuid'] ?? '')));
+                if ($operationalSessionUuid !== '') {
+                    (new FlightSessionService($this->pdo))->cancelOperationalSession($operationalSessionUuid);
+                }
                 $this->pdo->prepare(
                     "UPDATE ipca_cvr_dispatches
                      SET status = 'released',
@@ -190,6 +197,15 @@ final class CvrDispatchReleaseService
                          updated_at = CURRENT_TIMESTAMP(3)
                      WHERE id = ?"
                 )->execute(array((int)$dispatch['id']));
+            }
+
+            if (is_array($slot)) {
+                $this->reconcileSlotAfterDispatchRelease(
+                    $slot,
+                    $resolvedSchedulerId,
+                    $resolvedDispatchUuid,
+                    $actorUserId
+                );
             }
 
             (new AuditEventService($this->pdo))->record(
@@ -226,6 +242,137 @@ final class CvrDispatchReleaseService
             }
             throw $e;
         }
+    }
+
+    /**
+     * After releasing one Dispatch, either reopen the schedule slot or keep it claimed/completed
+     * for remaining multi-leg sibling Dispatches / closures.
+     *
+     * @param array<string,mixed> $slot
+     */
+    private function reconcileSlotAfterDispatchRelease(
+        array $slot,
+        string $schedulerRecordId,
+        string $releasedDispatchUuid,
+        ?int $actorUserId
+    ): void {
+        $retained = $this->findRetainedSiblingDispatch($schedulerRecordId, $releasedDispatchUuid);
+        $siblingClosure = $this->schedulerHasClosureOutsideDispatch($schedulerRecordId, $releasedDispatchUuid);
+
+        if ($retained === null && !$siblingClosure) {
+            $this->pdo->prepare(
+                "UPDATE ipca_flight_schedule_slots
+                 SET status = 'scheduled',
+                     claimed_dispatch_uuid = NULL,
+                     claimed_at = NULL,
+                     updated_by = ?
+                 WHERE id = ?"
+            )->execute(array($actorUserId, (int)$slot['id']));
+            return;
+        }
+
+        $status = $siblingClosure ? 'completed' : 'claimed';
+        $claimUuid = is_array($retained)
+            ? strtolower(trim((string)($retained['dispatch_uuid'] ?? '')))
+            : strtolower(trim((string)($slot['claimed_dispatch_uuid'] ?? '')));
+        if ($claimUuid === '' || $claimUuid === strtolower(trim($releasedDispatchUuid))) {
+            $claimUuid = is_array($retained)
+                ? strtolower(trim((string)($retained['dispatch_uuid'] ?? '')))
+                : '';
+        }
+        if ($claimUuid === '') {
+            // Closures exist without a live sibling Dispatch — keep completed, clear claim pointer.
+            $this->pdo->prepare(
+                "UPDATE ipca_flight_schedule_slots
+                 SET status = 'completed',
+                     claimed_dispatch_uuid = NULL,
+                     updated_by = ?
+                 WHERE id = ?"
+            )->execute(array($actorUserId, (int)$slot['id']));
+            return;
+        }
+
+        $this->pdo->prepare(
+            "UPDATE ipca_flight_schedule_slots
+             SET status = ?,
+                 claimed_dispatch_uuid = ?,
+                 updated_by = ?
+             WHERE id = ?"
+        )->execute(array($status, $claimUuid, $actorUserId, (int)$slot['id']));
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    private function findRetainedSiblingDispatch(string $schedulerRecordId, string $releasedDispatchUuid): ?array
+    {
+        $schedulerRecordId = strtolower(trim($schedulerRecordId));
+        $releasedDispatchUuid = strtolower(trim($releasedDispatchUuid));
+        if ($schedulerRecordId === '') {
+            return null;
+        }
+        $statement = $this->pdo->prepare(
+            "SELECT *
+             FROM ipca_cvr_dispatches
+             WHERE LOWER(TRIM(COALESCE(scheduler_record_id, ''))) = ?
+               AND LOWER(TRIM(dispatch_uuid)) <> ?
+               AND LOWER(TRIM(COALESCE(status, ''))) <> 'released'
+             ORDER BY id ASC
+             LIMIT 1"
+        );
+        $statement->execute(array($schedulerRecordId, $releasedDispatchUuid !== '' ? $releasedDispatchUuid : '-'));
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    private function schedulerHasClosureOutsideDispatch(string $schedulerRecordId, string $releasedDispatchUuid): bool
+    {
+        $schedulerRecordId = strtolower(trim($schedulerRecordId));
+        $releasedDispatchUuid = strtolower(trim($releasedDispatchUuid));
+        if ($schedulerRecordId === '' || !$this->tableExists('ipca_cvr_flight_closures')) {
+            return false;
+        }
+        // Closures still linked through an active scheduler_record_id on sibling Dispatches.
+        $statement = $this->pdo->prepare(
+            "SELECT 1
+             FROM ipca_cvr_flight_closures closure_record
+             INNER JOIN ipca_cvr_dispatches dispatch_record
+               ON LOWER(TRIM(dispatch_record.workflow_flight_record_uuid))
+                  = LOWER(TRIM(closure_record.workflow_flight_record_uuid))
+             WHERE LOWER(TRIM(COALESCE(dispatch_record.scheduler_record_id, ''))) = ?
+               AND LOWER(TRIM(dispatch_record.dispatch_uuid)) <> ?
+             LIMIT 1"
+        );
+        $statement->execute(array(
+            $schedulerRecordId,
+            $releasedDispatchUuid !== '' ? $releasedDispatchUuid : '-',
+        ));
+        if ($statement->fetchColumn()) {
+            return true;
+        }
+        // Slot claim owner may be an earlier hop that already checked in.
+        $slotClaim = $this->pdo->prepare(
+            "SELECT LOWER(TRIM(COALESCE(claimed_dispatch_uuid, '')))
+             FROM ipca_flight_schedule_slots
+             WHERE LOWER(TRIM(scheduler_record_id)) = ?
+             LIMIT 1"
+        );
+        $slotClaim->execute(array($schedulerRecordId));
+        $claimed = strtolower(trim((string)($slotClaim->fetchColumn() ?: '')));
+        if ($claimed === '' || $claimed === $releasedDispatchUuid) {
+            return false;
+        }
+        $byClaim = $this->pdo->prepare(
+            "SELECT 1
+             FROM ipca_cvr_flight_closures closure_record
+             INNER JOIN ipca_cvr_dispatches dispatch_record
+               ON LOWER(TRIM(dispatch_record.workflow_flight_record_uuid))
+                  = LOWER(TRIM(closure_record.workflow_flight_record_uuid))
+             WHERE LOWER(TRIM(dispatch_record.dispatch_uuid)) = ?
+             LIMIT 1"
+        );
+        $byClaim->execute(array($claimed));
+        return (bool)$byClaim->fetchColumn();
     }
 
     private function assertNoFlightEvidence(string $flightRecordUuid): void

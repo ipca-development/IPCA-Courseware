@@ -648,13 +648,50 @@ function tv_adsb_fleet_track_messages_ready(PDO $pdo): bool
     }
 }
 
+/** @return list<array<string,mixed>> */
+function tv_adsb_registry_fleet_track_rows(PDO $pdo): array
+{
+    try {
+        require_once __DIR__ . '/CockpitAircraftService.php';
+        if (!CockpitAircraftService::tablesPresent($pdo)) {
+            return array();
+        }
+        $rows = array();
+        foreach ((new CockpitAircraftService($pdo))->activeAircraft() as $aircraft) {
+            $hex = tv_adsb_normalize_hex((string)($aircraft['adsb_hex'] ?? ''));
+            $label = tv_adsb_normalize_label((string)($aircraft['registration'] ?? ''));
+            if ($hex === '' && $label === '') {
+                continue;
+            }
+            $rows[] = array(
+                'id' => (int)($aircraft['id'] ?? 0),
+                'title' => $label,
+                'body' => $hex,
+                'aircraft_hex' => $hex,
+                'aircraft_label' => $label,
+                'aircraft_type' => tv_adsb_normalize_type((string)($aircraft['aircraft_type'] ?? '')),
+                'aircraft_home_airport' => tv_adsb_normalize_home_airport(
+                    (string)($aircraft['home_airport'] ?? '')
+                ),
+                'announce_audio_enabled' => 0,
+                'priority' => 50,
+            );
+        }
+        return $rows;
+    } catch (Throwable) {
+        return array();
+    }
+}
+
 function tv_adsb_fetch_active_fleet_tracks(PDO $pdo, string $screenKey = '', int $limit = 25): array
 {
     $limit = max(1, min(50, $limit));
     $configTracks = tv_kiosk_fleet_track_rows();
+    $registryTracks = tv_adsb_registry_fleet_track_rows($pdo);
+    $primaryTracks = tv_adsb_merge_fleet_track_rows($configTracks, $registryTracks);
 
     if (!tv_adsb_fleet_track_messages_ready($pdo)) {
-        return array_slice($configTracks, 0, $limit);
+        return array_slice($primaryTracks, 0, $limit);
     }
 
     $screenKey = preg_replace('/[^a-zA-Z0-9_-]/', '', $screenKey) ?: '';
@@ -722,8 +759,8 @@ function tv_adsb_fetch_active_fleet_tracks(PDO $pdo, string $screenKey = '', int
         $rows = $fetch($pdo, null, $limit, $aircraftSelect, $voiceSelect);
     }
 
-    if ($configTracks !== array()) {
-        return array_slice(tv_adsb_merge_fleet_track_rows($configTracks, $rows), 0, $limit);
+    if ($primaryTracks !== array()) {
+        return array_slice(tv_adsb_merge_fleet_track_rows($primaryTracks, $rows), 0, $limit);
     }
 
     return array_slice($rows, 0, $limit);

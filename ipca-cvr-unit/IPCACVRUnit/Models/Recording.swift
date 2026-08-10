@@ -209,6 +209,8 @@ struct Recording: Identifiable, Codable, Equatable {
     var beaconDiagnosticsPath: String?
     var recordingEventsPath: String?
     var flightSessionID: String
+    /// Canonical Stage 1 execution identity. `flightSessionID` remains legacy-compatible.
+    var operationalSessionID: String? = nil
     var segmentIndex: Int
     var previousSegmentID: String?
     var isTestRecording: Bool
@@ -240,6 +242,7 @@ struct Recording: Identifiable, Codable, Equatable {
         beaconDiagnosticsPath: String? = nil,
         recordingEventsPath: String? = nil,
         flightSessionID: String? = nil,
+        operationalSessionID: String? = nil,
         segmentIndex: Int = 1,
         previousSegmentID: String? = nil,
         isTestRecording: Bool = false,
@@ -270,6 +273,7 @@ struct Recording: Identifiable, Codable, Equatable {
         self.beaconDiagnosticsPath = beaconDiagnosticsPath
         self.recordingEventsPath = recordingEventsPath
         self.flightSessionID = flightSessionID ?? id
+        self.operationalSessionID = operationalSessionID
         self.segmentIndex = max(1, segmentIndex)
         self.previousSegmentID = previousSegmentID
         self.isTestRecording = isTestRecording
