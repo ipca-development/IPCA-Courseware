@@ -58,8 +58,8 @@ final class ChapterRepository
             $insert->execute(array(
                 $recordingId,
                 $processingRunId,
-                substr((string)($chapter['title'] ?? 'Section'), 0, 255),
-                isset($chapter['category']) ? substr((string)$chapter['category'], 0, 64) : null,
+                mb_substr((string)($chapter['title'] ?? 'Section'), 0, 255),
+                isset($chapter['category']) ? mb_substr((string)$chapter['category'], 0, 64) : null,
                 (int)($chapter['start_time_ms'] ?? 0),
                 (int)($chapter['end_time_ms'] ?? 0),
                 isset($chapter['confidence']) ? (float)$chapter['confidence'] : null,
