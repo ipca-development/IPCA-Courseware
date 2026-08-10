@@ -42,7 +42,12 @@ final class FlightScheduleService
     }
 
     /** @return list<array<string,mixed>> */
-    public function listSlots(?string $fromDate = null, ?string $toDate = null, ?int $aircraftId = null): array
+    public function listSlots(
+        ?string $fromDate = null,
+        ?string $toDate = null,
+        ?int $aircraftId = null,
+        bool $deriveOperationalCompletion = true
+    ): array
     {
         $operationalToday = new DateTimeImmutable('today', new DateTimeZone('America/Los_Angeles'));
         $fromDate = $this->date($fromDate ?: $operationalToday->modify('-1 day')->format('Y-m-d'));
@@ -56,6 +61,7 @@ final class FlightScheduleService
                    d.id AS dispatch_id,
                    d.dispatch_uuid AS linked_dispatch_uuid,
                    d.workflow_flight_record_uuid,
+                   d.operational_session_uuid AS linked_operational_session_uuid,
                    d.current_version AS dispatch_version,
                    d.last_received_at AS dispatch_received_at,
                    EXISTS(
@@ -93,8 +99,14 @@ final class FlightScheduleService
                    (s.claimed_dispatch_uuid IS NOT NULL AND d.dispatch_uuid = s.claimed_dispatch_uuid)
                    OR (
                      s.claimed_dispatch_uuid IS NULL
-                     AND d.scheduler_record_id = s.scheduler_record_id
-                     AND d.operational_session_uuid IS NULL
+                     AND d.id = (
+                       SELECT d2.id
+                       FROM ipca_cvr_dispatches d2
+                       WHERE d2.scheduler_record_id = s.scheduler_record_id
+                         AND LOWER(TRIM(COALESCE(d2.status, ''))) <> 'released'
+                       ORDER BY d2.id DESC
+                       LIMIT 1
+                     )
                    )
                  )
               AND LOWER(TRIM(COALESCE(d.status, ''))) <> 'released'
@@ -115,7 +127,11 @@ final class FlightScheduleService
         }
         $crewBySlot = $this->crewBySlotIds(array_map(static fn(array $row): int => (int)$row['id'], $rows));
         $payloads = array_map(
-            fn(array $row): array => $this->payload($row, $crewBySlot[(int)$row['id']] ?? array()),
+            fn(array $row): array => $this->payload(
+                $row,
+                $crewBySlot[(int)$row['id']] ?? array(),
+                $deriveOperationalCompletion
+            ),
             $rows
         );
         return $this->attachOperationalLegDetails($payloads);
@@ -129,7 +145,7 @@ final class FlightScheduleService
             throw new RuntimeException('The authenticated CVR device is not assigned to an aircraft.');
         }
         $slots = array_values(array_filter(
-            $this->listSlots($fromDate, $toDate, $aircraftId),
+            $this->listSlots($fromDate, $toDate, $aircraftId, false),
             // The aircraft schedule remains a schedule after Dispatch. The device
             // needs claimed rows so it can display them as DISPATCHED rather than
             // making the reservation disappear.
@@ -153,7 +169,13 @@ final class FlightScheduleService
      */
     private function expandSlotToDeviceSessions(array $slot): array
     {
-        $legs = is_array($slot['legs'] ?? null) ? $slot['legs'] : array();
+        $legs = is_array($slot['legs'] ?? null)
+            ? array_values(array_filter(
+                $slot['legs'],
+                static fn($leg): bool => is_array($leg)
+                    && strtolower((string)($leg['status'] ?? 'scheduled')) !== 'cancelled'
+            ))
+            : array();
         if (count($legs) <= 1) {
             return array($slot);
         }
@@ -191,7 +213,8 @@ final class FlightScheduleService
      * @param array<string,mixed> $values
      * @param list<array<string,mixed>> $crew
      */
-    public function saveSlot(array $values, array $crew, ?int $actorUserId = null): string
+    /** @return array{scheduler_record_id:string,warnings:list<string>} */
+    public function saveSlot(array $values, array $crew, ?int $actorUserId = null): array
     {
         $recordId = strtolower(trim((string)($values['scheduler_record_id'] ?? '')));
         if ($recordId === '') {
@@ -275,7 +298,7 @@ final class FlightScheduleService
             if (is_array($row) && trim((string)($row['claimed_dispatch_uuid'] ?? '')) !== '') {
                 throw new RuntimeException('A claimed schedule slot cannot be edited.');
             }
-            $this->assertNoResourceConflicts(
+            $overlapWarnings = $this->resourceConflictWarnings(
                 $recordId,
                 $aircraftId,
                 $cohortId,
@@ -411,7 +434,10 @@ final class FlightScheduleService
                 $e
             );
         }
-        return $recordId;
+        return array(
+            'scheduler_record_id' => $recordId,
+            'warnings' => $overlapWarnings,
+        );
     }
 
     /**
@@ -444,6 +470,26 @@ final class FlightScheduleService
         $end = $this->timestamp((string)($payload['scheduled_end_time'] ?? ''), 'scheduled end');
         if (substr($start, 0, 10) !== $scheduledDate || strtotime($end) <= strtotime($start)) {
             throw new RuntimeException('A valid same-date schedule start and end are required.');
+        }
+        $routeSupplied = array_key_exists('legs', $payload);
+        $routeLegs = $routeSupplied && is_array($payload['legs'])
+            ? array_values(array_filter($payload['legs'], static fn($leg): bool => is_array($leg)))
+            : array();
+        usort($routeLegs, static fn(array $a, array $b): int =>
+            ((int)($a['sequence_number'] ?? 0)) <=> ((int)($b['sequence_number'] ?? 0))
+        );
+        $airportChain = array();
+        foreach ($routeLegs as $index => $leg) {
+            $origin = $this->airport($leg['origin_airport'] ?? '');
+            $destination = $this->airport($leg['destination_airport'] ?? '');
+            if ($origin === '' || $destination === ''
+                || ($index > 0 && end($airportChain) !== $origin)) {
+                throw new RuntimeException('Informative route legs must form one continuous airport chain.');
+            }
+            if ($index === 0) {
+                $airportChain[] = $origin;
+            }
+            $airportChain[] = $destination;
         }
         $missionCode = substr(strtoupper(trim((string)($payload['mission_code'] ?? ''))), 0, 64);
         if ($missionCode === '') {
@@ -714,11 +760,36 @@ final class FlightScheduleService
                 $start,
                 $end
             );
-            $this->pdo->prepare(
-                'UPDATE ipca_flight_schedule_slots
-                 SET scheduled_date = ?, scheduled_start_time = ?, scheduled_end_time = ?, updated_by = NULL
-                 WHERE id = ?'
-            )->execute(array($scheduledDate, $start, $end, (int)$slot['id']));
+            if ($routeSupplied) {
+                $departure = $airportChain[0] ?? '';
+                $destination = $airportChain !== array() ? $airportChain[count($airportChain) - 1] : '';
+                $this->pdo->prepare(
+                    'UPDATE ipca_flight_schedule_slots
+                     SET scheduled_date = ?, scheduled_start_time = ?, scheduled_end_time = ?,
+                         planned_departure_airport = ?, planned_destination_airport = ?, updated_by = NULL
+                     WHERE id = ?'
+                )->execute(array(
+                    $scheduledDate,
+                    $start,
+                    $end,
+                    $departure,
+                    $destination,
+                    (int)$slot['id'],
+                ));
+                $this->replaceInformativeReservationRoute(
+                    $recordId,
+                    max(1, (int)($slot['organization_id'] ?? 1)),
+                    $airportChain,
+                    $start,
+                    $end
+                );
+            } else {
+                $this->pdo->prepare(
+                    'UPDATE ipca_flight_schedule_slots
+                     SET scheduled_date = ?, scheduled_start_time = ?, scheduled_end_time = ?, updated_by = NULL
+                     WHERE id = ?'
+                )->execute(array($scheduledDate, $start, $end, (int)$slot['id']));
+            }
             $this->pdo->commit();
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
@@ -733,6 +804,70 @@ final class FlightScheduleService
             'reservation_uuid' => $recordId,
             'warnings' => $warnings,
         );
+    }
+
+    /**
+     * Informative route is mutable planning context, not actual flown-leg evidence.
+     *
+     * @param list<string> $airportChain
+     */
+    private function replaceInformativeReservationRoute(
+        string $reservationUuid,
+        int $organizationId,
+        array $airportChain,
+        string $start,
+        string $end
+    ): array {
+        $statement = $this->pdo->prepare(
+            'SELECT * FROM ipca_operational_reservation_legs
+             WHERE reservation_uuid = ? ORDER BY sequence_number ASC FOR UPDATE'
+        );
+        $statement->execute(array($reservationUuid));
+        $existing = array();
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $leg) {
+            $existing[(int)$leg['sequence_number']] = $leg;
+        }
+        $legCount = max(0, count($airportChain) - 1);
+        for ($index = 0; $index < $legCount; $index++) {
+            $sequence = $index + 1;
+            $origin = $airportChain[$index];
+            $destination = $airportChain[$index + 1];
+            if (isset($existing[$sequence])) {
+                $this->pdo->prepare(
+                    "UPDATE ipca_operational_reservation_legs
+                     SET origin_airport = ?, destination_airport = ?,
+                         planned_start_local = ?, planned_end_local = ?, status = 'scheduled'
+                     WHERE id = ?"
+                )->execute(array(
+                    $origin,
+                    $destination,
+                    $start,
+                    $end,
+                    (int)$existing[$sequence]['id'],
+                ));
+                continue;
+            }
+            $this->identityWrite()->createFlightLeg(array(
+                'reservation_uuid' => $reservationUuid,
+                'organization_id' => $organizationId,
+                'sequence_number' => $sequence,
+                'origin_airport' => $origin,
+                'destination_airport' => $destination,
+                'planned_start_local' => $start,
+                'planned_end_local' => $end,
+                'organization_timezone_iana' => 'America/Los_Angeles',
+                'status' => 'scheduled',
+                'source' => 'server_create',
+            ), true);
+        }
+        foreach ($existing as $sequence => $leg) {
+            if ($sequence <= $legCount) {
+                continue;
+            }
+            $this->pdo->prepare(
+                "UPDATE ipca_operational_reservation_legs SET status = 'cancelled' WHERE id = ?"
+            )->execute(array((int)$leg['id']));
+        }
     }
 
     /**
@@ -1017,7 +1152,7 @@ final class FlightScheduleService
         ?int $actorUserId = null,
         ?string $expectedUpdatedAt = null,
         ?int $aircraftId = null
-    ): void {
+    ): array {
         $schedulerRecordId = strtolower(trim($schedulerRecordId));
         if (!$this->isUuid($schedulerRecordId)) {
             throw new RuntimeException('Schedule record id must be a valid UUID.');
@@ -1077,7 +1212,7 @@ final class FlightScheduleService
                 . ' WHERE schedule_slot_id = ? AND user_id IS NOT NULL'
             );
             $crewStatement->execute(array((int)$slot['id']));
-            $this->assertNoResourceConflicts(
+            $overlapWarnings = $this->resourceConflictWarnings(
                 $schedulerRecordId,
                 $targetAircraftId,
                 (int)($slot['cohort_id'] ?? 0) ?: null,
@@ -1104,6 +1239,10 @@ final class FlightScheduleService
             }
             throw $e;
         }
+        return array(
+            'scheduler_record_id' => $schedulerRecordId,
+            'warnings' => $overlapWarnings,
+        );
     }
 
     public function cancelSlot(string $schedulerRecordId, ?int $actorUserId = null): void
@@ -1255,17 +1394,23 @@ final class FlightScheduleService
     }
 
     /** @param list<array<string,mixed>> $crew @return array<string,mixed> */
-    private function payload(array $row, array $crew): array
+    private function payload(
+        array $row,
+        array $crew,
+        bool $deriveOperationalCompletion = true
+    ): array
     {
         $hasDispatch = (int)($row['dispatch_id'] ?? 0) > 0
             || trim((string)($row['claimed_dispatch_uuid'] ?? '')) !== '';
         $hasFlightData = (bool)($row['has_flight_data'] ?? false);
         $hasClosure = (bool)($row['has_closure'] ?? false);
-        $status = $hasClosure ? 'completed' : (string)$row['status'];
+        $isOperationalSession = trim((string)($row['linked_operational_session_uuid'] ?? '')) !== '';
+        $hasDisplayClosure = $hasClosure && ($deriveOperationalCompletion || !$isOperationalSession);
+        $status = $hasDisplayClosure ? 'completed' : (string)$row['status'];
         $editable = $status === 'scheduled' && !$hasDispatch;
         $canUndispatch = $status === 'claimed'
             && $hasDispatch
-            && !$hasClosure
+            && !$hasDisplayClosure
             && !$hasFlightData
             && empty($row['has_audio']);
         $payload = array(
@@ -1299,7 +1444,7 @@ final class FlightScheduleService
             'status' => $status,
             'editable' => $editable,
             'can_undispatch' => $canUndispatch,
-            'lock_reason' => $editable ? null : ($hasClosure ? 'completed' : 'dispatch_claimed'),
+            'lock_reason' => $editable ? null : ($hasDisplayClosure ? 'completed' : 'dispatch_claimed'),
             'claimed_dispatch_uuid' => trim((string)($row['claimed_dispatch_uuid'] ?? '')) ?: null,
             'claimed_at' => isset($row['claimed_at'])
                 ? $this->isoPrecise((string)$row['claimed_at'])

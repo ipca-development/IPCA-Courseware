@@ -83,6 +83,11 @@ final class SettingsStore: ObservableObject {
     @Published var operationalIdentityCanonicalWriteEnabled: Bool {
         didSet { UserDefaults.standard.set(operationalIdentityCanonicalWriteEnabled, forKey: Keys.operationalIdentityCanonicalWriteEnabled) }
     }
+    /// Offline-capable mirror of the Stage 1 rollout. Default off until an
+    /// authenticated schedule refresh confirms this exact device is allowlisted.
+    @Published var operationalSessionModelEnabled: Bool {
+        didSet { UserDefaults.standard.set(operationalSessionModelEnabled, forKey: Keys.operationalSessionModelEnabled) }
+    }
 
     /// Garmin SD Card folder bookmark metadata. The bookmark `Data` itself lives only in
     /// UserDefaults (see `Keys.garminSDCardBookmark`) — never published directly.
@@ -121,6 +126,8 @@ final class SettingsStore: ObservableObject {
         garminVaultMaxMegabytes = UserDefaults.standard.object(forKey: Keys.garminVaultMaxMegabytes) as? Int ?? 500
         operationalIdentityCanonicalWriteEnabled =
             UserDefaults.standard.object(forKey: Keys.operationalIdentityCanonicalWriteEnabled) as? Bool ?? false
+        operationalSessionModelEnabled =
+            UserDefaults.standard.object(forKey: Keys.operationalSessionModelEnabled) as? Bool ?? false
         deviceEnrollmentStatus = Self.keychainValue(for: Keys.deviceCredential) == nil ? "Not enrolled" : "Enrolled"
         garminSDCardFolderLabel = UserDefaults.standard.string(forKey: Keys.garminSDCardFolderLabel) ?? ""
         garminSDCardVolumeName = UserDefaults.standard.string(forKey: Keys.garminSDCardVolumeName) ?? ""
@@ -465,6 +472,7 @@ final class SettingsStore: ObservableObject {
         static let garminVaultRetentionDays = "ipca.cvrUnit.garminVaultRetentionDays"
         static let garminVaultMaxMegabytes = "ipca.cvrUnit.garminVaultMaxMegabytes"
         static let operationalIdentityCanonicalWriteEnabled = "ipca.cvrUnit.operationalIdentityCanonicalWriteEnabled"
+        static let operationalSessionModelEnabled = "ipca.cvrUnit.operationalSessionModelEnabled"
         static let deviceUUID = "ipca.cvrUnit.deviceUUID"
         static let deviceCredential = "ipca.cvrUnit.deviceCredential"
         static let garminSDCardBookmark = "ipca.cvrUnit.garminSDCardBookmark"

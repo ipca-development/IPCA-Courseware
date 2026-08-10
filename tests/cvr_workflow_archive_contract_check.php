@@ -12,6 +12,7 @@ $dispatchIntake = file_get_contents($root . '/src/CvrDispatchIntakeService.php')
 $derivation = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
 $classification = file_get_contents($root . '/src/GarminFlightDataSourceClassificationService.php') ?: '';
 $garminRecovery = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/GarminRecoveryServices.swift') ?: '';
+$garminImport = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/GarminSDCardImportCoordinator.swift') ?: '';
 $apiClient = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/APIClient.swift') ?: '';
 $garminEvidence = file_get_contents($root . '/src/GarminCsvEvidenceService.php') ?: '';
 $garminChunkEndpoint = file_get_contents($root . '/public/api/cvr/csv_upload_chunk.php') ?: '';
@@ -34,20 +35,22 @@ $checks = array(
         && !str_contains($store, 'NEXT FLIGHT is blocked until every Dispatch, event, closure, and Garmin component')
         && !str_contains($store, 'components.allSatisfy({ $0.state == .serverVerified'),
     'locally closed aircraft carryover prefills next dispatch while upload continues' =>
-        str_contains($store, 'latestClosedCarryover(for: registration)')
+        str_contains($store, 'resolvedLegCarryover(for: registration)')
         && str_contains($store, 'startingHobbs: carryover?.endingHobbs')
         && str_contains($store, 'startingTacho: carryover?.endingTacho')
         && str_contains($store, 'fuelOnboard: carryover?.fuelRemaining')
         && str_contains($views, 'PREVIOUS FLIGHT VALUES SAVED ON THIS IPHONE')
-        && str_contains($views, 'server upload may still be pending'),
+        && str_contains($store, '"previous_locally_closed_flight_carryover"'),
     'shutdown save persists locally before immediate closure upload' =>
-        str_contains($store, 'let persisted = mutate')
+        str_contains($store, 'func saveCheckInValues(')
         && str_contains($store, 'return persisted')
-        && str_contains($views, 'if save()')
+        && str_contains($views, 'let saved = workflow.saveCheckInValues(')
+        && str_contains($views, 'guard saved else { return }')
         && str_contains($views, 'uploadManager.uploadQueuedWorkflowComponents'),
     'closure repair replaces immutable upload identity instead of looping' =>
         str_contains($store, 'repairCompletedClosureUploadIfNeeded')
-        && str_contains($store, 'A repaired closure is new immutable evidence')
+        && str_contains($store, '$0.uploadComponents.removeAll')
+        && str_contains($store, '$0.uploadComponents.append(evidenceComponent(')
         && str_contains($views, 'workflow.repairCompletedClosureUploadIfNeeded()')
         && !str_contains($views, 'FIX ENDING METERS / FUEL'),
     'server rejects incomplete or regressing closure values' =>
@@ -60,9 +63,9 @@ $checks = array(
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/FlightLandingCycleDetector.swift'), 'stop_and_go')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'CVROperationalHoldTile')
         && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'verifiedTakeoffCount'),
-    'postflight closure asks only for meters while preserving derived operational evidence' =>
-        str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'AUDIO FLIGHT CLOSURE')
-        && str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), 'Garmin CSV data is optional now')
+    'Check-In saves meters and fuel while Garmin remains optional' =>
+        str_contains($views, 'Enter the fuel remaining.')
+        && str_contains($views, 'workflow.saveCheckInValues(')
         && !str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift'), '@State private var oilRemaining')
         && !str_contains($store, 'fuel remaining, and oil remaining are required before closure upload')
         && !str_contains((string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift'), 'item["ending_oil_quantity"]')
@@ -75,19 +78,19 @@ $checks = array(
         && str_contains($derivation, 'verify the dispatch entry')
         && str_contains($derivation, 'Garmin airframe_hours'),
     'SD recovery synchronizes all data-rich files without GPS-only logs' =>
-        str_contains($garminRecovery, 'if candidate.classification.isDataRich')
-        && str_contains($garminRecovery, 'candidate) in candidates.enumerated()')
-        && str_contains($garminRecovery, 'Non-matching files synchronize as standalone records')
-        && str_contains($garminRecovery, 'knownGarminCsvHashes')
+        str_contains($garminImport, 'if result.isDataRich')
+        && str_contains($garminImport, 'knownGarminCsvHashes')
+        && str_contains($garminRecovery, 'let standaloneRecords = vault.pendingRecords().filter')
+        && str_contains($garminRecovery, 'uploadStandaloneRecord(')
         && str_contains($apiClient, 'appendField("standalone_upload", "1")')
         && str_contains($garminChunkEndpoint, "'standalone_upload' =>")
         && str_contains($garminEvidence, '$standaloneUpload'),
     'SD recovery exposes live scan and synchronization progress' =>
-        str_contains($garminRecovery, 'scanFilesProcessed')
+        str_contains($garminImport, 'scanFilesProcessed')
         && str_contains($garminRecovery, 'syncFilesProcessed')
         && str_contains($garminRecovery, 'currentFileProgress')
         && str_contains($views, 'activeRecoveryProgress')
-        && str_contains($views, 'SYNCHRONIZING CARD FILES')
+        && str_contains($views, 'SYNCHRONIZING GARMIN FILES')
         && str_contains(
             (string) file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/CVROperationalDesign.swift'),
             'ProgressView(value: progress)'
@@ -109,7 +112,8 @@ $checks = array(
         && str_contains($store, 'dispatchContinuityUploadIssue')
         && str_contains($store, 'dispatchUploadVerified')
         && str_contains($views, 'DISPATCH CONTINUITY WARNING')
-        && str_contains($views, 'RETRY DISPATCH UPLOAD')
+        && str_contains($views, 'FUEL DISCREPANCY >20%')
+        && str_contains($views, 'Confirm the airplane was refueled before this flight')
         && str_contains($views, 'Oil has been uploaded')
         && !str_contains($views, 'Adjust dispatch oil if the reading was wrong'),
     'failed closure upload can be repaired from Garmin and In-Flight tabs' =>
@@ -119,7 +123,7 @@ $checks = array(
         && str_contains($store, 'repairCompletedClosureUploadIfNeeded')
         && str_contains($views, 'FIX ENDING METERS')
         && str_contains($views, 'RETRY FAILED ITEMS')
-        && str_contains($views, 'Fix Ending Meters'),
+        && str_contains($views, 'CheckInView(repairExistingClosureUpload: true)'),
     'operational calculation versions accept long service version labels' =>
         str_contains($derivation, "substr((string)(\$value['calculation_version'] ?? 'phase3-v1'), 0, 64)")
         && str_contains((string) file_get_contents($root . '/src/TachoCalculationService.php'), 'tacho_rpm_threshold_cumulative_v2')

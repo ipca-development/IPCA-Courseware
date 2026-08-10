@@ -23,6 +23,7 @@ final class AircraftFleetStatusService
     {
         $uplifts = new AircraftFuelUpliftService($this->pdo);
         $fuelStateService = new AircraftFuelStateService($this->pdo);
+        $averageBurnByRegistration = $this->averageFuelBurnByRegistration();
         $cards = array();
         foreach ($aircraftOptions as $aircraft) {
             $registration = strtoupper(trim((string)($aircraft['registration'] ?? '')));
@@ -59,12 +60,8 @@ final class AircraftFleetStatusService
             }
             $fuelUnit = strtoupper(trim((string)($fuelState['unit'] ?? ($cfg['fuel_unit'] ?? 'USG')))) ?: 'USG';
             $fuelPct = $fuelQty !== null ? max(0.0, min(100.0, ($fuelQty / $fuelCap) * 100.0)) : 0.0;
-            $fuelBurn = null;
-            $departureFuel = $this->numericOrNull($latest['dispatch_fuel_onboard'] ?? null);
-            $landingFuel = $this->numericOrNull($latest['fuel_remaining'] ?? null);
-            if ($departureFuel !== null && $landingFuel !== null) {
-                $fuelBurn = round(max(0.0, $departureFuel - $landingFuel), 1);
-            }
+            $avgBurn = $averageBurnByRegistration[$registration] ?? null;
+            $avgBurnRate = is_array($avgBurn) ? ($avgBurn['avg_usg_per_hour'] ?? null) : null;
 
             $cards[] = array(
                 'aircraft_id' => $aircraftId,
@@ -81,7 +78,11 @@ final class AircraftFleetStatusService
                 'fuel_pct' => $fuelPct,
                 'fuel_unit' => $fuelUnit,
                 'fuel_capacity' => $fuelCap,
-                'fuel_burn' => $fuelBurn,
+                // Measured all-time average from Master Logbook–visible CVR legs (USG/hr).
+                'fuel_burn' => $avgBurnRate,
+                'fuel_burn_avg_usg_per_hour' => $avgBurnRate,
+                'fuel_burn_sample_flights' => is_array($avgBurn) ? (int)($avgBurn['sample_flights'] ?? 0) : 0,
+                'fuel_burn_total_hobbs' => is_array($avgBurn) ? ($avgBurn['total_hobbs'] ?? null) : null,
                 'fuel_source' => $fuelSource,
                 'has_meters' => $latest !== null,
                 'uplift_count' => count($upliftRows),
@@ -90,6 +91,97 @@ final class AircraftFleetStatusService
             );
         }
         return $cards;
+    }
+
+    /**
+     * All-time average fuel burn (USG per Hobbs hour) from Master Logbook–visible CVR legs.
+     * Soft-removed legs are excluded. Incomplete fuel/Hobbs samples are skipped.
+     *
+     * @return array<string,array{avg_usg_per_hour:float,sample_flights:int,total_hobbs:float,total_burn:float}>
+     */
+    private function averageFuelBurnByRegistration(): array
+    {
+        if (!$this->tableExists('ipca_cvr_dispatches') || !$this->tableExists('ipca_cvr_flight_closures')) {
+            return array();
+        }
+
+        $hiddenClause = '';
+        if ($this->tableExists('ipca_cvr_logbook_hidden_legs')) {
+            $hiddenClause = ' AND NOT EXISTS (
+                SELECT 1 FROM ipca_cvr_logbook_hidden_legs h
+                WHERE h.dispatch_id = d.id
+            )';
+        }
+
+        $statement = $this->pdo->query(
+            'SELECT UPPER(TRIM(d.aircraft_registration)) AS registration,
+                    d.starting_hobbs,
+                    d.fuel_onboard,
+                    c.ending_hobbs,
+                    c.fuel_remaining
+             FROM ipca_cvr_dispatches d
+             INNER JOIN ipca_cvr_flight_closures c ON c.id = (
+               SELECT fc.id FROM ipca_cvr_flight_closures fc
+               WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER(d.workflow_flight_record_uuid)
+               ORDER BY fc.received_at DESC, fc.id DESC
+               LIMIT 1
+             )
+             WHERE TRIM(d.aircraft_registration) <> \'\'
+               AND d.starting_hobbs IS NOT NULL
+               AND c.ending_hobbs IS NOT NULL'
+            . $hiddenClause
+        );
+        $rows = $statement ? $statement->fetchAll(PDO::FETCH_ASSOC) : array();
+        if (!is_array($rows) || $rows === array()) {
+            return array();
+        }
+
+        $totals = array();
+        foreach ($rows as $row) {
+            $registration = strtoupper(trim((string)($row['registration'] ?? '')));
+            if ($registration === '') {
+                continue;
+            }
+            $startHobbs = $this->numericOrNull($row['starting_hobbs'] ?? null);
+            $endHobbs = $this->numericOrNull($row['ending_hobbs'] ?? null);
+            $fuelDep = $this->numericOrNull($row['fuel_onboard'] ?? null);
+            $fuelLdg = $this->numericOrNull($row['fuel_remaining'] ?? null);
+            if ($startHobbs === null || $endHobbs === null || $fuelDep === null || $fuelLdg === null) {
+                continue;
+            }
+            $hobbsHours = round($endHobbs - $startHobbs, 2);
+            $fuelBurned = round($fuelDep - $fuelLdg, 1);
+            // Match Master Logbook usable samples: positive Hobbs and positive burn only.
+            if ($hobbsHours <= 0.0 || $fuelBurned <= 0.0) {
+                continue;
+            }
+            if (!isset($totals[$registration])) {
+                $totals[$registration] = array(
+                    'total_burn' => 0.0,
+                    'total_hobbs' => 0.0,
+                    'sample_flights' => 0,
+                );
+            }
+            $totals[$registration]['total_burn'] += $fuelBurned;
+            $totals[$registration]['total_hobbs'] += $hobbsHours;
+            $totals[$registration]['sample_flights']++;
+        }
+
+        $result = array();
+        foreach ($totals as $registration => $aggregate) {
+            $totalHobbs = (float)$aggregate['total_hobbs'];
+            if ($totalHobbs < 0.1 || (int)$aggregate['sample_flights'] < 1) {
+                continue;
+            }
+            $result[$registration] = array(
+                'avg_usg_per_hour' => round(((float)$aggregate['total_burn']) / $totalHobbs, 1),
+                'sample_flights' => (int)$aggregate['sample_flights'],
+                'total_hobbs' => round($totalHobbs, 2),
+                'total_burn' => round((float)$aggregate['total_burn'], 1),
+            );
+        }
+
+        return $result;
     }
 
     /**

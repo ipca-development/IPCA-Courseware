@@ -54,10 +54,13 @@ $checks = array(
         && str_contains($uploads, 'item["on_block_utc"]')
         && str_contains($uploads, 'off_block_plus_hobbs_increment')
         && !str_contains($uploads, 'item["on_block_source"] = onBlock.eventType'),
-    'duplicate local and server rows collapse by reservation then Dispatch identity' =>
+    'duplicate rows merge by flight record without crossing Operational Sessions' =>
         str_contains($service, "'scheduler_record_id'")
         && str_contains($models, 'var schedulerRecordID: String?')
         && str_contains($views, 'private func logIdentity(')
+        && str_contains($views, 'return "flight:\\(flightRecordID.lowercased())"')
+        && str_contains($views, 'Garmin evidence belongs to one flight record')
+        && str_contains($views, 'return "leg:')
         && str_contains($views, 'return "schedule:')
         && str_contains($views, 'return "dispatch:')
         && str_contains($views, 'mergeLogEntries')
@@ -69,10 +72,22 @@ $checks = array(
         && str_contains($views, 'return ("SYNCING"')
         && str_contains($views, 'return ("CHECKED IN"')
         && str_contains($views, 'SYNC PENDING')
-        && str_contains($views, 'SYNC PENDING UNTIL DISPATCH + AUDIO FINISH ONLINE'),
-    'Log exposes manual SYNC NOW for pending uploads' =>
+        && str_contains($views, 'FLIGHT RECORDS AND SYNCHRONIZATION'),
+    'Admin-only Log PIN void hides entries from overview counts' =>
+        str_contains($views, 'ADMIN MODE · HOLD A LOG CARD 5 SECONDS TO VOID')
+        && str_contains($views, 'HOLD CARD 5 SECONDS TO VOID')
+        && str_contains($views, 'guard adminUnlocked else { return }')
+        && str_contains($views, 'voidHoldDuration')
+        && str_contains($views, 'pinPurpose = .voidLog')
+        && str_contains($views, 'Void this Log entry?')
+        && str_contains($workflowStore, 'func voidFlightLog(')
+        && str_contains($workflowStore, 'isFlightLogVoided')
+        && str_contains($views, 'workflow.isFlightLogVoided'),
+    'Log exposes manual sync at the top tile and bottom action' =>
         str_contains($views, 'title: "SYNC NOW"')
         && str_contains($views, 'syncPendingLogUploads()')
+        && str_contains($views, '.accessibilityLabel("Sync \(missingCount) pending flight logs now")')
+        && str_contains($views, '.disabled(missingCount == 0)')
         && str_contains($views, 'logNeedsManualSync')
         && str_contains($views, 'Label("SYNC"')
         && str_contains($views, 'syncLogEntry(entry)')
@@ -91,11 +106,17 @@ $checks = array(
         && str_contains($uploads, 'configureNetworkMonitor')
         && str_contains($app, 'recordingStore.requeueConnectivityFailedUploads()'),
     'retry progress replaces stale offline errors in the merged Log row' =>
-        str_contains($views, 'merged.serverUploadStatus?.lowercased() == "failed"')
+        str_contains($views, 'if status == "failed"')
+        && str_contains($views, 'candidate.serverUploadError ?? existing.serverUploadError')
         && str_contains($views, 'merged.transcriptStatus?.lowercased() == "failed"')
         && strpos($views, 'if values.contains("queued")') < strpos($views, 'if values.contains("failed")')
         && strpos($views, 'if values.contains("failed")') < strpos($views, 'if values.contains("pending")')
         && str_contains($views, 'await flightLogs.refresh(settings: settings)'),
+    'Log DISPATCH column tracks dispatch_metadata progress only' =>
+        str_contains($views, 'componentType == "dispatch_metadata"')
+        && str_contains($views, 'DISPATCH column tracks dispatch_metadata only')
+        && str_contains($views, 'return progress < 1 ? "UPLOADING" : "\(progress)%"')
+        && str_contains($uploads, 'workflowUploadEpochs'),
     'legacy continuity 422 is cleared and automatically requeued' =>
         str_contains($workflowStore, 'requeueLegacyAdvisoryDispatchFailure')
         && str_contains($workflowStore, 'isLegacyAdvisoryDispatchFailure')
@@ -165,8 +186,15 @@ $checks = array(
         && str_contains($service, 'requeueTranscription')
         && str_contains($models, 'func retryServerProcessing(')
         && str_contains($workflowStore, 'func requeueFailedUploads(forFlightRecordID')
+        && str_contains($workflowStore, 'func forceRetryPendingUploads(forFlightRecordID')
         && str_contains($views, 'Label("RETRY"')
-        && str_contains($views, 'retryLogUpload(entry)'),
+        && str_contains($views, 'retryLogUpload(entry)')
+        && str_contains($views, 'forceRetryPendingUploads(forFlightRecordID'),
+    'Log SYNC force-retries stuck queued Dispatch uploads' =>
+        str_contains($workflowStore, 'forceRetryPendingUploads(forFlightRecordID')
+        && str_contains($workflowStore, 'ensureArchivedDispatchUploadComponent')
+        && str_contains($workflowStore, 'resetWorkflowComponentForForceRetry')
+        && str_contains($workflowStore, 'Explicit Log SYNC must not force reconciliation for never-attempted'),
     'iOS accepts AirDrop CSV and routes it to Log assignment' =>
         str_contains($plist, 'public.comma-separated-values-text')
         && str_contains($app, '.onOpenURL')
@@ -212,7 +240,7 @@ $checks = array(
         && str_contains($views, 'OperationalBottomTabBar'),
     'Log replaces the standalone Garmin operational tab' =>
         str_contains($views, 'CVROperationalTab.allCases.filter { $0 != .garmin }')
-        && str_contains($views, "case .garmin:\n            FlightLogView()")
+        && str_contains($views, "case .garmin:\n            FlightLogView(adminUnlocked: adminUnlocked)")
         && str_contains($workflowStore, '$0.selectedTab = .log'),
     'ended persisted workflow is archived and operational tabs become idle' =>
         str_contains($workflowStore, 'try loadArchives()')
@@ -235,12 +263,13 @@ $checks = array(
         str_contains($views, 'private var displayEntries: [CVRFlightLogEntry]')
         && str_contains($views, 'for archive in workflow.archives')
         && str_contains($views, 'ForEach(displayEntries.filter { !$0.hasGarminCSV })'),
-    'successful Garmin attachment survives assignment-sheet dismissal and refresh cancellation' =>
+    'successful Garmin attachment clears durable retry before status refresh' =>
         str_contains($models, 'locallyAttachedGarminFlightRecordIDs.insert(entry.flightRecordID)')
         && str_contains($models, 'entries[index].hasGarminCSV = true')
         && str_contains($models, 'await refresh(settings: settings)')
         && str_contains($models, 'clearPendingGarminAfterVerifiedSuccess')
-        && strpos($models, 'await refresh(settings: settings)') < strpos($models, 'clearPendingGarminAfterVerifiedSuccess')
+        && strpos($models, 'clearPendingGarminAfterVerifiedSuccess(fileURL: pending.fileURL)')
+            < strpos($models, 'await refresh(settings: settings)', strpos($models, 'clearPendingGarminAfterVerifiedSuccess(fileURL: pending.fileURL)'))
         && str_contains($models, 'catch is CancellationError')
         && str_contains($views, 'hasLocallyAttachedGarminCSV'),
     'manual Log CSV upload cannot reopen its assignment sheet in a loop' =>
@@ -248,6 +277,10 @@ $checks = array(
         && str_contains($views, 'isShowingGarminAssignment = false')
         && str_contains($views, 'isShowingGarminAssignment = true')
         && !str_contains($views, 'flightLogs.pendingGarminCSV != nil && directImportTarget == nil && !flightLogs.isUploading'),
+    'Garmin picker is hosted by the persistent operational shell' =>
+        str_contains($views, 'struct OperationalTabsView: View')
+        && str_contains($views, '.sheet(isPresented: $garminSDCard.showingFileSheet)')
+        && str_contains($views, 'GarminSDCardImportSheet(coordinator: garminSDCard)'),
 );
 
 $failed = array();

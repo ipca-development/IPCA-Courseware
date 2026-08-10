@@ -107,6 +107,7 @@ final class CvrDataIntakeReadService
             $this->prefixedColumnExpression($columns, $tableAlias, array('crew_json', 'crew'), 'crew_json', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('error_message', 'last_error'), 'error_message'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('workflow_flight_record_uuid', 'flight_record_uuid'), 'workflow_flight_record_uuid'),
+            $this->prefixedColumnExpression($columns, $tableAlias, array('operational_session_uuid'), 'operational_session_uuid', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('scheduler_record_id'), 'scheduler_record_id', 'NULL'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('organization_id'), 'organization_id', '0'),
             $this->prefixedColumnExpression($columns, $tableAlias, array('last_received_at', 'received_at', 'created_at', 'updated_at'), 'received_at', 'NULL'),
@@ -132,9 +133,25 @@ final class CvrDataIntakeReadService
                   AND v.dispatch_version = {$tableAlias}.current_version
                 LIMIT 1
             ), '') AS arrival_airport";
+            $select[] = "(
+                SELECT JSON_EXTRACT(v.payload_json, '$.leg_segments')
+                FROM ipca_cvr_dispatch_versions v
+                WHERE v.dispatch_id = {$tableAlias}.id
+                  AND v.dispatch_version = {$tableAlias}.current_version
+                LIMIT 1
+            ) AS leg_segments_json";
+            $select[] = "(
+                SELECT JSON_EXTRACT(v.payload_json, '$.via_airports')
+                FROM ipca_cvr_dispatch_versions v
+                WHERE v.dispatch_id = {$tableAlias}.id
+                  AND v.dispatch_version = {$tableAlias}.current_version
+                LIMIT 1
+            ) AS via_airports_json";
         } else {
             $select[] = "'' AS departure_airport";
             $select[] = "'' AS arrival_airport";
+            $select[] = 'NULL AS leg_segments_json';
+            $select[] = 'NULL AS via_airports_json';
         }
         if ($this->tableExists('ipca_cvr_flight_events')
             && isset($columns['workflow_flight_record_uuid'])) {
@@ -149,7 +166,8 @@ final class CvrDataIntakeReadService
             if ($this->tableExists('ipca_cvr_flight_closures')) {
                 $closureOffFallback = "(SELECT COALESCE(
                         JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.evidence.off_block_utc')),
-                        JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.off_block_utc'))
+                        JSON_UNQUOTE(JSON_EXTRACT(fc.payload_json, '$.off_block_utc')),
+                        fc.received_at
                     )
                     FROM ipca_cvr_flight_closures fc
                     WHERE LOWER(fc.workflow_flight_record_uuid) = LOWER({$tableAlias}.workflow_flight_record_uuid)
@@ -326,28 +344,12 @@ final class CvrDataIntakeReadService
                 $this->firstColumn($columns, array('last_received_at', 'received_at', 'created_at', 'updated_at', 'id')) ?? 'id'
             ) . ' DESC');
 
-        $countSql = 'SELECT COUNT(*) FROM ' . $quotedTable . ' WHERE ' . $whereSql;
-        $total = 0;
-        try {
-            $countStmt = $this->pdo->prepare($countSql);
-            $countStmt->execute($params);
-            $total = (int)$countStmt->fetchColumn();
-        } catch (Throwable) {
-            $total = 0;
-        }
-
-        $pageCount = max(1, (int)ceil(max(0, $total) / $limit));
-        if ($offset >= $total && $total > 0) {
-            $offset = (int)(($pageCount - 1) * $limit);
-        }
-        $page = (int)floor($offset / $limit) + 1;
-
+        // Fetch the full filtered set, then group device multi-leg siblings before paging.
+        // LIMIT in SQL would split a reservation across pages and hide Via aggregation.
         $sql = 'SELECT ' . implode(', ', $select)
             . ' FROM ' . $quotedTable
             . ' WHERE ' . $whereSql
-            . ' ORDER BY ' . $orderSql
-            . ' LIMIT ' . $limit
-            . ' OFFSET ' . $offset;
+            . ' ORDER BY ' . $orderSql;
 
         $rows = $this->fetchAllPrepared($sql, $params);
         $flightKeys = array_values(array_filter(array_map(
@@ -437,6 +439,12 @@ final class CvrDataIntakeReadService
             $row['debrief_job_status'] = (string)($bundle['debrief_job_status'] ?? '');
             $row['debrief_job_progress'] = (int)($bundle['debrief_job_progress'] ?? 0);
             $row['debrief_job_message'] = (string)($bundle['debrief_job_message'] ?? '');
+            $row['leg_segments'] = $this->decodeJsonList($row['leg_segments_json'] ?? null);
+            $row['via_airports'] = $this->decodeJsonStringList($row['via_airports_json'] ?? null);
+            if ($row['via_airports'] === array() && $row['leg_segments'] !== array()) {
+                $row['via_airports'] = $this->viaAirportsFromSegments($row['leg_segments']);
+            }
+            unset($row['leg_segments_json'], $row['via_airports_json']);
             $row['crew_members'] = $this->blockTimes()->parseCrew($row['crew_json'] ?? null);
             $organizationId = (int)($row['organization_id'] ?? 0);
             $projection = $this->identityRead()->projectLegIdentity(
@@ -448,9 +456,18 @@ final class CvrDataIntakeReadService
             $projected[] = $this->identityRead()->mergeProjection($row, $projection);
         }
 
+        $grouped = self::groupDeviceMultiLegDispatchRows($projected);
+        $total = count($grouped);
+        $pageCount = max(1, (int)ceil(max(0, $total) / $limit));
+        if ($offset >= $total && $total > 0) {
+            $offset = (int)(($pageCount - 1) * $limit);
+        }
+        $page = (int)floor($offset / $limit) + 1;
+        $paged = array_slice($grouped, $offset, $limit);
+
         return array(
             'available' => true,
-            'rows' => $projected,
+            'rows' => array_values($paged),
             'message' => '',
             'total' => $total,
             'limit' => $limit,
@@ -461,8 +478,300 @@ final class CvrDataIntakeReadService
     }
 
     /**
+     * Collapse device multi-leg siblings (same scheduler/reservation, one Dispatch per hop)
+     * into a single intake row with synthetic leg_segments — matching admin Define Legs UX.
+     * Annotated single-dispatch multi-leg rows (already have leg_segments) are left alone.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    public static function groupDeviceMultiLegDispatchRows(array $rows): array
+    {
+        $buckets = array();
+        $order = array();
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $key = self::deviceMultiLegGroupKey($row);
+            if ($key === null) {
+                $key = 'singleton:' . (string)($row['id'] ?? ('idx-' . $index));
+            }
+            if (!isset($buckets[$key])) {
+                $buckets[$key] = array();
+                $order[] = $key;
+            }
+            $buckets[$key][] = $row;
+        }
+
+        $out = array();
+        foreach ($order as $key) {
+            $siblings = $buckets[$key] ?? array();
+            if ($siblings === array()) {
+                continue;
+            }
+            if (count($siblings) < 2 || str_starts_with($key, 'singleton:')) {
+                foreach ($siblings as $sibling) {
+                    $out[] = $sibling;
+                }
+                continue;
+            }
+            $annotatedRows = array();
+            foreach ($siblings as $sibling) {
+                $segments = is_array($sibling['leg_segments'] ?? null) ? $sibling['leg_segments'] : array();
+                if (count($segments) >= 2) {
+                    $annotatedRows[] = $sibling;
+                }
+            }
+            if ($annotatedRows !== array()) {
+                // Continuous Check-In already Define-Legs annotated: keep that row only.
+                // Incomplete later device hops under the same scheduler are orphans.
+                foreach ($annotatedRows as $annotated) {
+                    $out[] = $annotated;
+                }
+                continue;
+            }
+            $out[] = self::mergeDeviceMultiLegSiblingRows($siblings);
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    public static function deviceMultiLegGroupKey(array $row): ?string
+    {
+        $operationalSession = strtolower(trim((string)($row['operational_session_uuid'] ?? '')));
+        if ($operationalSession !== '') {
+            return 'session:' . $operationalSession;
+        }
+        $scheduler = strtolower(trim((string)($row['scheduler_record_id'] ?? '')));
+        if ($scheduler !== '') {
+            return 'sched:' . $scheduler;
+        }
+        $reservation = strtolower(trim((string)($row['reservation_uuid'] ?? '')));
+        if ($reservation !== '') {
+            return 'res:' . $reservation;
+        }
+        return null;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $siblings
+     * @return array<string,mixed>
+     */
+    public static function mergeDeviceMultiLegSiblingRows(array $siblings): array
+    {
+        usort($siblings, static function (array $a, array $b): int {
+            $ao = trim((string)($a['off_block_utc'] ?? ''));
+            $bo = trim((string)($b['off_block_utc'] ?? ''));
+            if ($ao !== '' && $bo !== '' && $ao !== $bo) {
+                return $ao <=> $bo;
+            }
+            return ((int)($a['id'] ?? 0)) <=> ((int)($b['id'] ?? 0));
+        });
+
+        $segments = array();
+        foreach ($siblings as $index => $sibling) {
+            $startHobbs = is_numeric($sibling['starting_hobbs'] ?? null) ? (float)$sibling['starting_hobbs'] : null;
+            $endHobbs = is_numeric($sibling['ending_hobbs'] ?? null) ? (float)$sibling['ending_hobbs'] : null;
+            $startTacho = is_numeric($sibling['starting_tacho'] ?? null) ? (float)$sibling['starting_tacho'] : null;
+            $endTacho = is_numeric($sibling['ending_tacho'] ?? null) ? (float)$sibling['ending_tacho'] : null;
+            $fuelOn = trim((string)($sibling['fuel_onboard'] ?? $sibling['fuel_departure'] ?? ''));
+            $fuelRem = trim((string)($sibling['fuel_remaining'] ?? $sibling['fuel_landing'] ?? ''));
+            $segments[] = array(
+                'sequence_number' => $index + 1,
+                'dispatch_id' => (int)($sibling['id'] ?? 0),
+                'dispatch_uuid' => (string)($sibling['dispatch_uuid'] ?? ''),
+                'workflow_flight_record_uuid' => (string)($sibling['workflow_flight_record_uuid'] ?? ''),
+                'leg_uuid' => (string)($sibling['leg_uuid'] ?? ''),
+                'departure_airport' => strtoupper(trim((string)($sibling['departure_airport'] ?? ''))),
+                'arrival_airport' => strtoupper(trim((string)($sibling['arrival_airport'] ?? ''))),
+                'off_block_utc' => (string)($sibling['off_block_utc'] ?? ''),
+                'on_block_utc' => (string)($sibling['on_block_utc'] ?? ''),
+                'starting_hobbs' => $startHobbs,
+                'ending_hobbs' => $endHobbs,
+                'hobbs_delta' => ($startHobbs !== null && $endHobbs !== null)
+                    ? round(max(0.0, $endHobbs - $startHobbs), 1)
+                    : null,
+                'starting_tacho' => $startTacho,
+                'ending_tacho' => $endTacho,
+                'tacho_delta' => ($startTacho !== null && $endTacho !== null)
+                    ? round(max(0.0, $endTacho - $startTacho), 1)
+                    : null,
+                'fuel_onboard' => $fuelOn !== '' ? $fuelOn : null,
+                'fuel_remaining' => $fuelRem !== '' ? $fuelRem : null,
+                'fuel_burn' => (is_numeric($fuelOn) && is_numeric($fuelRem))
+                    ? round((float)$fuelOn - (float)$fuelRem, 1)
+                    : null,
+                'takeoff_count' => (int)($sibling['takeoff_count'] ?? 0),
+                'landing_count' => (int)($sibling['landing_count'] ?? 0),
+                'has_garmin_csv' => !empty($sibling['has_garmin_csv']),
+                'recording_uid' => (string)($sibling['recording_uid'] ?? ''),
+            );
+        }
+
+        $first = $siblings[0];
+        $last = $siblings[count($siblings) - 1];
+        $merged = $first;
+        $evidence = self::pickDeviceMultiLegEvidenceDonor($siblings);
+        foreach (array(
+            'has_garmin_csv',
+            'flight_data_status_label',
+            'recording_id',
+            'recording_uid',
+            'bundle_id',
+            'debrief_id',
+            'reconstruction_status',
+            'debrief_job_id',
+            'debrief_job_status',
+            'debrief_job_progress',
+            'debrief_job_message',
+            'audio_upload_status',
+            'transcript_status',
+            'audio_status_label',
+            'transcript_status_label',
+            'sync_status',
+            'dispatch_status_label',
+        ) as $field) {
+            if (array_key_exists($field, $evidence)) {
+                $merged[$field] = $evidence[$field];
+            }
+        }
+        // Prefer the evidence-owning flight UUID for CSV attach / replay launch.
+        if (trim((string)($evidence['workflow_flight_record_uuid'] ?? '')) !== '') {
+            $merged['workflow_flight_record_uuid'] = $evidence['workflow_flight_record_uuid'];
+        }
+        if ((int)($evidence['id'] ?? 0) > 0) {
+            $merged['id'] = (int)$evidence['id'];
+            $merged['dispatch_uuid'] = (string)($evidence['dispatch_uuid'] ?? $merged['dispatch_uuid'] ?? '');
+        }
+
+        $merged['departure_airport'] = strtoupper(trim((string)($first['departure_airport'] ?? '')));
+        $merged['arrival_airport'] = strtoupper(trim((string)($last['arrival_airport'] ?? '')));
+        $merged['off_block_utc'] = (string)($first['off_block_utc'] ?? '');
+        $merged['on_block_utc'] = (string)($last['on_block_utc'] ?? '');
+        $merged['starting_hobbs'] = $first['starting_hobbs'] ?? null;
+        $merged['ending_hobbs'] = $last['ending_hobbs'] ?? null;
+        $merged['starting_tacho'] = $first['starting_tacho'] ?? null;
+        $merged['ending_tacho'] = $last['ending_tacho'] ?? null;
+        $merged['fuel_onboard'] = $first['fuel_onboard'] ?? $first['fuel_departure'] ?? null;
+        $merged['fuel_remaining'] = $last['fuel_remaining'] ?? $last['fuel_landing'] ?? null;
+        $merged['fuel_departure'] = trim((string)($merged['fuel_onboard'] ?? ''));
+        $merged['fuel_landing'] = trim((string)($merged['fuel_remaining'] ?? ''));
+        if (is_numeric($merged['fuel_departure']) && is_numeric($merged['fuel_landing'])) {
+            $merged['fuel_consumption'] = round((float)$merged['fuel_departure'] - (float)$merged['fuel_landing'], 1);
+        }
+        $merged['takeoff_count'] = array_sum(array_map(
+            static fn(array $row): int => (int)($row['takeoff_count'] ?? 0),
+            $siblings
+        ));
+        $merged['landing_count'] = array_sum(array_map(
+            static fn(array $row): int => (int)($row['landing_count'] ?? 0),
+            $siblings
+        ));
+        if (is_numeric($merged['starting_hobbs'] ?? null) && is_numeric($merged['ending_hobbs'] ?? null)) {
+            $merged['engine_time_hours'] = round(
+                max(0.0, (float)$merged['ending_hobbs'] - (float)$merged['starting_hobbs']),
+                2
+            );
+        }
+        if (is_numeric($merged['starting_tacho'] ?? null) && is_numeric($merged['ending_tacho'] ?? null)) {
+            $merged['tacho_delta_hours'] = round(
+                max(0.0, (float)$merged['ending_tacho'] - (float)$merged['starting_tacho']),
+                2
+            );
+        }
+        $merged['leg_segments'] = $segments;
+        $merged['via_airports'] = self::viaAirportsFromSegmentList($segments);
+        $merged['device_multi_leg_grouped'] = true;
+        $merged['sibling_dispatch_ids'] = array_values(array_map(
+            static fn(array $row): int => (int)($row['id'] ?? 0),
+            $siblings
+        ));
+        $merged['sibling_flight_record_uuids'] = array_values(array_filter(array_map(
+            static fn(array $row): string => strtolower(trim((string)($row['workflow_flight_record_uuid'] ?? ''))),
+            $siblings
+        )));
+        $merged['has_closure'] = !empty(array_filter(
+            $siblings,
+            static fn(array $row): bool => !empty($row['has_closure'])
+        ));
+        $merged['has_recorder_verification'] = !empty(array_filter(
+            $siblings,
+            static fn(array $row): bool => !empty($row['has_recorder_verification'])
+        ));
+        return $merged;
+    }
+
+    /**
+     * Prefer the sibling that owns Garmin CSV, else a ready replay recording.
+     *
+     * @param list<array<string,mixed>> $siblings
+     * @return array<string,mixed>
+     */
+    public static function pickDeviceMultiLegEvidenceDonor(array $siblings): array
+    {
+        $ready = array('ready', 'reconstruction_complete', 'complete');
+        foreach ($siblings as $sibling) {
+            if (!empty($sibling['has_garmin_csv'])) {
+                return $sibling;
+            }
+        }
+        foreach ($siblings as $sibling) {
+            $status = strtolower(trim((string)($sibling['reconstruction_status'] ?? '')));
+            $uid = trim((string)($sibling['recording_uid'] ?? ''));
+            if ($uid !== '' && in_array($status, $ready, true)) {
+                return $sibling;
+            }
+        }
+        foreach ($siblings as $sibling) {
+            if (trim((string)($sibling['recording_uid'] ?? '')) !== '') {
+                return $sibling;
+            }
+        }
+        return $siblings[0];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $segments
+     * @return list<string>
+     */
+    public static function viaAirportsFromSegmentList(array $segments): array
+    {
+        if (count($segments) < 2) {
+            return array();
+        }
+        $via = array();
+        foreach ($segments as $index => $segment) {
+            if ($index === 0) {
+                continue;
+            }
+            $dep = strtoupper(trim((string)($segment['departure_airport'] ?? '')));
+            if ($dep !== '' && !in_array($dep, $via, true)) {
+                $via[] = $dep;
+            }
+        }
+        $finalArr = strtoupper(trim((string)($segments[count($segments) - 1]['arrival_airport'] ?? '')));
+        return array_values(array_filter(
+            $via,
+            static fn(string $icao): bool => $icao !== '' && $icao !== $finalArr
+        ));
+    }
+
+    /**
+     * @deprecated use viaAirportsFromSegmentList
+     * @param list<array<string,mixed>> $segments
+     * @return list<string>
+     */
+    private function viaAirportsFromSegments(array $segments): array
+    {
+        return self::viaAirportsFromSegmentList($segments);
+    }
+
+    /**
      * @param list<string> $flightRecordUuids
-     * @return array<string,array{recording_id:?int,recording_uid:string}>
+     * @return array<string,array{recording_id:?int,recording_uid:string,reconstruction_status?:string}>
      */
     private function recordingMetaByFlightRecord(array $flightRecordUuids): array
     {
@@ -886,6 +1195,51 @@ final class CvrDataIntakeReadService
             'rows' => $rows,
             'message' => '',
         );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function decodeJsonList(mixed $raw): array
+    {
+        if (is_array($raw)) {
+            return array_values(array_filter($raw, 'is_array'));
+        }
+        $text = trim((string)($raw ?? ''));
+        if ($text === '' || strcasecmp($text, 'null') === 0) {
+            return array();
+        }
+        $decoded = json_decode($text, true);
+        if (!is_array($decoded)) {
+            return array();
+        }
+        return array_values(array_filter($decoded, 'is_array'));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function decodeJsonStringList(mixed $raw): array
+    {
+        if (is_array($raw)) {
+            $out = array();
+            foreach ($raw as $value) {
+                $icao = strtoupper(trim((string)$value));
+                if ($icao !== '') {
+                    $out[] = $icao;
+                }
+            }
+            return $out;
+        }
+        $text = trim((string)($raw ?? ''));
+        if ($text === '' || strcasecmp($text, 'null') === 0) {
+            return array();
+        }
+        $decoded = json_decode($text, true);
+        if (!is_array($decoded)) {
+            return array();
+        }
+        return $this->decodeJsonStringList($decoded);
     }
 
     private function tableExists(string $table): bool

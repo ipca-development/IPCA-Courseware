@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/FlightScheduleService.php';
 require_once __DIR__ . '/../src/AircraftOperationalConfigService.php';
+require_once __DIR__ . '/../src/MissionCatalogService.php';
 
 $checks = array();
 $migration = file_get_contents(__DIR__ . '/../scripts/sql/2026_07_31_scheduled_dispatch_start_end.sql') ?: '';
@@ -76,12 +77,12 @@ $checks['offline Dispatch safely reconciles one matching return reservation'] = 
     && str_contains($scheduleSource, "SET status = 'completed', claimed_dispatch_uuid = ?");
 $checks['schedule times are planning data and cannot block Dispatch upload'] = static fn(): bool =>
     !str_contains($dispatchSource, 'Scheduled session times do not match the Dispatch.')
-    && str_contains($iosWorkflow, 'failedForLegacyScheduleTimeRule')
-    && str_contains($iosWorkflow, 'componentState == .failed || componentState == .needsUserAction');
-$checks['consumed scheduled sessions disappear from the iOS schedule immediately'] = static fn(): bool =>
-    str_contains($iosViews, 'consumedSchedulerRecordIDs')
-    && str_contains($iosViews, 'workflow.archives.compactMap')
-    && str_contains($iosViews, '!consumedSchedulerRecordIDs.contains($0.schedulerRecordID)');
+    && str_contains($iosWorkflow, 'componentState == .failed');
+$checks['aircraft schedule retains claimed sessions and displays Dispatch state'] = static fn(): bool =>
+    str_contains($scheduleSource, "array('scheduled', 'claimed')")
+    && str_contains($iosModels, 'status: session.status')
+    && str_contains($iosViews, 'return workflow.state.activeFlightRecord == nil ? "scheduled" : "dispatched"')
+    && str_contains($iosViews, 'return ("DISPATCHED", CVROperationalPalette.success)');
 $checks['migration is additive and contains relational crew'] = static fn(): bool =>
     str_contains($migration, 'CREATE TABLE IF NOT EXISTS ipca_flight_schedule_slots')
     && str_contains($migration, 'CREATE TABLE IF NOT EXISTS ipca_flight_schedule_crew')
@@ -103,19 +104,37 @@ $checks['iOS schedule decoder accepts authenticated API envelope'] = static fn()
     && str_contains($iosModels, 'scheduledSessions = "scheduled_sessions"');
 $checks['authenticated scheduled missions are selectable unless audio is recording'] = static fn(): bool =>
     str_contains($iosWorkflow, 'return !isAudioRecording')
-    && str_contains($iosWorkflow, 'state.activeDispatch != nil')
+    && str_contains($iosWorkflow, 'state.engineSessionContinuityActive')
     && str_contains($iosViews, 'aircraftForSession(session)')
-    && str_contains($iosViews, 'Archive Current and Open Scheduled Dispatch');
-$checks['engine shutdown requires the original three second hold'] = static fn(): bool =>
-    str_contains($iosViews, 'CVRHoldActionButton(title: "ENGINE SHUTDOWN"')
-    && str_contains($iosViews, 'subtitle: "Hold 3 seconds for ON Block"')
-    && str_contains($iosWorkflow, 'creationMethod: "three_second_hold"')
+    && str_contains($iosViews, 'Open Scheduled Leg');
+$checks['engine shutdown requires a two second hold with confirm'] = static fn(): bool =>
+    str_contains($iosViews, 'CVRHoldActionButton(')
+    && str_contains($iosViews, 'title: "ENGINE SHUTDOWN"')
+    && str_contains($iosViews, 'Did you shut down the engine?')
+    && str_contains($iosViews, 'minimumDuration: 2')
+    && str_contains($iosWorkflow, 'creationMethod: "two_second_hold"')
     && !str_contains($iosViews, 'CVROperationalActionButton(title: "END FLIGHT", subtitle: "Enter Ending Hobbs and Tacho", color: CVROperationalPalette.critical');
+$checks['schedule time entry is 24-hour'] = static fn(): bool =>
+    str_contains($scheduleAdmin, 'Depart time (24h)')
+    && str_contains($scheduleAdmin, 'Return time (24h)')
+    && str_contains($scheduleAdmin, 'pattern="([01][0-9]|2[0-3]):[0-5][0-9]"');
+$checks['schedule mission picker filters by reservation type'] = static fn(): bool =>
+    str_contains($scheduleAdmin, 'listMissionsForSchedule')
+    && str_contains($scheduleAdmin, 'data-schedule-category')
+    && str_contains($scheduleAdmin, 'syncMissionOptions')
+    && str_contains($scheduleAdmin, 'flightReservationMissionField')
+    && str_contains($scheduleSource, 'reservationTypeRequiresMission')
+    && str_contains($scheduleSource, 'Selected mission does not match the reservation type')
+    && MissionCatalogService::scheduleCategoryForMission('1-1-4', 'Your First Flight - (1.5h DUAL)') === 'flight_training'
+    && MissionCatalogService::scheduleCategoryForMission('1-1-1', 'Training Habits - (1.0h LB)') === 'briefing'
+    && MissionCatalogService::scheduleCategoryForMission('1-1-2', 'Familiarization - (1.0h SE/FSTD)') === 'simulator_training'
+    && !MissionCatalogService::reservationTypeRequiresMission('ground_training')
+    && !MissionCatalogService::reservationTypeRequiresMission('other')
+    && MissionCatalogService::compareMissionCodes('1-1-2', '1-1-10') < 0;
 $checks['completed prior workflow archives without a confusing confirmation'] = static fn(): bool =>
     str_contains($iosWorkflow, 'func requiresArchivingBeforeScheduledSession')
-    && str_contains($iosWorkflow, 'let endingMetersEntered')
-    && str_contains($iosWorkflow, 'shutdown_verification_completed')
-    && str_contains($iosWorkflow, 'if endingMetersEntered || shutdownSaved');
+    && str_contains($iosWorkflow, 'endingHobbs == nil || flightRecord.endingTacho == nil')
+    && str_contains($iosViews, 'Complete Check-In for the current leg when possible');
 $checks['iOS and backend use the same generic oil payload keys'] = static fn(): bool =>
     str_contains($dispatchSource, "\$dispatch['oil_quantity']")
     && str_contains($dispatchSource, "\$dispatch['oil_unit']")
@@ -169,7 +188,11 @@ $checks['resource rescheduling retains dispatch lock'] = static fn(): bool =>
     && str_contains($scheduleSource, 'FOR UPDATE')
     && str_contains($scheduleSource, 'A reservation cannot move after Dispatch is activated.')
     && str_contains($scheduleSource, 'This reservation changed in another session.')
-    && str_contains($scheduleSource, 'assertNoResourceConflicts');
+    && str_contains($scheduleSource, '$overlapWarnings = $this->resourceConflictWarnings(');
+$checks['online schedule saves overlaps with an amber advisory'] = static fn(): bool =>
+    str_contains($scheduleSource, "'warnings' => \$overlapWarnings")
+    && str_contains($scheduleAdmin, 'Reservation saved with overlap warning:')
+    && str_contains($scheduleAdmin, "array('type' => 'warning', 'message' => \$warning)");
 $checks['online multi-leg schedule uses one reservation crew and airport chain'] = static fn(): bool =>
     str_contains($scheduleSource, 'normalizeAirportChain')
     && str_contains($scheduleSource, 'assertReservationScopedCrew')

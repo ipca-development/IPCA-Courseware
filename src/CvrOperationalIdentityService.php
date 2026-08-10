@@ -265,61 +265,72 @@ final class CvrOperationalIdentityService
                 $destination = $this->normalizeAirportCode((string)($input['planned_destination_airport'] ?? ''));
                 $chain = array_values(array_filter(array($origin, $destination), static fn(string $c): bool => $c !== ''));
             }
-            if (count($chain) < 2) {
+            $allowRouteFreeFlight = !empty($input['allow_route_free_flight']);
+            if (count($chain) < 2 && !$allowRouteFreeFlight) {
                 throw new InvalidArgumentException('Flight schedule identity requires departure and destination airports.');
             }
 
-            $existingLegs = $this->listLegsForReservation($reservationUuid);
-            $legsBySequence = array();
-            foreach ($existingLegs as $existingLeg) {
-                if ((int)($existingLeg['organization_id'] ?? 0) !== $organizationId) {
-                    continue;
-                }
-                $seq = (int)($existingLeg['sequence_number'] ?? 0);
-                if ($seq >= 1) {
-                    $legsBySequence[$seq] = $existingLeg;
-                }
-            }
-
-            $legCount = count($chain) - 1;
-            for ($index = 0; $index < $legCount; $index++) {
-                $sequence = $index + 1;
-                $origin = $chain[$index];
-                $destination = $chain[$index + 1];
-                // Reservation time window applies to the whole multi-leg block.
-                $legStart = $startLocal;
-                $legEnd = $endLocal;
-                if (isset($legsBySequence[$sequence])) {
-                    $this->assertReusableOnlineLegMatches(
-                        $legsBySequence[$sequence],
-                        $organizationId,
-                        $reservationUuid,
-                        $origin,
-                        $destination,
-                        $legStart,
-                        $legEnd,
-                        $timezone,
-                        $sequence
-                    );
-                    if ($sequence === 1) {
-                        $legUuid = (string)$legsBySequence[$sequence]['leg_uuid'];
+            if (count($chain) >= 2) {
+                $existingLegs = $this->listLegsForReservation($reservationUuid);
+                $legsBySequence = array();
+                foreach ($existingLegs as $existingLeg) {
+                    if ((int)($existingLeg['organization_id'] ?? 0) !== $organizationId) {
+                        continue;
                     }
-                    continue;
+                    $seq = (int)($existingLeg['sequence_number'] ?? 0);
+                    if ($seq >= 1) {
+                        $legsBySequence[$seq] = $existingLeg;
+                    }
                 }
-                $leg = $this->createFlightLeg(array(
-                    'reservation_uuid' => $reservationUuid,
-                    'organization_id' => $organizationId,
-                    'sequence_number' => $sequence,
-                    'origin_airport' => $origin,
-                    'destination_airport' => $destination,
-                    'planned_start_local' => $legStart,
-                    'planned_end_local' => $legEnd,
-                    'organization_timezone_iana' => $timezone,
-                    'status' => 'scheduled',
-                    'source' => 'server_create',
-                ), true);
-                if ($sequence === 1) {
-                    $legUuid = (string)$leg['leg_uuid'];
+
+                $legCount = count($chain) - 1;
+                $providedLegUuids = isset($input['leg_uuids']) && is_array($input['leg_uuids'])
+                    ? array_values($input['leg_uuids'])
+                    : array();
+                for ($index = 0; $index < $legCount; $index++) {
+                    $sequence = $index + 1;
+                    $origin = $chain[$index];
+                    $destination = $chain[$index + 1];
+                    // Reservation time window applies to the whole multi-leg block.
+                    $legStart = $startLocal;
+                    $legEnd = $endLocal;
+                    if (isset($legsBySequence[$sequence])) {
+                        $this->assertReusableOnlineLegMatches(
+                            $legsBySequence[$sequence],
+                            $organizationId,
+                            $reservationUuid,
+                            $origin,
+                            $destination,
+                            $legStart,
+                            $legEnd,
+                            $timezone,
+                            $sequence
+                        );
+                        if ($sequence === 1) {
+                            $legUuid = (string)$legsBySequence[$sequence]['leg_uuid'];
+                        }
+                        continue;
+                    }
+                    $legInput = array(
+                        'reservation_uuid' => $reservationUuid,
+                        'organization_id' => $organizationId,
+                        'sequence_number' => $sequence,
+                        'origin_airport' => $origin,
+                        'destination_airport' => $destination,
+                        'planned_start_local' => $legStart,
+                        'planned_end_local' => $legEnd,
+                        'organization_timezone_iana' => $timezone,
+                        'status' => 'scheduled',
+                        'source' => 'server_create',
+                    );
+                    $providedLegUuid = strtolower(trim((string)($providedLegUuids[$index] ?? '')));
+                    if ($providedLegUuid !== '') {
+                        $legInput['leg_uuid'] = self::normalizeUuid($providedLegUuid, 'leg_uuid');
+                    }
+                    $leg = $this->createFlightLeg($legInput, true);
+                    if ($sequence === 1) {
+                        $legUuid = (string)$leg['leg_uuid'];
+                    }
                 }
             }
         }

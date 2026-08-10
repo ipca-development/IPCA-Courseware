@@ -149,6 +149,19 @@ final class CVRUnitCoordinator: ObservableObject {
             }
             .store(in: &cancellables)
 
+        gps.$latestSample
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sample in
+                guard let self, let workflow = self.workflow else { return }
+                guard workflow.considerInferredEngineStartFromTaxi(gpsSample: sample) else { return }
+                if let settings = self.settings {
+                    self.uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
+                }
+                self.log("Off Block inferred from taxi motion (forgotten Engine Start).")
+            }
+            .store(in: &cancellables)
+
         beacon.onMatchingBeaconAdvertisement = { [weak self] in
             Task { @MainActor in
                 await self?.handleMatchingBeaconAdvertisement()
@@ -275,6 +288,7 @@ final class CVRUnitCoordinator: ObservableObject {
         guard settings?.isBeaconTriggerEnabled == true || simulationActive else { return }
         switch state {
         case .on:
+            workflow?.noteAvionicsPowerState(isOn: true)
             guard audio?.isRecording != true, mode != .starting else { return }
             if simulationActive && activeRecordingSessionID != nil && mode == .recording {
                 return
@@ -286,32 +300,46 @@ final class CVRUnitCoordinator: ObservableObject {
             }
             await startRecording()
         case .off:
+            workflow?.noteAvionicsPowerState(isOn: false)
             if simulationActive {
                 if activeRecordingSessionID != nil || mode == .recording {
                     await stopRecording(reason: "Simulation avionics OFF.")
                 }
+                let shouldComplete = workflow?.state.activeFlightRecord?.status == .awaitingAvionicsOff
+                    || workflow?.state.operationalSession?.awaitingAvionicsOffConfirmation == true
+                    || workflow?.state.activeFlightRecord?.endingHobbs != nil
                 workflow?.markAvionicsOffAfterShutdown()
-                if workflow?.state.activeFlightRecord?.status == .awaitingUpload
-                    || workflow?.state.activeFlightRecord?.endingHobbs != nil {
-                    _ = workflow?.completeEngineShutdownAfterAvionicsOff()
+                if shouldComplete,
+                   workflow?.completeEngineShutdownAfterAvionicsOff() == true,
+                   let workflow,
+                   let settings {
+                    uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
                 return
             }
             guard audio?.isRecording == true else {
+                let shouldComplete = workflow?.state.operationalSession?.awaitingAvionicsOffConfirmation == true
+                    || workflow?.state.activeFlightRecord?.status == .awaitingAvionicsOff
                 workflow?.markAvionicsOffAfterShutdown()
-                if workflow?.state.operationalSession?.awaitingAvionicsOffConfirmation == true
-                    || workflow?.state.activeFlightRecord?.status == .awaitingAvionicsOff {
-                    _ = workflow?.completeEngineShutdownAfterAvionicsOff()
+                if shouldComplete,
+                   workflow?.completeEngineShutdownAfterAvionicsOff() == true,
+                   let workflow,
+                   let settings {
+                    uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
                 }
                 return
             }
             await stopRecording(reason: "Beacon unavailable beyond iPhone finalization window.")
-            workflow?.markAvionicsOffAfterShutdown()
-            if workflow?.state.operationalSession?.awaitingAvionicsOffConfirmation == true
+            let shouldComplete = workflow?.state.operationalSession?.awaitingAvionicsOffConfirmation == true
                 || workflow?.state.activeFlightRecord?.status == .awaitingAvionicsOff
                 || (workflow?.state.activeFlightRecord?.endingHobbs != nil
-                    && workflow?.state.activeFlightRecord?.checkInMode == .engineShutdown) {
-                _ = workflow?.completeEngineShutdownAfterAvionicsOff()
+                    && workflow?.state.activeFlightRecord?.checkInMode == .engineShutdown)
+            workflow?.markAvionicsOffAfterShutdown()
+            if shouldComplete,
+               workflow?.completeEngineShutdownAfterAvionicsOff() == true,
+               let workflow,
+               let settings {
+                uploadManager?.uploadQueuedWorkflowComponents(workflow: workflow, settings: settings)
             }
         }
     }
@@ -339,6 +367,7 @@ final class CVRUnitCoordinator: ObservableObject {
     }
 
     private func handleMatchingBeaconAdvertisement() async {
+        workflow?.cancelPostFlightGarminCountdownIfBeaconReturned()
         guard settings?.isBeaconTriggerEnabled == true else { return }
         if audio?.isRecording == true {
             refreshBeaconRecorderToken(reason: "Beacon rediscovered during active recording.")
@@ -505,6 +534,7 @@ final class CVRUnitCoordinator: ObservableObject {
         recording.gpsSamplesPath = gps?.stopCaptureAndSave(recordingID: recording.id)
         let recordingSessionID = sessionID ?? recording.id
         recording.flightSessionID = workflow?.state.activeFlightRecord?.id ?? recordingSessionID
+        recording.operationalSessionID = workflow?.state.activeOperationalSession?.id
         workflow?.linkRecordingSession(recordingID: recordingSessionID, startedAt: recording.startedAt)
         if !mergedRecoveredPrelude {
             recording.segmentIndex = activeSegmentIndex
@@ -600,6 +630,7 @@ final class CVRUnitCoordinator: ObservableObject {
     private func handleBeaconCommunicationLost() {
         log("Beacon GATT relationship lost. Continuing recording during reconnection window.")
         beaconLossStartedAt = Date()
+        _ = workflow?.beginPostFlightGarminCountdown(now: beaconLossStartedAt ?? Date())
         recordEvent(severity: "warning", type: "beacon_signal_loss", message: "Beacon communication lost; recording continued.")
     }
 
@@ -847,6 +878,7 @@ final class CVRUnitCoordinator: ObservableObject {
             lastError: "Recovered after app restart and queued as a separate interrupted recording.",
             recordingEventsPath: eventsPath,
             flightSessionID: workflow?.state.activeFlightRecord?.id ?? prelude.sessionID,
+            operationalSessionID: workflow?.state.activeOperationalSession?.id,
             segmentIndex: prelude.segmentIndex,
             sourceGapSummary: "App was closed or restarted during recording. Recovered pre-close audio was saved as a separate interrupted recording.\(gapText)"
         )

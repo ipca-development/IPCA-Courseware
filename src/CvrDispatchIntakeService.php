@@ -143,15 +143,6 @@ final class CvrDispatchIntakeService
             }
         }
 
-        require_once __DIR__ . '/CvrAutoReconstructionOrchestrator.php';
-        CvrAutoReconstructionOrchestrator::safeConsider(
-            $this->pdo,
-            $normalized['flight_record_uuid'] ?? null,
-            null,
-            $dispatchId,
-            null
-        );
-
         $response = array(
             'ok' => true,
             'error_code' => $alreadyPresent ? 'DUPLICATE_ALREADY_VERIFIED' : null,
@@ -353,6 +344,11 @@ final class CvrDispatchIntakeService
             );
         }
 
+        // Operational Session Dispatch no longer requires or synthesizes crew
+        // consent records. Preserve legacy validation only for legacy payloads.
+        if ($isOperationalSession) {
+            $consents = array();
+        }
         $normalizedConsents = array();
         foreach ($consents as $consent) {
             if (!is_array($consent)) {
@@ -379,7 +375,7 @@ final class CvrDispatchIntakeService
                 'app_version' => substr(trim((string)($consent['app_version'] ?? '')), 0, 64),
             );
         }
-        foreach ($normalizedCrew as $member) {
+        foreach ($isOperationalSession ? array() : $normalizedCrew as $member) {
             $hasConsent = false;
             foreach ($normalizedConsents as $consent) {
                 $samePerson = ($member['person_id'] !== null && $consent['person_id'] === $member['person_id'])
@@ -438,7 +434,9 @@ final class CvrDispatchIntakeService
             'creator_identity' => substr(trim((string)($dispatch['creator_identity'] ?? '')), 0, 128),
             'created_at' => $this->normalizeTimestamp((string)($dispatch['created_at'] ?? '')),
             'modified_at' => $this->normalizeTimestamp((string)($dispatch['modified_at'] ?? '')),
-            'consent_status' => substr(trim((string)($dispatch['consent_status'] ?? '')), 0, 64),
+            'consent_status' => $isOperationalSession
+                ? 'not_required'
+                : substr(trim((string)($dispatch['consent_status'] ?? '')), 0, 64),
             'status' => substr(trim((string)($dispatch['status'] ?? '')), 0, 64),
             'cvr_unit_identifier' => substr(trim((string)($dispatch['configured_cvr_unit_id'] ?? '')), 0, 32),
             'beacon_identifier' => substr(trim((string)($dispatch['configured_beacon_id'] ?? '')), 0, 64),

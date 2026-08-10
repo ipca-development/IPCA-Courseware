@@ -94,6 +94,11 @@ $checks = array(
         && str_contains($store, 'Unsupported reconciliation component type')
         && str_contains($store, 'state.uploadComponents[index].reconciliationRequired = false')
         && str_contains($store, 'if component.componentType == "schedule_duty_sync", state == .serverVerified'),
+    'Dispatch waits for matching schedule synchronization acknowledgement' =>
+        str_contains($uploads, 'scheduleBlockedSchedulerIDs')
+        && str_contains($uploads, 'component.componentType == "dispatch_metadata"')
+        && str_contains($uploads, 'scheduleBlockedSchedulerIDs.contains(schedulerRecordID)')
+        && str_contains($uploads, 'Schedule completion invokes'),
     'schedule hides superseded cached row and avoids false local-leg warning' =>
         str_contains($views, 'workflow.locallySupersededSchedulerRecordIDs.contains')
         && str_contains($views, '!workflow.hasQueuedScheduleDutyReplacement'),

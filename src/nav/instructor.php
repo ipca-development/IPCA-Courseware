@@ -20,8 +20,10 @@ return [
         'key' => 'schedule',
         'label' => 'Schedule',
         'icon' => 'schedule',
-        'href' => null,
-        'coming_soon' => true,
+        'href' => '/instructor/schedule.php',
+        'match_paths' => [
+            '/instructor/schedule.php',
+        ],
     ],
 
     [
@@ -74,6 +76,15 @@ return [
         'href' => '/instructor/flight_records.php',
         'match_paths' => [
             '/instructor/flight_records.php',
+        ],
+    ],
+    [
+        'key' => 'my_logbook',
+        'label' => 'My Logbook',
+        'icon' => 'flight',
+        'href' => '/instructor/logbook.php',
+        'match_paths' => [
+            '/instructor/logbook.php',
         ],
     ],
     [
