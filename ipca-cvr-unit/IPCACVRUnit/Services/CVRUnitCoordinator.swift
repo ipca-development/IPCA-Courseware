@@ -41,6 +41,7 @@ final class CVRUnitCoordinator: ObservableObject {
     private weak var settings: SettingsStore?
     private weak var uploadManager: UploadManager?
     private weak var workflow: CVRWorkflowStore?
+    private weak var crewMessages: CrewMessagesStore?
     private var activeRecordingSessionID: String?
     private var activeRecorderToken: Data?
     private var activeRecordingEvents: [CVRRecordingEvent] = []
@@ -67,7 +68,8 @@ final class CVRUnitCoordinator: ObservableObject {
         store: RecordingStore,
         settings: SettingsStore,
         uploadManager: UploadManager,
-        workflow: CVRWorkflowStore
+        workflow: CVRWorkflowStore,
+        crewMessages: CrewMessagesStore
     ) {
         guard self.audio == nil else { return }
         self.audio = audio
@@ -79,7 +81,9 @@ final class CVRUnitCoordinator: ObservableObject {
         self.settings = settings
         self.uploadManager = uploadManager
         self.workflow = workflow
+        self.crewMessages = crewMessages
         uploadManager.configureNetworkMonitor(network)
+        crewMessages.bind(settings: settings, network: network, workflow: workflow)
 
         network.$statusText
             .receive(on: RunLoop.main)
@@ -258,6 +262,7 @@ final class CVRUnitCoordinator: ObservableObject {
 
     func appBecameActive() {
         recordEvent(severity: "info", type: "app_became_active", message: "Cockpit Recorder app became active.")
+        crewMessages?.appBecameActive()
         attemptPendingUploads()
         if let settings {
             uploadManager?.retryQueuedLiveAudioSegments(settings: settings)
@@ -265,6 +270,7 @@ final class CVRUnitCoordinator: ObservableObject {
     }
 
     func appEnteredBackground() {
+        crewMessages?.appEnteredBackground()
         if settings?.isBeaconTriggerEnabled == true {
             beacon?.startScan(scanAll: false)
             log("App entered background. Beacon listener confirmed active.")
@@ -275,6 +281,7 @@ final class CVRUnitCoordinator: ObservableObject {
 
     func appWillEnterForeground() {
         audio?.appWillEnterForeground()
+        crewMessages?.appBecameActive()
         recordEvent(severity: "info", type: "app_foregrounded", message: "Cockpit Recorder app returned to foreground.")
         attemptPendingUploads()
     }

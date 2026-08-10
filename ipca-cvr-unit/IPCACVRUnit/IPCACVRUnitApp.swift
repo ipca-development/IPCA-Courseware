@@ -15,6 +15,7 @@ struct IPCACVRUnitApp: App {
     @StateObject private var remoteIPads = RemoteIPadLinkManager()
     @StateObject private var coordinator = CVRUnitCoordinator()
     @StateObject private var workflowStore = CVRWorkflowStore()
+    @StateObject private var crewMessages = CrewMessagesStore()
     @StateObject private var missionCatalog = MissionCatalogStore()
     @StateObject private var scheduledSessions = ScheduledSessionsStore()
     @StateObject private var flightLogs = CVRFlightLogStore()
@@ -64,6 +65,7 @@ struct IPCACVRUnitApp: App {
                 .environmentObject(remoteIPads)
                 .environmentObject(coordinator)
                 .environmentObject(workflowStore)
+                .environmentObject(crewMessages)
                 .environmentObject(missionCatalog)
                 .environmentObject(scheduledSessions)
                 .environmentObject(flightLogs)
@@ -116,7 +118,8 @@ struct IPCACVRUnitApp: App {
                         store: recordingStore,
                         settings: settings,
                         uploadManager: uploadManager,
-                        workflow: workflowStore
+                        workflow: workflowStore,
+                        crewMessages: crewMessages
                     )
                     coordinator.appBecameActive()
                     if CVRHapticDiagnostics.isEnabled {

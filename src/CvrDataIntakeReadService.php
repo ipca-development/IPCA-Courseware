@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/CvrOperationalIdentityReadService.php';
 require_once __DIR__ . '/CvrOperationalBlockTimeService.php';
 require_once __DIR__ . '/CvrOperationalLegVisibilityService.php';
+require_once __DIR__ . '/CvrCrewMessageService.php';
 
 final class CvrDataIntakeReadService
 {
@@ -468,6 +469,7 @@ final class CvrDataIntakeReadService
         }
         $page = (int)floor($offset / $limit) + 1;
         $paged = array_slice($grouped, $offset, $limit);
+        $paged = $this->attachClosedSessionCrewMessages($paged, $timezone);
 
         return array(
             'available' => true,
@@ -479,6 +481,82 @@ final class CvrDataIntakeReadService
             'page' => $page,
             'page_count' => $pageCount,
         );
+    }
+
+    /**
+     * Crew communications are archived only on completed Master Logbook rows.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function attachClosedSessionCrewMessages(array $rows, string $timezone): array
+    {
+        if (!$this->tableExists('ipca_cvr_crew_messages')) {
+            foreach ($rows as &$row) {
+                $row['crew_messages'] = array();
+            }
+            unset($row);
+            return $rows;
+        }
+        try {
+            $localTimezone = new DateTimeZone(
+                in_array($timezone, timezone_identifiers_list(), true)
+                    ? $timezone
+                    : 'America/Los_Angeles'
+            );
+        } catch (Throwable) {
+            $localTimezone = new DateTimeZone('America/Los_Angeles');
+        }
+        $service = new CvrCrewMessageService($this->pdo);
+        $cache = array();
+        foreach ($rows as &$row) {
+            $row['crew_messages'] = array();
+            $sessionUuid = strtolower(trim((string)($row['operational_session_uuid'] ?? '')));
+            $organizationId = (int)($row['organization_id'] ?? 0);
+            if (empty($row['has_closure']) || $organizationId <= 0 || $sessionUuid === '') {
+                continue;
+            }
+            $cacheKey = $organizationId . ':' . $sessionUuid;
+            if (!array_key_exists($cacheKey, $cache)) {
+                try {
+                    $cache[$cacheKey] = $service->historyByOperationalSession($organizationId, $sessionUuid);
+                } catch (Throwable) {
+                    $cache[$cacheKey] = array();
+                }
+            }
+            $row['crew_messages'] = array_map(
+                static function (array $message) use ($localTimezone): array {
+                    $local = static function (mixed $value) use ($localTimezone): string {
+                        $text = trim((string)$value);
+                        if ($text === '') {
+                            return '';
+                        }
+                        try {
+                            return (new DateTimeImmutable($text, new DateTimeZone('UTC')))
+                                ->setTimezone($localTimezone)
+                                ->format('H:i:s');
+                        } catch (Throwable) {
+                            return '';
+                        }
+                    };
+                    return array(
+                        'message_uuid' => (string)($message['message_uuid'] ?? ''),
+                        'body_text' => (string)($message['body'] ?? ''),
+                        'sender_name' => (string)($message['sender_name'] ?? ''),
+                        'sender_role' => (string)($message['sender_role'] ?? ''),
+                        'sent_at_utc' => (string)($message['sent_at_utc'] ?? ''),
+                        'sent_at_local' => $local($message['sent_at_utc'] ?? ''),
+                        'acknowledgement_uuid' => (string)($message['acknowledgement_uuid'] ?? ''),
+                        'acknowledged_at_utc' => (string)($message['device_event_at_utc'] ?? ''),
+                        'acknowledged_at_local' => $local($message['device_event_at_utc'] ?? ''),
+                        'server_received_at_utc' => (string)($message['server_received_at_utc'] ?? ''),
+                    );
+                },
+                is_array($cache[$cacheKey]) ? $cache[$cacheKey] : array()
+            );
+        }
+        unset($row);
+        return $rows;
     }
 
     /**

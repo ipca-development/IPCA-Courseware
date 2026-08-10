@@ -920,6 +920,55 @@ struct APIClient {
         return try decode(CVRFlightLogsResponse.self, from: data, response: response)
     }
 
+    func pendingCrewMessages(
+        operationalSessionUUID: String,
+        credential: String
+    ) async throws -> CVRCrewMessagesResponse {
+        let url = try endpoint("api/cvr/crew_messages.php", queryItems: [
+            URLQueryItem(
+                name: "operational_session_uuid",
+                value: operationalSessionUUID.lowercased()
+            )
+        ])
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            return try decoder.decode(CVRCrewMessagesResponse.self, from: data)
+        } catch {
+            throw APIClientError.invalidJSON(
+                "Crew message service returned invalid JSON: \(responsePreview(data))"
+            )
+        }
+    }
+
+    func acknowledgeCrewMessage(
+        _ acknowledgement: CVRCrewMessageAcknowledgementRequest,
+        credential: String
+    ) async throws -> CVRCrewMessageAcknowledgementResponse {
+        let url = serverURL.appending(path: "api/cvr/crew_messages.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        request.httpBody = try encoder.encode(acknowledgement)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(
+            CVRCrewMessageAcknowledgementResponse.self,
+            from: data,
+            response: response
+        )
+    }
+
     func operationalLegReview(
         dispatchUUID: String,
         credential: String

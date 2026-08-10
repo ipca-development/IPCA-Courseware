@@ -501,6 +501,220 @@
 
   var dispatchedTrackChart = null;
   var dispatchedTrackReservation = null;
+  var crewMessagePollTimer = null;
+  var crewMessageCanSend = false;
+
+  function crewMessageElements() {
+    return {
+      panel: document.getElementById('flightCrewMessagePanel'),
+      title: document.getElementById('flightCrewMessageTitle'),
+      status: document.getElementById('flightCrewMessageStatus'),
+      text: document.getElementById('flightCrewMessageText'),
+      count: document.getElementById('flightCrewMessageCount'),
+      send: document.getElementById('flightCrewMessageSend'),
+      history: document.getElementById('flightCrewMessageHistory')
+    };
+  }
+
+  function crewMessageDispatchUUID(reservation) {
+    return String((reservation && (reservation.claimed_dispatch_uuid || reservation.linked_dispatch_uuid)) || '').trim();
+  }
+
+  function crewMessageLocalTime(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    var normalized = raw.indexOf('T') >= 0 ? raw : raw.replace(' ', 'T') + 'Z';
+    var date = new Date(normalized);
+    if (!Number.isFinite(date.getTime())) return '';
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+  }
+
+  function setCrewMessageComposerEnabled(enabled) {
+    var els = crewMessageElements();
+    crewMessageCanSend = !!enabled;
+    if (els.text) els.text.disabled = !crewMessageCanSend;
+    if (els.send) {
+      els.send.disabled = !crewMessageCanSend || !String((els.text && els.text.value) || '').trim();
+    }
+  }
+
+  function crewMessageAcknowledgementLabel(message) {
+    var local = String(
+      message.acknowledged_at_local
+      || (message.acknowledgement && message.acknowledgement.acknowledged_at_local)
+      || ''
+    ).trim();
+    if (!local) {
+      local = crewMessageLocalTime(
+        message.device_event_at_utc
+        || message.acknowledged_at_utc
+        || (message.acknowledgement && (
+          message.acknowledgement.device_event_at_utc
+          || message.acknowledgement.acknowledged_at_utc
+        ))
+      );
+    }
+    if (local) return 'Crew acknowledged at ' + local.replace(/\s+LT$/i, '') + ' LT';
+    return 'Awaiting crew acknowledgement';
+  }
+
+  function renderCrewMessageStatus(data) {
+    var els = crewMessageElements();
+    var reservation = dispatchedTrackReservation;
+    if (!reservation || !els.panel) return;
+    var aircraft = reservation.aircraft || {};
+    var registration = String(aircraft.registration || '').toUpperCase();
+    if (els.title) els.title.textContent = 'System Message to Crew · ' + (registration || 'Aircraft');
+
+    var active = !!(data && (data.active || data.active_session || data.can_send));
+    setCrewMessageComposerEnabled(active);
+    if (els.status) {
+      els.status.dataset.tone = active ? 'ok' : 'warning';
+      els.status.textContent = active
+        ? 'Active CVR session · messages require acknowledgement'
+        : String((data && data.error) || 'No active CVR Operational Session. Sending is unavailable.');
+    }
+
+    var messages = data && Array.isArray(data.messages) ? data.messages : [];
+    if (els.history) {
+      els.history.innerHTML = messages.map(function (message) {
+        var body = message.body_text != null ? message.body_text : message.message;
+        var acknowledged = !!(
+          message.acknowledged_at_utc
+          || message.acknowledged_at_local
+          || message.device_event_at_utc
+          || message.acknowledgement
+        );
+        var sent = String(message.sent_at_local || message.created_at_local || '').trim()
+          || crewMessageLocalTime(message.sent_at_utc || message.created_at_utc);
+        return '<div class="fltsch-crew-message-item">'
+          + '<div class="fltsch-crew-message-text">' + escapeHtml(body || '') + '</div>'
+          + '<div class="fltsch-crew-message-meta' + (acknowledged ? ' is-acknowledged' : '') + '">'
+          + (sent ? ('Sent ' + escapeHtml(sent) + ' · ') : '')
+          + escapeHtml(crewMessageAcknowledgementLabel(message))
+          + '</div></div>';
+      }).join('');
+    }
+  }
+
+  function loadCrewMessageStatus(reservation, options) {
+    options = options || {};
+    if (!reservation || dispatchedTrackReservation !== reservation) return Promise.resolve(null);
+    var dispatchUUID = crewMessageDispatchUUID(reservation);
+    var aircraftId = reservation.aircraft && reservation.aircraft.id ? Number(reservation.aircraft.id) : 0;
+    var els = crewMessageElements();
+    if (!dispatchUUID) {
+      renderCrewMessageStatus({
+        active_session: false,
+        error: 'This aircraft has no active dispatched CVR Operational Session.',
+        messages: []
+      });
+      return Promise.resolve(null);
+    }
+    if (!options.silent && els.status) {
+      els.status.dataset.tone = '';
+      els.status.textContent = 'Checking active CVR session…';
+    }
+    var url = String(config.crewMessagesApiUrl || '/admin/api/cvr_crew_messages.php')
+      + '?claimed_dispatch_uuid=' + encodeURIComponent(dispatchUUID)
+      + '&aircraft_id=' + encodeURIComponent(String(aircraftId || ''));
+    return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        return response.json().catch(function () { return null; }).then(function (data) {
+          if (!response.ok || !data || data.ok === false) {
+            throw new Error((data && data.error) || ('Message status failed (HTTP ' + response.status + ').'));
+          }
+          return data;
+        });
+      })
+      .then(function (data) {
+        if (dispatchedTrackReservation === reservation) renderCrewMessageStatus(data);
+        return data;
+      })
+      .catch(function (error) {
+        if (dispatchedTrackReservation !== reservation) return null;
+        setCrewMessageComposerEnabled(false);
+        if (els.status) {
+          els.status.dataset.tone = 'error';
+          els.status.textContent = error && error.message ? error.message : 'Message status is unavailable.';
+        }
+        if (els.history) els.history.replaceChildren();
+        return null;
+      });
+  }
+
+  function sendCrewMessage() {
+    var reservation = dispatchedTrackReservation;
+    var els = crewMessageElements();
+    if (!reservation || !crewMessageCanSend || !els.text || !els.send) return;
+    var message = String(els.text.value || '').trim();
+    if (!message) return;
+    var dispatchUUID = crewMessageDispatchUUID(reservation);
+    var aircraftId = reservation.aircraft && reservation.aircraft.id ? Number(reservation.aircraft.id) : 0;
+    els.send.disabled = true;
+    if (els.status) {
+      els.status.dataset.tone = '';
+      els.status.textContent = 'Sending system message…';
+    }
+    fetch(String(config.crewMessagesApiUrl || '/admin/api/cvr_crew_messages.php'), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        claimed_dispatch_uuid: dispatchUUID,
+        aircraft_id: aircraftId,
+        body: message,
+        csrf_token: String(config.crewMessagesCsrfToken || '')
+      })
+    })
+      .then(function (response) {
+        return response.json().catch(function () { return null; }).then(function (data) {
+          if (!response.ok || !data || data.ok === false) {
+            throw new Error((data && data.error) || ('Message send failed (HTTP ' + response.status + ').'));
+          }
+          return data;
+        });
+      })
+      .then(function () {
+        if (dispatchedTrackReservation !== reservation) return;
+        els.text.value = '';
+        if (els.count) els.count.textContent = '0 / 512';
+        if (els.status) {
+          els.status.dataset.tone = 'ok';
+          els.status.textContent = 'Message sent · awaiting crew acknowledgement';
+        }
+        return loadCrewMessageStatus(reservation, { silent: true });
+      })
+      .catch(function (error) {
+        if (dispatchedTrackReservation !== reservation) return;
+        if (els.status) {
+          els.status.dataset.tone = 'error';
+          els.status.textContent = error && error.message ? error.message : 'Message could not be sent.';
+        }
+        setCrewMessageComposerEnabled(true);
+      });
+  }
+
+  function startCrewMessagePolling(reservation) {
+    if (crewMessagePollTimer) globalThis.clearInterval(crewMessagePollTimer);
+    loadCrewMessageStatus(reservation);
+    crewMessagePollTimer = globalThis.setInterval(function () {
+      if (dispatchedTrackReservation === reservation) {
+        loadCrewMessageStatus(reservation, { silent: true });
+      }
+    }, 5000);
+  }
+
+  function stopCrewMessagePolling() {
+    if (crewMessagePollTimer) globalThis.clearInterval(crewMessagePollTimer);
+    crewMessagePollTimer = null;
+    crewMessageCanSend = false;
+  }
 
   function ensureDispatchedTrackChart() {
     var root = document.getElementById('flightDispatchedTrackRoot');
@@ -723,6 +937,20 @@
         + '<p class="fltsch-muted">Live ADS-B follows this aircraft continuously. Full selected-aircraft track is shown; nearby traffic appears without trails.</p>';
     }
     showDialog('flightDispatchedModal');
+    var messageEls = crewMessageElements();
+    if (messageEls.text && !messageEls.text.dataset.bound) {
+      messageEls.text.dataset.bound = '1';
+      messageEls.text.addEventListener('input', function () {
+        var length = Array.from(String(messageEls.text.value || '')).length;
+        if (messageEls.count) messageEls.count.textContent = String(length) + ' / 512';
+        if (messageEls.send) messageEls.send.disabled = !crewMessageCanSend || !String(messageEls.text.value || '').trim();
+      });
+    }
+    if (messageEls.send && !messageEls.send.dataset.bound) {
+      messageEls.send.dataset.bound = '1';
+      messageEls.send.addEventListener('click', sendCrewMessage);
+    }
+    startCrewMessagePolling(reservation);
     var chart = ensureDispatchedTrackChart();
     if (chart) {
       chart._scheduleLiveStarted = false;
@@ -742,6 +970,7 @@
     if (modal && !modal.dataset.trackCloseBound) {
       modal.dataset.trackCloseBound = '1';
       modal.addEventListener('close', function () {
+        stopCrewMessagePolling();
         dispatchedTrackReservation = null;
         if (dispatchedTrackChart) {
           dispatchedTrackChart._scheduleLiveStarted = false;

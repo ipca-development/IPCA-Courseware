@@ -390,6 +390,23 @@ compliance_page_open(array(
   .fltsch-live-track .legs-track-status[data-tone="ok"]{color:#166534}
   .fltsch-live-track .legs-track-status[data-tone="error"]{color:#991b1b}
   .fltsch-live-track .legs-track-status[data-tone="loading"]{color:#1d4ed8}
+  .fltsch-crew-message{border:1px solid #bfdbfe;border-radius:14px;background:#eff6ff;padding:14px;display:grid;gap:10px}
+  .fltsch-crew-message-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+  .fltsch-crew-message-head strong{font-size:13px;color:#0f3a6d}
+  .fltsch-crew-message-status{margin:0;font-size:12px;font-weight:750;color:#64748b}
+  .fltsch-crew-message-status[data-tone="ok"]{color:#166534}
+  .fltsch-crew-message-status[data-tone="error"]{color:#991b1b}
+  .fltsch-crew-message-status[data-tone="warning"]{color:#92400e}
+  .fltsch-crew-message textarea{width:100%;min-height:78px;resize:vertical;border:1px solid #93c5fd;border-radius:10px;padding:10px 11px;background:#fff;color:#0f172a;font:inherit;font-size:13px;line-height:1.45}
+  .fltsch-crew-message textarea:focus{outline:2px solid rgba(37,99,235,.22);border-color:#2563eb}
+  .fltsch-crew-message-actions{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .fltsch-crew-message-count{font-size:11px;font-weight:750;color:#64748b;font-variant-numeric:tabular-nums}
+  .fltsch-crew-message-history{display:grid;gap:7px}
+  .fltsch-crew-message-item{border-top:1px solid rgba(30,64,175,.14);padding-top:8px;display:grid;gap:3px}
+  .fltsch-crew-message-item:first-child{border-top:0;padding-top:0}
+  .fltsch-crew-message-text{font-size:12.5px;font-weight:750;color:#172554;white-space:pre-wrap;overflow-wrap:anywhere}
+  .fltsch-crew-message-meta{font-size:11px;font-weight:700;color:#64748b}
+  .fltsch-crew-message-meta.is-acknowledged{color:#166534}
   .fltsch-live-track .legs-track-player{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin-top:10px}
   .fltsch-live-track .legs-track-play{border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#0f172a;padding:8px 12px;font-size:12px;font-weight:850;cursor:pointer;min-width:72px}
   .fltsch-live-track .legs-track-play:disabled{opacity:.45;cursor:not-allowed}
@@ -635,6 +652,18 @@ compliance_page_open(array(
         <p class="fltsch-muted" style="margin:0">Checking aircraft position…</p>
       </div>
     </div>
+    <section class="fltsch-crew-message" id="flightCrewMessagePanel" aria-labelledby="flightCrewMessageTitle">
+      <div class="fltsch-crew-message-head">
+        <strong id="flightCrewMessageTitle">System Message to Crew</strong>
+        <p class="fltsch-crew-message-status" id="flightCrewMessageStatus">Checking active CVR session…</p>
+      </div>
+      <textarea id="flightCrewMessageText" maxlength="512" placeholder="Type a one-way operational message for the crew…" aria-label="Message to crew" disabled></textarea>
+      <div class="fltsch-crew-message-actions">
+        <span class="fltsch-crew-message-count" id="flightCrewMessageCount">0 / 512</span>
+        <button type="button" class="compliance-btn compliance-btn--primary" id="flightCrewMessageSend" disabled>Send to Crew</button>
+      </div>
+      <div class="fltsch-crew-message-history" id="flightCrewMessageHistory" aria-live="polite"></div>
+    </section>
     <div>
       <p class="legs-track-status" id="legs-track-status" data-tone="muted">Loading ADS-B track history…</p>
       <div class="legs-track-map-wrap">
@@ -678,6 +707,8 @@ window.IPCAFlightSchedule = <?= json_encode(array(
     'liveRefreshMilliseconds' => 5000,
     'adsbApiUrl' => '/admin/api/schedule_aircraft_adsb.php',
     'adsbTrackApiUrl' => '/admin/api/schedule_aircraft_adsb_track.php',
+    'crewMessagesApiUrl' => '/admin/api/cvr_crew_messages.php',
+    'crewMessagesCsrfToken' => $csrfToken,
 ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 document.querySelectorAll('[data-crew-user]').forEach(function(select) {
   function syncCrew() {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var crewMessages: CrewMessagesStore
     @State private var adminPIN = ""
     @State private var adminUnlocked = false
     @State private var showAdminUnlock = false
@@ -17,8 +18,17 @@ struct ContentView: View {
                 adminTabs
                     .transition(.opacity)
             }
+
+            if let message = crewMessages.oldestUnacknowledgedMessage {
+                CrewSystemMessageView(message: message) {
+                    crewMessages.acknowledge(message)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(100)
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: adminUnlocked)
+        .animation(.easeInOut(duration: 0.2), value: crewMessages.oldestUnacknowledgedMessage?.id)
         .background(
             (adminUnlocked ? CVROperationalPalette.background : IPCATheme.pageBackground)
                 .ignoresSafeArea()
@@ -77,6 +87,58 @@ struct ContentView: View {
         .background(CVROperationalPalette.background.ignoresSafeArea())
         // Admin shell must stay dark like the operational workflow (app root forces light).
         .preferredColorScheme(.dark)
+    }
+}
+
+private struct CrewSystemMessageView: View {
+    var message: CVRCrewMessage
+    var acknowledge: () -> Void
+
+    var body: some View {
+        VStack {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("SYSTEM MESSAGE", systemImage: "exclamationmark.triangle.fill")
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(Color.yellow)
+                    Spacer()
+                    Text(message.sentAtUTC, format: .dateTime.hour().minute().second())
+                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(Color.white.opacity(0.8))
+                        .accessibilityLabel("Sent \(message.sentAtUTC.formatted(date: .omitted, time: .complete))")
+                }
+
+                Text(message.body)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(action: acknowledge) {
+                    Text("ACKNOWLEDGE")
+                        .font(.headline.weight(.black))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.12, green: 0.47, blue: 0.92))
+                .accessibilityHint("Dismisses this message and queues confirmation to the server")
+            }
+            .padding(18)
+            .background(Color.black.opacity(0.96))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.yellow.opacity(0.85), lineWidth: 2)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: Color.black.opacity(0.5), radius: 14, y: 6)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.48).ignoresSafeArea())
+        .contentShape(Rectangle())
     }
 }
 

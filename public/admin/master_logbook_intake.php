@@ -1758,6 +1758,13 @@ a.intake-refresh:hover{
 .leg-edit-crew-row{display:grid;grid-template-columns:minmax(140px,180px) minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:8px}
 .leg-edit-crew-remove{border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:9px;padding:8px 10px;font-size:11px;font-weight:800;cursor:pointer}
 .leg-edit-add-crew{border:1px solid #cbd5e1;background:#fff;color:#1d4ed8;border-radius:9px;padding:8px 12px;font-size:12px;font-weight:850;cursor:pointer}
+.leg-edit-comms{display:grid;gap:9px}
+.leg-edit-comms-note{margin:0;color:#64748b;font-size:12px;line-height:1.45}
+.leg-edit-comms-item{border:1px solid #bfdbfe;border-radius:11px;background:#eff6ff;padding:10px 12px;display:grid;gap:5px}
+.leg-edit-comms-message{color:#172554;font-size:13px;font-weight:750;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.leg-edit-comms-meta{display:flex;flex-wrap:wrap;gap:5px 12px;color:#64748b;font-size:11px;font-weight:700}
+.leg-edit-comms-ack{color:#166534;font-weight:850}
+.leg-edit-comms-ack.is-missing{color:#92400e}
 .leg-edit-footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:12px 0 4px;background:linear-gradient(180deg,rgba(255,255,255,0),#fff 28%);border-top:1px solid #e2e8f0;margin-top:8px}
 .leg-edit-fin-head{border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;padding:10px 12px;margin-bottom:12px;display:grid;gap:4px}
 .leg-edit-fin-head strong{color:#0f172a}
@@ -2378,6 +2385,8 @@ a.intake-refresh:hover{
                   'dispatch_id' => (int)($row['id'] ?? 0),
                   'dispatch_uuid' => (string)($row['dispatch_uuid'] ?? ''),
                   'workflow_flight_record_uuid' => (string)($row['workflow_flight_record_uuid'] ?? ''),
+                  'operational_session_uuid' => (string)($row['operational_session_uuid'] ?? ''),
+                  'crew_messages' => is_array($row['crew_messages'] ?? null) ? $row['crew_messages'] : array(),
                   'aircraft_registration' => $tail,
                   'mission_code' => $missionCode,
                   'departure_airport' => $depAirport,
@@ -3724,6 +3733,12 @@ a.intake-refresh:hover{
             <div class="legs-crew-editor" id="legs-edit-crew"></div>
             <button class="leg-edit-add-crew" type="button" id="legs-edit-add-crew">+ Add Crew Member</button>
             <div class="leg-edit-error" data-error-for="crew"></div>
+          </section>
+
+          <section class="leg-edit-card" data-leg-section="communications" id="legs-edit-communications" hidden>
+            <h4>Crew Communications</h4>
+            <p class="leg-edit-comms-note">Read-only Operational Session record. Messages and crew acknowledgements cannot be edited or removed.</p>
+            <div class="leg-edit-comms" id="legs-edit-communications-list"></div>
           </section>
 
           <section class="leg-edit-card" data-leg-section="financial" id="legs-edit-financial">
@@ -5683,6 +5698,39 @@ $legTrackJsVer = is_file($legTrackJsPath) ? (string)filemtime($legTrackJsPath) :
       document.getElementById('legs-csv-flight-label').textContent = leg.workflow_flight_record_uuid || '—';
       document.getElementById('legs-csv-status').textContent = leg.has_garmin_csv ? 'Garmin Uploaded' : 'Garmin Missing';
       renderCrew(leg.crew || []);
+      const communicationsSection = document.getElementById('legs-edit-communications');
+      const communicationsList = document.getElementById('legs-edit-communications-list');
+      const communications = Array.isArray(leg.crew_messages) ? leg.crew_messages : [];
+      if (communicationsSection && communicationsList) {
+        communicationsSection.hidden = communications.length === 0;
+        communicationsList.replaceChildren();
+        communications.forEach((message) => {
+          const item = document.createElement('article');
+          item.className = 'leg-edit-comms-item';
+          const body = document.createElement('div');
+          body.className = 'leg-edit-comms-message';
+          body.textContent = String(message.body_text || message.message || '');
+          const meta = document.createElement('div');
+          meta.className = 'leg-edit-comms-meta';
+          const sent = document.createElement('span');
+          const sender = String(message.sender_name || message.sent_by || 'Schedule');
+          const sentAt = String(message.sent_at_local || message.created_at_local || '');
+          sent.textContent = 'Sent by ' + sender + (sentAt ? (' · ' + sentAt) : '');
+          const ack = document.createElement('span');
+          const ackAt = String(
+            message.acknowledged_at_local
+            || (message.acknowledgement && message.acknowledgement.acknowledged_at_local)
+            || ''
+          ).replace(/\s+LT$/i, '');
+          ack.className = 'leg-edit-comms-ack' + (ackAt ? '' : ' is-missing');
+          ack.textContent = ackAt
+            ? ('Crew acknowledged at ' + ackAt + ' LT')
+            : 'Not acknowledged before session closure';
+          meta.append(sent, ack);
+          item.append(body, meta);
+          communicationsList.appendChild(item);
+        });
+      }
       fillFinancial(leg);
       renderAnnotatedSegments(leg);
       const splitBtn = document.getElementById('legs-split-btn');
