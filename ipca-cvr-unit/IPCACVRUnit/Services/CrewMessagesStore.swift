@@ -56,7 +56,14 @@ struct CVRCrewMessage: Codable, Identifiable, Equatable {
         forKey key: CodingKeys
     ) throws -> Date {
         let value = try container.decode(String.self, forKey: key)
-        if let date = ISO8601DateFormatter().date(from: value) {
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: value) {
+            return date
+        }
+        let standardFormatter = ISO8601DateFormatter()
+        standardFormatter.formatOptions = [.withInternetDateTime]
+        if let date = standardFormatter.date(from: value) {
             return date
         }
         let sqlFormatter = DateFormatter()

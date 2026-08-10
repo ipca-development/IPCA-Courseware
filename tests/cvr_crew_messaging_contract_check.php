@@ -170,6 +170,7 @@ $checks = array(
         && str_contains($iosStore, 'flight.dispatchID == dispatch.id')
         && str_contains($iosStore, 'operationalSessionUUID: ""')
         && str_contains($iosStore, 'serverActiveOperationalSessionUUID')
+        && str_contains($iosStore, 'fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]')
         && !str_contains($iosStore, 'allowCellularUpload')
         && str_contains($iosContent, 'SYSTEM MESSAGE')
         && str_contains($iosContent, 'ACKNOWLEDGE'),
