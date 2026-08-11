@@ -1,0 +1,33 @@
+# /etc/systemd/system/ipca-analytics-oneshot.service
+#
+# Install on approved host (paths may vary):
+#   sudo install -m 644 deploy/systemd/ipca-analytics-oneshot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl start ipca-analytics-oneshot.service
+#
+# EnvironmentFile holds plaintext secrets outside the repository (mode 600).
+# Generate with: sudo scripts/analytics/sync_analytics_env_from_fpm.sh
+#
+# Do NOT put secrets in the unit file body or in the git repo.
+
+[Unit]
+Description=IPCA analytics oneshot (Phase 10 live shadow)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/var/www/ipca
+EnvironmentFile=-/etc/ipca/analytics.env
+Environment=IPCA_ANALYTICS_ENV_FILE=/etc/ipca/analytics.env
+# Prefer a dedicated analytics system user once permissions are settled.
+ExecStart=/var/www/ipca/analytics/.venv/bin/python /var/www/ipca/analytics/etl/phase10_01_live_shadow.py
+Nice=10
+# No secret logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

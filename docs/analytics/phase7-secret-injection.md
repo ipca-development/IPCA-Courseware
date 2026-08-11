@@ -26,3 +26,12 @@ Scope: **remaining Phase 6 targeted high-value hashes only** (not full 21.7k).
 ## Status table
 
 Runtime status is recorded in analytics SQLite: `phase7_secret_injection_status`.
+
+## Phase 8 abstraction
+
+Use the shared loader (do not re-implement per script):
+
+- Python: `analytics/lib/runtime_secrets.py` → `get_runtime_secret("OPENAI_API_KEY")`
+- PHP: `src/RuntimeSecrets.php` → `RuntimeSecrets::get('OPENAI_API_KEY')`
+
+These reject `EV[...]` ciphertext and fail clearly when plaintext is not injected.

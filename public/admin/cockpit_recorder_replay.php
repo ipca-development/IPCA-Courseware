@@ -217,7 +217,7 @@ if ($isPublicReplay) {
       <meta name="robots" content="noindex,nofollow,noarchive">
       <title>Private Flight Replay</title>
     </head>
-    <body style="margin:0;background:#020617"><?php
+    <body class="replay-public-body"><?php
 } else {
     cw_header('Cockpit Recorder Replay');
 }
@@ -227,6 +227,32 @@ if ($isPublicReplay) {
 .replay-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 10px; padding: 12px; margin: 16px; }
 .replay-fullscreen-shell {
   width: 100%;
+}
+.replay-public-body {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+  background: #020617;
+}
+.replay-fullscreen-shell.is-public-replay {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #000;
+}
+.replay-fullscreen-shell.is-public-replay .replay-avionics-header {
+  flex: 0 0 45px;
+}
+.replay-fullscreen-shell.is-public-replay .replay-immersive {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  border-radius: 0;
 }
 .replay-fullscreen-shell:fullscreen,
 .replay-fullscreen-shell:-webkit-full-screen {
@@ -561,6 +587,15 @@ if ($isPublicReplay) {
   pointer-events: none;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .28));
   overflow: visible;
+}
+.replay-immersive.is-responsive-overlay-layout .hsi-overlay {
+  width: var(--responsive-hsi-width);
+  height: var(--responsive-hsi-height);
+  bottom: var(--responsive-hsi-bottom);
+}
+.replay-immersive.is-responsive-overlay-layout.is-panel-layout {
+  --panel-engine-width: var(--responsive-engine-width);
+  --panel-bottom-band: var(--responsive-bottom-band);
 }
 .hsi-overlay[hidden],
 .attitude-overlay[hidden],
@@ -2468,7 +2503,7 @@ if ($isPublicReplay) {
 <?php if ($error !== ''): ?>
   <div class="replay-error"><?= h($error) ?></div>
 <?php else: ?>
-  <div id="replayFullscreenShell" class="replay-fullscreen-shell">
+  <div id="replayFullscreenShell" class="replay-fullscreen-shell<?= $isPublicReplay ? ' is-public-replay' : '' ?>">
   <div class="replay-avionics-header" aria-label="Avionics data header">
     <div class="replay-avionics-brand">Avionics data</div>
     <?php if (!$isPublicReplay && is_array($recording) && (int)($recording['aircraft_id'] ?? 0) > 0): ?>
@@ -2786,6 +2821,9 @@ if ($isPublicReplay) {
 (function() {
   const AIRSPEED_PROFILE = <?= json_encode($airspeedProfile, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   const ENGINE_PROFILE = <?= json_encode($engineProfile, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+  const IS_PUBLIC_REPLAY = <?= $isPublicReplay ? 'true' : 'false' ?>;
+  const RESPONSIVE_OVERLAY_MAX_WIDTH = 1200;
+  const RESPONSIVE_CALIBRATION_REFERENCE_HEIGHT = 1080;
   const root = document.querySelector('[data-replay-id]');
   const fullscreenRoot = document.getElementById('replayFullscreenShell') || root;
   const id = root ? root.getAttribute('data-replay-id') : '';
@@ -3282,6 +3320,42 @@ if ($isPublicReplay) {
       width: Number(container && container.clientWidth) || 0,
       height: Number(container && container.clientHeight) || 0,
     };
+  };
+  const usesResponsiveOverlayLayout = () => Boolean(
+    root && root.classList.contains('is-responsive-overlay-layout')
+  );
+  function syncResponsiveOverlayLayout() {
+    if (!root) return false;
+    const viewport = actualReplayViewport();
+    const coarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    const compact = viewport.width > 0
+      && viewport.width <= RESPONSIVE_OVERLAY_MAX_WIDTH
+      && (IS_PUBLIC_REPLAY || coarsePointer);
+    root.classList.toggle('is-responsive-overlay-layout', compact);
+    if (!compact) {
+      root.style.removeProperty('--responsive-engine-width');
+      root.style.removeProperty('--responsive-hsi-width');
+      root.style.removeProperty('--responsive-hsi-height');
+      root.style.removeProperty('--responsive-hsi-bottom');
+      root.style.removeProperty('--responsive-bottom-band');
+      return false;
+    }
+    const hsiWidth = clamp(viewport.width * 0.32, 300, 348);
+    const hsiHeight = hsiWidth * (330 / 390);
+    const hsiBottom = clamp(viewport.width / 1920 * 68, 34, 50);
+    const engineWidth = clamp(viewport.width * 0.115, 110, 124);
+    const bottomBand = clamp(hsiHeight * 0.82, 118, 160);
+    root.style.setProperty('--responsive-engine-width', `${engineWidth.toFixed(1)}px`);
+    root.style.setProperty('--responsive-hsi-width', `${hsiWidth.toFixed(1)}px`);
+    root.style.setProperty('--responsive-hsi-height', `${hsiHeight.toFixed(1)}px`);
+    root.style.setProperty('--responsive-hsi-bottom', `${hsiBottom.toFixed(1)}px`);
+    root.style.setProperty('--responsive-bottom-band', `${bottomBand.toFixed(1)}px`);
+    return true;
+  }
+  const responsiveCalibrationPixelScale = (referenceHeight) => {
+    if (!usesResponsiveOverlayLayout()) return 1;
+    const height = Number(referenceHeight) || actualReplayViewport().height;
+    return clamp(height / RESPONSIVE_CALIBRATION_REFERENCE_HEIGHT, 0.45, 1);
   };
   function captureNormalReferenceViewport() {
     if (isReplayFullscreen()) return;
@@ -5725,9 +5799,10 @@ if ($isPublicReplay) {
     const verticalFovDeg = Math.max(1, firstFinite(dbg.verticalFovDeg, dbg.activeVerticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
     const halfHeight = refHeight / 2;
     const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
-    const horizonOffsetPx = cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0;
-    const referenceY = clamp(refHeight * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 90, refHeight - 90);
-    const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0);
+    const calibrationPixelScale = responsiveCalibrationPixelScale(refHeight);
+    const horizonOffsetPx = (cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0) * calibrationPixelScale;
+    const referenceY = clamp(refHeight * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0) * calibrationPixelScale, 90, refHeight - 90);
+    const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0) * calibrationPixelScale;
     const scaleY = height / refHeight;
     const y = clamp((yellowReferenceY + pitchOffsetPx + horizonOffsetPx) * scaleY, -height, height * 2);
     setElementHidden(horizonLine, false);
@@ -5780,10 +5855,11 @@ if ($isPublicReplay) {
     const rollDeg = firstFinite(view.roll, dbg.uncalibratedRollDeg, dbg.rollDegUsed, 0) || 0;
     const verticalFovDeg = Math.max(1, firstFinite(dbg.verticalFovDeg, dbg.activeVerticalFovDeg, SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg) || SYNTHETIC_VISION_DEFAULTS.verticalFovFallbackDeg);
     const halfHeight = height / 2;
-    const horizonOffsetPx = cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0;
+    const calibrationPixelScale = responsiveCalibrationPixelScale(height);
+    const horizonOffsetPx = (cameraCalibration ? Number(cameraCalibration.horizonBarOffsetPx || 0) : 0) * calibrationPixelScale;
     const pitchOffsetPx = Math.tan(degToRad(pitchDeg)) / Math.tan(degToRad(verticalFovDeg) / 2) * halfHeight;
-    const referenceY = clamp(height * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0), 90, height - 90);
-    const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0);
+    const referenceY = clamp(height * 0.66 + (cameraCalibration ? Number(cameraCalibration.attitudeReferenceOffsetPx || 0) : 0) * calibrationPixelScale, 90, height - 90);
+    const yellowReferenceY = referenceY + (cameraCalibration ? Number(cameraCalibration.yellowPitchReferenceOffsetPx || 0) : 0) * calibrationPixelScale;
     const horizonY = clamp(yellowReferenceY + pitchOffsetPx + horizonOffsetPx, -height, height * 2);
     const rootRect = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
     const airspeedRect = instrumentAnchorRect(airspeedTape);
@@ -7211,12 +7287,13 @@ if ($isPublicReplay) {
     }
     const gMeterReserve = gMeterReservePx();
     const desiredLeft = (airspeedRect ? airspeedRect.left : rootRect.left + 18) + gMeterReserve;
+    const compact = usesResponsiveOverlayLayout();
     const profileHeight = clamp(Math.round(hsiRect.height * 0.17), 42, 58);
     const verticalSize = clamp(Math.round(hsiRect.height - profileHeight - 4), 170, 240);
     const hsiScaleX = hsiRect.width / 390;
     const hsiScaleY = hsiRect.height / 330;
     const hdgBoxLeft = hsiRect.left - (2 * hsiScaleX);
-    const maxWidthBeforeHdg = Math.max(120, hdgBoxLeft - 20 - desiredLeft);
+    const maxWidthBeforeHdg = Math.max(compact ? 90 : 120, hdgBoxLeft - 20 - desiredLeft);
     const topSize = Math.round(Math.min(verticalSize, maxWidthBeforeHdg));
     const top = hsiRect.top + (50 * hsiScaleY);
     const left = Math.min(desiredLeft, rootRect.right - topSize - 12);
@@ -8451,6 +8528,10 @@ if ($isPublicReplay) {
 
   function safeRenderCesium(snap = false) {
     try {
+      syncResponsiveOverlayLayout();
+      if (cesiumViewer && typeof cesiumViewer.resize === 'function') {
+        cesiumViewer.resize();
+      }
       renderCesium(snap);
     } catch (err) {
       showCesiumError(String(err.message || err));
@@ -9098,10 +9179,26 @@ if ($isPublicReplay) {
     animationFrame = requestAnimationFrame(animatePlayback);
   }
 
-  window.addEventListener('resize', () => {
-    if (!payload) return;
-    safeRenderCesium(true);
-  });
+  let replayResizeFrame = null;
+  let replayResizeObserver = null;
+  const scheduleReplayResize = () => {
+    if (!payload || replayResizeFrame !== null) return;
+    replayResizeFrame = window.requestAnimationFrame(() => {
+      replayResizeFrame = null;
+      attitudeOverlaySignature = '';
+      insetMapSignature = '';
+      safeRenderCesium(true);
+    });
+  };
+  window.addEventListener('resize', scheduleReplayResize);
+  window.addEventListener('orientationchange', scheduleReplayResize);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', scheduleReplayResize);
+  }
+  if (root && typeof ResizeObserver === 'function') {
+    replayResizeObserver = new ResizeObserver(scheduleReplayResize);
+    replayResizeObserver.observe(root);
+  }
 
   function setReplayLoadProgress(percent, message) {
     const pct = clamp(Math.round(Number(percent) || 0), 0, 100);

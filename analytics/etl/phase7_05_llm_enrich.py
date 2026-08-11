@@ -61,10 +61,16 @@ def clean(raw: str) -> str:
 
 
 def usable_key() -> str | None:
-    k = os.environ.get("CW_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
-    if k.startswith("sk-") and not k.startswith("EV["):
-        return k
-    return None
+    try:
+        import sys
+        sys.path.insert(0, str(ROOT / "analytics"))
+        from lib.runtime_secrets import get_runtime_secret
+        return get_runtime_secret("OPENAI_API_KEY", required=False)
+    except Exception:
+        k = os.environ.get("CW_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+        if k.startswith("sk-") and not k.startswith("EV["):
+            return k
+        return None
 
 
 def openai_chat(api_key: str, model: str, system: str, user: str) -> str:
@@ -339,7 +345,11 @@ def main() -> None:
     processed = 0
     if api_key:
         log("Runtime OpenAI key available — enriching remaining targeted hashes...")
-        processed = enrich_remaining(con, api_key)
+        limit_env = os.environ.get("PHASE7_LLM_LIMIT", "").strip()
+        limit = int(limit_env) if limit_env.isdigit() else None
+        if limit is not None:
+            log(f"PHASE7_LLM_LIMIT={limit}")
+        processed = enrich_remaining(con, api_key, limit=limit)
     else:
         log("No usable OpenAI key — documenting injection requirement; reconciling existing LLM/heuristic only.")
         con.execute("DELETE FROM phase7_secret_injection_status")

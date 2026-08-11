@@ -24,6 +24,22 @@ $checks = array(
     'aircraft settings UI preserves stored camera calibration and defaults to panel' =>
         str_contains($settings, "camera_calibration")
         && str_contains($settings, "replay_layout_mode'] ?? 'panel'"),
+    'public replay uses the dynamic viewport without changing admin layout' =>
+        str_contains($replay, 'replay-fullscreen-shell.is-public-replay')
+        && str_contains($replay, 'height: 100dvh')
+        && str_contains($replay, "\$isPublicReplay ? ' is-public-replay' : ''")
+        && str_contains($replay, 'IS_PUBLIC_REPLAY || coarsePointer'),
+    'compact overlays share one responsive geometry and scaled calibration' =>
+        str_contains($replay, 'syncResponsiveOverlayLayout')
+        && str_contains($replay, '--responsive-hsi-width')
+        && str_contains($replay, '--responsive-engine-width')
+        && str_contains($replay, 'responsiveCalibrationPixelScale')
+        && str_contains($replay, 'const compact = usesResponsiveOverlayLayout();'),
+    'container and Safari viewport changes trigger a complete redraw' =>
+        str_contains($replay, 'new ResizeObserver(scheduleReplayResize)')
+        && str_contains($replay, 'window.visualViewport.addEventListener')
+        && str_contains($replay, "window.addEventListener('orientationchange'")
+        && str_contains($replay, "typeof cesiumViewer.resize === 'function'"),
 );
 
 $failed = 0;
