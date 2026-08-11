@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrAdminLegSplitService.php';
+require_once __DIR__ . '/CvrOperationalLegTimelineService.php';
 require_once __DIR__ . '/FlightSessionService.php';
 require_once __DIR__ . '/MasterLogbookLogbookProposalService.php';
 require_once __DIR__ . '/OperationalFlightRecordVersionService.php';
@@ -50,6 +51,12 @@ final class CvrOperationalSessionLegReviewService
                 $leg['sequence_number'] = (int)($leg['sequence_number'] ?? $leg['leg_index'] ?? 0);
                 return $leg;
             }, $preview['proposed_legs']);
+            $preview['proposed_legs'] = CvrOperationalLegTimelineService::apply(
+                array_values(array_filter(
+                    $preview['proposed_legs'],
+                    static fn(mixed $leg): bool => is_array($leg)
+                ))
+            );
         }
         $preview['operational_session_uuid'] = strtolower((string)$dispatch['operational_session_uuid']);
         $currentEvidence = $this->currentEvidence((string)$dispatch['workflow_flight_record_uuid']);
@@ -120,6 +127,7 @@ final class CvrOperationalSessionLegReviewService
                 $leg['source'] = $evidenceSource;
                 return $leg;
             }, $legs);
+            $legs = CvrOperationalLegTimelineService::apply($legs);
             $canonicalLegs = AuditEventService::jsonEncode($legs);
             $closure = $this->closure($flightUuid);
             $evidenceDiscrepancies = $this->evidenceDiscrepancies($dispatch, $closure, $legs);
@@ -224,6 +232,76 @@ final class CvrOperationalSessionLegReviewService
         );
     }
 
+    /**
+     * Rebuild mutable read projections for an existing immutable accepted revision.
+     *
+     * @param array<string,mixed> $device
+     * @return array<string,mixed>
+     */
+    public function repairAcceptedProjectionForDevice(array $device, string $dispatchUuid): array
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $dispatch = $this->ownedDispatch($device, $dispatchUuid, true);
+            $sessionUuid = $this->uuid(
+                (string)($dispatch['operational_session_uuid'] ?? ''),
+                'operational_session_uuid'
+            );
+            $flightUuid = $this->uuid(
+                (string)($dispatch['workflow_flight_record_uuid'] ?? ''),
+                'workflow_flight_record_uuid'
+            );
+            $review = $this->latestReview($sessionUuid, true);
+            if (!is_array($review) || strtoupper((string)($review['status'] ?? '')) !== 'ACCEPTED') {
+                throw new RuntimeException('No accepted Operational Session leg review is available to reproject.');
+            }
+            $decodedLegs = json_decode((string)($review['legs_json'] ?? '[]'), true);
+            $legs = $this->normalizeLegs($decodedLegs);
+            $legs = CvrOperationalLegTimelineService::apply($legs);
+            $closure = $this->closure($flightUuid);
+            $evidenceDiscrepancies = $this->evidenceDiscrepancies($dispatch, $closure, $legs);
+            $revisionUuid = $this->uuid((string)$review['revision_uuid'], 'revision_uuid');
+            $evidenceHash = strtolower(trim((string)($review['evidence_sha256'] ?? '')));
+            if (!preg_match('/^[a-f0-9]{64}$/', $evidenceHash)) {
+                throw new RuntimeException('Accepted leg review evidence hash is unavailable.');
+            }
+
+            $this->persistCurrentProjection(
+                (int)$dispatch['id'],
+                $legs,
+                $revisionUuid,
+                $evidenceHash
+            );
+            $this->persistOperationalFlightRecordProjection(
+                $sessionUuid,
+                $legs,
+                $revisionUuid,
+                $evidenceHash,
+                $evidenceDiscrepancies
+            );
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        try {
+            (new MasterLogbookLogbookProposalService($this->pdo))
+                ->createProposalsForFlightRecord($flightUuid);
+        } catch (Throwable $e) {
+            error_log('[CvrOperationalSessionLegReview] repaired proposal projection failed: ' . $e->getMessage());
+        }
+        return array(
+            'ok' => true,
+            'revision_uuid' => $revisionUuid,
+            'revision_number' => (int)$review['revision_number'],
+            'legs' => $legs,
+            'evidence_discrepancies' => $evidenceDiscrepancies,
+        );
+    }
+
     /** @return array<string,mixed> */
     private function ownedDispatch(array $device, string $dispatchUuid, bool $forUpdate): array
     {
@@ -269,10 +347,18 @@ final class CvrOperationalSessionLegReviewService
                 'arrival_airport' => $arrival,
                 'off_block_utc' => $offBlock,
                 'on_block_utc' => $onBlock,
-                'starting_hobbs' => round((float)($row['starting_hobbs'] ?? 0), 1),
-                'ending_hobbs' => round((float)($row['ending_hobbs'] ?? 0), 1),
-                'starting_tacho' => round((float)($row['starting_tacho'] ?? 0), 1),
-                'ending_tacho' => round((float)($row['ending_tacho'] ?? 0), 1),
+                'starting_hobbs' => CvrOperationalLegTimelineService::roundUpToTenth(
+                    (float)($row['starting_hobbs'] ?? 0)
+                ),
+                'ending_hobbs' => CvrOperationalLegTimelineService::roundUpToTenth(
+                    (float)($row['ending_hobbs'] ?? 0)
+                ),
+                'starting_tacho' => CvrOperationalLegTimelineService::roundUpToTenth(
+                    (float)($row['starting_tacho'] ?? 0)
+                ),
+                'ending_tacho' => CvrOperationalLegTimelineService::roundUpToTenth(
+                    (float)($row['ending_tacho'] ?? 0)
+                ),
                 'takeoff_count' => max(0, (int)($row['takeoff_count'] ?? 0)),
                 'landing_count' => max(0, (int)($row['landing_count'] ?? 0)),
                 'fuel_onboard' => $this->nullableFloat($row['fuel_onboard'] ?? null),
@@ -534,7 +620,9 @@ final class CvrOperationalSessionLegReviewService
             $currentSummary = json_decode((string)$currentStatement->fetchColumn(), true);
             if (is_array($currentSummary)
                 && strtolower((string)($currentSummary['operational_leg_review_revision_uuid'] ?? ''))
-                    === strtolower($revisionUuid)) {
+                    === strtolower($revisionUuid)
+                && (string)($currentSummary['operational_leg_timeline_model'] ?? '')
+                    === CvrOperationalLegTimelineService::MODEL) {
                 $this->pdo->prepare(
                     'UPDATE ipca_flight_sessions SET current_flight_record_id = ? WHERE id = ?'
                 )->execute(array($recordId, (int)$session['id']));
@@ -561,6 +649,7 @@ final class CvrOperationalSessionLegReviewService
             'source' => 'device_reviewed_operational_legs',
             'operational_leg_review_revision_uuid' => $revisionUuid,
             'operational_leg_review_evidence_sha256' => $evidenceHash,
+            'operational_leg_timeline_model' => CvrOperationalLegTimelineService::MODEL,
             'evidence_discrepancies' => $evidenceDiscrepancies,
             'exact_hobbs_duration_ms' => $hobbsDurationMs,
             'exact_tacho_duration_ms' => $tachoDurationMs,

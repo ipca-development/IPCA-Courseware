@@ -116,6 +116,16 @@ if ($on === null || !str_starts_with($on, '2026-03-08 10:30:00')) {
     $failures[] = 'derivedOnBlockUtc 0.5h Hobbs delta failed: ' . ($on ?? 'null');
 }
 
+// Operational Hobbs always rounds upward to one decimal before time derivation.
+$roundedUpOn = $blocks->derivedOnBlockUtc(array(
+    'off_block_utc' => '2026-03-08 10:00:00.000',
+    'starting_hobbs' => 100.0,
+    'ending_hobbs' => 100.501,
+));
+if ($roundedUpOn === null || !str_starts_with($roundedUpOn, '2026-03-08 10:36:00')) {
+    $failures[] = 'derivedOnBlockUtc must round 0.501h upward to 0.6h: ' . ($roundedUpOn ?? 'null');
+}
+
 // DST spring-forward day in America/Los_Angeles: UTC math must stay wall-clock-independent
 $offUtc = new DateTimeImmutable('2026-03-08 09:00:00', new DateTimeZone('UTC'));
 $onUtc = $blocks->derivedOnBlockUtc(array(

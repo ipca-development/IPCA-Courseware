@@ -834,7 +834,17 @@ private struct CVROperationalLegReviewSheet: View {
     }
 
     private func durationValue(_ value: Double) -> String {
-        String(format: "%.1f", value)
+        String(format: "%.1f", roundedUpTenth(value))
+    }
+
+    private func roundedUpTenth(_ value: Double) -> Double {
+        let nonnegative = max(0, value)
+        let scaled = nonnegative * 10
+        let nearestInteger = scaled.rounded()
+        let stableScaled = abs(scaled - nearestInteger) < 0.000_000_1
+            ? nearestInteger
+            : scaled
+        return ceil(stableScaled) / 10
     }
 
     private func fuelValue(_ value: Double?) -> String {
@@ -1049,6 +1059,9 @@ private struct CVROperationalLegReviewSheet: View {
         func interpolate(_ start: Double, _ end: Double, at timestamp: Date) -> Double {
             start + ((end - start) * fraction(timestamp))
         }
+        func interpolateMeter(_ start: Double, _ end: Double, at timestamp: Date) -> Double {
+            roundedUpTenth(interpolate(start, end, at: timestamp))
+        }
 
         return evidenceLegs.enumerated().map { index, evidenceLeg in
             let legStart = index == 0
@@ -1069,10 +1082,10 @@ private struct CVROperationalLegReviewSheet: View {
                 arrivalAirport: evidenceLeg.arrival,
                 offBlockUTC: Self.utcString(from: legStart),
                 onBlockUTC: Self.utcString(from: legEnd),
-                startingHobbs: interpolate(startingHobbs, endingHobbs, at: legStart),
-                endingHobbs: interpolate(startingHobbs, endingHobbs, at: legEnd),
-                startingTacho: interpolate(startingTacho, endingTacho, at: legStart),
-                endingTacho: interpolate(startingTacho, endingTacho, at: legEnd),
+                startingHobbs: interpolateMeter(startingHobbs, endingHobbs, at: legStart),
+                endingHobbs: interpolateMeter(startingHobbs, endingHobbs, at: legEnd),
+                startingTacho: interpolateMeter(startingTacho, endingTacho, at: legStart),
+                endingTacho: interpolateMeter(startingTacho, endingTacho, at: legEnd),
                 takeoffCount: 1,
                 landingCount: 1,
                 fuelOnboard: fuelStart,
@@ -1308,7 +1321,7 @@ private struct CVROperationalLegReviewSheet: View {
             get: { String(format: "%.1f", legs[index][keyPath: keyPath]) },
             set: { value in
                 if let number = Double(value.replacingOccurrences(of: ",", with: ".")) {
-                    legs[index][keyPath: keyPath] = number
+                    legs[index][keyPath: keyPath] = roundedUpTenth(number)
                 }
             }
         )

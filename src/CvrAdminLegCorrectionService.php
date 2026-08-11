@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrOperationalBlockTimeService.php';
+require_once __DIR__ . '/CvrOperationalLegTimelineService.php';
 
 /**
  * Admin corrections for a checked-in Operational Leg (dispatch + latest closure).
@@ -63,10 +64,10 @@ final class CvrAdminLegCorrectionService
                     $oilUnit = null;
                 }
             }
-            $startingHobbs = $this->oneDecimal($input['starting_hobbs'] ?? null);
-            $endingHobbs = $this->oneDecimal($input['ending_hobbs'] ?? null);
-            $startingTacho = $this->oneDecimal($input['starting_tacho'] ?? null);
-            $endingTacho = $this->oneDecimal($input['ending_tacho'] ?? null);
+            $startingHobbs = $this->meterTenth($input['starting_hobbs'] ?? null);
+            $endingHobbs = $this->meterTenth($input['ending_hobbs'] ?? null);
+            $startingTacho = $this->meterTenth($input['starting_tacho'] ?? null);
+            $endingTacho = $this->meterTenth($input['ending_tacho'] ?? null);
             if ($startingHobbs !== null && $endingHobbs !== null && $endingHobbs < $startingHobbs) {
                 throw new InvalidArgumentException('Hobbs End cannot be lower than Hobbs Start.');
             }
@@ -238,16 +239,16 @@ final class CvrAdminLegCorrectionService
             throw new InvalidArgumentException('dispatch_id is required.');
         }
         $startingHobbs = array_key_exists('starting_hobbs', $fields)
-            ? $this->oneDecimal($fields['starting_hobbs'] ?? null)
+            ? $this->meterTenth($fields['starting_hobbs'] ?? null)
             : null;
         $endingHobbs = array_key_exists('ending_hobbs', $fields)
-            ? $this->oneDecimal($fields['ending_hobbs'] ?? null)
+            ? $this->meterTenth($fields['ending_hobbs'] ?? null)
             : null;
         $startingTacho = array_key_exists('starting_tacho', $fields)
-            ? $this->oneDecimal($fields['starting_tacho'] ?? null)
+            ? $this->meterTenth($fields['starting_tacho'] ?? null)
             : null;
         $endingTacho = array_key_exists('ending_tacho', $fields)
-            ? $this->oneDecimal($fields['ending_tacho'] ?? null)
+            ? $this->meterTenth($fields['ending_tacho'] ?? null)
             : null;
         $fuelOnboard = array_key_exists('fuel_onboard', $fields)
             ? $this->formatFuel($fields['fuel_onboard'] ?? '')
@@ -292,19 +293,19 @@ final class CvrAdminLegCorrectionService
             }
 
             if ($startingHobbs === null) {
-                $startingHobbs = $this->oneDecimal($dispatch['starting_hobbs'] ?? null);
+                $startingHobbs = $this->meterTenth($dispatch['starting_hobbs'] ?? null);
             }
             if ($startingTacho === null) {
-                $startingTacho = $this->oneDecimal($dispatch['starting_tacho'] ?? null);
+                $startingTacho = $this->meterTenth($dispatch['starting_tacho'] ?? null);
             }
             if ($fuelOnboard === null) {
                 $fuelOnboard = $this->formatFuel($dispatch['fuel_onboard'] ?? '');
             }
             if ($endingHobbs === null) {
-                $endingHobbs = $this->oneDecimal($closure['ending_hobbs'] ?? null);
+                $endingHobbs = $this->meterTenth($closure['ending_hobbs'] ?? null);
             }
             if ($endingTacho === null) {
-                $endingTacho = $this->oneDecimal($closure['ending_tacho'] ?? null);
+                $endingTacho = $this->meterTenth($closure['ending_tacho'] ?? null);
             }
             if ($fuelRemaining === null) {
                 $fuelRemaining = $this->formatFuel($closure['fuel_remaining'] ?? '');
@@ -481,10 +482,10 @@ final class CvrAdminLegCorrectionService
             if ($seq <= 0) {
                 continue;
             }
-            $startHobbs = $this->oneDecimal($segment['starting_hobbs'] ?? null);
-            $endHobbs = $this->oneDecimal($segment['ending_hobbs'] ?? null);
-            $startTacho = $this->oneDecimal($segment['starting_tacho'] ?? null);
-            $endTacho = $this->oneDecimal($segment['ending_tacho'] ?? null);
+            $startHobbs = $this->meterTenth($segment['starting_hobbs'] ?? null);
+            $endHobbs = $this->meterTenth($segment['ending_hobbs'] ?? null);
+            $startTacho = $this->meterTenth($segment['starting_tacho'] ?? null);
+            $endTacho = $this->meterTenth($segment['ending_tacho'] ?? null);
             $fuelOn = $this->formatFuel($segment['fuel_onboard'] ?? '');
             $fuelRem = $this->formatFuel($segment['fuel_remaining'] ?? '');
             $bySequence[$seq] = array(
@@ -524,6 +525,12 @@ final class CvrAdminLegCorrectionService
         if (!$changed) {
             return;
         }
+        $payload['leg_segments'] = CvrOperationalLegTimelineService::apply(
+            array_values(array_filter(
+                $payload['leg_segments'],
+                static fn(mixed $segment): bool => is_array($segment)
+            ))
+        );
         $update = $this->pdo->prepare('UPDATE ipca_cvr_dispatch_versions SET payload_json = ? WHERE id = ?');
         $update->execute(array(AuditEventService::jsonEncode($payload), (int)$row['id']));
     }
@@ -922,6 +929,12 @@ final class CvrAdminLegCorrectionService
     {
         $n = $this->nullableFloat($value);
         return $n === null ? null : round($n, 1);
+    }
+
+    private function meterTenth(mixed $value): ?float
+    {
+        $n = $this->nullableFloat($value);
+        return $n === null ? null : CvrOperationalLegTimelineService::roundUpToTenth($n);
     }
 
     private function formatFuel(mixed $value): string

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/CvrOperationalLegTimelineService.php';
+
 /**
  * Phase 4A single authority for operational Off/On Block derivation.
  *
@@ -19,8 +21,9 @@ final class CvrOperationalBlockTimeService
         $startingHobbs = $row['starting_hobbs'] ?? null;
         $endingHobbs = $row['ending_hobbs'] ?? null;
         if ($offRaw !== '' && is_numeric($startingHobbs) && is_numeric($endingHobbs)) {
-            $deltaHours = (float)$endingHobbs - (float)$startingHobbs;
-            if ($deltaHours >= 0) {
+            $rawDeltaHours = (float)$endingHobbs - (float)$startingHobbs;
+            if ($rawDeltaHours >= 0) {
+                $deltaHours = CvrOperationalLegTimelineService::roundUpToTenth($rawDeltaHours);
                 try {
                     $off = new DateTimeImmutable($offRaw, new DateTimeZone('UTC'));
                     $seconds = (int)round($deltaHours * 3600);
@@ -41,7 +44,9 @@ final class CvrOperationalBlockTimeService
             return null;
         }
         $delta = (float)$endingHobbs - (float)$startingHobbs;
-        return $delta >= 0 ? round($delta, 2) : null;
+        return $delta >= 0
+            ? CvrOperationalLegTimelineService::roundUpToTenth($delta)
+            : null;
     }
 
     /**

@@ -143,28 +143,40 @@ foreach ($flightUuids as $rawFlightUuid) {
             throw new RuntimeException('CVR device not found.');
         }
         $device['aircraft_registration'] = (string)($dispatch['aircraft_registration'] ?? '');
-        $preview = $reviewService->previewForDevice($device, (string)$dispatch['dispatch_uuid']);
-        $review = is_array($preview['review'] ?? null) ? $preview['review'] : array();
-        $legs = is_array($review['proposed_legs'] ?? null) ? $review['proposed_legs'] : array();
-        if ($legs === array()) {
-            throw new RuntimeException('No derived legs are available for repair.');
-        }
-        $acceptedRevisionUuid = strtolower(trim((string)($review['accepted_revision_uuid'] ?? '')));
-        if ($acceptedRevisionUuid === '' && !$acceptDerived) {
+        $acceptedReviewStatement = $pdo->prepare(
+            "SELECT revision_uuid
+             FROM ipca_operational_session_leg_reviews
+             WHERE operational_session_uuid = ? AND status = 'ACCEPTED'
+             ORDER BY revision_number DESC LIMIT 1"
+        );
+        $acceptedReviewStatement->execute(array($operationalSessionUuid));
+        $acceptedRevisionUuid = strtolower(trim((string)$acceptedReviewStatement->fetchColumn()));
+        if ($acceptedRevisionUuid !== '') {
+            $accepted = $reviewService->repairAcceptedProjectionForDevice(
+                $device,
+                (string)$dispatch['dispatch_uuid']
+            );
+            $legs = is_array($accepted['legs'] ?? null) ? $accepted['legs'] : array();
+        } elseif (!$acceptDerived) {
             printf(
                 "%s: identity repaired; no accepted review exists, so derived legs were not auto-accepted.\n",
                 $flightUuid
             );
             continue;
+        } else {
+            $preview = $reviewService->previewForDevice($device, (string)$dispatch['dispatch_uuid']);
+            $review = is_array($preview['review'] ?? null) ? $preview['review'] : array();
+            $legs = is_array($review['proposed_legs'] ?? null) ? $review['proposed_legs'] : array();
+            if ($legs === array()) {
+                throw new RuntimeException('No derived legs are available for repair.');
+            }
+            $accepted = $reviewService->acceptForDevice($device, array(
+                'revision_uuid' => AuditEventService::uuid(),
+                'dispatch_uuid' => (string)$dispatch['dispatch_uuid'],
+                'evidence_sha256' => (string)($review['evidence_sha256'] ?? ''),
+                'legs' => $legs,
+            ));
         }
-        $accepted = $reviewService->acceptForDevice($device, array(
-            'revision_uuid' => $acceptedRevisionUuid !== ''
-                ? $acceptedRevisionUuid
-                : AuditEventService::uuid(),
-            'dispatch_uuid' => (string)$dispatch['dispatch_uuid'],
-            'evidence_sha256' => (string)($review['evidence_sha256'] ?? ''),
-            'legs' => $legs,
-        ));
 
         $currentVersionStatement = $pdo->prepare(
             'SELECT r.current_version_id

@@ -48,7 +48,9 @@ $checks = [
     'retry is idempotent and UUID conflicts are rejected' =>
         str_contains($service, 'reviewByUuid($revisionUuid)')
         && str_contains($service, "'already_present' => true")
-        && str_contains($service, 'Leg-review revision UUID conflict.'),
+        && str_contains($service, 'Leg-review revision UUID conflict.')
+        && str_contains($service, 'repairAcceptedProjectionForDevice')
+        && str_contains($service, 'Rebuild mutable read projections for an existing immutable accepted revision.'),
     'meter evidence discrepancies are audited while continuity is enforced' =>
         str_contains($service, 'evidenceDiscrepancies')
         && str_contains($service, 'Verified legs differ from the')
