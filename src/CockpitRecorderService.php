@@ -906,10 +906,16 @@ final class CockpitRecorderService
             )), $language);
             $result = $parallel[0] ?? null;
             if (!is_array($result) || empty($result['ok'])) {
-                throw new RuntimeException((string)($result['error'] ?? 'Chunk transcription failed.'));
+                $resultError = (string)($result['error'] ?? 'Chunk transcription failed.');
+                if (self::isNoSpeechTranscriptionResult($resultError)) {
+                    $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', 0, '', null);
+                } else {
+                    throw new RuntimeException($resultError);
+                }
+            } else {
+                $text = trim((string)($result['text'] ?? ''));
+                $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', strlen($text), $text, null);
             }
-            $text = trim((string)($result['text'] ?? ''));
-            $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', strlen($text), $text, null);
         } catch (Throwable $e) {
             $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'failed', 0, null, $e->getMessage());
         } finally {
@@ -1055,6 +1061,10 @@ final class CockpitRecorderService
                 if (!empty($result['ok'])) {
                     $text = trim((string)($result['text'] ?? ''));
                     $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', strlen($text), $text, null);
+                } elseif (self::isNoSpeechTranscriptionResult((string)($result['error'] ?? ''))) {
+                    // A valid silent chunk has no words. It is complete evidence, not a
+                    // technical failure that should block the entire transcript/debrief.
+                    $this->storeTranscriptionChunk($recordingId, $index, $start, $end, 'ready', 0, '', null);
                 } else {
                     $this->storeTranscriptionChunk(
                         $recordingId,
@@ -2781,6 +2791,11 @@ final class CockpitRecorderService
         $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM ' . self::CHUNK_TABLE . ' WHERE recording_id = ? AND status = ?');
         $stmt->execute(array($recordingId, $status));
         return (int)$stmt->fetchColumn();
+    }
+
+    private static function isNoSpeechTranscriptionResult(string $error): bool
+    {
+        return trim($error) === 'OpenAI transcription returned no text.';
     }
 
     /**

@@ -1865,6 +1865,11 @@ final class CockpitReconstructionService
         if ($type === '') {
             return null;
         }
+        // Periodic GPS samples are immutable reconstruction evidence, not discrete
+        // operational events for the replay list or timeline marker rail.
+        if ($type === 'gps_position_sample') {
+            return null;
+        }
 
         $map = array(
             'safety_event' => array('category' => 'safety', 'marker' => 'red', 'title' => 'Safety Occurrence', 'subtitle' => ''),

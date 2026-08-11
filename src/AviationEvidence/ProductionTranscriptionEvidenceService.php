@@ -354,9 +354,6 @@ final class ProductionTranscriptionEvidenceService
         }
 
         $this->updateRecordingProcessingRun($recordingId, $processingRunId, $pass4Result);
-        if (is_array($pass4Result) && !empty($pass4Result['ok']) && empty($pass4Result['skipped'])) {
-            $this->maybeAutoQueueDebrief($recordingId);
-        }
 
         $pass5Result = null;
         if (
@@ -381,6 +378,11 @@ final class ProductionTranscriptionEvidenceService
         $execution->heartbeat('finishing');
         $execution->complete();
         $GLOBALS['cockpit_evidence_active_run_id'] = null;
+        if (is_array($pass4Result) && !empty($pass4Result['ok']) && empty($pass4Result['skipped'])) {
+            // Publishability requires a completed processing run. Queue only after
+            // complete(), otherwise the readable transcript lookup races this run.
+            $this->maybeAutoQueueDebrief($recordingId);
+        }
 
         return array(
             'ok' => true,

@@ -64,7 +64,8 @@ $checks = array(
         && str_contains($store, 'cancelledSession?.state = .cancelled')
         && str_contains($store, 'Administrative server release confirmed; retained as cancelled evidence.')
         && str_contains($views, 'administrative server release; evidence is retained')
-        && str_contains($views, '!audio.isRecording, !audio.recordingSignalActive'),
+        && str_contains($views, 'guard !audio.isRecording else')
+        && !str_contains($views, 'isUndispatching || audio.isRecording || audio.recordingSignalActive'),
     'Undispatch preserves prepared values but remints released identity' =>
         str_contains($store, 'draft.id = replacementDispatchID')
         && str_contains($store, 'Undispatch revokes the acknowledged execution, not the prepared')

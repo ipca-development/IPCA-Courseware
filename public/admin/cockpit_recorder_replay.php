@@ -6115,9 +6115,13 @@ if ($isPublicReplay) {
     setEventsOpen(!!eventsPanel.hidden);
   }
 
+  function isReplayTelemetryEvent(action) {
+    return String(action && action.event_type || '').trim().toLowerCase() === 'gps_position_sample';
+  }
+
   function replayActionsFromPayload(data) {
     if (data && Array.isArray(data.replay_actions) && data.replay_actions.length) {
-      return data.replay_actions.slice();
+      return data.replay_actions.filter((action) => !isReplayTelemetryEvent(action));
     }
     const actions = [];
     const identified = data && Array.isArray(data.identified_exercises) ? data.identified_exercises : [];
@@ -6151,6 +6155,7 @@ if ($isPublicReplay) {
       const type = String(event.event_type || '');
       const t = Number(event.t);
       if (!type || !Number.isFinite(t)) return;
+      if (isReplayTelemetryEvent(event)) return;
       if (type === 'exercise_marker') {
         const uuid = String(event.event_uuid || '');
         if (uuid && identifiedWindows.some((w) => w.markerUuid === uuid)) return;

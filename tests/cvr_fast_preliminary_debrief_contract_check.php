@@ -61,6 +61,10 @@ $bundleService = source($root . '/src/ManualReconstructionBundleService.php');
 $debrief = source($root . '/src/FlightDebriefService.php');
 $readModel = source($root . '/src/CvrDataIntakeReadService.php');
 $legReview = source($root . '/src/CvrOperationalSessionLegReviewService.php');
+$cockpitRecorder = source($root . '/src/CockpitRecorderService.php');
+$productionEvidence = source($root . '/src/AviationEvidence/ProductionTranscriptionEvidenceService.php');
+$reconstruction = source($root . '/src/CockpitReconstructionService.php');
+$replayPage = source($root . '/public/admin/cockpit_recorder_replay.php');
 expect(str_contains($liveEndpoint, 'DeviceAuthService') && str_contains($liveService, 'transcribeOpenAiAudioStructured'), 'server authenticates and transcribes live segments', $failures);
 expect(str_contains($bundleService, 'freezePreliminary') && str_contains($orchestrator, 'considerPreliminary'), 'shutdown can freeze a preliminary bundle without Garmin', $failures);
 expect(str_contains($bundleService, 'lockLiveTranscript') && str_contains($orchestrator, 'garmin_blocking') && str_contains($orchestrator, 'false'), 'incremental transcript can drive a nonblocking preliminary debrief', $failures);
@@ -71,8 +75,28 @@ expect(
     'admin read model distinguishes preliminary and enriched evidence',
     $failures
 );
+expect(
+    strpos($productionEvidence, '$execution->complete();')
+        < strpos($productionEvidence, '$this->maybeAutoQueueDebrief($recordingId);'),
+    'debrief queue runs only after the readable processing run becomes publishable',
+    $failures
+);
 expect(!str_contains($legReview, 'A verified Garmin CSV must be linked before legs can be accepted.'), 'leg acceptance is not gated on Garmin', $failures);
 expect(str_contains($legReview, 'ios_gps_provisional') && str_contains($legReview, 'reconciliation_required'), 'GPS-derived legs reconcile when Garmin arrives', $failures);
+expect(
+    str_contains($workflow, 'eventType: "gps_position_sample"')
+        && str_contains($reconstruction, "if (\$type === 'gps_position_sample')")
+        && str_contains($replayPage, 'function isReplayTelemetryEvent(action)')
+        && substr_count($replayPage, 'isReplayTelemetryEvent(') >= 3,
+    'GPS position samples remain evidence but are excluded from replay actions and markers',
+    $failures
+);
+expect(
+    str_contains($cockpitRecorder, 'isNoSpeechTranscriptionResult')
+        && str_contains($cockpitRecorder, "storeTranscriptionChunk(\$recordingId, \$index, \$start, \$end, 'ready', 0, '', null)"),
+    'silent transcription chunks complete without blocking the full transcript and debrief',
+    $failures
+);
 
 if ($failures !== array()) {
     fwrite(STDERR, "cvr_fast_preliminary_debrief_contract_check FAILED\n");
