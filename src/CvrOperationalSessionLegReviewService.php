@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrAdminLegSplitService.php';
+require_once __DIR__ . '/FlightSessionService.php';
 require_once __DIR__ . '/MasterLogbookLogbookProposalService.php';
+require_once __DIR__ . '/OperationalFlightRecordVersionService.php';
 
 final class CvrOperationalSessionLegReviewService
 {
@@ -119,6 +121,8 @@ final class CvrOperationalSessionLegReviewService
                 return $leg;
             }, $legs);
             $canonicalLegs = AuditEventService::jsonEncode($legs);
+            $closure = $this->closure($flightUuid);
+            $evidenceDiscrepancies = $this->evidenceDiscrepancies($dispatch, $closure, $legs);
 
             $existing = $this->reviewByUuid($revisionUuid);
             if (is_array($existing)) {
@@ -127,6 +131,14 @@ final class CvrOperationalSessionLegReviewService
                     || !hash_equals((string)$existing['legs_json'], $canonicalLegs)) {
                     throw new RuntimeException('Leg-review revision UUID conflict.');
                 }
+                $this->persistCurrentProjection((int)$dispatch['id'], $legs, $revisionUuid, $evidenceHash);
+                $this->persistOperationalFlightRecordProjection(
+                    $sessionUuid,
+                    $legs,
+                    $revisionUuid,
+                    $evidenceHash,
+                    $evidenceDiscrepancies
+                );
                 $this->pdo->commit();
                 return array(
                     'ok' => true,
@@ -134,11 +146,10 @@ final class CvrOperationalSessionLegReviewService
                     'revision_uuid' => $revisionUuid,
                     'revision_number' => (int)$existing['revision_number'],
                     'legs' => $legs,
+                    'evidence_discrepancies' => $evidenceDiscrepancies,
                 );
             }
 
-            $closure = $this->closure($flightUuid);
-            $this->assertEvidenceBounds($dispatch, $closure, $legs);
             $latest = $this->latestReview($sessionUuid, true);
             $revisionNumber = is_array($latest) ? ((int)$latest['revision_number'] + 1) : 1;
             $supersedes = is_array($latest) ? (string)$latest['revision_uuid'] : null;
@@ -163,6 +174,13 @@ final class CvrOperationalSessionLegReviewService
                 $supersedes ?: null,
             ));
             $this->persistCurrentProjection((int)$dispatch['id'], $legs, $revisionUuid, $evidenceHash);
+            $this->persistOperationalFlightRecordProjection(
+                $sessionUuid,
+                $legs,
+                $revisionUuid,
+                $evidenceHash,
+                $evidenceDiscrepancies
+            );
             (new AuditEventService($this->pdo))->record(
                 'cvr.operational_session.legs_reviewed',
                 'ipca_operational_session_leg_reviews',
@@ -174,6 +192,7 @@ final class CvrOperationalSessionLegReviewService
                     'leg_count' => count($legs),
                     'evidence_sha256' => $evidenceHash,
                     'evidence_source' => $evidenceSource,
+                    'evidence_discrepancies' => $evidenceDiscrepancies,
                 ),
                 'CVR device accepted evidence-derived Operational Session legs.',
                 'device',
@@ -201,6 +220,7 @@ final class CvrOperationalSessionLegReviewService
             'revision_uuid' => $revisionUuid,
             'revision_number' => $revisionNumber,
             'legs' => $legs,
+            'evidence_discrepancies' => $evidenceDiscrepancies,
         );
     }
 
@@ -263,9 +283,17 @@ final class CvrOperationalSessionLegReviewService
         return $legs;
     }
 
-    /** @param list<array<string,mixed>> $legs */
-    private function assertEvidenceBounds(array $dispatch, array $closure, array $legs): void
+    /**
+     * Evidence remains immutable, but a reviewed logical record may differ from it.
+     * Preserve those differences as explicit audit provenance instead of rejecting
+     * an otherwise valid offline review.
+     *
+     * @param list<array<string,mixed>> $legs
+     * @return list<string>
+     */
+    private function evidenceDiscrepancies(array $dispatch, array $closure, array $legs): array
     {
+        $discrepancies = array();
         $first = $legs[0];
         $last = $legs[count($legs) - 1];
         $flightUuid = strtolower((string)($dispatch['workflow_flight_record_uuid'] ?? ''));
@@ -277,7 +305,7 @@ final class CvrOperationalSessionLegReviewService
             array((float)$last['ending_tacho'], (float)($adjustment['ending_tacho'] ?? $closure['ending_tacho']), 'ending Tacho'),
         ) as [$actual, $expected, $label]) {
             if (abs($actual - $expected) > 0.05) {
-                throw new RuntimeException("Verified legs must preserve the {$label} evidence boundary.");
+                $discrepancies[] = "Verified legs differ from the {$label} evidence boundary.";
             }
         }
         $closurePayload = json_decode((string)($closure['payload_json'] ?? '{}'), true);
@@ -298,10 +326,10 @@ final class CvrOperationalSessionLegReviewService
         $actualTakeoffs = array_sum(array_column($legs, 'takeoff_count'));
         $actualLandings = array_sum(array_column($legs, 'landing_count'));
         if ($expectedTakeoffs !== null && $actualTakeoffs !== $expectedTakeoffs) {
-            throw new RuntimeException('Verified leg takeoffs must match the Check-In total.');
+            $discrepancies[] = 'Verified leg takeoffs differ from the Check-In total.';
         }
         if ($expectedLandings !== null && $actualLandings !== $expectedLandings) {
-            throw new RuntimeException('Verified leg landings must match the Check-In total.');
+            $discrepancies[] = 'Verified leg landings differ from the Check-In total.';
         }
 
         $expectedFuelStart = is_numeric($dispatch['fuel_onboard'] ?? null)
@@ -314,7 +342,7 @@ final class CvrOperationalSessionLegReviewService
             if ($first['fuel_onboard'] === null || $last['fuel_remaining'] === null
                 || abs((float)$first['fuel_onboard'] - $expectedFuelStart) > 0.05
                 || abs((float)$last['fuel_remaining'] - $expectedFuelEnd) > 0.05) {
-                throw new RuntimeException('Verified legs must preserve the total fuel evidence boundary.');
+                $discrepancies[] = 'Verified legs differ from the total fuel evidence boundary.';
             }
             $actualFuelBurn = 0.0;
             for ($index = 0; $index < count($legs); $index++) {
@@ -331,7 +359,7 @@ final class CvrOperationalSessionLegReviewService
             }
             $expectedFuelBurn = max(0.0, $expectedFuelStart - $expectedFuelEnd);
             if (abs($actualFuelBurn - $expectedFuelBurn) > 0.11) {
-                throw new RuntimeException('Verified leg fuel consumption must match the Check-In total.');
+                $discrepancies[] = 'Verified leg fuel consumption differs from the Check-In total.';
             }
         }
         for ($index = 0; $index < count($legs); $index++) {
@@ -348,6 +376,7 @@ final class CvrOperationalSessionLegReviewService
                 }
             }
         }
+        return array_values(array_unique($discrepancies));
     }
 
     /** @return array<string,mixed> */
@@ -462,6 +491,138 @@ final class CvrOperationalSessionLegReviewService
         $stmt->execute(array($sessionUuid));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Materialize the accepted logical legs as the canonical Flight Record revision.
+     *
+     * @param list<array<string,mixed>> $legs
+     * @param list<string> $evidenceDiscrepancies
+     */
+    private function persistOperationalFlightRecordProjection(
+        string $sessionUuid,
+        array $legs,
+        string $revisionUuid,
+        string $evidenceHash,
+        array $evidenceDiscrepancies
+    ): void {
+        $sessionStatement = $this->pdo->prepare(
+            'SELECT id, current_flight_record_id
+             FROM ipca_flight_sessions
+             WHERE session_uuid = ? AND model_version = ?
+             LIMIT 1 FOR UPDATE'
+        );
+        $sessionStatement->execute(array($sessionUuid, FlightSessionService::MODEL_OPERATIONAL_V1));
+        $session = $sessionStatement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($session)) {
+            throw new RuntimeException('Canonical Operational Session was not found for the verified legs.');
+        }
+
+        $recordService = new OperationalFlightRecordVersionService($this->pdo);
+        $record = $recordService->ensureRecordForSession((int)$session['id']);
+        $recordId = (int)($record['id'] ?? 0);
+        if ($recordId <= 0) {
+            throw new RuntimeException('Canonical Operational Flight Record could not be established.');
+        }
+
+        $currentVersionId = (int)($record['current_version_id'] ?? 0);
+        if ($currentVersionId > 0) {
+            $currentStatement = $this->pdo->prepare(
+                'SELECT summary_json FROM ipca_operational_flight_record_versions WHERE id = ? LIMIT 1'
+            );
+            $currentStatement->execute(array($currentVersionId));
+            $currentSummary = json_decode((string)$currentStatement->fetchColumn(), true);
+            if (is_array($currentSummary)
+                && strtolower((string)($currentSummary['operational_leg_review_revision_uuid'] ?? ''))
+                    === strtolower($revisionUuid)) {
+                $this->pdo->prepare(
+                    'UPDATE ipca_flight_sessions SET current_flight_record_id = ? WHERE id = ?'
+                )->execute(array($recordId, (int)$session['id']));
+                return;
+            }
+        }
+
+        $first = $legs[0];
+        $last = $legs[count($legs) - 1];
+        $hobbsDurationMs = (int)round(max(
+            0,
+            (float)$last['ending_hobbs'] - (float)$first['starting_hobbs']
+        ) * 3600000);
+        $tachoDurationMs = (int)round(max(
+            0,
+            (float)$last['ending_tacho'] - (float)$first['starting_tacho']
+        ) * 3600000);
+        $fuelStart = $first['fuel_onboard'] ?? null;
+        $fuelEnd = $last['fuel_remaining'] ?? null;
+        $fuelUsed = is_numeric($fuelStart) && is_numeric($fuelEnd)
+            ? max(0.0, (float)$fuelStart - (float)$fuelEnd)
+            : null;
+        $summary = array(
+            'source' => 'device_reviewed_operational_legs',
+            'operational_leg_review_revision_uuid' => $revisionUuid,
+            'operational_leg_review_evidence_sha256' => $evidenceHash,
+            'evidence_discrepancies' => $evidenceDiscrepancies,
+            'exact_hobbs_duration_ms' => $hobbsDurationMs,
+            'exact_tacho_duration_ms' => $tachoDurationMs,
+            'landing_event_count' => array_sum(array_column($legs, 'landing_count')),
+            'readiness_status' => 'ready',
+        );
+        $version = $recordService->createVersion($recordId, $summary, 'device_reviewed');
+        $versionId = (int)($version['id'] ?? 0);
+        if ($versionId <= 0) {
+            throw new RuntimeException('Verified Operational Flight Record revision could not be created.');
+        }
+        $this->pdo->prepare(
+            "UPDATE ipca_operational_flight_record_versions
+             SET status = 'finalized', finalized_at = CURRENT_TIMESTAMP(3),
+                 hobbs_start_hours = ?, hobbs_end_hours = ?,
+                 tacho_start_hours = ?, tacho_end_hours = ?,
+                 fuel_start_usg = ?, fuel_end_usg = ?, fuel_used_usg = ?
+             WHERE id = ?"
+        )->execute(array(
+            $first['starting_hobbs'],
+            $last['ending_hobbs'],
+            $first['starting_tacho'],
+            $last['ending_tacho'],
+            $fuelStart,
+            $fuelEnd,
+            $fuelUsed,
+            $versionId,
+        ));
+
+        foreach ($legs as $leg) {
+            $legFuelStart = $leg['fuel_onboard'] ?? null;
+            $legFuelEnd = $leg['fuel_remaining'] ?? null;
+            $recordService->addLegVersion($versionId, array(
+                'leg_index' => (int)$leg['sequence_number'],
+                'allocation_start_utc' => (string)$leg['off_block_utc'],
+                'allocation_end_utc' => (string)$leg['on_block_utc'],
+                'allocated_hobbs_duration_ms' => (int)round(max(
+                    0,
+                    (float)$leg['ending_hobbs'] - (float)$leg['starting_hobbs']
+                ) * 3600000),
+                'allocated_tacho_duration_ms' => (int)round(max(
+                    0,
+                    (float)$leg['ending_tacho'] - (float)$leg['starting_tacho']
+                ) * 3600000),
+                'departure_airport_code' => (string)$leg['departure_airport'],
+                'arrival_airport_code' => (string)$leg['arrival_airport'],
+                'administrative_departure_utc' => (string)$leg['off_block_utc'],
+                'administrative_arrival_utc' => (string)$leg['on_block_utc'],
+                'fuel_start_usg' => $legFuelStart,
+                'fuel_end_usg' => $legFuelEnd,
+                'fuel_used_usg' => is_numeric($legFuelStart) && is_numeric($legFuelEnd)
+                    ? max(0.0, (float)$legFuelStart - (float)$legFuelEnd)
+                    : null,
+                'fuel_method' => 'device_reviewed',
+                'fuel_confidence' => 1.0,
+                'landing_event_count' => (int)$leg['landing_count'],
+                'notes' => 'Accepted Operational Session leg review ' . $revisionUuid,
+            ));
+        }
+        $this->pdo->prepare(
+            'UPDATE ipca_flight_sessions SET current_flight_record_id = ? WHERE id = ?'
+        )->execute(array($recordId, (int)$session['id']));
     }
 
     /** @param list<array<string,mixed>> $legs */

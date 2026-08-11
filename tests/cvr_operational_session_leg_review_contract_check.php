@@ -12,6 +12,7 @@ $api = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/APIClient.
 $views = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/OperationalWorkflowViews.swift');
 $store = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/CVRWorkflowStore.swift');
 $uploads = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services/UploadManager.swift');
+$versionService = file_get_contents($root . '/src/OperationalFlightRecordVersionService.php');
 
 $checks = [
     'migration stores append-only immutable review revisions' =>
@@ -48,13 +49,15 @@ $checks = [
         str_contains($service, 'reviewByUuid($revisionUuid)')
         && str_contains($service, "'already_present' => true")
         && str_contains($service, 'Leg-review revision UUID conflict.'),
-    'meter evidence boundaries and continuity are enforced' =>
-        str_contains($service, 'assertEvidenceBounds')
+    'meter evidence discrepancies are audited while continuity is enforced' =>
+        str_contains($service, 'evidenceDiscrepancies')
+        && str_contains($service, 'Verified legs differ from the')
         && str_contains($service, 'Verified leg meter boundaries must form a continuous chain.'),
-    'fuel and operation totals are enforced server-side' =>
+    'fuel and operation total differences retain explicit provenance' =>
         str_contains($service, "'fuel_onboard' => \$this->nullableFloat")
-        && str_contains($service, 'Verified leg fuel consumption must match the Check-In total.')
-        && str_contains($service, 'Verified leg landings must match the Check-In total.'),
+        && str_contains($service, 'Verified leg fuel consumption differs from the Check-In total.')
+        && str_contains($service, 'Verified leg landings differ from the Check-In total.')
+        && str_contains($service, "'evidence_discrepancies' => \$evidenceDiscrepancies"),
     'leg review uses effective Log adjustments and operation event fallback' =>
         str_contains($splitService, 'ipca_cvr_flight_log_adjustments')
         && str_contains($splitService, 'manual_takeoff_adjustment')
@@ -75,7 +78,12 @@ $checks = [
         && str_contains($views, 'if legs == legsBeforeServerRefresh'),
     'accepted revision projects current legs into Master Logbook source' =>
         str_contains($service, "payload['leg_segments']")
-        && str_contains($service, 'MasterLogbookLogbookProposalService'),
+        && str_contains($service, 'MasterLogbookLogbookProposalService')
+        && str_contains($service, 'persistOperationalFlightRecordProjection')
+        && str_contains($service, "'device_reviewed_operational_legs'")
+        && str_contains($service, "SET status = 'finalized'")
+        && str_contains($versionService, ':fuel_start_usg')
+        && str_contains($versionService, '$ownsTransaction = !$this->pdo->inTransaction()'),
     'iOS review allows corrections before explicit acceptance' =>
         str_contains($api, 'func operationalLegReview(')
         && str_contains($api, 'func acceptOperationalLegReview(')
@@ -89,7 +97,8 @@ $checks = [
         && str_contains($store, 'componentType: "operational_leg_review"')
         && str_contains($store, 'locallyAcceptedLegReviewDispatchUUIDs')
         && str_contains($uploads, 'uploadQueuedOperationalLegReviewComponent')
-        && str_contains($uploads, 'Legs are verified locally · server synchronization waits for Check-In.'),
+        && str_contains($uploads, 'The server is authoritative for the Check-In dependency')
+        && !str_contains($uploads, 'workflow.closureSynchronizationPending(for: component.flightRecordID)'),
     'iOS editor supports full operational correction workflow' =>
         str_contains($views, 'ALL DATES AND TIMES ARE CALIFORNIA LOCAL TIME')
         && str_contains($views, 'Label("UNDO", systemImage: "arrow.uturn.backward")')

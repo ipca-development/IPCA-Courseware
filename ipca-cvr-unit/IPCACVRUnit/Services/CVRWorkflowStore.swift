@@ -2478,16 +2478,6 @@ final class CVRWorkflowStore: ObservableObject {
         })
     }
 
-    func closureSynchronizationPending(for flightRecordUUID: String) -> Bool {
-        let target = flightRecordUUID.lowercased()
-        let components = state.uploadComponents + archives.flatMap(\.uploadComponents)
-        return components.contains {
-            $0.componentType == "flight_record_closure"
-                && $0.flightRecordID.lowercased() == target
-                && $0.state != .serverVerified
-        }
-    }
-
     /// Check-In is saved but Avionics OFF never arrived — archive anyway so History/Log are not orphaned.
     @discardableResult
     func forceFinalizeEngineShutdownAfterCheckIn() -> Bool {

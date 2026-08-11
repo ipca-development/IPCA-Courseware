@@ -774,15 +774,11 @@ final class UploadManager: ObservableObject {
             )
             return
         }
-        if workflow.closureSynchronizationPending(for: component.flightRecordID) {
-            workflow.updateUploadComponent(
-                id: component.id,
-                state: .queued,
-                progress: component.progress ?? 0,
-                lastError: "Legs are verified locally · waiting to synchronize Check-In first."
-            )
-            return
-        }
+        // The server is authoritative for the Check-In dependency. A prior Check-In
+        // response can be lost while the idempotent server receipt already exists;
+        // blocking here would then prevent the leg review from ever reconciling.
+        // If Check-In truly is missing, the API returns DEPENDENCY_PENDING below and
+        // this component remains queued for a later retry.
         guard let snapshot = component.requestPayloadSnapshot,
               let payload = try? JSONSerialization.jsonObject(with: snapshot) as? [String: Any] else {
             workflow.updateUploadComponent(

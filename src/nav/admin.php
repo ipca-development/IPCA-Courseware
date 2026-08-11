@@ -189,6 +189,117 @@ return [
 
     [
         'type' => 'section',
+        'label' => 'Analytics',
+    ],
+    [
+        'key' => 'training_analytics',
+        'label' => 'Training Analytics',
+        'icon' => 'scanner',
+        'match_paths' => [
+            '/admin/training_analytics/index.php',
+            '/admin/training_analytics/continuity.php',
+            '/admin/training_analytics/competencies.php',
+            '/admin/training_analytics/competency.php',
+            '/admin/training_analytics/curriculum.php',
+            '/admin/training_analytics/bottlenecks.php',
+            '/admin/training_analytics/mission.php',
+            '/admin/training_analytics/progression.php',
+            '/admin/training_analytics/instructors.php',
+            '/admin/training_analytics/instructor.php',
+            '/admin/training_analytics/narratives.php',
+            '/admin/training_analytics/programs.php',
+            '/admin/training_analytics/program.php',
+            '/admin/training_analytics/discoveries.php',
+            '/admin/training_analytics/data_quality.php',
+        ],
+        'items' => [
+            [
+                'key' => 'training_analytics_overview',
+                'label' => 'Overview',
+                'icon' => 'dashboard',
+                'href' => '/admin/training_analytics/index.php',
+            ],
+            [
+                'key' => 'training_analytics_discoveries',
+                'label' => 'Research / Discoveries',
+                'icon' => 'decisions',
+                'href' => '/admin/training_analytics/discoveries.php',
+            ],
+            [
+                'key' => 'training_analytics_programs',
+                'label' => 'Programs',
+                'icon' => 'courses',
+                'href' => '/admin/training_analytics/programs.php',
+                'match_paths' => [
+                    '/admin/training_analytics/programs.php',
+                    '/admin/training_analytics/program.php',
+                ],
+            ],
+            [
+                'key' => 'training_analytics_curriculum',
+                'label' => 'Curriculum',
+                'icon' => 'documents',
+                'href' => '/admin/training_analytics/curriculum.php',
+            ],
+            [
+                'key' => 'training_analytics_progression',
+                'label' => 'Student Progression',
+                'icon' => 'training',
+                'href' => '/admin/training_analytics/progression.php',
+            ],
+            [
+                'key' => 'training_analytics_competencies',
+                'label' => 'Competencies',
+                'icon' => 'health',
+                'href' => '/admin/training_analytics/competencies.php',
+                'match_paths' => [
+                    '/admin/training_analytics/competencies.php',
+                    '/admin/training_analytics/competency.php',
+                ],
+            ],
+            [
+                'key' => 'training_analytics_continuity',
+                'label' => 'Training Continuity',
+                'icon' => 'schedule',
+                'href' => '/admin/training_analytics/continuity.php',
+            ],
+            [
+                'key' => 'training_analytics_bottlenecks',
+                'label' => 'Mission Bottlenecks',
+                'icon' => 'flight',
+                'href' => '/admin/training_analytics/bottlenecks.php',
+                'match_paths' => [
+                    '/admin/training_analytics/bottlenecks.php',
+                    '/admin/training_analytics/mission.php',
+                ],
+            ],
+            [
+                'key' => 'training_analytics_instructors',
+                'label' => 'Instructors',
+                'icon' => 'users',
+                'href' => '/admin/training_analytics/instructors.php',
+                'match_paths' => [
+                    '/admin/training_analytics/instructors.php',
+                    '/admin/training_analytics/instructor.php',
+                ],
+            ],
+            [
+                'key' => 'training_analytics_narratives',
+                'label' => 'Narrative Insights',
+                'icon' => 'reviews',
+                'href' => '/admin/training_analytics/narratives.php',
+            ],
+            [
+                'key' => 'training_analytics_data_quality',
+                'label' => 'Data Quality',
+                'icon' => 'tools',
+                'href' => '/admin/training_analytics/data_quality.php',
+            ],
+        ],
+    ],
+
+    [
+        'type' => 'section',
         'label' => 'Operations',
     ],
     [

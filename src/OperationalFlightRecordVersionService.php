@@ -41,7 +41,10 @@ final class OperationalFlightRecordVersionService
      */
     public function createVersion(int $flightRecordId, array $summary = array(), string $source = 'system'): array
     {
-        $this->pdo->beginTransaction();
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
         try {
             $stmt = $this->pdo->prepare('SELECT COALESCE(MAX(version_number), 0) + 1 FROM ipca_operational_flight_record_versions WHERE flight_record_id = ? FOR UPDATE');
             $stmt->execute(array($flightRecordId));
@@ -74,9 +77,13 @@ final class OperationalFlightRecordVersionService
             $versionId = (int)$this->pdo->lastInsertId();
             $this->pdo->prepare('UPDATE ipca_operational_flight_records SET current_version_id = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?')
                 ->execute(array($versionId, $flightRecordId));
-            $this->pdo->commit();
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
         } catch (Throwable $e) {
-            $this->pdo->rollBack();
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
             throw $e;
         }
         return $this->versionById($versionId) ?? array();
@@ -92,11 +99,13 @@ final class OperationalFlightRecordVersionService
               (leg_version_uuid, flight_record_version_id, leg_index, allocation_start_utc, allocation_end_utc,
                allocated_hobbs_duration_ms, allocated_tacho_duration_ms, departure_airport_code, arrival_airport_code,
                takeoff_utc, landing_utc, first_movement_utc, final_stop_utc, administrative_departure_utc, administrative_arrival_utc,
+               fuel_start_usg, fuel_end_usg, fuel_used_usg, fuel_method, fuel_confidence,
                night_duration_ms, cross_country_easa_qualified, cross_country_faa_qualified, landing_event_count, notes)
             VALUES
               (:leg_version_uuid, :flight_record_version_id, :leg_index, :allocation_start_utc, :allocation_end_utc,
                :allocated_hobbs_duration_ms, :allocated_tacho_duration_ms, :departure_airport_code, :arrival_airport_code,
                :takeoff_utc, :landing_utc, :first_movement_utc, :final_stop_utc, :administrative_departure_utc, :administrative_arrival_utc,
+               :fuel_start_usg, :fuel_end_usg, :fuel_used_usg, :fuel_method, :fuel_confidence,
                :night_duration_ms, :cross_country_easa_qualified, :cross_country_faa_qualified, :landing_event_count, :notes)
         ");
         $stmt->execute(array(
@@ -115,6 +124,11 @@ final class OperationalFlightRecordVersionService
             ':final_stop_utc' => $leg['final_stop_utc'] ?? null,
             ':administrative_departure_utc' => $leg['administrative_departure_utc'] ?? null,
             ':administrative_arrival_utc' => $leg['administrative_arrival_utc'] ?? null,
+            ':fuel_start_usg' => $leg['fuel_start_usg'] ?? null,
+            ':fuel_end_usg' => $leg['fuel_end_usg'] ?? null,
+            ':fuel_used_usg' => $leg['fuel_used_usg'] ?? null,
+            ':fuel_method' => $leg['fuel_method'] ?? null,
+            ':fuel_confidence' => $leg['fuel_confidence'] ?? null,
             ':night_duration_ms' => $leg['night_duration_ms'] ?? null,
             ':cross_country_easa_qualified' => !empty($leg['cross_country_easa_qualified']) ? 1 : 0,
             ':cross_country_faa_qualified' => !empty($leg['cross_country_faa_qualified']) ? 1 : 0,

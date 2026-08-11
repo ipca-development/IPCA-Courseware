@@ -17,6 +17,7 @@ $debriefWorker = file_get_contents($root . '/scripts/run_structured_flight_debri
 $debriefPage = file_get_contents($root . '/public/admin/master_logbook_intake.php') ?: '';
 $derivationService = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
 $genericDebriefMigration = file_get_contents($root . '/scripts/sql/2026_08_01_generic_mission_debrief.sql') ?: '';
+$repairScript = file_get_contents($root . '/scripts/repair_cvr_operational_leg_projection.php') ?: '';
 
 $service = (new ReflectionClass(FlightDebriefService::class))->newInstanceWithoutConstructor();
 $calculate = new ReflectionMethod(FlightDebriefService::class, 'calculateSuggestedOverall');
@@ -146,6 +147,26 @@ $checks = array(
         && str_contains($bundleService, "\$derived['flight_record_version_id']")
         && str_contains($bundleService, 'rebuildFlightRecord')
         && (str_contains($debriefPage, 'Rebuild Flight Record') || str_contains($debriefPage, 'Re-derive Flight Record')),
+    'reconstruction binds evidence to the immutable Operational Session identity' =>
+        str_contains($bundleService, "\$dispatch['operational_session_uuid']")
+        && str_contains($bundleService, 'FlightSessionService::MODEL_OPERATIONAL_V1')
+        && str_contains($bundleService, 'The canonical Operational Session identity is unavailable or inconsistent.')
+        && str_contains($bundleService, 'SET operational_session_uuid = ?')
+        && str_contains($bundleService, 'Never use the')
+        && str_contains($bundleService, 'workflow Flight Record UUID as a new-session fallback'),
+    'Garmin crew reconciliation joins the canonical session without conflating UUIDs' =>
+        str_contains($derivationService, 'd2.operational_session_uuid = s.session_uuid')
+        && str_contains($derivationService, 'd2.workflow_flight_record_uuid = s.workflow_flight_record_uuid')
+        && str_contains($derivationService, 'fc.workflow_flight_record_uuid = d.workflow_flight_record_uuid')
+        && str_contains($derivationService, 'adj.workflow_flight_record_uuid = d.workflow_flight_record_uuid')
+        && !str_contains($derivationService, 'ON d.workflow_flight_record_uuid = s.session_uuid'),
+    'duplicate-safe repair rebinds legacy evidence and reprojects accepted legs' =>
+        str_contains($repairScript, "'--apply'")
+        && str_contains($repairScript, "'--accept-derived'")
+        && str_contains($repairScript, 'UPDATE ipca_garmin_csv_files SET session_id = ?')
+        && str_contains($repairScript, 'UPDATE ipca_operational_flight_records SET session_id = ?')
+        && str_contains($repairScript, 'previewForDevice')
+        && str_contains($repairScript, 'acceptForDevice'),
     'ready frozen reconstruction keeps a direct Replay action' =>
         str_contains($debriefPage, '$bundleReplayReady')
         && str_contains($debriefPage, '/admin/cockpit_recorder_replay.php?id=')

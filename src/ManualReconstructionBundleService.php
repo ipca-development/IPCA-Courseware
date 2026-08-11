@@ -696,10 +696,25 @@ final class ManualReconstructionBundleService
     {
         $device = $this->row('ipca_cvr_devices', (int)($dispatch['device_id'] ?? 0));
         $device['aircraft_registration'] = (string)($dispatch['aircraft_registration'] ?? '');
-        $session = (new FlightSessionService($this->pdo))->sessionForDevice(
-            $device,
-            (string)$dispatch['workflow_flight_record_uuid']
-        );
+        $operationalSessionUuid = strtolower(trim((string)($dispatch['operational_session_uuid'] ?? '')));
+        $usesOperationalSession = $operationalSessionUuid !== '';
+        if ($usesOperationalSession) {
+            $session = (new FlightSessionService($this->pdo))->sessionByUuid($operationalSessionUuid);
+            if (!is_array($session)
+                || (string)($session['model_version'] ?? '') !== FlightSessionService::MODEL_OPERATIONAL_V1
+                || (int)($session['device_id'] ?? 0) !== (int)($device['id'] ?? 0)
+                || strtolower(trim((string)($session['workflow_flight_record_uuid'] ?? '')))
+                    !== strtolower(trim((string)($dispatch['workflow_flight_record_uuid'] ?? '')))) {
+                throw new RuntimeException('The canonical Operational Session identity is unavailable or inconsistent.');
+            }
+        } else {
+            // Legacy bundles retain their historical Flight Session identity. Never use the
+            // workflow Flight Record UUID as a new-session fallback for Operational Session v1.
+            $session = (new FlightSessionService($this->pdo))->sessionForDevice(
+                $device,
+                (string)$dispatch['workflow_flight_record_uuid']
+            );
+        }
         $sessionId = (int)($session['id'] ?? 0);
         if ($sessionId <= 0) {
             throw new RuntimeException('Could not establish the canonical Flight Session.');
@@ -708,7 +723,10 @@ final class ManualReconstructionBundleService
             $this->pdo->prepare('UPDATE ipca_garmin_csv_files SET session_id = ? WHERE id = ?')
                 ->execute(array($sessionId, (int)$garmin['id']));
         }
-        if ($this->columnExists('ipca_cockpit_recordings', 'flight_session_uid')) {
+        if ($usesOperationalSession && $this->columnExists('ipca_cockpit_recordings', 'operational_session_uuid')) {
+            $this->pdo->prepare('UPDATE ipca_cockpit_recordings SET operational_session_uuid = ? WHERE id = ?')
+                ->execute(array($operationalSessionUuid, (int)$recording['id']));
+        } elseif ($this->columnExists('ipca_cockpit_recordings', 'flight_session_uid')) {
             $this->pdo->prepare('UPDATE ipca_cockpit_recordings SET flight_session_uid = ? WHERE id = ?')
                 ->execute(array((string)$session['session_uuid'], (int)$recording['id']));
         }

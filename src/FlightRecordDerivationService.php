@@ -595,15 +595,29 @@ final class FlightRecordDerivationService
                     c.oil_percentage
              FROM ipca_flight_sessions s
              INNER JOIN ipca_cvr_dispatches d
-               ON d.workflow_flight_record_uuid = s.session_uuid
+               ON d.id = (
+                 SELECT d2.id
+                 FROM ipca_cvr_dispatches d2
+                 WHERE d2.operational_session_uuid = s.session_uuid
+                    OR (
+                      s.workflow_flight_record_uuid IS NOT NULL
+                      AND d2.workflow_flight_record_uuid = s.workflow_flight_record_uuid
+                    )
+                    OR (
+                      s.workflow_flight_record_uuid IS NULL
+                      AND d2.workflow_flight_record_uuid = s.session_uuid
+                    )
+                 ORDER BY (d2.operational_session_uuid = s.session_uuid) DESC, d2.id DESC
+                 LIMIT 1
+               )
              LEFT JOIN ipca_cvr_flight_closures c ON c.id = (
                SELECT fc.id FROM ipca_cvr_flight_closures fc
-               WHERE fc.workflow_flight_record_uuid = s.session_uuid
+               WHERE fc.workflow_flight_record_uuid = d.workflow_flight_record_uuid
                ORDER BY fc.received_at DESC, fc.id DESC LIMIT 1
              )
              LEFT JOIN ipca_cvr_flight_log_adjustments a ON a.id = (
                SELECT adj.id FROM ipca_cvr_flight_log_adjustments adj
-               WHERE adj.workflow_flight_record_uuid = s.session_uuid
+               WHERE adj.workflow_flight_record_uuid = d.workflow_flight_record_uuid
                ORDER BY adj.created_at DESC, adj.id DESC LIMIT 1
              )
              WHERE s.id = ? LIMIT 1'

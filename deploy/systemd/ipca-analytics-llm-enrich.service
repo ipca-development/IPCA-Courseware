@@ -1,0 +1,29 @@
+# /etc/systemd/system/ipca-analytics-llm-enrich.service
+# Durable Phase 7/10C targeted LLM enrichment (approved host).
+# Does not log secrets. Skips already-processed hashes via DB + cache.
+#
+#   sudo install -m 644 deploy/systemd/ipca-analytics-llm-enrich.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl start ipca-analytics-llm-enrich.service
+#   journalctl -u ipca-analytics-llm-enrich.service -f
+
+[Unit]
+Description=IPCA analytics targeted LLM enrichment (resumable)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/var/www/ipca
+Environment=PHP_FPM_POOL=/etc/php/8.3/fpm/pool.d/www.conf
+Environment=IPCA_FPM_POOL=/etc/php/8.3/fpm/pool.d/www.conf
+EnvironmentFile=-/etc/ipca/analytics.env
+ExecStart=/var/www/ipca/scripts/analytics/run-with-analytics-env.sh /var/www/ipca/analytics/.venv/bin/python /var/www/ipca/analytics/etl/phase7_05_llm_enrich.py
+Nice=10
+TimeoutStartSec=infinity
+StandardOutput=append:/var/www/ipca/storage/logs/phase7_llm_enrich.log
+StandardError=append:/var/www/ipca/storage/logs/phase7_llm_enrich.log
+
+[Install]
+WantedBy=multi-user.target
