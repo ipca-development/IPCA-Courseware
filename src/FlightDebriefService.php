@@ -360,7 +360,8 @@ final class FlightDebriefService
                         allocation_start_utc, allocation_end_utc,
                         COALESCE(administrative_departure_utc, takeoff_utc, allocation_start_utc) AS departure_utc,
                         COALESCE(administrative_arrival_utc, landing_utc, allocation_end_utc) AS arrival_utc,
-                        allocated_hobbs_duration_ms, night_duration_ms,
+                        allocated_hobbs_duration_ms, allocated_tacho_duration_ms,
+                        fuel_start_usg, fuel_end_usg, fuel_used_usg, night_duration_ms,
                         cross_country_easa_qualified, cross_country_faa_qualified, landing_event_count
                  FROM ipca_operational_flight_leg_versions
                  WHERE flight_record_version_id = ? ORDER BY leg_index'

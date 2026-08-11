@@ -6,6 +6,7 @@ require_once __DIR__ . '/../src/ReplayShareService.php';
 $root = dirname(__DIR__);
 $service = file_get_contents($root . '/src/ReplayShareService.php') ?: '';
 $migration = file_get_contents($root . '/scripts/sql/2026_07_28_replay_debrief_shares.sql') ?: '';
+$deliveryMigration = file_get_contents($root . '/scripts/sql/2026_08_10_replay_share_email_delivery.sql') ?: '';
 $adminPage = file_get_contents($root . '/public/admin/master_logbook_intake.php') ?: '';
 $publicPage = file_get_contents($root . '/public/replay-debrief.php') ?: '';
 $replayPage = file_get_contents($root . '/public/admin/cockpit_recorder_replay.php') ?: '';
@@ -20,10 +21,18 @@ $checks = array(
         && !preg_match('/\b(token|passcode)\s+VARCHAR/i', $migration)
         && str_contains($service, "password_hash(\$passcode, PASSWORD_DEFAULT)")
         && str_contains($service, "hash('sha256', trim(\$plainToken))"),
-    'new credentials revoke previous active share and expire in 12 hours' =>
-        str_contains($service, "modify('+12 hours')")
-        && str_contains($service, "SET status = 'revoked'")
-        && str_contains($service, "WHERE debrief_id = ? AND status = 'active'"),
+    'recipient shares coexist with selectable 12 24 or 48 hour expiry' =>
+        str_contains($service, 'ALLOWED_EXPIRY_HOURS = array(12, 24, 48)')
+        && str_contains($service, "modify('+' . \$expiryHours . ' hours')")
+        && str_contains($service, 'listForDebrief')
+        && str_contains($service, 'revokeShare'),
+    'email delivery is recipient specific audited and excludes passcode' =>
+        str_contains($deliveryMigration, 'ipca_replay_debrief_share_deliveries')
+        && str_contains($deliveryMigration, 'recipient_email VARCHAR(254)')
+        && str_contains($deliveryMigration, 'delivery_status')
+        && str_contains($service, 'sendLinkEmail')
+        && str_contains($service, 'The required passcode is intentionally not included in this email')
+        && str_contains($service, 'recipient_email_hash'),
     'passcode abuse is rate limited' =>
         str_contains($service, 'failed_attempt_count')
         && str_contains($service, 'failed_attempt_count + 1 >= 5')
@@ -37,7 +46,7 @@ $checks = array(
     'mandatory notice contains the requested wording' =>
         str_contains(ReplayShareService::NOTICE_TEXT, 'strictly private and may not be copied, downloaded, distributed, published, shared, or shown to any third party')
         && str_contains(ReplayShareService::NOTICE_TEXT, 'You agree to treat all content as confidential')
-        && str_contains(ReplayShareService::NOTICE_TEXT, 'This link is temporary and will expire automatically after 12 hours.')
+        && str_contains(ReplayShareService::NOTICE_TEXT, 'expire automatically at the time shown')
         && str_contains($publicPage, 'accept_privacy'),
     'public authorization is scoped to the shared flight' =>
         str_contains($service, 'recordingBelongsToShare')
@@ -56,13 +65,24 @@ $checks = array(
     'public replay excludes admin navigation and settings controls' =>
         str_contains($replayPage, 'IPCA_PUBLIC_REPLAY')
         && str_contains($replayPage, 'if (!$isPublicReplay)')
-        && str_contains($replayPage, 'if (!$isPublicReplay): ?><div class="replay-settings-cluster"')
+        && str_contains($replayPage, 'if (!$isPublicReplay): ?><button class="replay-icon-button replay-settings-button"')
         && str_contains($replayPage, 'if (!$isPublicReplay): ?><a class="replay-icon-button"'),
-    'instructor UI supports generate regenerate revoke and one-time copying' =>
-        str_contains($adminPage, 'Generate Link & Passcode')
-        && str_contains($adminPage, 'Regenerate Link & Passcode')
+    'instructor UI supports recipient email expiry and individual revocation' =>
+        str_contains($adminPage, 'Create Link &amp; Email Recipient')
+        && str_contains($adminPage, 'name="expiry_hours"')
+        && str_contains($adminPage, 'name="recipient_email"')
+        && str_contains($adminPage, 'name="share_id"')
         && str_contains($adminPage, 'revoke_replay_share')
         && str_contains($adminPage, 'data-copy-input'),
+    'privacy flow shows legs and AI debrief before media access' =>
+        str_contains($publicPage, "\$stage === 'summary'")
+        && str_contains($publicPage, 'Flight Legs')
+        && str_contains($debriefService, 'allocated_tacho_duration_ms')
+        && str_contains($debriefService, 'fuel_used_usg')
+        && str_contains($publicPage, 'Overall Assessment')
+        && str_contains($publicPage, 'Main Takeaways')
+        && str_contains($publicPage, 'open_replay')
+        && str_contains($service, "empty(\$grant['replay_opened'])"),
     'future debriefs use supportive direct instructor voice' =>
         str_contains($debriefService, 'v5-chief-instructor-voice')
         && str_contains($debriefService, 'speaking directly to the student')

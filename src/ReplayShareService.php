@@ -16,8 +16,9 @@ By accessing this recording, you acknowledge that it may contain personal inform
 
 Unauthorized use or disclosure may violate privacy rights and applicable laws and may result in access to this service being revoked.
 
-This link is temporary and will expire automatically after 12 hours.
+This link is temporary and will expire automatically at the time shown on the access page.
 NOTICE;
+    private const ALLOWED_EXPIRY_HOURS = array(12, 24, 48);
 
     public function __construct(private PDO $pdo)
     {
@@ -34,16 +35,40 @@ NOTICE;
         }
     }
 
+    public function isEmailDeliveryReady(): bool
+    {
+        return $this->deliveryTableReady();
+    }
+
     /** @return array<string,mixed> */
-    public function create(int $debriefId, int $actorUserId): array
+    public function create(
+        int $debriefId,
+        int $actorUserId,
+        int $expiryHours = 12,
+        string $recipientEmail = '',
+        string $recipientName = '',
+        string $recipientType = 'custom'
+    ): array
     {
         if (!$this->isReady()) {
             throw new RuntimeException('Replay sharing database migration is not installed.');
         }
         $source = $this->sourceForDebrief($debriefId);
+        if (!in_array($expiryHours, self::ALLOWED_EXPIRY_HOURS, true)) {
+            throw new InvalidArgumentException('Replay access must expire after 12, 24, or 48 hours.');
+        }
+        $recipientEmail = strtolower(trim($recipientEmail));
+        $recipientName = mb_substr(trim($recipientName), 0, 160);
+        $recipientType = in_array($recipientType, array('student', 'custom'), true)
+            ? $recipientType
+            : 'custom';
+        if ($recipientEmail !== '' && filter_var($recipientEmail, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('Enter a valid replay recipient email address.');
+        }
         $plainToken = $this->randomToken();
         $passcode = $this->randomPasscode();
-        $expiresAt = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('+12 hours');
+        $expiresAt = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
+            ->modify('+' . $expiryHours . ' hours');
         $this->pdo->beginTransaction();
         try {
             $lock = $this->pdo->prepare('SELECT id FROM ipca_structured_debriefs WHERE id = ? FOR UPDATE');
@@ -51,11 +76,6 @@ NOTICE;
             if (!$lock->fetchColumn()) {
                 throw new RuntimeException('Debrief is unavailable.');
             }
-            $this->pdo->prepare(
-                "UPDATE ipca_replay_debrief_shares
-                 SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP(3), revoked_by = ?
-                 WHERE debrief_id = ? AND status = 'active'"
-            )->execute(array($actorUserId, $debriefId));
             $insert = $this->pdo->prepare(
                 "INSERT INTO ipca_replay_debrief_shares
                  (share_uuid, debrief_id, bundle_id, recording_id, token_hash, passcode_hash,
@@ -73,6 +93,24 @@ NOTICE;
                 $actorUserId,
             ));
             $shareId = (int)$this->pdo->lastInsertId();
+            if ($recipientEmail !== '') {
+                if (!$this->deliveryTableReady()) {
+                    throw new RuntimeException('Replay email delivery migration is not installed.');
+                }
+                $this->pdo->prepare(
+                    "INSERT INTO ipca_replay_debrief_share_deliveries
+                     (delivery_uuid, share_id, recipient_type, recipient_name, recipient_email,
+                      delivery_status, created_by)
+                     VALUES (?, ?, ?, ?, ?, 'pending', ?)"
+                )->execute(array(
+                    AuditEventService::uuid(),
+                    $shareId,
+                    $recipientType,
+                    $recipientName,
+                    $recipientEmail,
+                    $actorUserId,
+                ));
+            }
             $this->pdo->commit();
         } catch (Throwable $e) {
             $this->pdo->rollBack();
@@ -81,6 +119,10 @@ NOTICE;
         $share = $this->shareById($shareId);
         $share['token'] = $plainToken;
         $share['passcode'] = $passcode;
+        $share['expiry_hours'] = $expiryHours;
+        $share['recipient_email'] = $recipientEmail;
+        $share['recipient_name'] = $recipientName;
+        $share['recipient_type'] = $recipientType;
         return $share;
     }
 
@@ -103,6 +145,152 @@ NOTICE;
             $this->pdo->rollBack();
             throw $e;
         }
+    }
+
+    public function revokeShare(int $shareId, int $actorUserId, int $debriefId = 0): void
+    {
+        if ($shareId <= 0) {
+            throw new InvalidArgumentException('Replay share is required.');
+        }
+        $statement = $this->pdo->prepare(
+            "UPDATE ipca_replay_debrief_shares
+             SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP(3), revoked_by = ?
+             WHERE id = ? AND status = 'active'"
+                . ($debriefId > 0 ? ' AND debrief_id = ?' : '')
+        );
+        $parameters = array($actorUserId, $shareId);
+        if ($debriefId > 0) {
+            $parameters[] = $debriefId;
+        }
+        $statement->execute($parameters);
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function listForDebrief(int $debriefId): array
+    {
+        if (!$this->isReady() || $debriefId <= 0) {
+            return array();
+        }
+        $deliveryJoin = $this->deliveryTableReady()
+            ? 'LEFT JOIN ipca_replay_debrief_share_deliveries delivery ON delivery.share_id = share_record.id'
+            : '';
+        $deliveryFields = $this->deliveryTableReady()
+            ? ', delivery.recipient_type, delivery.recipient_name, delivery.recipient_email,
+                 delivery.delivery_status, delivery.sent_at, delivery.delivery_error'
+            : ", 'custom' AS recipient_type, '' AS recipient_name, '' AS recipient_email,
+                 '' AS delivery_status, NULL AS sent_at, NULL AS delivery_error";
+        $statement = $this->pdo->prepare(
+            'SELECT share_record.id, share_record.share_uuid, share_record.debrief_id,
+                    share_record.status, share_record.expires_at, share_record.revoked_at,
+                    share_record.last_viewed_at, share_record.view_count, share_record.created_at'
+                    . $deliveryFields . '
+             FROM ipca_replay_debrief_shares share_record
+             ' . $deliveryJoin . '
+             WHERE share_record.debrief_id = ?
+             ORDER BY share_record.id DESC'
+        );
+        $statement->execute(array($debriefId));
+        return $statement->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    /** @return array{name:string,email:string,type:string} */
+    public function suggestedStudentRecipient(int $debriefId): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT dispatch_record.crew_json
+             FROM ipca_structured_debriefs debrief
+             INNER JOIN ipca_manual_intake_bundles bundle ON bundle.id = debrief.bundle_id
+             INNER JOIN ipca_cvr_dispatches dispatch_record ON dispatch_record.id = bundle.dispatch_id
+             WHERE debrief.id = ? LIMIT 1'
+        );
+        $statement->execute(array($debriefId));
+        $crew = json_decode((string)($statement->fetchColumn() ?: '[]'), true);
+        if (!is_array($crew)) {
+            return array('name' => '', 'email' => '', 'type' => 'student');
+        }
+        $candidate = null;
+        foreach ($crew as $member) {
+            if (!is_array($member)) {
+                continue;
+            }
+            $role = strtolower(trim((string)($member['role'] ?? '')));
+            if (!empty($member['is_primary_customer']) || $role === 'student' || $role === 'customer') {
+                $candidate = $member;
+                if (!empty($member['is_primary_customer'])) {
+                    break;
+                }
+            }
+        }
+        if (!is_array($candidate)) {
+            return array('name' => '', 'email' => '', 'type' => 'student');
+        }
+        $name = trim((string)($candidate['person_name'] ?? $candidate['personName'] ?? ''));
+        $personId = (int)($candidate['person_id'] ?? 0);
+        $email = '';
+        if ($personId > 0) {
+            $user = $this->pdo->prepare('SELECT name, email FROM users WHERE id = ? LIMIT 1');
+            $user->execute(array($personId));
+            $row = $user->fetch(PDO::FETCH_ASSOC);
+            if (is_array($row)) {
+                $name = trim((string)($row['name'] ?? '')) ?: $name;
+                $email = strtolower(trim((string)($row['email'] ?? '')));
+            }
+        }
+        return array('name' => $name, 'email' => $email, 'type' => 'student');
+    }
+
+    /** @param array<string,mixed> $share @return array<string,mixed> */
+    public function sendLinkEmail(array $share, string $publicUrl, int $actorUserId): array
+    {
+        $shareId = (int)($share['id'] ?? 0);
+        $email = strtolower(trim((string)($share['recipient_email'] ?? '')));
+        $name = trim((string)($share['recipient_name'] ?? ''));
+        if ($shareId <= 0 || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('A valid replay share recipient is required.');
+        }
+        if (!$this->deliveryTableReady()) {
+            throw new RuntimeException('Replay email delivery migration is not installed.');
+        }
+        require_once __DIR__ . '/mailer.php';
+        $expires = gmdate('M j, Y H:i \U\T\C', strtotime((string)($share['expires_at'] ?? '')));
+        $safeName = htmlspecialchars($name !== '' ? $name : 'Student', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $safeUrl = htmlspecialchars($publicUrl, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $html = '<p>Dear ' . $safeName . ',</p>'
+            . '<p>Your instructor has shared a private IPCA flight debrief and replay with you.</p>'
+            . '<p><a href="' . $safeUrl . '">Open your private flight debrief</a></p>'
+            . '<p>This link expires ' . htmlspecialchars($expires, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '.</p>'
+            . '<p>The required passcode is intentionally not included in this email. Obtain it separately from your instructor.</p>';
+        $result = cw_send_mail(array(
+            'to' => array(array('email' => $email, 'name' => $name)),
+            'subject' => 'Your private IPCA flight debrief',
+            'html' => $html,
+        ));
+        $ok = !empty($result['ok']);
+        $this->pdo->prepare(
+            "UPDATE ipca_replay_debrief_share_deliveries
+             SET delivery_status = ?, provider = ?, provider_message_id = ?,
+                 delivery_error = ?, sent_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP(3) ELSE sent_at END
+             WHERE share_id = ?"
+        )->execute(array(
+            $ok ? 'sent' : 'failed',
+            mb_substr((string)($result['provider'] ?? ''), 0, 48),
+            mb_substr((string)($result['message_id'] ?? ''), 0, 255),
+            $ok ? null : mb_substr((string)($result['error'] ?? 'Email delivery failed.'), 0, 1000),
+            $ok ? 1 : 0,
+            $shareId,
+        ));
+        (new AuditEventService($this->pdo))->record(
+            'replay_share_email_' . ($ok ? 'sent' : 'failed'),
+            'ipca_replay_debrief_shares',
+            (string)($share['share_uuid'] ?? $shareId),
+            null,
+            array('share_id' => $shareId, 'recipient_email_hash' => hash('sha256', $email)),
+            $ok ? 'Private replay link emailed without passcode.' : 'Private replay email delivery failed.',
+            'user',
+            $actorUserId
+        );
+        $result['recipient_email'] = $email;
+        return $result;
     }
 
     /** @return array<string,mixed> */
@@ -172,6 +360,7 @@ NOTICE;
             'access_uuid' => $accessUuid,
             'expires_at' => strtotime((string)$share['expires_at']),
             'privacy_accepted' => false,
+            'replay_opened' => false,
         );
         $this->pdo->prepare(
             'UPDATE ipca_replay_debrief_shares
@@ -194,14 +383,39 @@ NOTICE;
              WHERE id = ? AND share_id = ?"
         )->execute(array(self::NOTICE_VERSION, (int)$grant['access_id'], (int)$share['id']));
         $_SESSION['replay_share_grant']['privacy_accepted'] = true;
+        $_SESSION['replay_share_grant']['replay_opened'] = false;
+    }
+
+    public function openReplay(string $plainToken): void
+    {
+        $share = $this->shareForToken($plainToken);
+        $grant = $this->sessionGrant();
+        if ((int)($grant['share_id'] ?? 0) !== (int)$share['id']
+            || empty($grant['privacy_accepted'])) {
+            throw new RuntimeException('This replay link is invalid or unavailable.');
+        }
+        $_SESSION['replay_share_grant']['replay_opened'] = true;
+    }
+
+    /** @return array<string,mixed> */
+    public function debriefForGrantedShare(string $plainToken): array
+    {
+        $share = $this->shareForToken($plainToken);
+        $grant = $this->sessionGrant();
+        if ((int)($grant['share_id'] ?? 0) !== (int)$share['id']
+            || empty($grant['privacy_accepted'])) {
+            throw new RuntimeException('This replay link is invalid or unavailable.');
+        }
+        require_once __DIR__ . '/FlightDebriefService.php';
+        return (new FlightDebriefService($this->pdo))->structuredDebrief((int)$share['debrief_id']);
     }
 
     /** @return array<string,mixed> */
     public function mediaGrant(string $recordingIdentifier): array
     {
         $grant = $this->sessionGrant();
-        if (empty($grant['privacy_accepted'])) {
-            throw new RuntimeException('Privacy acceptance is required.');
+        if (empty($grant['privacy_accepted']) || empty($grant['replay_opened'])) {
+            throw new RuntimeException('Debrief review and privacy acceptance are required.');
         }
         $statement = $this->pdo->prepare(
             'SELECT s.*, a.privacy_accepted_at, a.status AS access_status
@@ -259,6 +473,16 @@ NOTICE;
             throw new RuntimeException('Replay share was not created.');
         }
         return $row;
+    }
+
+    private function deliveryTableReady(): bool
+    {
+        try {
+            $this->pdo->query('SELECT id FROM ipca_replay_debrief_share_deliveries LIMIT 0');
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /** @param array<string,mixed> $share */
