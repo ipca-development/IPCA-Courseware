@@ -168,17 +168,33 @@ NOTICE;
     /** @return list<array<string,mixed>> */
     public function listForDebrief(int $debriefId): array
     {
-        if (!$this->isReady() || $debriefId <= 0) {
+        $map = $this->listForDebriefs(array($debriefId));
+        return $map[$debriefId] ?? array();
+    }
+
+    /**
+     * @param list<int> $debriefIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function listForDebriefs(array $debriefIds): array
+    {
+        $debriefIds = array_values(array_unique(array_filter(
+            array_map('intval', $debriefIds),
+            static fn(int $id): bool => $id > 0
+        )));
+        if (!$this->isReady() || $debriefIds === array()) {
             return array();
         }
-        $deliveryJoin = $this->deliveryTableReady()
+        $deliveryReady = $this->deliveryTableReady();
+        $deliveryJoin = $deliveryReady
             ? 'LEFT JOIN ipca_replay_debrief_share_deliveries delivery ON delivery.share_id = share_record.id'
             : '';
-        $deliveryFields = $this->deliveryTableReady()
+        $deliveryFields = $deliveryReady
             ? ', delivery.recipient_type, delivery.recipient_name, delivery.recipient_email,
                  delivery.delivery_status, delivery.sent_at, delivery.delivery_error'
             : ", 'custom' AS recipient_type, '' AS recipient_name, '' AS recipient_email,
                  '' AS delivery_status, NULL AS sent_at, NULL AS delivery_error";
+        $placeholders = implode(',', array_fill(0, count($debriefIds), '?'));
         $statement = $this->pdo->prepare(
             'SELECT share_record.id, share_record.share_uuid, share_record.debrief_id,
                     share_record.status, share_record.expires_at, share_record.revoked_at,
@@ -186,11 +202,18 @@ NOTICE;
                     . $deliveryFields . '
              FROM ipca_replay_debrief_shares share_record
              ' . $deliveryJoin . '
-             WHERE share_record.debrief_id = ?
+             WHERE share_record.debrief_id IN (' . $placeholders . ')
              ORDER BY share_record.id DESC'
         );
-        $statement->execute(array($debriefId));
-        return $statement->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $statement->execute($debriefIds);
+        $map = array();
+        foreach (($statement->fetchAll(PDO::FETCH_ASSOC) ?: array()) as $row) {
+            $debriefId = (int)($row['debrief_id'] ?? 0);
+            if ($debriefId > 0) {
+                $map[$debriefId][] = $row;
+            }
+        }
+        return $map;
     }
 
     /** @return array{name:string,email:string,type:string} */

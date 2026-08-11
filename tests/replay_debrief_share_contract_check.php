@@ -67,13 +67,17 @@ $checks = array(
         && str_contains($replayPage, 'if (!$isPublicReplay)')
         && str_contains($replayPage, 'if (!$isPublicReplay): ?><button class="replay-icon-button replay-settings-button"')
         && str_contains($replayPage, 'if (!$isPublicReplay): ?><a class="replay-icon-button"'),
-    'instructor UI supports recipient email expiry and individual revocation' =>
+    'Operational Leg Details supports recipient email expiry and individual revocation' =>
         str_contains($adminPage, 'Create Link &amp; Email Recipient')
         && str_contains($adminPage, 'name="expiry_hours"')
         && str_contains($adminPage, 'name="recipient_email"')
-        && str_contains($adminPage, 'name="share_id"')
+        && str_contains($adminPage, "appendHidden(revokeForm, 'share_id'")
         && str_contains($adminPage, 'revoke_replay_share')
-        && str_contains($adminPage, 'data-copy-input'),
+        && str_contains($adminPage, 'data-copy-input')
+        && str_contains($adminPage, 'id="legs-replay-share"')
+        && strpos($adminPage, 'id="legs-edit-modal"') < strpos($adminPage, 'id="legs-replay-share"')
+        && str_contains($adminPage, "'replay_shares' => \$replaySharesByDebrief[\$debriefId] ?? array()")
+        && str_contains($service, 'listForDebriefs'),
     'privacy flow shows legs and AI debrief before media access' =>
         str_contains($publicPage, "\$stage === 'summary'")
         && str_contains($publicPage, 'Flight Legs')

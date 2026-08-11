@@ -116,7 +116,7 @@ try {
         );
     }
     $userStatement = $pdo->query(
-        "SELECT id, COALESCE(NULLIF(TRIM(name), ''), email) AS display_name, role"
+        "SELECT id, COALESCE(NULLIF(TRIM(name), ''), email) AS display_name, email, role"
         . " FROM users WHERE role IN ('student', 'instructor', 'supervisor', 'chief_instructor')"
         . " AND status = 'active'"
         . ' ORDER BY display_name ASC, id ASC'
@@ -168,6 +168,7 @@ $reconstructionService = new ManualReconstructionBundleService($pdo);
 $debriefService = new FlightDebriefService($pdo);
 $replayShareService = new ReplayShareService($pdo);
 $createdReplayShare = null;
+$replayShareFocusDebriefId = 0;
 $reconstructionError = trim((string)($_GET['reconstruction_error'] ?? ''));
 $reconstructionNotice = '';
 if ((string)($_GET['debrief_generation'] ?? '') === 'started') {
@@ -325,8 +326,9 @@ try {
             if ($actorUserId <= 0) {
                 throw new RuntimeException('Instructor identity is required.');
             }
+            $replayShareFocusDebriefId = (int)($_POST['debrief_id'] ?? 0);
             $createdReplayShare = $replayShareService->create(
-                (int)($_POST['debrief_id'] ?? 0),
+                $replayShareFocusDebriefId,
                 $actorUserId,
                 (int)($_POST['expiry_hours'] ?? 12),
                 (string)($_POST['recipient_email'] ?? ''),
@@ -352,6 +354,7 @@ try {
             }
             $shareId = (int)($_POST['share_id'] ?? 0);
             $debriefId = (int)($_POST['debrief_id'] ?? 0);
+            $replayShareFocusDebriefId = $debriefId;
             if ($shareId > 0) {
                 $replayShareService->revokeShare($shareId, $actorUserId, $debriefId);
             } else {
@@ -536,6 +539,10 @@ try {
 } catch (Throwable $e) {
     $reconstructionError = $e->getMessage();
 }
+$createdReplayShareUrl = is_array($createdReplayShare)
+    ? cvr_replay_share_base_url() . '/replay-debrief.php?t='
+        . rawurlencode((string)($createdReplayShare['token'] ?? ''))
+    : '';
 
 $legsAircraftFilter = strtoupper(trim((string)($_GET['legs_aircraft'] ?? '')));
 $legsFrom = trim((string)($_GET['legs_from'] ?? ''));
@@ -557,6 +564,16 @@ $dispatch = $intake->dispatchRows(
 $legsTotal = (int)($dispatch['total'] ?? count($dispatch['rows']));
 $legsPageCount = max(1, (int)($dispatch['page_count'] ?? 1));
 $legsPage = max(1, min($legsPageCount, (int)($dispatch['page'] ?? $legsPage)));
+$replaySharesByDebrief = array();
+try {
+    $legDebriefIds = array_values(array_filter(array_map(
+        static fn(array $row): int => (int)($row['debrief_id'] ?? 0),
+        is_array($dispatch['rows'] ?? null) ? $dispatch['rows'] : array()
+    )));
+    $replaySharesByDebrief = $replayShareService->listForDebriefs($legDebriefIds);
+} catch (Throwable $e) {
+    error_log('[ReplayShare] Could not load Operational Leg share history: ' . $e->getMessage());
+}
 $instructionalRates = array();
 $aircraftRentalRateMap = array();
 $financialByDispatchId = array();
@@ -2436,6 +2453,7 @@ a.intake-refresh:hover{
                   'crew' => $crewMembers,
                   'bundle_id' => $bundleId,
                   'debrief_id' => $debriefId,
+                  'replay_shares' => $replaySharesByDebrief[$debriefId] ?? array(),
                   'recording_uid' => $recordingUid,
                   'has_garmin_csv' => $garminOn,
                   'is_hidden' => !empty($row['is_hidden']),
@@ -3169,31 +3187,6 @@ a.intake-refresh:hover{
         $copySections[] = "Overall Assessment\n" . trim((string)$selectedDebrief['mission_assessment_text']);
         $copySections[] = "Main Takeaways\n" . trim((string)$selectedDebrief['summary_next_steps_text']);
         $chronologicalCopyText = trim(implode("\n\n", array_filter($copySections)));
-        $replayShareReady = $replayShareService->isReady();
-        $replayEmailReady = $replayShareReady && $replayShareService->isEmailDeliveryReady();
-        $replayShares = $replayShareReady
-            ? $replayShareService->listForDebrief((int)$selectedDebrief['id'])
-            : array();
-        $replayShare = $replayShares[0] ?? array();
-        $suggestedReplayRecipient = $replayShareReady
-            ? $replayShareService->suggestedStudentRecipient((int)$selectedDebrief['id'])
-            : array('name' => '', 'email' => '', 'type' => 'student');
-        $newShareForDebrief = is_array($createdReplayShare)
-            && (int)($createdReplayShare['debrief_id'] ?? 0) === (int)$selectedDebrief['id']
-            ? $createdReplayShare
-            : null;
-        $replayShareUrl = $newShareForDebrief !== null
-            ? cvr_replay_share_base_url() . '/replay-debrief.php?t=' . rawurlencode((string)$newShareForDebrief['token'])
-            : '';
-        $replayShareActive = array_reduce(
-            $replayShares,
-            static fn(bool $active, array $candidate): bool => $active || (
-                (string)($candidate['status'] ?? '') === 'active'
-                && empty($candidate['revoked_at'])
-                && strtotime((string)($candidate['expires_at'] ?? '')) > time()
-            ),
-            false
-        );
       ?>
       <div class="debrief-toolbar no-print">
         <div>
@@ -3473,125 +3466,6 @@ a.intake-refresh:hover{
           </div>
         </footer>
       </article>
-
-      <section class="replay-share-card no-print" aria-labelledby="replay-share-title">
-        <div class="replay-share-head">
-          <div>
-            <h4 id="replay-share-title">Secure Replay Debrief Link</h4>
-            <div class="intake-muted">Email a recipient-specific private link for 12, 24, or 48 hours. The separate passcode is never included in the email.</div>
-          </div>
-          <?php if ($replayShareActive): ?><?= cvr_intake_badge('active') ?><?php endif; ?>
-        </div>
-
-        <?php if (!$replayShareReady): ?>
-          <div class="intake-notice" style="margin-top:12px">Install <span class="intake-mono">scripts/sql/2026_07_28_replay_debrief_shares.sql</span> before enabling replay sharing.</div>
-        <?php elseif (!$replayEmailReady): ?>
-          <div class="intake-notice" style="margin-top:12px">Install <span class="intake-mono">scripts/sql/2026_08_10_replay_share_email_delivery.sql</span> before enabling recipient email delivery.</div>
-        <?php else: ?>
-          <?php if ($newShareForDebrief !== null): ?>
-            <div class="intake-notice" style="margin-top:12px">
-              Copy the passcode now and provide it separately. The emailed message contains only the link.
-              <?php if (!empty($newShareForDebrief['email_delivery'])): ?>
-                Email status: <strong><?= cvr_intake_h(!empty($newShareForDebrief['email_delivery']['ok']) ? 'sent' : 'failed') ?></strong>.
-              <?php endif; ?>
-            </div>
-            <div class="replay-share-grid">
-              <label class="replay-share-field">
-                <span>Private replay link</span>
-                <input id="replay-share-url-<?= (int)$selectedDebrief['id'] ?>" class="replay-share-value" type="text" readonly value="<?= cvr_intake_h($replayShareUrl) ?>">
-              </label>
-              <label class="replay-share-field">
-                <span>Separate passcode</span>
-                <input id="replay-share-passcode-<?= (int)$selectedDebrief['id'] ?>" class="replay-share-value replay-share-passcode" type="text" readonly value="<?= cvr_intake_h($newShareForDebrief['passcode']) ?>">
-              </label>
-            </div>
-            <div class="replay-share-actions">
-              <button class="intake-refresh" type="button" data-copy-input="replay-share-url-<?= (int)$selectedDebrief['id'] ?>">Copy Link</button>
-              <button class="intake-refresh" type="button" data-copy-input="replay-share-passcode-<?= (int)$selectedDebrief['id'] ?>">Copy Passcode</button>
-            </div>
-          <?php endif; ?>
-
-          <?php if ((string)($selectedDebrief['status'] ?? '') === 'ai_draft'): ?>
-            <div class="intake-notice" style="margin-top:12px">This recipient will see an AI-generated draft that has not yet been instructor-approved.</div>
-          <?php endif; ?>
-
-          <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" style="margin-top:14px" onsubmit="return confirm('Create and optionally email this private replay link? The passcode must be delivered separately.');">
-            <input type="hidden" name="action" value="create_replay_share">
-            <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-            <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
-            <div class="replay-share-grid">
-              <label class="replay-share-field"><span>Recipient</span>
-                <select class="intake-select" name="recipient_type">
-                  <option value="student">Student / primary customer</option>
-                  <option value="custom">Other recipient</option>
-                </select>
-              </label>
-              <label class="replay-share-field"><span>Access duration</span>
-                <select class="intake-select" name="expiry_hours">
-                  <option value="12">12 hours</option>
-                  <option value="24">24 hours</option>
-                  <option value="48">48 hours</option>
-                </select>
-              </label>
-              <label class="replay-share-field"><span>Recipient name</span>
-                <input class="intake-select" type="text" name="recipient_name" maxlength="160" value="<?= cvr_intake_h($suggestedReplayRecipient['name'] ?? '') ?>">
-              </label>
-              <label class="replay-share-field"><span>Recipient email</span>
-                <input class="intake-select" type="email" name="recipient_email" maxlength="254" required value="<?= cvr_intake_h($suggestedReplayRecipient['email'] ?? '') ?>">
-              </label>
-            </div>
-            <label style="display:flex;align-items:center;gap:8px;margin-top:12px">
-              <input type="checkbox" name="send_email" value="1" checked>
-              Email the private link now; never include the passcode
-            </label>
-            <div class="replay-share-actions">
-              <button class="intake-button" type="submit">Create Link &amp; Email Recipient</button>
-            </div>
-          </form>
-
-          <?php if ($replayShares !== array()): ?>
-            <div style="display:grid;gap:8px;margin-top:16px">
-              <?php foreach ($replayShares as $listedShare): ?>
-                <?php
-                  $listedActive = (string)($listedShare['status'] ?? '') === 'active'
-                      && empty($listedShare['revoked_at'])
-                      && strtotime((string)($listedShare['expires_at'] ?? '')) > time();
-                ?>
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid #dce3ed;border-radius:10px">
-                  <div>
-                    <strong><?= cvr_intake_h(($listedShare['recipient_name'] ?? '') ?: ($listedShare['recipient_email'] ?? 'Private recipient')) ?></strong>
-                    <div class="intake-muted">
-                      <?= cvr_intake_h($listedShare['recipient_email'] ?? '') ?>
-                      · expires <?= cvr_intake_h(cvr_intake_timestamp($listedShare['expires_at'] ?? '')) ?>
-                      · <?= (int)($listedShare['view_count'] ?? 0) ?> media requests
-                      <?php if (($listedShare['delivery_status'] ?? '') !== ''): ?>· email <?= cvr_intake_h($listedShare['delivery_status']) ?><?php endif; ?>
-                    </div>
-                  </div>
-                  <?php if ($listedActive): ?>
-                    <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" onsubmit="return confirm('Revoke this recipient’s replay access immediately?');">
-                      <input type="hidden" name="action" value="revoke_replay_share">
-                      <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-                      <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
-                      <input type="hidden" name="share_id" value="<?= (int)$listedShare['id'] ?>">
-                      <button class="intake-refresh" type="submit" style="color:#991b1b;border-color:#fecaca">Revoke</button>
-                    </form>
-                  <?php else: ?>
-                    <?= cvr_intake_badge((string)($listedShare['status'] ?? 'expired')) ?>
-                  <?php endif; ?>
-                </div>
-              <?php endforeach; ?>
-            </div>
-            <?php if ($replayShareActive): ?>
-              <form method="post" action="/admin/master_logbook.php?tab=reconstruction&debrief_id=<?= (int)$selectedDebrief['id'] ?>" style="margin-top:10px" onsubmit="return confirm('Revoke every active replay link for this debrief immediately?');">
-                <input type="hidden" name="action" value="revoke_replay_share">
-                <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
-                <input type="hidden" name="debrief_id" value="<?= (int)$selectedDebrief['id'] ?>">
-                <button class="intake-refresh" type="submit" style="color:#991b1b;border-color:#fecaca">Revoke All Active Links</button>
-              </form>
-            <?php endif; ?>
-          <?php endif; ?>
-        <?php endif; ?>
-      </section>
 
       <div class="reconstruction-actions no-print">
         <?php if (!$isApprovedDebrief && (string)$selectedDebrief['status'] !== 'rejected'): ?>
@@ -3987,6 +3861,85 @@ a.intake-refresh:hover{
         <textarea id="legs-briefing-copy-box" readonly placeholder="Open a leg with a generated debrief to load the Generic Briefing."></textarea>
         <div class="leg-edit-briefing-status" id="legs-briefing-status"></div>
       </div>
+
+      <section class="replay-share-card" id="legs-replay-share" aria-labelledby="legs-replay-share-title">
+        <div class="replay-share-head">
+          <div>
+            <h4 id="legs-replay-share-title">Email Flight Debrief &amp; Replay</h4>
+            <div class="intake-muted">Send a recipient-specific private link for 12, 24, or 48 hours. The passcode must be delivered separately.</div>
+          </div>
+          <span class="leg-edit-badge" id="legs-replay-share-status">Select an Operational Leg</span>
+        </div>
+
+        <?php if (!$replayShareService->isReady() || !$replayShareService->isEmailDeliveryReady()): ?>
+          <div class="intake-notice" style="margin-top:12px">Replay email sharing is not available until both replay-share migrations are installed.</div>
+        <?php else: ?>
+          <div class="intake-notice" id="legs-replay-share-unavailable" style="margin-top:12px">A generated debrief and replay are required before this flight can be emailed.</div>
+
+          <?php if (is_array($createdReplayShare)): ?>
+            <div class="intake-notice" id="legs-replay-share-created" style="margin-top:12px">
+              Email status:
+              <strong><?= cvr_intake_h(
+                  !empty($createdReplayShare['email_delivery']['ok'])
+                      ? 'sent'
+                      : (isset($createdReplayShare['email_delivery']) ? 'failed — use Copy Link' : 'link created')
+              ) ?></strong>.
+              Copy the passcode now and provide it separately.
+              <div class="replay-share-grid">
+                <label class="replay-share-field"><span>Private replay link</span>
+                  <input id="legs-replay-share-url" class="replay-share-value" type="text" readonly value="<?= cvr_intake_h($createdReplayShareUrl) ?>">
+                </label>
+                <label class="replay-share-field"><span>Separate passcode</span>
+                  <input id="legs-replay-share-passcode" class="replay-share-value replay-share-passcode" type="text" readonly value="<?= cvr_intake_h($createdReplayShare['passcode'] ?? '') ?>">
+                </label>
+              </div>
+              <div class="replay-share-actions">
+                <button class="intake-refresh" type="button" data-copy-input="legs-replay-share-url">Copy Link</button>
+                <button class="intake-refresh" type="button" data-copy-input="legs-replay-share-passcode">Copy Passcode</button>
+              </div>
+            </div>
+          <?php endif; ?>
+
+          <form method="post" id="legs-replay-share-form" style="margin-top:14px" onsubmit="return confirm('Create and email this private replay link? The passcode must be delivered separately.');">
+            <input type="hidden" name="action" value="create_replay_share">
+            <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+            <input type="hidden" name="debrief_id" id="legs-replay-share-debrief-id" value="">
+            <div class="replay-share-grid">
+              <label class="replay-share-field"><span>Recipient</span>
+                <select class="intake-select" name="recipient_type" id="legs-replay-share-recipient-type">
+                  <option value="student">Student / primary customer</option>
+                  <option value="custom">Other recipient</option>
+                </select>
+              </label>
+              <label class="replay-share-field"><span>Access duration</span>
+                <select class="intake-select" name="expiry_hours">
+                  <option value="12">12 hours</option>
+                  <option value="24">24 hours</option>
+                  <option value="48">48 hours</option>
+                </select>
+              </label>
+              <label class="replay-share-field"><span>Recipient name</span>
+                <input class="intake-select" type="text" name="recipient_name" id="legs-replay-share-recipient-name" maxlength="160">
+              </label>
+              <label class="replay-share-field"><span>Recipient email</span>
+                <input class="intake-select" type="email" name="recipient_email" id="legs-replay-share-recipient-email" maxlength="254" required>
+              </label>
+            </div>
+            <input type="hidden" name="send_email" value="1">
+            <div class="replay-share-actions">
+              <button class="intake-button" id="legs-replay-share-submit" type="submit">Create Link &amp; Email Recipient</button>
+            </div>
+          </form>
+
+          <div id="legs-replay-share-history" style="display:grid;gap:8px;margin-top:16px"></div>
+          <form method="post" id="legs-replay-share-revoke-all" style="margin-top:10px" onsubmit="return confirm('Revoke every active replay link for this debrief immediately?');" hidden>
+            <input type="hidden" name="action" value="revoke_replay_share">
+            <input type="hidden" name="csrf_token" value="<?= cvr_intake_h($reconstructionCsrf) ?>">
+            <input type="hidden" name="debrief_id" id="legs-replay-share-revoke-debrief-id" value="">
+            <button class="intake-refresh" type="submit" style="color:#991b1b;border-color:#fecaca">Revoke All Active Links</button>
+          </form>
+        <?php endif; ?>
+      </section>
     </div>
   </div>
 </div>
@@ -4039,6 +3992,7 @@ a.intake-refresh:hover{
     return array(
         'id' => (int)$u['id'],
         'name' => (string)($u['display_name'] ?? ''),
+        'email' => (string)($u['email'] ?? ''),
         'role' => $role,
         'kind' => in_array($role, array('instructor', 'supervisor', 'chief_instructor'), true) ? 'staff' : 'student',
     );
@@ -5170,10 +5124,127 @@ $legTrackJsVer = is_file($legTrackJsPath) ? (string)filemtime($legTrackJsPath) :
 
     let baselineSnapshot = '';
     let currentLeg = null;
+    const createdReplayShare = <?= json_encode(is_array($createdReplayShare) ? array(
+        'debrief_id' => (int)($createdReplayShare['debrief_id'] ?? 0),
+        'recipient_name' => (string)($createdReplayShare['recipient_name'] ?? ''),
+        'recipient_email' => (string)($createdReplayShare['recipient_email'] ?? ''),
+    ) : null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+    const replayShareFocusDebriefId = <?= (int)$replayShareFocusDebriefId ?>;
+    const replayShareCsrf = <?= json_encode($reconstructionCsrf) ?>;
     const trackPanel = document.getElementById('legs-track-panel');
     const trackChart = (window.IPCALegTrackChart && trackPanel)
       ? window.IPCALegTrackChart.create(trackPanel)
       : null;
+
+    const suggestedReplayRecipient = (leg) => {
+      const crew = Array.isArray(leg?.crew) ? leg.crew : [];
+      const member = crew.find((candidate) => candidate && candidate.is_primary_customer)
+        || crew.find((candidate) => ['student', 'customer'].includes(String(candidate?.role || '').toLowerCase()))
+        || null;
+      const personId = Number(member?.person_id || 0);
+      const catalogUser = crewCatalog.find((candidate) => Number(candidate.id) === personId) || null;
+      return {
+        name: String(catalogUser?.name || member?.person_name || member?.personName || ''),
+        email: String(catalogUser?.email || ''),
+      };
+    };
+
+    const appendHidden = (form, name, value) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = String(value ?? '');
+      form.appendChild(input);
+    };
+
+    const renderReplaySharing = (leg) => {
+      const shareForm = document.getElementById('legs-replay-share-form');
+      if (!shareForm) return;
+      const debriefId = Number(leg?.debrief_id || 0);
+      const available = debriefId > 0 && String(leg?.recording_uid || '').trim() !== '';
+      const unavailable = document.getElementById('legs-replay-share-unavailable');
+      const status = document.getElementById('legs-replay-share-status');
+      const history = document.getElementById('legs-replay-share-history');
+      const revokeAll = document.getElementById('legs-replay-share-revoke-all');
+      const created = document.getElementById('legs-replay-share-created');
+      const nameInput = document.getElementById('legs-replay-share-recipient-name');
+      const emailInput = document.getElementById('legs-replay-share-recipient-email');
+      document.getElementById('legs-replay-share-debrief-id').value = available ? String(debriefId) : '';
+      document.getElementById('legs-replay-share-revoke-debrief-id').value = available ? String(debriefId) : '';
+      shareForm.hidden = !available;
+      unavailable.hidden = available;
+      if (created) {
+        created.hidden = Number(createdReplayShare?.debrief_id || 0) !== debriefId;
+      }
+      if (!available) {
+        status.textContent = debriefId > 0 ? 'Replay unavailable' : 'Debrief not ready';
+        history.replaceChildren();
+        revokeAll.hidden = true;
+        return;
+      }
+
+      const suggested = suggestedReplayRecipient(leg);
+      nameInput.value = Number(createdReplayShare?.debrief_id || 0) === debriefId
+        ? String(createdReplayShare?.recipient_name || suggested.name)
+        : suggested.name;
+      emailInput.value = Number(createdReplayShare?.debrief_id || 0) === debriefId
+        ? String(createdReplayShare?.recipient_email || suggested.email)
+        : suggested.email;
+      const shares = Array.isArray(leg?.replay_shares) ? leg.replay_shares : [];
+      const now = Date.now();
+      let activeCount = 0;
+      history.replaceChildren();
+      shares.forEach((share) => {
+        const expiresText = String(share.expires_at || '');
+        const expiresAt = Date.parse(expiresText.replace(' ', 'T') + (/[zZ]|[+-]\d\d:\d\d$/.test(expiresText) ? '' : 'Z'));
+        const active = String(share.status || '') === 'active'
+          && !share.revoked_at
+          && Number.isFinite(expiresAt)
+          && expiresAt > now;
+        if (active) activeCount += 1;
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;border:1px solid #dce3ed;border-radius:10px';
+        const detail = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = String(share.recipient_name || share.recipient_email || 'Private recipient');
+        const meta = document.createElement('div');
+        meta.className = 'intake-muted';
+        meta.textContent = [
+          String(share.recipient_email || ''),
+          'expires ' + expiresText + ' UTC',
+          String(Number(share.view_count || 0)) + ' media requests',
+          share.delivery_status ? ('email ' + String(share.delivery_status)) : '',
+        ].filter(Boolean).join(' · ');
+        detail.append(title, meta);
+        item.appendChild(detail);
+        if (active) {
+          const revokeForm = document.createElement('form');
+          revokeForm.method = 'post';
+          revokeForm.addEventListener('submit', (event) => {
+            if (!window.confirm('Revoke this recipient’s replay access immediately?')) event.preventDefault();
+          });
+          appendHidden(revokeForm, 'action', 'revoke_replay_share');
+          appendHidden(revokeForm, 'csrf_token', replayShareCsrf);
+          appendHidden(revokeForm, 'debrief_id', debriefId);
+          appendHidden(revokeForm, 'share_id', Number(share.id || 0));
+          const button = document.createElement('button');
+          button.className = 'intake-refresh';
+          button.type = 'submit';
+          button.style.cssText = 'color:#991b1b;border-color:#fecaca';
+          button.textContent = 'Revoke';
+          revokeForm.appendChild(button);
+          item.appendChild(revokeForm);
+        } else {
+          const badge = document.createElement('span');
+          badge.className = 'leg-edit-badge';
+          badge.textContent = share.revoked_at || String(share.status || '') === 'revoked' ? 'Revoked' : 'Expired';
+          item.appendChild(badge);
+        }
+        history.appendChild(item);
+      });
+      status.textContent = activeCount > 0 ? (activeCount + ' active link' + (activeCount === 1 ? '' : 's')) : 'Ready to share';
+      revokeAll.hidden = activeCount === 0;
+    };
 
     const openModal = (modal) => {
       modal.hidden = false;
@@ -5836,6 +5907,7 @@ $legTrackJsVer = is_file($legTrackJsPath) ? (string)filemtime($legTrackJsPath) :
       updateDerived();
       baselineSnapshot = serializeSnapshot();
       loadGenericBriefing(leg);
+      renderReplaySharing(leg);
       if (trackChart) {
         trackChart.load(leg);
       }
@@ -6347,6 +6419,39 @@ $legTrackJsVer = is_file($legTrackJsPath) ? (string)filemtime($legTrackJsPath) :
         setBriefingStatus('Copied to clipboard.', 'ok');
       }
     });
+
+    document.getElementById('legs-replay-share-recipient-type')?.addEventListener('change', (event) => {
+      const nameInput = document.getElementById('legs-replay-share-recipient-name');
+      const emailInput = document.getElementById('legs-replay-share-recipient-email');
+      if (event.target.value === 'custom') {
+        nameInput.value = '';
+        emailInput.value = '';
+        nameInput.focus();
+      } else if (currentLeg) {
+        const suggested = suggestedReplayRecipient(currentLeg);
+        nameInput.value = suggested.name;
+        emailInput.value = suggested.email;
+      }
+    });
+
+    if (replayShareFocusDebriefId > 0) {
+      const matchingRow = Array.from(table.querySelectorAll('tr[data-leg]')).find((row) => {
+        try {
+          return Number(JSON.parse(row.getAttribute('data-leg') || '{}').debrief_id || 0)
+            === replayShareFocusDebriefId;
+        } catch (error) {
+          return false;
+        }
+      });
+      if (matchingRow) {
+        try {
+          fillEditForm(JSON.parse(matchingRow.getAttribute('data-leg') || '{}'));
+          openModal(editModal);
+        } catch (error) {
+          // The share was created successfully even if the modal cannot be restored.
+        }
+      }
+    }
   })();
 })();
 </script>
