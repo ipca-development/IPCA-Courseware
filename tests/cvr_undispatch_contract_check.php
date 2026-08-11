@@ -58,6 +58,13 @@ $checks = array(
         && str_contains($apiClient, 'dispatch_release.php')
         && str_contains($views, 'UNDISPATCH')
         && str_contains($views, 'undispatchActiveFlight'),
+    'app can reconcile an administrative release without deleting local evidence' =>
+        str_contains($store, 'response.alreadyReleased != true')
+        && str_contains($store, 'archiveAdministrativelyReleasedWorkflow')
+        && str_contains($store, 'cancelledSession?.state = .cancelled')
+        && str_contains($store, 'Administrative server release confirmed; retained as cancelled evidence.')
+        && str_contains($views, 'administrative server release; evidence is retained')
+        && str_contains($views, '!audio.isRecording, !audio.recordingSignalActive'),
     'Undispatch preserves prepared values but remints released identity' =>
         str_contains($store, 'draft.id = replacementDispatchID')
         && str_contains($store, 'Undispatch revokes the acknowledged execution, not the prepared')

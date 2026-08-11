@@ -3895,13 +3895,15 @@ struct DispatchWorkflowView: View {
             } else if workflow.isDispatchLocked {
                 CVRHoldActionButton(
                     title: isUndispatching ? "UNDISPATCHING…" : "UNDISPATCH",
-                    subtitle: workflow.canUndispatchActiveFlight
-                        ? "Hold for 2 seconds to confirm"
-                        : "Unavailable after Off Block, recording, or Check-In",
+                    subtitle: audio.isRecording || audio.recordingSignalActive
+                        ? "Unavailable while cockpit audio is recording"
+                        : (workflow.canUndispatchActiveFlight
+                            ? "Hold for 2 seconds to confirm"
+                            : "Hold to clear an administrative server release; evidence is retained"),
                     color: CVROperationalPalette.warning,
                     minimumDuration: 2,
                     asyncAction: {
-                        guard workflow.canUndispatchActiveFlight else { return false }
+                        guard !audio.isRecording, !audio.recordingSignalActive else { return false }
                         isUndispatching = true
                         defer { isUndispatching = false }
                         let released = await workflow.undispatchActiveFlight(settings: settings)
@@ -3915,8 +3917,8 @@ struct DispatchWorkflowView: View {
                         return released
                     }
                 )
-                .disabled(isUndispatching || !workflow.canUndispatchActiveFlight)
-                .opacity((isUndispatching || !workflow.canUndispatchActiveFlight) ? 0.55 : 1)
+                .disabled(isUndispatching || audio.isRecording || audio.recordingSignalActive)
+                .opacity((isUndispatching || audio.isRecording || audio.recordingSignalActive) ? 0.55 : 1)
             } else {
                 CVRHoldActionButton(
                     title: "DISPATCH NOW",

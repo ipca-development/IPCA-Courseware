@@ -2965,16 +2965,21 @@ final class CVRWorkflowStore: ObservableObject {
     /// Releases the schedule claim on the server when this Dispatch was synced or linked to a reservation.
     @discardableResult
     func undispatchActiveFlight(settings: SettingsStore) async -> Bool {
-        guard canUndispatchActiveFlight,
+        guard isDispatchLocked,
               let dispatch = state.activeDispatch,
               let flightRecord = state.activeFlightRecord else {
-            lastError = "Undispatch is only available before Off Block, recording, or Check-In."
+            lastError = "There is no active Dispatch to release."
             return false
         }
 
+        let containsOperationalEvidence = !canUndispatchActiveFlight
         let needsServerRelease = dispatch.serverDispatchID != nil
             || dispatchUploadVerified()
             || !(dispatch.schedulerRecordID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if containsOperationalEvidence && !needsServerRelease {
+            lastError = "A local evidence-bearing flight cannot be discarded without an administrative server release."
+            return false
+        }
 
         if needsServerRelease {
             guard let url = settings.normalizedServerURL,
@@ -2993,10 +2998,18 @@ final class CVRWorkflowStore: ObservableObject {
                     lastError = response.error ?? "Server could not Undispatch this flight."
                     return false
                 }
+                if containsOperationalEvidence && response.alreadyReleased != true {
+                    lastError = "The server must administratively release this evidence-bearing Dispatch before it can be cleared locally."
+                    return false
+                }
             } catch {
                 lastError = error.localizedDescription
                 return false
             }
+        }
+
+        if containsOperationalEvidence && !archiveAdministrativelyReleasedWorkflow() {
+            return false
         }
 
         let flightID = flightRecord.id
@@ -3040,6 +3053,59 @@ final class CVRWorkflowStore: ObservableObject {
         }
         lastError = ""
         return true
+    }
+
+    /// Preserve an evidence-bearing workflow after an administrator has already released
+    /// its server Dispatch. This is a terminal local archive, never a deletion or retry source.
+    private func archiveAdministrativelyReleasedWorkflow() -> Bool {
+        guard let dispatch = state.activeDispatch,
+              let flightRecord = state.activeFlightRecord else {
+            lastError = "Cannot archive the administratively released workflow."
+            return false
+        }
+        if archives.contains(where: { $0.flightRecordID == flightRecord.id }) {
+            return true
+        }
+
+        var components = state.uploadComponents.filter { $0.flightRecordID == flightRecord.id }
+        for index in components.indices
+            where components[index].state != .serverVerified
+                && components[index].state != .uploaded {
+            components[index].state = .superseded
+            components[index].lastError = "Administrative server release confirmed; retained as cancelled evidence."
+        }
+        var cancelledSession = state.activeOperationalSession
+        if cancelledSession?.modelVersion == CVROperationalSessionRecord.modelVersion {
+            cancelledSession?.state = .cancelled
+        }
+        let archive = CVRWorkflowArchiveRecord(
+            id: UUID().uuidString,
+            schemaVersion: 2,
+            flightRecordID: flightRecord.id,
+            dispatch: dispatch,
+            flightRecord: flightRecord,
+            consents: state.consents.filter { $0.dispatchID == dispatch.id },
+            recorderVerifications: state.recorderVerifications.filter { $0.flightRecordID == flightRecord.id },
+            flightEvents: state.flightEvents.filter { $0.flightRecordID == flightRecord.id },
+            flightLegs: state.flightLegs.filter { $0.flightRecordID == flightRecord.id },
+            uploadComponents: components,
+            discrepancies: state.discrepancies.filter { $0.flightRecordID == flightRecord.id },
+            recordingSessionIDs: [flightRecord.recordingSessionID].compactMap { $0 },
+            archivedAt: Date(),
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            status: .serverVerified,
+            operationalSession: cancelledSession
+        )
+        do {
+            var updated = archives
+            updated.append(archive)
+            try saveArchives(updated)
+            archives = updated
+            return true
+        } catch {
+            lastError = "Released flight evidence could not be archived locally: \(error.localizedDescription)"
+            return false
+        }
     }
 
     private func clearActiveLegStatePreservingSession(selectScheduled: Bool) {
