@@ -51,11 +51,12 @@ try {
         case 'session':
             $user = cw_current_user($pdo);
             if ($user === null) {
-                mr_auth_json(200, array(
-                    'ok' => true,
-                    'logged_in' => false,
-                    'user' => null,
-                ));
+            mr_auth_json(200, array(
+                'ok' => true,
+                'logged_in' => false,
+                'user' => null,
+                'can_preview_draft_manuals' => $access->canPreviewDraftManuals($user),
+            ));
             }
             $access = new ControlledPublishingReaderAccessService();
             mr_auth_json(200, array(
@@ -63,6 +64,7 @@ try {
                 'logged_in' => true,
                 'user' => mr_auth_user_payload($user),
                 'can_read_manuals' => $access->canReadManuals($user),
+                'can_preview_draft_manuals' => $access->canPreviewDraftManuals($user),
             ));
 
         case 'login':
@@ -85,6 +87,7 @@ try {
                 'ok' => true,
                 'logged_in' => true,
                 'user' => mr_auth_user_payload($user),
+                'can_preview_draft_manuals' => $access->canPreviewDraftManuals($user),
             ));
 
         case 'logout':

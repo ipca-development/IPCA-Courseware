@@ -10,6 +10,8 @@
   var API = '/student/api/manual_reader_api.php';
   var bookKey = root.dataset.book || 'OM';
   var initialAnchor = root.dataset.anchor || '';
+  var versionId = parseInt(root.dataset.versionId || '0', 10);
+  var isPreview = root.dataset.isPreview === '1';
 
   var tocNav = document.getElementById('mrTocNav');
   var tocDrawer = document.getElementById('mrTocDrawer');
@@ -98,6 +100,12 @@
     var qs = new URLSearchParams(params || {});
     qs.set('action', action);
     qs.set('book', bookKey);
+    if (versionId > 0) {
+      qs.set('version_id', String(versionId));
+    }
+    if (isPreview) {
+      qs.set('preview', '1');
+    }
     return API + '?' + qs.toString();
   }
 
@@ -331,11 +339,13 @@
   }
 
   function scheduleProgressSave() {
+    if (isPreview) return;
     if (state.progressTimer) clearTimeout(state.progressTimer);
     state.progressTimer = setTimeout(saveProgress, 800);
   }
 
   function saveProgress() {
+    if (isPreview) return;
     var page = state.pages[state.pageIndex];
     if (!page) return;
     fetchJson(apiUrl('progress_save'), {

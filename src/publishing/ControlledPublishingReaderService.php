@@ -46,6 +46,9 @@ final class ControlledPublishingReaderService
 
     private static ?bool $progressTableReady = null;
 
+    /** @var array<int, list<array<string,mixed>>> */
+    private static array $ephemeralPageMapCache = array();
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -54,6 +57,14 @@ final class ControlledPublishingReaderService
      * @return list<array<string,mixed>>
      */
     public function listActiveReleasedLibrary(?int $userId = null): array
+    {
+        return $this->listActiveLibrary($userId, false);
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function listActiveLibrary(?int $userId, bool $includeDraftPreview): array
     {
         $stmt = $this->pdo->query("
             SELECT id, book_key, title, manual_code, status
@@ -66,37 +77,65 @@ final class ControlledPublishingReaderService
 
         foreach ($books as $book) {
             $bookKey = (string)($book['book_key'] ?? '');
-            $version = $this->resolveLatestReleasedVersion($bookKey);
-            if ($version === null) {
+            $released = $this->resolveLatestReleasedVersion($bookKey);
+            if ($released !== null) {
+                $library[] = $this->buildLibraryEntry($book, $released, $userId, false);
+            }
+
+            if (!$includeDraftPreview) {
                 continue;
             }
 
-            $cover = $this->cover()->resolveCoverForVersion($version);
-            $progress = ($userId !== null && $userId > 0)
-                ? $this->getReadingProgress($userId, $bookKey)
-                : null;
+            $draft = $this->resolveLatestDraftVersion($bookKey);
+            if ($draft === null) {
+                continue;
+            }
+            if ($released !== null && (int)$draft['id'] === (int)$released['id']) {
+                continue;
+            }
 
-            $library[] = array(
-                'book_id' => (int)($book['id'] ?? 0),
-                'book_key' => $bookKey,
-                'book_title' => (string)($book['title'] ?? ''),
-                'manual_code' => (string)($book['manual_code'] ?? ''),
-                'version_id' => (int)($version['id'] ?? 0),
-                'version_label' => (string)($version['version_label'] ?? ''),
-                'effective_date' => $version['effective_date'] ?? null,
-                'released_at' => $version['released_at'] ?? null,
-                'cover_url' => $cover['cover_url'],
-                'cover_image_url' => $cover['cover_image_url'],
-                'logo_url' => $cover['logo_url'],
-                'cover_fallback' => $cover['fallback'],
-                'has_progress' => is_array($progress),
-                'has_page_map' => $this->hasApprovedFrozenPageMap($bookKey),
-                'continue_section_id' => is_array($progress) ? (int)($progress['section_id'] ?? 0) : null,
-                'continue_stable_anchor' => is_array($progress) ? (string)($progress['stable_anchor'] ?? '') : '',
-            );
+            $library[] = $this->buildLibraryEntry($book, $draft, $userId, true);
         }
 
         return $library;
+    }
+
+    /**
+     * @param array<string,mixed> $book
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    private function buildLibraryEntry(array $book, array $version, ?int $userId, bool $isPreview): array
+    {
+        $bookKey = (string)($book['book_key'] ?? '');
+        $cover = $this->cover()->resolveCoverForVersion($version);
+        $progress = (!$isPreview && $userId !== null && $userId > 0)
+            ? $this->getReadingProgress($userId, $bookKey)
+            : null;
+        $lifecycle = (string)($version['lifecycle_status'] ?? '');
+
+        return array(
+            'book_id' => (int)($book['id'] ?? 0),
+            'book_key' => $bookKey,
+            'book_title' => (string)($book['title'] ?? ''),
+            'manual_code' => (string)($book['manual_code'] ?? ''),
+            'version_id' => (int)($version['id'] ?? 0),
+            'version_label' => (string)($version['version_label'] ?? ''),
+            'effective_date' => $version['effective_date'] ?? null,
+            'released_at' => $version['released_at'] ?? null,
+            'lifecycle_status' => $lifecycle,
+            'is_preview' => $isPreview,
+            'cover_url' => $cover['cover_url'],
+            'cover_image_url' => $cover['cover_image_url'],
+            'logo_url' => $cover['logo_url'],
+            'cover_fallback' => $cover['fallback'],
+            'has_progress' => is_array($progress),
+            'has_page_map' => $isPreview
+                ? true
+                : $this->hasApprovedFrozenPageMapForVersion($version),
+            'continue_section_id' => is_array($progress) ? (int)($progress['section_id'] ?? 0) : null,
+            'continue_stable_anchor' => is_array($progress) ? (string)($progress['stable_anchor'] ?? '') : '',
+        );
     }
 
     /**
@@ -130,11 +169,123 @@ final class ControlledPublishingReaderService
     }
 
     /**
+     * @return array<string,mixed>|null
+     */
+    public function resolveLatestDraftVersion(string $bookKey): ?array
+    {
+        $bookKey = strtoupper(trim($bookKey));
+        if ($bookKey === '') {
+            return null;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT
+              bv.*,
+              b.book_key,
+              b.title AS book_title,
+              b.manual_code
+            FROM ipca_publishing_book_versions bv
+            INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
+            WHERE b.book_key = :book_key
+              AND b.status = 'active'
+              AND bv.lifecycle_status IN ('draft', 'in_review', 'approved')
+            ORDER BY bv.id DESC
+            LIMIT 1
+        ");
+        $stmt->execute(array(':book_key' => $bookKey));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function resolveVersionById(int $bookVersionId): ?array
+    {
+        if ($bookVersionId <= 0) {
+            return null;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT
+              bv.*,
+              b.book_key,
+              b.title AS book_title,
+              b.manual_code,
+              b.status AS book_status
+            FROM ipca_publishing_book_versions bv
+            INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
+            WHERE bv.id = :version_id
+            LIMIT 1
+        ");
+        $stmt->execute(array(':version_id' => $bookVersionId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        if ((string)($row['book_status'] ?? '') !== 'active') {
+            return null;
+        }
+
+        return $row;
+    }
+
+    /**
+     * Resolve the reader version: explicit id, else latest released, else latest draft (preview roles).
+     *
+     * @return array<string,mixed>
+     */
+    public function resolveReaderVersion(string $bookKey, ?int $versionId, bool $allowDraftPreview): array
+    {
+        $bookKey = strtoupper(trim($bookKey));
+
+        if ($versionId !== null && $versionId > 0) {
+            $version = $this->resolveVersionById($versionId);
+            if ($version === null) {
+                throw new RuntimeException('Manual version not found.');
+            }
+            if (strtoupper(trim((string)($version['book_key'] ?? ''))) !== $bookKey) {
+                throw new RuntimeException('Version does not match book.');
+            }
+
+            $lifecycle = (string)($version['lifecycle_status'] ?? '');
+            if ($lifecycle === 'released') {
+                return $version;
+            }
+            if ($allowDraftPreview && $this->isPreviewableLifecycleStatus($lifecycle)) {
+                return $version;
+            }
+
+            throw new RuntimeException('You cannot view this manual version.');
+        }
+
+        $released = $this->resolveLatestReleasedVersion($bookKey);
+        if ($released !== null) {
+            return $released;
+        }
+
+        if ($allowDraftPreview) {
+            $draft = $this->resolveLatestDraftVersion($bookKey);
+            if ($draft !== null) {
+                return $draft;
+            }
+        }
+
+        throw new RuntimeException('No manual available.');
+    }
+
+    private function isPreviewableLifecycleStatus(string $lifecycle): bool
+    {
+        return in_array($lifecycle, array('draft', 'in_review', 'approved'), true);
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
-    public function buildReaderNavTree(string $bookKey): array
+    public function buildReaderNavTree(string $bookKey, ?array $version = null): array
     {
-        $version = $this->requireReleasedVersion($bookKey);
+        $version = $version ?? $this->requireReleasedVersion($bookKey);
         $versionId = (int)$version['id'];
         $tree = $this->editorNav()->buildNavTree($versionId, (string)($version['book_key'] ?? $bookKey));
 
@@ -147,9 +298,10 @@ final class ControlledPublishingReaderService
     public function loadSection(
         string $bookKey,
         ?int $sectionId = null,
-        ?string $stableAnchor = null
+        ?string $stableAnchor = null,
+        ?array $version = null
     ): ?array {
-        $version = $this->requireReleasedVersion($bookKey);
+        $version = $version ?? $this->requireReleasedVersion($bookKey);
         $versionId = (int)$version['id'];
         $section = null;
 
@@ -198,9 +350,9 @@ final class ControlledPublishingReaderService
         );
     }
 
-    public function defaultSectionId(string $bookKey): int
+    public function defaultSectionId(string $bookKey, ?array $version = null): int
     {
-        $version = $this->requireReleasedVersion($bookKey);
+        $version = $version ?? $this->requireReleasedVersion($bookKey);
         $versionId = (int)$version['id'];
         $flat = $this->sections()->listFlatSections($versionId);
 
@@ -210,14 +362,14 @@ final class ControlledPublishingReaderService
     /**
      * @return list<array<string,mixed>>
      */
-    public function searchSectionTitles(string $bookKey, string $query, int $limit = 40): array
+    public function searchSectionTitles(string $bookKey, string $query, int $limit = 40, ?array $version = null): array
     {
         $query = trim($query);
         if ($query === '') {
             return array();
         }
 
-        $version = $this->requireReleasedVersion($bookKey);
+        $version = $version ?? $this->requireReleasedVersion($bookKey);
         $versionId = (int)$version['id'];
         $needle = mb_strtolower($query);
         $results = array();
@@ -885,9 +1037,229 @@ final class ControlledPublishingReaderService
             return false;
         }
 
+        return $this->hasApprovedFrozenPageMapForVersion($version);
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     */
+    public function hasApprovedFrozenPageMapForVersion(array $version): bool
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+
         return $this->pageMapStore()->isApproved(
             (int)$version['id'],
             ControlledPublishingReaderLayoutProfile::profileKey()
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    public function loadReaderPageMap(array $version, bool $allowEphemeral): array
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? '')));
+        $versionId = (int)$version['id'];
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        $lifecycle = (string)($version['lifecycle_status'] ?? '');
+        $isPreview = $lifecycle !== 'released';
+
+        if (!$isPreview && $this->pageMapStore()->isApproved($versionId, $profile)) {
+            $summary = $this->pageMapStore()->loadPageMapSummary($versionId, $profile);
+
+            return array_merge($summary, array(
+                'ok' => true,
+                'book_key' => $bookKey,
+                'version_id' => $versionId,
+                'version_label' => (string)($version['version_label'] ?? ''),
+                'book_title' => (string)($version['book_title'] ?? ''),
+                'lifecycle_status' => $lifecycle,
+                'is_preview' => false,
+            ));
+        }
+
+        if (!$allowEphemeral) {
+            throw new RuntimeException('No approved page map for this manual. Contact compliance.');
+        }
+
+        $summary = $this->buildEphemeralPageMapSummary($version);
+
+        return array_merge($summary, array(
+            'ok' => true,
+            'book_key' => $bookKey,
+            'version_id' => $versionId,
+            'version_label' => (string)($version['version_label'] ?? ''),
+            'book_title' => (string)($version['book_title'] ?? ''),
+            'lifecycle_status' => $lifecycle,
+            'is_preview' => $isPreview,
+        ));
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    public function loadReaderPage(array $version, int $pageNumber, bool $allowEphemeral): array
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? '')));
+        $versionId = (int)$version['id'];
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        $lifecycle = (string)($version['lifecycle_status'] ?? '');
+        $isPreview = $lifecycle !== 'released';
+
+        if ($pageNumber <= 0) {
+            throw new RuntimeException('page_number required.');
+        }
+
+        if (!$isPreview && $this->pageMapStore()->isApproved($versionId, $profile)) {
+            $page = $this->pageMapStore()->loadPage($versionId, $profile, $pageNumber);
+            if ($page === null) {
+                throw new RuntimeException('Page not found.');
+            }
+
+            return array_merge($page, array(
+                'ok' => true,
+                'book_key' => $bookKey,
+                'version_id' => $versionId,
+                'is_preview' => false,
+            ));
+        }
+
+        if (!$allowEphemeral) {
+            throw new RuntimeException('No approved page map for this manual.');
+        }
+
+        $pages = $this->getEphemeralPageMapPages($version);
+        foreach ($pages as $page) {
+            if ((int)($page['page_number'] ?? 0) === $pageNumber) {
+                return array_merge($page, array(
+                    'ok' => true,
+                    'book_key' => $bookKey,
+                    'version_id' => $versionId,
+                    'page_count' => count($pages),
+                    'is_preview' => $isPreview,
+                ));
+            }
+        }
+
+        throw new RuntimeException('Page not found.');
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    public function loadReaderTocWithPages(array $version, bool $allowEphemeral): array
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? '')));
+        $versionId = (int)$version['id'];
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        $lifecycle = (string)($version['lifecycle_status'] ?? '');
+        $isPreview = $lifecycle !== 'released';
+
+        if (!$isPreview && $this->pageMapStore()->isApproved($versionId, $profile)) {
+            $sectionPages = $this->pageMapStore()->sectionPageIndex($versionId, $profile);
+            $nav = $this->buildReaderNavTree($bookKey, $version);
+            $this->annotateNavWithPageNumbers($nav, $sectionPages);
+
+            return array(
+                'ok' => true,
+                'book_key' => $bookKey,
+                'version_id' => $versionId,
+                'lifecycle_status' => $lifecycle,
+                'is_preview' => false,
+                'nav' => $nav,
+                'section_page_index' => $sectionPages,
+                'page_count' => $this->pageMapStore()->pageCount($versionId, $profile),
+            );
+        }
+
+        if (!$allowEphemeral) {
+            throw new RuntimeException('No approved page map for this manual.');
+        }
+
+        $summary = $this->buildEphemeralPageMapSummary($version);
+        $sectionPages = array();
+        foreach ($summary['pages'] as $page) {
+            $sectionId = $page['section_id'] ?? null;
+            if ($sectionId === null) {
+                continue;
+            }
+            $sid = (int)$sectionId;
+            if (!isset($sectionPages[$sid])) {
+                $sectionPages[$sid] = (int)$page['page_number'];
+            }
+        }
+        $nav = $this->buildReaderNavTree($bookKey, $version);
+        $this->annotateNavWithPageNumbers($nav, $sectionPages);
+
+        return array(
+            'ok' => true,
+            'book_key' => $bookKey,
+            'version_id' => $versionId,
+            'lifecycle_status' => $lifecycle,
+            'is_preview' => $isPreview,
+            'nav' => $nav,
+            'section_page_index' => $sectionPages,
+            'page_count' => (int)($summary['page_count'] ?? 0),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @return list<array<string,mixed>>
+     */
+    private function getEphemeralPageMapPages(array $version): array
+    {
+        $versionId = (int)$version['id'];
+        if (isset(self::$ephemeralPageMapCache[$versionId])) {
+            return self::$ephemeralPageMapCache[$versionId];
+        }
+
+        require_once __DIR__ . '/ControlledPublishingPaginationService.php';
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? '')));
+        $pages = (new ControlledPublishingPaginationService($this))->generateFrozenPageMap($bookKey, $version);
+        self::$ephemeralPageMapCache[$versionId] = $pages;
+
+        return $pages;
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    private function buildEphemeralPageMapSummary(array $version): array
+    {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $pages = $this->getEphemeralPageMapPages($version);
+        $summaryPages = array();
+
+        foreach ($pages as $page) {
+            $meta = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+            $summaryPages[] = array(
+                'page_number' => (int)($page['page_number'] ?? 0),
+                'section_id' => isset($page['section_id']) ? (int)$page['section_id'] : null,
+                'stable_anchor' => $page['stable_anchor'] ?? null,
+                'page_type' => (string)($page['page_type'] ?? 'content'),
+                'is_cover' => !empty($page['is_cover']),
+                'is_section_start' => !empty($page['is_section_start']),
+                'is_major_section_start' => !empty($page['is_major_section_start']),
+                'section_title' => (string)($meta['section_title'] ?? ''),
+                'thumbnail_html' => $page['thumbnail_html'] ?? null,
+            );
+        }
+
+        return array(
+            'layout_profile' => ControlledPublishingReaderLayoutProfile::profileKey(),
+            'layout_hash' => ControlledPublishingReaderLayoutProfile::layoutHash(),
+            'layout' => ControlledPublishingReaderLayoutProfile::spec(),
+            'page_count' => count($summaryPages),
+            'approval' => null,
+            'pages' => $summaryPages,
         );
     }
 
@@ -896,23 +1268,9 @@ final class ControlledPublishingReaderService
      */
     public function loadFrozenPageMap(string $bookKey): array
     {
-        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
         $version = $this->requireReleasedVersion($bookKey);
-        $versionId = (int)$version['id'];
-        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
-        if (!$this->pageMapStore()->isApproved($versionId, $profile)) {
-            throw new RuntimeException('No approved page map for this manual. Contact compliance.');
-        }
 
-        $summary = $this->pageMapStore()->loadPageMapSummary($versionId, $profile);
-
-        return array_merge($summary, array(
-            'ok' => true,
-            'book_key' => $bookKey,
-            'version_id' => $versionId,
-            'version_label' => (string)($version['version_label'] ?? ''),
-            'book_title' => (string)($version['book_title'] ?? ''),
-        ));
+        return $this->loadReaderPageMap($version, false);
     }
 
     /**
@@ -920,27 +1278,9 @@ final class ControlledPublishingReaderService
      */
     public function loadFrozenPage(string $bookKey, int $pageNumber): array
     {
-        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
         $version = $this->requireReleasedVersion($bookKey);
-        $versionId = (int)$version['id'];
-        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
-        if (!$this->pageMapStore()->isApproved($versionId, $profile)) {
-            throw new RuntimeException('No approved page map for this manual.');
-        }
-        if ($pageNumber <= 0) {
-            throw new RuntimeException('page_number required.');
-        }
 
-        $page = $this->pageMapStore()->loadPage($versionId, $profile, $pageNumber);
-        if ($page === null) {
-            throw new RuntimeException('Page not found.');
-        }
-
-        return array_merge($page, array(
-            'ok' => true,
-            'book_key' => $bookKey,
-            'version_id' => $versionId,
-        ));
+        return $this->loadReaderPage($version, $pageNumber, false);
     }
 
     /**
@@ -948,26 +1288,9 @@ final class ControlledPublishingReaderService
      */
     public function loadTocWithPages(string $bookKey): array
     {
-        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
         $version = $this->requireReleasedVersion($bookKey);
-        $versionId = (int)$version['id'];
-        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
-        if (!$this->pageMapStore()->isApproved($versionId, $profile)) {
-            throw new RuntimeException('No approved page map for this manual.');
-        }
 
-        $sectionPages = $this->pageMapStore()->sectionPageIndex($versionId, $profile);
-        $nav = $this->buildReaderNavTree($bookKey);
-        $this->annotateNavWithPageNumbers($nav, $sectionPages);
-
-        return array(
-            'ok' => true,
-            'book_key' => $bookKey,
-            'version_id' => $versionId,
-            'nav' => $nav,
-            'section_page_index' => $sectionPages,
-            'page_count' => $this->pageMapStore()->pageCount($versionId, $profile),
-        );
+        return $this->loadReaderTocWithPages($version, false);
     }
 
     /**

@@ -176,51 +176,83 @@ struct ManualReaderAPIClient {
         try await get("student/api/manual_reader_api.php", query: [("action", "library")])
     }
 
-    func fetchPageMap(bookKey: String) async throws -> PageMapResponse {
-        try await get("student/api/manual_reader_api.php", query: [
-            ("action", "page_map"),
-            ("book", bookKey),
-        ])
+    private func readerQuery(
+        bookKey: String,
+        versionId: Int?,
+        isPreview: Bool,
+        action: String,
+        extra: [(String, String)] = []
+    ) -> [(String, String)] {
+        var query = extra
+        query.append(("action", action))
+        query.append(("book", bookKey))
+        if let versionId, versionId > 0 {
+            query.append(("version_id", String(versionId)))
+        }
+        if isPreview {
+            query.append(("preview", "1"))
+        }
+        return query
     }
 
-    func fetchPage(bookKey: String, pageNumber: Int) async throws -> FrozenPageResponse {
-        try await get("student/api/manual_reader_api.php", query: [
-            ("action", "page"),
-            ("book", bookKey),
-            ("page_number", String(pageNumber)),
-        ])
+    func fetchPageMap(bookKey: String, versionId: Int? = nil, isPreview: Bool = false) async throws -> PageMapResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: readerQuery(bookKey: bookKey, versionId: versionId, isPreview: isPreview, action: "page_map")
+        )
     }
 
-    func fetchToc(bookKey: String) async throws -> TocResponse {
-        try await get("student/api/manual_reader_api.php", query: [
-            ("action", "toc_with_pages"),
-            ("book", bookKey),
-        ])
+    func fetchPage(bookKey: String, pageNumber: Int, versionId: Int? = nil, isPreview: Bool = false) async throws -> FrozenPageResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: readerQuery(
+                bookKey: bookKey,
+                versionId: versionId,
+                isPreview: isPreview,
+                action: "page",
+                extra: [("page_number", String(pageNumber))]
+            )
+        )
     }
 
-    func fetchProgress(bookKey: String) async throws -> ProgressGetResponse {
-        try await get("student/api/manual_reader_api.php", query: [
-            ("action", "progress_get"),
-            ("book", bookKey),
-        ])
+    func fetchToc(bookKey: String, versionId: Int? = nil, isPreview: Bool = false) async throws -> TocResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: readerQuery(bookKey: bookKey, versionId: versionId, isPreview: isPreview, action: "toc_with_pages")
+        )
     }
 
-    func saveProgress(bookKey: String, sectionId: Int, stableAnchor: String, pageNumber: Int) async throws {
-        let body: [String: Any] = [
+    func fetchProgress(bookKey: String, versionId: Int? = nil, isPreview: Bool = false) async throws -> ProgressGetResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: readerQuery(bookKey: bookKey, versionId: versionId, isPreview: isPreview, action: "progress_get")
+        )
+    }
+
+    func saveProgress(bookKey: String, sectionId: Int, stableAnchor: String, pageNumber: Int, versionId: Int? = nil) async throws {
+        var body: [String: Any] = [
             "book_key": bookKey,
             "section_id": sectionId,
             "stable_anchor": stableAnchor,
             "page_number": pageNumber,
         ]
+        if let versionId, versionId > 0 {
+            body["version_id"] = versionId
+        }
         _ = try await postJSON("student/api/manual_reader_api.php?action=progress_save", body: body) as OKResponse
     }
 
-    func searchTitles(bookKey: String, query: String) async throws -> SearchTitlesResponse {
-        try await get("student/api/manual_reader_api.php", query: [
-            ("action", "search_titles"),
-            ("book", bookKey),
-            ("q", query),
-        ])
+    func searchTitles(bookKey: String, query: String, versionId: Int? = nil, isPreview: Bool = false) async throws -> SearchTitlesResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: readerQuery(
+                bookKey: bookKey,
+                versionId: versionId,
+                isPreview: isPreview,
+                action: "search_titles",
+                extra: [("q", query)]
+            )
+        )
     }
 
     // MARK: - Transport

@@ -40,6 +40,34 @@ function mr_validate_book_key(string $bookKey): string
     return $bookKey;
 }
 
+/**
+ * @param array<string,mixed>|null $user
+ * @return array{version: array<string,mixed>, is_preview: bool, can_preview: bool, book_key: string}
+ */
+function mr_reader_context(
+    ControlledPublishingReaderService $reader,
+    ControlledPublishingReaderAccessService $access,
+    ?array $user,
+    string $bookKey,
+    array $input = array()
+): array {
+    $canPreview = $access->canPreviewDraftManuals($user);
+    $versionId = (int)($input['version_id'] ?? $_GET['version_id'] ?? 0);
+    $version = $reader->resolveReaderVersion(
+        $bookKey,
+        $versionId > 0 ? $versionId : null,
+        $canPreview
+    );
+    $lifecycle = (string)($version['lifecycle_status'] ?? '');
+
+    return array(
+        'version' => $version,
+        'is_preview' => $lifecycle !== 'released',
+        'can_preview' => $canPreview,
+        'book_key' => $bookKey,
+    );
+}
+
 try {
     $user = cw_current_user($pdo);
     $access = new ControlledPublishingReaderAccessService();
@@ -53,46 +81,53 @@ try {
     }
 
     $reader = new ControlledPublishingReaderService($pdo);
+    $canPreviewDrafts = $access->canPreviewDraftManuals($user);
     $action = strtolower(trim((string)($_GET['action'] ?? '')));
 
     switch ($action) {
         case 'library':
             mr_json(200, array(
                 'ok' => true,
-                'books' => $reader->listActiveReleasedLibrary($userId),
+                'can_preview_draft_manuals' => $canPreviewDrafts,
+                'books' => $reader->listActiveLibrary($userId, $canPreviewDrafts),
             ));
 
         case 'nav':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
-            $version = $reader->resolveLatestReleasedVersion($bookKey);
-            if ($version === null) {
-                mr_json(404, array('ok' => false, 'error' => 'No released manual available'));
-            }
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            $version = $ctx['version'];
             mr_json(200, array(
                 'ok' => true,
                 'book_key' => $bookKey,
                 'version_id' => (int)$version['id'],
                 'version_label' => (string)($version['version_label'] ?? ''),
                 'book_title' => (string)($version['book_title'] ?? ''),
-                'nav' => $reader->buildReaderNavTree($bookKey),
-                'has_page_map' => $reader->hasApprovedFrozenPageMap($bookKey),
+                'lifecycle_status' => (string)($version['lifecycle_status'] ?? ''),
+                'is_preview' => $ctx['is_preview'],
+                'nav' => $reader->buildReaderNavTree($bookKey, $version),
+                'has_page_map' => $ctx['is_preview']
+                    || $reader->hasApprovedFrozenPageMapForVersion($version),
             ));
 
         case 'page_map':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
-            mr_json(200, $reader->loadFrozenPageMap($bookKey));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            mr_json(200, $reader->loadReaderPageMap($ctx['version'], $ctx['can_preview']));
 
         case 'page':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             $pageNumber = (int)($_GET['page_number'] ?? $_GET['page'] ?? 0);
-            mr_json(200, $reader->loadFrozenPage($bookKey, $pageNumber));
+            mr_json(200, $reader->loadReaderPage($ctx['version'], $pageNumber, $ctx['can_preview']));
 
         case 'toc_with_pages':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
-            mr_json(200, $reader->loadTocWithPages($bookKey));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            mr_json(200, $reader->loadReaderTocWithPages($ctx['version'], $ctx['can_preview']));
 
         case 'section':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             $sectionId = (int)($_GET['section_id'] ?? 0);
             $stableAnchor = trim((string)($_GET['stable_anchor'] ?? ''));
             if ($sectionId <= 0 && $stableAnchor === '') {
@@ -101,15 +136,31 @@ try {
             $payload = $reader->loadSection(
                 $bookKey,
                 $sectionId > 0 ? $sectionId : null,
-                $stableAnchor !== '' ? $stableAnchor : null
+                $stableAnchor !== '' ? $stableAnchor : null,
+                $ctx['version']
             );
             if ($payload === null) {
                 mr_json(404, array('ok' => false, 'error' => 'Section not found'));
             }
-            mr_json(200, array_merge(array('ok' => true), $payload));
+            mr_json(200, array_merge(array(
+                'ok' => true,
+                'is_preview' => $ctx['is_preview'],
+                'lifecycle_status' => (string)($ctx['version']['lifecycle_status'] ?? ''),
+            ), $payload));
 
         case 'progress_get':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            if ($ctx['is_preview']) {
+                mr_json(200, array(
+                    'ok' => true,
+                    'book_key' => $bookKey,
+                    'version_id' => (int)$ctx['version']['id'],
+                    'is_preview' => true,
+                    'progress' => null,
+                    'default_section_id' => $reader->defaultSectionId($bookKey, $ctx['version']),
+                ));
+            }
             $version = $reader->resolveLatestReleasedVersion($bookKey);
             if ($version === null) {
                 mr_json(404, array('ok' => false, 'error' => 'No released manual available'));
@@ -120,12 +171,16 @@ try {
                 'book_key' => $bookKey,
                 'version_id' => (int)$version['id'],
                 'progress' => $progress,
-                'default_section_id' => $reader->defaultSectionId($bookKey),
+                'default_section_id' => $reader->defaultSectionId($bookKey, $version),
             ));
 
         case 'progress_save':
             $in = mr_input();
             $bookKey = mr_validate_book_key((string)($in['book_key'] ?? $_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey, $in);
+            if ($ctx['is_preview']) {
+                mr_json(200, array('ok' => true, 'skipped' => true, 'reason' => 'preview'));
+            }
             $sectionId = (int)($in['section_id'] ?? 0);
             if ($sectionId <= 0) {
                 throw new RuntimeException('section_id required.');
@@ -141,13 +196,14 @@ try {
 
         case 'search_titles':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             $query = trim((string)($_GET['q'] ?? ''));
             if ($query === '') {
                 mr_json(200, array('ok' => true, 'results' => array()));
             }
             mr_json(200, array(
                 'ok' => true,
-                'results' => $reader->searchSectionTitles($bookKey, $query),
+                'results' => $reader->searchSectionTitles($bookKey, $query, 40, $ctx['version']),
             ));
 
         default:

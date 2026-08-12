@@ -41,9 +41,12 @@ final class ControlledPublishingPaginationService
     /**
      * @return array<string,mixed>
      */
-    public function buildPaginateSource(string $bookKey): array
+    public function buildPaginateSource(string $bookKey, ?array $version = null): array
     {
-        $version = $this->reader->requireReleasedVersion($bookKey);
+        if ($version === null) {
+            $version = $this->reader->requireReleasedVersion($bookKey);
+        }
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? $bookKey)));
         $versionId = (int)$version['id'];
         $this->reader->paginationConfigureRenderer($version);
 
@@ -568,9 +571,9 @@ final class ControlledPublishingPaginationService
      *
      * @return list<array<string,mixed>>
      */
-    public function generateFrozenPageMap(string $bookKey): array
+    public function generateFrozenPageMap(string $bookKey, ?array $version = null): array
     {
-        $source = $this->buildPaginateSource($bookKey);
+        $source = $this->buildPaginateSource($bookKey, $version);
 
         $tocSection = null;
         $sectionsWithoutToc = array();

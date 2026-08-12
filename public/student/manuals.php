@@ -37,7 +37,8 @@ function manuals_fmt_date(?string $value): string
 
 $userId = (int)($u['id'] ?? 0);
 $reader = new ControlledPublishingReaderService($pdo);
-$library = $reader->listActiveReleasedLibrary($userId);
+$canPreviewDrafts = $access->canPreviewDraftManuals($u);
+$library = $reader->listActiveLibrary($userId, $canPreviewDrafts);
 
 $shelfCssVersion = @filemtime(__DIR__ . '/../assets/manual_shelf.css') ?: time();
 
@@ -49,15 +50,21 @@ cw_header('Manuals');
   <header class="ms-hero">
     <p class="ms-kicker">Library</p>
     <h1 class="ms-title">Manuals</h1>
-    <p class="ms-subtitle">Official operations and management manuals — released editions only.</p>
+    <p class="ms-subtitle"><?= $canPreviewDrafts
+        ? 'Official released editions and draft previews (staff only).'
+        : 'Official operations and management manuals — released editions only.' ?></p>
   </header>
 
   <?php if ($library === array()): ?>
     <div class="ms-empty">
       <div class="ms-empty-icon" aria-hidden="true">📚</div>
-      <h2 class="ms-empty-title">No released manuals available</h2>
+      <h2 class="ms-empty-title">No manuals available</h2>
       <p class="ms-empty-text">
-        When a manual version is released through controlled publishing, it will appear here for reading.
+        <?php if ($canPreviewDrafts): ?>
+          When a manual version is published or released, it will appear here for reading.
+        <?php else: ?>
+          When a manual version is released through controlled publishing, it will appear here for reading.
+        <?php endif; ?>
       </p>
     </div>
   <?php else: ?>
@@ -75,8 +82,14 @@ cw_header('Manuals');
           $effectiveDate = manuals_fmt_date($book['effective_date'] ?? null);
           $hasProgress = !empty($book['has_progress']);
           $continueAnchor = trim((string)($book['continue_stable_anchor'] ?? ''));
+          $isPreview = !empty($book['is_preview']);
+          $versionId = (int)($book['version_id'] ?? 0);
           $readerUrl = '/student/manual_reader.php?book=' . urlencode($bookKeyRaw);
+          if ($isPreview && $versionId > 0) {
+              $readerUrl .= '&version_id=' . $versionId . '&preview=1';
+          }
           $continueUrl = $readerUrl . ($continueAnchor !== '' ? '#' . urlencode($continueAnchor) : '');
+          $lifecycleLabel = manuals_h(strtoupper((string)($book['lifecycle_status'] ?? '')));
         ?>
         <article class="ms-card">
           <div class="ms-cover-wrap">
@@ -111,13 +124,15 @@ cw_header('Manuals');
             <h3 class="ms-card-title"><?= $displayTitle ?></h3>
             <div class="ms-card-meta">
               <span class="ms-badge"><?= $manualCode ?> · v<?= $versionLabel ?></span>
-              <?php if ($releasedAt !== ''): ?>
+              <?php if ($isPreview): ?>
+                <span class="ms-badge ms-badge-draft">Draft preview · <?= $lifecycleLabel ?></span>
+              <?php elseif ($releasedAt !== ''): ?>
                 <span class="ms-meta-item">Released <?= manuals_h($releasedAt) ?></span>
               <?php endif; ?>
             </div>
             <div class="ms-card-actions">
-              <a class="ms-btn ms-btn-primary" href="<?= manuals_h($readerUrl) ?>">Open Manual</a>
-              <?php if ($hasProgress): ?>
+              <a class="ms-btn ms-btn-primary" href="<?= manuals_h($readerUrl) ?>"><?= $isPreview ? 'Preview Draft' : 'Open Manual' ?></a>
+              <?php if ($hasProgress && !$isPreview): ?>
                 <a class="ms-btn ms-btn-secondary" href="<?= manuals_h($continueUrl) ?>">Continue Reading</a>
               <?php endif; ?>
             </div>

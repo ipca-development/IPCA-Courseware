@@ -136,6 +136,14 @@ struct ReaderView: View {
 
     private var chromeOverlay: some View {
         VStack(spacing: 0) {
+            if viewModel.book.isDraftPreview {
+                Text("Draft preview — not the official released manual")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.15))
+            }
             topBar
             Spacer()
             if session.settings.showFilmstrip {

@@ -152,6 +152,11 @@
   font-size: 0.72rem;
 }
 
+.ms-badge-draft {
+  background: rgba(180, 83, 9, 0.12);
+  color: #b45309;
+}
+
 .ms-card-actions {
   display: flex;
   flex-wrap: wrap;

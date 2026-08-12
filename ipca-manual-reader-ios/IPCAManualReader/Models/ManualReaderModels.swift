@@ -45,6 +45,8 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     var versionLabel: String
     var effectiveDate: String?
     var releasedAt: String?
+    var lifecycleStatus: String?
+    var isPreview: Bool?
     var coverUrl: String?
     var coverImageUrl: String?
     var logoUrl: String?
@@ -53,7 +55,7 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     var continueSectionId: Int?
     var continueStableAnchor: String?
 
-    var id: String { bookKey }
+    var id: String { "\(bookKey)-\(versionId)" }
 
     enum CodingKeys: String, CodingKey {
         case bookId = "book_id"
@@ -64,6 +66,8 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         case versionLabel = "version_label"
         case effectiveDate = "effective_date"
         case releasedAt = "released_at"
+        case lifecycleStatus = "lifecycle_status"
+        case isPreview = "is_preview"
         case coverUrl = "cover_url"
         case coverImageUrl = "cover_image_url"
         case logoUrl = "logo_url"
@@ -77,6 +81,8 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         if bookTitle.isEmpty { return bookKey }
         return bookTitle
     }
+
+    var isDraftPreview: Bool { isPreview == true }
 
     var coverAbsoluteURL: URL? {
         guard let path = coverImageUrl ?? coverUrl,

@@ -24,10 +24,25 @@ if (!in_array($bookKey, array('OM', 'OMM'), true)) {
 }
 
 $reader = new ControlledPublishingReaderService($pdo);
-$version = $reader->resolveLatestReleasedVersion($bookKey);
+$canPreviewDrafts = $access->canPreviewDraftManuals($u);
+$versionId = (int)($_GET['version_id'] ?? 0);
+
+try {
+    $version = $reader->resolveReaderVersion(
+        $bookKey,
+        $versionId > 0 ? $versionId : null,
+        $canPreviewDrafts
+    );
+} catch (RuntimeException $e) {
+    $version = null;
+}
+
 $bookTitle = is_array($version) ? (string)($version['book_title'] ?? 'Manual') : 'Manual';
 $versionLabel = is_array($version) ? (string)($version['version_label'] ?? '') : '';
+$lifecycleStatus = is_array($version) ? (string)($version['lifecycle_status'] ?? '') : '';
+$isPreview = is_array($version) && $lifecycleStatus !== 'released';
 $hasReleased = $version !== null;
+$resolvedVersionId = is_array($version) ? (int)($version['id'] ?? 0) : 0;
 
 $anchor = trim((string)(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_FRAGMENT) ?: ''));
 if ($anchor === '' && isset($_GET['anchor'])) {
@@ -54,7 +69,15 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
     data-book="<?= mr_page_h($bookKey) ?>"
     data-anchor="<?= mr_page_h($anchor) ?>"
     data-has-released="<?= $hasReleased ? '1' : '0' ?>"
+    data-is-preview="<?= $isPreview ? '1' : '0' ?>"
+    data-version-id="<?= (int)$resolvedVersionId ?>"
+    data-lifecycle-status="<?= mr_page_h($lifecycleStatus) ?>"
   >
+    <?php if ($isPreview): ?>
+    <div class="mr-preview-banner" role="status">
+      Draft preview — not the official released manual (<?= mr_page_h(strtoupper($lifecycleStatus)) ?>)
+    </div>
+    <?php endif; ?>
     <header class="mr-topbar">
       <div class="mr-topbar-left">
         <button type="button" class="mr-icon-btn" id="mrBackBtn" aria-label="Back">
@@ -146,8 +169,8 @@ $jsVersion = @filemtime(__DIR__ . '/../assets/manual_reader.js') ?: time();
     <main class="mr-stage" id="mrStage">
       <?php if (!$hasReleased): ?>
         <div class="mr-empty-state">
-          <h1>No released manual available</h1>
-          <p>This manual has not been released yet. Check back after publishing completes.</p>
+          <h1>No manual available</h1>
+          <p>This manual has not been released yet<?= $canPreviewDrafts ? ', and no draft preview is available.' : '.' ?> Check back after publishing completes.</p>
           <a class="mr-empty-link" href="/student/manuals.php">Back to Library</a>
         </div>
       <?php else: ?>

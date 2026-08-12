@@ -59,9 +59,11 @@ final class ReaderViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            async let mapTask = client.fetchPageMap(bookKey: book.bookKey)
-            async let tocTask = client.fetchToc(bookKey: book.bookKey)
-            async let progressTask = client.fetchProgress(bookKey: book.bookKey)
+            let versionId = book.versionId > 0 ? book.versionId : nil
+            let isPreview = book.isDraftPreview
+            async let mapTask = client.fetchPageMap(bookKey: book.bookKey, versionId: versionId, isPreview: isPreview)
+            async let tocTask = client.fetchToc(bookKey: book.bookKey, versionId: versionId, isPreview: isPreview)
+            async let progressTask = client.fetchProgress(bookKey: book.bookKey, versionId: versionId, isPreview: isPreview)
 
             let (map, toc, progress) = try await (mapTask, tocTask, progressTask)
             pages = map.pages.sorted { $0.pageNumber < $1.pageNumber }
@@ -73,10 +75,12 @@ final class ReaderViewModel: ObservableObject {
             }
 
             var startIndex = 0
-            if let anchor = book.continueStableAnchor, !anchor.isEmpty,
+            if !isPreview,
+               let anchor = book.continueStableAnchor, !anchor.isEmpty,
                let match = pages.firstIndex(where: { $0.stableAnchor == anchor }) {
                 startIndex = match
-            } else if let pageNum = progress.progress?.pageNumber,
+            } else if !isPreview,
+                      let pageNum = progress.progress?.pageNumber,
                       let match = pages.firstIndex(where: { $0.pageNumber == pageNum }) {
                 startIndex = match
             }
@@ -124,7 +128,12 @@ final class ReaderViewModel: ObservableObject {
         isSearching = true
         defer { isSearching = false }
         do {
-            let response = try await client.searchTitles(bookKey: book.bookKey, query: trimmed)
+            let response = try await client.searchTitles(
+                bookKey: book.bookKey,
+                query: trimmed,
+                versionId: book.versionId > 0 ? book.versionId : nil,
+                isPreview: book.isDraftPreview
+            )
             searchResults = response.results
         } catch {
             searchResults = []
@@ -152,15 +161,20 @@ final class ReaderViewModel: ObservableObject {
         let pageNumber = pages[index].pageNumber
         let settings = ManualReaderSessionStore.shared.settings
 
-        if let cached = await PageCache.shared.get(bookKey: book.bookKey, page: pageNumber),
+        if let cached = await PageCache.shared.get(bookKey: book.id, page: pageNumber),
            let html = cached.pageHtml {
             currentPageHTML = client.pageHTMLDocument(pageHtml: html, settings: settings)
             return
         }
 
         do {
-            let response = try await client.fetchPage(bookKey: book.bookKey, pageNumber: pageNumber)
-            await PageCache.shared.set(bookKey: book.bookKey, page: pageNumber, response: response)
+            let response = try await client.fetchPage(
+                bookKey: book.bookKey,
+                pageNumber: pageNumber,
+                versionId: book.versionId > 0 ? book.versionId : nil,
+                isPreview: book.isDraftPreview
+            )
+            await PageCache.shared.set(bookKey: book.id, page: pageNumber, response: response)
             currentPageHTML = client.pageHTMLDocument(pageHtml: response.pageHtml ?? "", settings: settings)
         } catch {
             errorMessage = error.localizedDescription
@@ -180,18 +194,24 @@ final class ReaderViewModel: ObservableObject {
             let target = index + offset
             guard pages.indices.contains(target) else { continue }
             let pageNumber = pages[target].pageNumber
-            let bookKey = book.bookKey
+            let cacheKey = book.id
             prefetchTasks.append(Task {
-                if await PageCache.shared.get(bookKey: bookKey, page: pageNumber) != nil { return }
+                if await PageCache.shared.get(bookKey: cacheKey, page: pageNumber) != nil { return }
                 guard let client = ManualReaderSessionStore.shared.client else { return }
-                if let response = try? await client.fetchPage(bookKey: bookKey, pageNumber: pageNumber) {
-                    await PageCache.shared.set(bookKey: bookKey, page: pageNumber, response: response)
+                if let response = try? await client.fetchPage(
+                    bookKey: book.bookKey,
+                    pageNumber: pageNumber,
+                    versionId: book.versionId > 0 ? book.versionId : nil,
+                    isPreview: book.isDraftPreview
+                ) {
+                    await PageCache.shared.set(bookKey: cacheKey, page: pageNumber, response: response)
                 }
             })
         }
     }
 
     private func scheduleProgressSave() {
+        guard !book.isDraftPreview else { return }
         progressTimer?.cancel()
         progressTimer = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 800_000_000)
@@ -200,14 +220,16 @@ final class ReaderViewModel: ObservableObject {
     }
 
     private func saveProgress() async {
-        guard let client = ManualReaderSessionStore.shared.client,
+        guard !book.isDraftPreview,
+              let client = ManualReaderSessionStore.shared.client,
               let page = currentPage,
               let sectionId = page.sectionId else { return }
         _ = try? await client.saveProgress(
             bookKey: book.bookKey,
             sectionId: sectionId,
             stableAnchor: page.stableAnchor ?? "",
-            pageNumber: page.pageNumber
+            pageNumber: page.pageNumber,
+            versionId: book.versionId > 0 ? book.versionId : nil
         )
     }
 }

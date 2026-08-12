@@ -134,7 +134,11 @@ private struct LibraryBookCard: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
                     .lineLimit(2)
-                if book.hasProgress {
+                if book.isDraftPreview {
+                    Text("Draft preview")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                } else if book.hasProgress {
                     Text("Continue reading")
                         .font(.caption)
                         .foregroundStyle(IPCAReaderTheme.accent)

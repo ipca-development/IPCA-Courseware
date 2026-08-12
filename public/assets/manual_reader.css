@@ -98,6 +98,17 @@
   outline: none;
 }
 
+.mr-preview-banner {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #92400e;
+  background: #fef3c7;
+  border-bottom: 1px solid #fcd34d;
+}
+
 /* Top bar */
 .mr-topbar {
   flex-shrink: 0;
