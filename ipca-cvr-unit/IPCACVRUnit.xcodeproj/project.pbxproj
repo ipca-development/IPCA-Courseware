@@ -53,6 +53,8 @@
 		100000000000000000000038 /* GarminSDCardImportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000038 /* GarminSDCardImportModels.swift */; };
 		100000000000000000000039 /* faa_ca_az_nv_airports.json in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000039 /* faa_ca_az_nv_airports.json */; };
 		10000000000000000000003A /* CrewMessagesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003A /* CrewMessagesStore.swift */; };
+		10000000000000000000003B /* LiveAudioCaptureFanout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003B /* LiveAudioCaptureFanout.swift */; };
+		10000000000000000000003C /* LiveCockpitMonitorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000003C /* LiveCockpitMonitorStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -103,6 +105,8 @@
 		200000000000000000000037 /* GarminSDCardImportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSDCardImportViews.swift; sourceTree = "<group>"; };
 		200000000000000000000038 /* GarminSDCardImportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSDCardImportModels.swift; sourceTree = "<group>"; };
 		200000000000000000000039 /* faa_ca_az_nv_airports.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = faa_ca_az_nv_airports.json; sourceTree = "<group>"; };
+		20000000000000000000003B /* LiveAudioCaptureFanout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAudioCaptureFanout.swift; sourceTree = "<group>"; };
+		20000000000000000000003C /* LiveCockpitMonitorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCockpitMonitorStore.swift; sourceTree = "<group>"; };
 		20000000000000000000003A /* CrewMessagesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrewMessagesStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -175,6 +179,8 @@
 				20000000000000000000002E /* GarminRecoveryServices.swift */,
 				200000000000000000000035 /* GarminSDCardImportCoordinator.swift */,
 				20000000000000000000001D /* GPSLocationManager.swift */,
+				20000000000000000000003B /* LiveAudioCaptureFanout.swift */,
+				20000000000000000000003C /* LiveCockpitMonitorStore.swift */,
 				200000000000000000000024 /* MissionCatalogStore.swift */,
 				200000000000000000000008 /* NetworkMonitor.swift */,
 				200000000000000000000004 /* RecordingStore.swift */,
@@ -341,6 +347,8 @@
 				100000000000000000000036 /* GarminSDCardFolderPicker.swift in Sources */,
 				100000000000000000000037 /* GarminSDCardImportViews.swift in Sources */,
 				100000000000000000000038 /* GarminSDCardImportModels.swift in Sources */,
+				10000000000000000000003B /* LiveAudioCaptureFanout.swift in Sources */,
+				10000000000000000000003C /* LiveCockpitMonitorStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -84,6 +84,50 @@ struct LiveAudioSegmentUploadResponse: Codable {
     }
 }
 
+struct LiveCockpitMonitorLeaseResponse: Codable {
+    var ok: Bool
+    var captureRequested: Bool?
+    var captureBackendEnabled: Bool?
+    var reason: String?
+    var broadcastUUID: String?
+    var dispatchUUID: String?
+    var workflowFlightRecordUUID: String?
+    var operationalSessionUUID: String?
+    var leaseExpiresInSeconds: Int?
+    var chunkDurationSeconds: Int?
+    var maxChunkBytes: Int?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case captureRequested = "capture_requested"
+        case captureBackendEnabled = "capture_backend_enabled"
+        case reason
+        case broadcastUUID = "broadcast_uuid"
+        case dispatchUUID = "dispatch_uuid"
+        case workflowFlightRecordUUID = "workflow_flight_record_uuid"
+        case operationalSessionUUID = "operational_session_uuid"
+        case leaseExpiresInSeconds = "lease_expires_in_seconds"
+        case chunkDurationSeconds = "chunk_duration_seconds"
+        case maxChunkBytes = "max_chunk_bytes"
+        case error
+    }
+}
+
+struct LiveCockpitMonitorChunkUploadResponse: Codable {
+    var ok: Bool
+    var alreadyPresent: Bool?
+    var chunkUUID: String?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case alreadyPresent = "already_present"
+        case chunkUUID = "chunk_uuid"
+        case error
+    }
+}
+
 struct StatusResponse: Codable {
     var ok: Bool
     var recording: APIRecording?
@@ -826,6 +870,44 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try decode(LiveAudioSegmentUploadResponse.self, from: data, response: response)
+    }
+
+    func liveCockpitMonitorLease(credential: String) async throws -> LiveCockpitMonitorLeaseResponse {
+        let url = serverURL.appending(path: "api/cvr/live_cockpit_monitor_lease.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(LiveCockpitMonitorLeaseResponse.self, from: data, response: response)
+    }
+
+    func uploadLiveCockpitMonitorChunk(
+        credential: String,
+        chunk: LiveCockpitEncodedChunk,
+        sha256: String,
+        audioData: Data
+    ) async throws -> LiveCockpitMonitorChunkUploadResponse {
+        let url = serverURL.appending(path: "api/cvr/live_cockpit_monitor_chunk.php")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 12
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("audio/mp4", forHTTPHeaderField: "Content-Type")
+        request.setValue(chunk.broadcastUUID, forHTTPHeaderField: "X-IPCA-Monitor-Broadcast-UUID")
+        request.setValue(chunk.chunkUUID, forHTTPHeaderField: "X-IPCA-Monitor-Chunk-UUID")
+        request.setValue(chunk.operationalSessionUUID, forHTTPHeaderField: "X-IPCA-Operational-Session-UUID")
+        request.setValue(String(chunk.sequenceNumber), forHTTPHeaderField: "X-IPCA-Monitor-Sequence")
+        request.setValue(ISO8601DateFormatter().string(from: chunk.startedAt), forHTTPHeaderField: "X-IPCA-Monitor-Started-At")
+        request.setValue(String(format: "%.3f", chunk.duration), forHTTPHeaderField: "X-IPCA-Monitor-Duration")
+        request.setValue(sha256, forHTTPHeaderField: "X-IPCA-SHA256")
+        request.httpBody = audioData
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return try decode(LiveCockpitMonitorChunkUploadResponse.self, from: data, response: response)
     }
 
     func finalizeChunkedUploadRequest(for recording: Recording, language: String) throws -> URLRequest {

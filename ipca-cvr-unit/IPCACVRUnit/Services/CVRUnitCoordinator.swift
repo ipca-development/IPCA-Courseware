@@ -58,6 +58,7 @@ final class CVRUnitCoordinator: ObservableObject {
     private var recoveredPreviousSegmentEndedAt: Date?
     private var recoveredAudioPrelude: RecoveredAudioPrelude?
     private var lastNetworkUploadAvailable = false
+    private let liveCockpitMonitor = LiveCockpitMonitorStore()
 
     func bind(
         audio: AudioRecorderManager,
@@ -84,6 +85,12 @@ final class CVRUnitCoordinator: ObservableObject {
         self.crewMessages = crewMessages
         uploadManager.configureNetworkMonitor(network)
         crewMessages.bind(settings: settings, network: network, workflow: workflow)
+        liveCockpitMonitor.bind(
+            audio: audio,
+            settings: settings,
+            network: network,
+            workflow: workflow
+        )
 
         network.$statusText
             .receive(on: RunLoop.main)
@@ -263,6 +270,7 @@ final class CVRUnitCoordinator: ObservableObject {
     func appBecameActive() {
         recordEvent(severity: "info", type: "app_became_active", message: "Cockpit Recorder app became active.")
         crewMessages?.appBecameActive()
+        liveCockpitMonitor.appBecameActive()
         attemptPendingUploads()
         if let settings {
             uploadManager?.retryQueuedLiveAudioSegments(settings: settings)
@@ -271,6 +279,7 @@ final class CVRUnitCoordinator: ObservableObject {
 
     func appEnteredBackground() {
         crewMessages?.appEnteredBackground()
+        liveCockpitMonitor.appEnteredBackground()
         if settings?.isBeaconTriggerEnabled == true {
             beacon?.startScan(scanAll: false)
             log("App entered background. Beacon listener confirmed active.")

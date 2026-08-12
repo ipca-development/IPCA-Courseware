@@ -717,6 +717,244 @@
     crewMessageCanSend = false;
   }
 
+  var liveMonitorLeaseUUID = '';
+  var liveMonitorHeartbeatTimer = null;
+  var liveMonitorManifestTimer = null;
+  var liveMonitorReconnectTimer = null;
+  var liveMonitorShouldRun = false;
+  var liveMonitorManifestBusy = false;
+  var liveMonitorAfterSequence = 0;
+  var liveMonitorAudioContext = null;
+  var liveMonitorNextPlayAt = 0;
+  var liveMonitorSources = [];
+
+  function liveMonitorElements() {
+    return {
+      status: document.getElementById('flightLiveAudioStatus'),
+      start: document.getElementById('flightLiveAudioStart'),
+      stop: document.getElementById('flightLiveAudioStop'),
+      delay: document.getElementById('flightLiveAudioDelay')
+    };
+  }
+
+  function setLiveMonitorState(state, label, delaySeconds) {
+    var els = liveMonitorElements();
+    if (els.status) {
+      els.status.dataset.state = state;
+      els.status.textContent = label;
+    }
+    if (els.delay) {
+      els.delay.textContent = Number.isFinite(delaySeconds)
+        ? ('Delay ' + Math.max(0, delaySeconds).toFixed(1) + ' s')
+        : 'Delay —';
+    }
+    if (els.start) els.start.hidden = liveMonitorShouldRun;
+    if (els.stop) els.stop.hidden = !liveMonitorShouldRun;
+  }
+
+  function liveMonitorPost(payload, keepalive) {
+    payload = payload || {};
+    payload.csrf_token = String(config.liveCockpitMonitorCsrfToken || '');
+    return fetch(String(config.liveCockpitMonitorApiUrl || '/admin/api/live_cockpit_monitor.php'), {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: !!keepalive,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      return response.json().catch(function () { return null; }).then(function (data) {
+        if (!response.ok || !data || data.ok === false) {
+          throw new Error((data && data.error) || ('Live audio request failed (HTTP ' + response.status + ').'));
+        }
+        return data;
+      });
+    });
+  }
+
+  function clearLiveMonitorTimers() {
+    if (liveMonitorHeartbeatTimer) globalThis.clearInterval(liveMonitorHeartbeatTimer);
+    if (liveMonitorManifestTimer) globalThis.clearInterval(liveMonitorManifestTimer);
+    if (liveMonitorReconnectTimer) globalThis.clearTimeout(liveMonitorReconnectTimer);
+    liveMonitorHeartbeatTimer = null;
+    liveMonitorManifestTimer = null;
+    liveMonitorReconnectTimer = null;
+  }
+
+  function stopScheduledLiveMonitorAudio() {
+    liveMonitorSources.forEach(function (source) {
+      try { source.stop(); } catch (_) {}
+    });
+    liveMonitorSources = [];
+    liveMonitorNextPlayAt = 0;
+  }
+
+  function scheduleLiveMonitorReconnect() {
+    if (!liveMonitorShouldRun || liveMonitorReconnectTimer) return;
+    clearLiveMonitorTimers();
+    setLiveMonitorState('reconnecting', 'Reconnecting…');
+    liveMonitorReconnectTimer = globalThis.setTimeout(function () {
+      liveMonitorReconnectTimer = null;
+      startLiveMonitorLease(true);
+    }, 1800);
+  }
+
+  function startLiveMonitorLease(isReconnect) {
+    var reservation = dispatchedTrackReservation;
+    if (!reservation || !liveMonitorShouldRun) return;
+    var dispatchUUID = crewMessageDispatchUUID(reservation);
+    var aircraftId = reservation.aircraft && reservation.aircraft.id ? Number(reservation.aircraft.id) : 0;
+    if (!dispatchUUID || !aircraftId) {
+      liveMonitorShouldRun = false;
+      setLiveMonitorState('ended', 'Ended');
+      return;
+    }
+    setLiveMonitorState(isReconnect ? 'reconnecting' : 'waiting', isReconnect ? 'Reconnecting…' : 'Waiting for recorder');
+    liveMonitorPost({
+      action: 'start',
+      aircraft_id: aircraftId,
+      claimed_dispatch_uuid: dispatchUUID,
+      client_uuid: randomUuid()
+    }).then(function (data) {
+      if (!liveMonitorShouldRun || dispatchedTrackReservation !== reservation) return;
+      liveMonitorLeaseUUID = String(data.lease_uuid || '');
+      liveMonitorAfterSequence = 0;
+      liveMonitorNextPlayAt = 0;
+      setLiveMonitorState('waiting', data.device_enabled === false ? 'Waiting for enabled recorder' : 'Waiting for recorder');
+      liveMonitorHeartbeatTimer = globalThis.setInterval(sendLiveMonitorHeartbeat, 5000);
+      liveMonitorManifestTimer = globalThis.setInterval(loadLiveMonitorManifest, 1000);
+      loadLiveMonitorManifest();
+    }).catch(function () {
+      scheduleLiveMonitorReconnect();
+    });
+  }
+
+  function sendLiveMonitorHeartbeat() {
+    if (!liveMonitorShouldRun || !liveMonitorLeaseUUID) return;
+    liveMonitorPost({ action: 'heartbeat', lease_uuid: liveMonitorLeaseUUID })
+      .catch(scheduleLiveMonitorReconnect);
+  }
+
+  function decodeAndScheduleLiveMonitorChunk(chunk) {
+    if (!liveMonitorShouldRun || !liveMonitorAudioContext) return Promise.resolve();
+    return fetch(String(chunk.audio_url || ''), {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'audio/mp4' }
+    }).then(function (response) {
+      if (!response.ok) throw new Error('Live audio chunk is unavailable.');
+      return response.arrayBuffer();
+    }).then(function (audioBytes) {
+      return liveMonitorAudioContext.decodeAudioData(audioBytes);
+    }).then(function (audioBuffer) {
+      if (!liveMonitorShouldRun || !liveMonitorAudioContext) return;
+      var now = liveMonitorAudioContext.currentTime;
+      if (!Number.isFinite(liveMonitorNextPlayAt) || liveMonitorNextPlayAt < now + 0.25) {
+        liveMonitorNextPlayAt = now + 2.5;
+      }
+      var source = liveMonitorAudioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(liveMonitorAudioContext.destination);
+      var scheduledAt = liveMonitorNextPlayAt;
+      source.start(scheduledAt);
+      liveMonitorNextPlayAt += audioBuffer.duration;
+      liveMonitorSources.push(source);
+      source.onended = function () {
+        liveMonitorSources = liveMonitorSources.filter(function (item) { return item !== source; });
+      };
+      var startedAt = Date.parse(String(chunk.started_at_utc || '').replace(' ', 'T') + 'Z');
+      var networkAge = Number.isFinite(startedAt) ? Math.max(0, (Date.now() - startedAt) / 1000) : 0;
+      var queuedDelay = Math.max(0, scheduledAt - now);
+      setLiveMonitorState('live', 'Live', networkAge + queuedDelay);
+    });
+  }
+
+  function loadLiveMonitorManifest() {
+    if (!liveMonitorShouldRun || !liveMonitorLeaseUUID || liveMonitorManifestBusy) return;
+    liveMonitorManifestBusy = true;
+    var url = String(config.liveCockpitMonitorApiUrl || '/admin/api/live_cockpit_monitor.php')
+      + '?action=manifest&lease_uuid=' + encodeURIComponent(liveMonitorLeaseUUID)
+      + '&after_sequence=' + encodeURIComponent(String(liveMonitorAfterSequence));
+    fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        return response.json().catch(function () { return null; }).then(function (data) {
+          if (!response.ok || !data || data.ok === false) {
+            throw new Error((data && data.error) || 'Live audio manifest failed.');
+          }
+          return data;
+        });
+      })
+      .then(function (data) {
+        if (!liveMonitorShouldRun) return;
+        var chunks = Array.isArray(data.chunks) ? data.chunks : [];
+        if (!chunks.length) {
+          if (!liveMonitorSources.length) setLiveMonitorState('waiting', 'Waiting for recorder');
+          return;
+        }
+        chunks.sort(function (a, b) { return Number(a.sequence_number || 0) - Number(b.sequence_number || 0); });
+        return chunks.reduce(function (chain, chunk) {
+          return chain.then(function () {
+            var sequence = Number(chunk.sequence_number || 0);
+            if (sequence <= liveMonitorAfterSequence) return;
+            setLiveMonitorState('buffering', 'Buffering');
+            return decodeAndScheduleLiveMonitorChunk(chunk).then(function () {
+              liveMonitorAfterSequence = sequence;
+            });
+          });
+        }, Promise.resolve());
+      })
+      .catch(scheduleLiveMonitorReconnect)
+      .finally(function () {
+        liveMonitorManifestBusy = false;
+      });
+  }
+
+  function beginLiveMonitor() {
+    if (liveMonitorShouldRun) return;
+    liveMonitorShouldRun = true;
+    liveMonitorAfterSequence = 0;
+    liveMonitorLeaseUUID = '';
+    stopScheduledLiveMonitorAudio();
+    var AudioContextType = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AudioContextType) {
+      liveMonitorShouldRun = false;
+      setLiveMonitorState('ended', 'Audio playback unsupported');
+      return;
+    }
+    if (!liveMonitorAudioContext || liveMonitorAudioContext.state === 'closed') {
+      liveMonitorAudioContext = new AudioContextType();
+    }
+    Promise.resolve(liveMonitorAudioContext.resume()).finally(function () {
+      startLiveMonitorLease(false);
+    });
+  }
+
+  function stopLiveMonitor(options) {
+    options = options || {};
+    var leaseUUID = liveMonitorLeaseUUID;
+    liveMonitorShouldRun = false;
+    liveMonitorLeaseUUID = '';
+    liveMonitorManifestBusy = false;
+    clearLiveMonitorTimers();
+    stopScheduledLiveMonitorAudio();
+    setLiveMonitorState('ended', 'Ended');
+    if (leaseUUID) {
+      liveMonitorPost({ action: 'stop', lease_uuid: leaseUUID }, !!options.keepalive).catch(function () {});
+    }
+  }
+
+  function prepareLiveMonitorControls() {
+    stopLiveMonitor({ keepalive: true });
+    var els = liveMonitorElements();
+    if (els.start && !els.start.dataset.bound) {
+      els.start.dataset.bound = '1';
+      els.start.addEventListener('click', beginLiveMonitor);
+    }
+    if (els.stop && !els.stop.dataset.bound) {
+      els.stop.dataset.bound = '1';
+      els.stop.addEventListener('click', function () { stopLiveMonitor(); });
+    }
+  }
+
   function ensureDispatchedTrackChart() {
     var root = document.getElementById('flightDispatchedTrackRoot');
     if (!root) return null;
@@ -1034,6 +1272,7 @@
       messageEls.send.addEventListener('click', sendCrewMessage);
     }
     startCrewMessagePolling(reservation);
+    prepareLiveMonitorControls();
     var chart = ensureDispatchedTrackChart();
     if (chart) {
       chart._scheduleLiveStarted = false;
@@ -1053,6 +1292,7 @@
     if (modal && !modal.dataset.trackCloseBound) {
       modal.dataset.trackCloseBound = '1';
       modal.addEventListener('close', function () {
+        stopLiveMonitor({ keepalive: true });
         stopCrewMessagePolling();
         dispatchedTrackReservation = null;
         if (dispatchedTrackChart) {

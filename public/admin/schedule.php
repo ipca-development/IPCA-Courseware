@@ -482,6 +482,20 @@ compliance_page_open(array(
   .fltsch-crew-message-text{font-size:12.5px;font-weight:750;color:#172554;white-space:pre-wrap;overflow-wrap:anywhere}
   .fltsch-crew-message-meta{font-size:11px;font-weight:700;color:#64748b}
   .fltsch-crew-message-meta.is-acknowledged{color:#166534}
+  .fltsch-live-audio{border:1px solid #bae6fd;border-radius:14px;background:#f0f9ff;padding:14px;display:grid;gap:10px}
+  .fltsch-live-audio-head,.fltsch-live-audio-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .fltsch-live-audio-head strong{font-size:13px;color:#0c4a6e}
+  .fltsch-live-audio-status{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;color:#64748b}
+  .fltsch-live-audio-status::before{content:"";width:9px;height:9px;border-radius:50%;background:#94a3b8}
+  .fltsch-live-audio-status[data-state="live"]{color:#166534}
+  .fltsch-live-audio-status[data-state="live"]::before{background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.14)}
+  .fltsch-live-audio-status[data-state="buffering"],.fltsch-live-audio-status[data-state="waiting"]{color:#92400e}
+  .fltsch-live-audio-status[data-state="buffering"]::before,.fltsch-live-audio-status[data-state="waiting"]::before{background:#f59e0b}
+  .fltsch-live-audio-status[data-state="reconnecting"]{color:#991b1b}
+  .fltsch-live-audio-status[data-state="reconnecting"]::before{background:#ef4444;animation:fltsch-live-pulse 1s ease-in-out infinite}
+  .fltsch-live-audio-note{margin:0;font-size:11.5px;line-height:1.45;color:#475569}
+  .fltsch-live-audio-delay{font-size:11px;font-weight:750;color:#64748b;font-variant-numeric:tabular-nums}
+  @keyframes fltsch-live-pulse{50%{opacity:.35}}
   .fltsch-live-track .legs-track-player{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin-top:10px}
   .fltsch-live-track .legs-track-play{border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#0f172a;padding:8px 12px;font-size:12px;font-weight:850;cursor:pointer;min-width:72px}
   .fltsch-live-track .legs-track-play:disabled{opacity:.45;cursor:not-allowed}
@@ -870,6 +884,20 @@ compliance_page_open(array(
         <p class="fltsch-muted" style="margin:0">Checking aircraft position…</p>
       </div>
     </div>
+    <section class="fltsch-live-audio" id="flightLiveAudioPanel" aria-labelledby="flightLiveAudioTitle">
+      <div class="fltsch-live-audio-head">
+        <strong id="flightLiveAudioTitle">Live Cockpit Audio</strong>
+        <span class="fltsch-live-audio-status" id="flightLiveAudioStatus" data-state="ended">Ended</span>
+      </div>
+      <p class="fltsch-live-audio-note">Low-bandwidth audio with a several-second safety delay. Listening is logged and the crew sees “LIVE BROADCAST ACTIVE”.</p>
+      <div class="fltsch-live-audio-actions">
+        <div>
+          <button type="button" class="compliance-btn compliance-btn--primary" id="flightLiveAudioStart">Listen Live</button>
+          <button type="button" class="compliance-btn compliance-btn--secondary" id="flightLiveAudioStop" hidden>Stop</button>
+        </div>
+        <span class="fltsch-live-audio-delay" id="flightLiveAudioDelay">Delay —</span>
+      </div>
+    </section>
     <section class="fltsch-crew-message" id="flightCrewMessagePanel" aria-labelledby="flightCrewMessageTitle">
       <div class="fltsch-crew-message-head">
         <strong id="flightCrewMessageTitle">System Message to Crew</strong>
@@ -927,6 +955,8 @@ window.IPCAFlightSchedule = <?= json_encode(array(
     'adsbTrackApiUrl' => '/admin/api/schedule_aircraft_adsb_track.php',
     'crewMessagesApiUrl' => '/admin/api/cvr_crew_messages.php',
     'crewMessagesCsrfToken' => $csrfToken,
+    'liveCockpitMonitorApiUrl' => '/admin/api/live_cockpit_monitor.php',
+    'liveCockpitMonitorCsrfToken' => $csrfToken,
     'adminOperationalRecoveryEnabled' => true,
     'operationalTimezone' => 'America/Los_Angeles',
 ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;

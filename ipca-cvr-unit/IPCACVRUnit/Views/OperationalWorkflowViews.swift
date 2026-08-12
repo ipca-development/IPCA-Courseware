@@ -4539,6 +4539,15 @@ struct InFlightWorkflowView: View {
             Text(audio.isRecording ? "RECORDING" : "RECORDER IDLE")
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(audio.isRecording ? CVROperationalPalette.critical : CVROperationalPalette.textSecondary)
+            if audio.isLiveBroadcastActive {
+                Label("LIVE BROADCAST ACTIVE", systemImage: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(CVROperationalPalette.critical, in: Capsule())
+                    .accessibilityLabel("Live broadcast active")
+            }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule().fill(CVROperationalPalette.cardBorder.opacity(0.45))

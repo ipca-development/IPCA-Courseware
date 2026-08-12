@@ -36,6 +36,18 @@ struct StatusDashboardView: View {
                             elapsed: audio.elapsed,
                             metrics: metrics
                         )
+                        if audio.isLiveBroadcastActive {
+                            HStack(spacing: 7) {
+                                Image(systemName: "dot.radiowaves.left.and.right")
+                                Text("LIVE BROADCAST ACTIVE")
+                            }
+                            .font(.system(size: metrics.isCompact ? 11 : 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(CVRPalette.critical, in: Capsule())
+                            .accessibilityLabel("Live broadcast active")
+                        }
                         AudioInputHealthCard(
                             sourceName: publicAudioSourceName,
                             signalState: audioSignalState,

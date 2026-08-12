@@ -25,10 +25,13 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     @Published private(set) var activeRecordingStartedAt: Date?
     @Published private(set) var recordingSignalActive = false
     @Published private(set) var backgroundRecordingStatus = "Idle"
+    @Published private(set) var isLiveBroadcastActive = false
+    @Published private(set) var captureBackend = "Legacy recorder"
     @Published var lastError: String = ""
 
     var onAudioEvent: ((CVRRecordingEvent) -> Void)?
     var onAudioSegmentsChanged: (([AudioRecordingSegment], String?) -> Void)?
+    var onLiveMonitorChunkReady: ((LiveCockpitEncodedChunk) -> Void)?
 
     var sourceSummary: String {
         if isUSBActive {
@@ -44,6 +47,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     }
 
     private var recorder: AVAudioRecorder?
+    private var captureFanout: LiveAudioCaptureFanout?
     private var monitorEngine: AVAudioEngine?
     private var recordingURL: URL?
     private var finalRecordingURL: URL?
@@ -55,6 +59,9 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     private var finalizedSegments: [AudioRecordingSegment] = []
     private var timer: Timer?
     private var shouldResumeAfterInterruption = false
+    private var engineCaptureAllowed = false
+    private var requestedMonitorBroadcastUUID: String?
+    private var requestedMonitorOperationalSessionUUID: String?
     private let segmentDurationSeconds: TimeInterval = 60
     private let recordingMeterRefreshInterval: TimeInterval = 0.5
     private let inputStateRefreshInterval: TimeInterval = 5
@@ -84,7 +91,39 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         NotificationCenter.default.removeObserver(self)
         monitorEngine?.inputNode.removeTap(onBus: 0)
         monitorEngine?.stop()
+        _ = captureFanout?.stop()
         timer?.invalidate()
+    }
+
+    func configureEngineCaptureAllowed(_ allowed: Bool) {
+        // The active evidence path is immutable for a recording. A server policy
+        // change applies only to the next recording.
+        guard !isRecording else { return }
+        engineCaptureAllowed = allowed
+    }
+
+    func setLiveMonitorCapture(
+        active: Bool,
+        broadcastUUID: String? = nil,
+        operationalSessionUUID: String? = nil
+    ) {
+        requestedMonitorBroadcastUUID = active ? broadcastUUID : nil
+        requestedMonitorOperationalSessionUUID = active ? operationalSessionUUID : nil
+        guard active, isRecording, captureFanout != nil else {
+            captureFanout?.setMonitorLease(
+                active: false,
+                broadcastUUID: nil,
+                operationalSessionUUID: nil
+            )
+            isLiveBroadcastActive = false
+            return
+        }
+        captureFanout?.setMonitorLease(
+            active: true,
+            broadcastUUID: broadcastUUID,
+            operationalSessionUUID: operationalSessionUUID
+        )
+        isLiveBroadcastActive = true
     }
 
     func refreshInputs(activateSession: Bool = true) async {
@@ -113,8 +152,13 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             updateInputState()
             try await startInputMonitorIfNeeded()
             if isRecording, !recordingSignalActive {
-                recorder?.record()
-                recordingSignalActive = recorder?.isRecording == true
+                if let captureFanout {
+                    try captureFanout.resumeAfterInterruption()
+                    recordingSignalActive = true
+                } else {
+                    recorder?.record()
+                    recordingSignalActive = recorder?.isRecording == true
+                }
             }
         } catch {
             lastError = "Audio route reset failed: \(error.localizedDescription)"
@@ -141,14 +185,60 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             let dir = try RecordingStore.recordingsDirectory()
             let finalURL = dir.appendingPathComponent("\(id).m4a")
             let segmentURL = segmentURL(recordingID: id, index: 1, directory: dir)
-            let audioRecorder = try makeRecorder(url: segmentURL)
-            audioRecorder.delegate = self
-            guard audioRecorder.record() else {
-                lastError = "Recorder did not start."
-                return false
+            var engineFallbackReason: String?
+            if engineCaptureAllowed {
+                do {
+                    let fanout = try LiveAudioCaptureFanout(evidenceURL: segmentURL)
+                    fanout.onLevels = { [weak self, weak fanout] average, peak in
+                        Task { @MainActor in
+                            guard let self, self.captureFanout === fanout else { return }
+                            self.updateAudioLevels(average: average, peak: peak)
+                            self.recordingSignalActive = true
+                        }
+                    }
+                    fanout.onMonitorChunk = { [weak self] chunk in
+                        Task { @MainActor in
+                            self?.onLiveMonitorChunkReady?(chunk)
+                        }
+                    }
+                    fanout.onFailure = { [weak self, weak fanout] error in
+                        Task { @MainActor in
+                            guard let self, self.captureFanout === fanout else { return }
+                            self.lastError = "Evidence fanout writer failed: \(error.localizedDescription)"
+                            self.recordingSignalActive = false
+                            self.onAudioEvent?(CVRRecordingEvent(
+                                severity: "error",
+                                type: "audio_engine_evidence_writer_failed",
+                                message: self.lastError
+                            ))
+                        }
+                    }
+                    try fanout.start()
+                    captureFanout = fanout
+                    captureBackend = "Single-capture fanout"
+                } catch {
+                    engineFallbackReason = error.localizedDescription
+                    captureFanout = nil
+                }
             }
-
-            recorder = audioRecorder
+            if captureFanout == nil {
+                try? FileManager.default.removeItem(at: segmentURL)
+                let audioRecorder = try makeRecorder(url: segmentURL)
+                audioRecorder.delegate = self
+                guard audioRecorder.record() else {
+                    lastError = "Recorder did not start."
+                    return false
+                }
+                recorder = audioRecorder
+                captureBackend = engineFallbackReason == nil ? "Legacy recorder" : "Legacy recorder fallback"
+                if let engineFallbackReason {
+                    onAudioEvent?(CVRRecordingEvent(
+                        severity: "warning",
+                        type: "audio_engine_fallback",
+                        message: "Single-capture fanout initialization failed; legacy evidence recorder used: \(engineFallbackReason)"
+                    ))
+                }
+            }
             recordingURL = segmentURL
             finalRecordingURL = finalURL
             recordingID = id
@@ -170,6 +260,13 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             isRecording = true
             recordingSignalActive = true
             backgroundRecordingStatus = "Recording"
+            if let requestedMonitorBroadcastUUID, let requestedMonitorOperationalSessionUUID {
+                setLiveMonitorCapture(
+                    active: true,
+                    broadcastUUID: requestedMonitorBroadcastUUID,
+                    operationalSessionUUID: requestedMonitorOperationalSessionUUID
+                )
+            }
             startTimer()
             return true
         } catch {
@@ -182,6 +279,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         guard let recordingID, let startedAt, let finalRecordingURL else { return nil }
         finalizeCurrentSegment()
         self.recorder = nil
+        self.captureFanout = nil
         self.recordingURL = nil
         self.finalRecordingURL = nil
         self.recordingID = nil
@@ -191,6 +289,9 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         self.currentSegmentStartedAt = nil
         isRecording = false
         recordingSignalActive = false
+        isLiveBroadcastActive = false
+        requestedMonitorBroadcastUUID = nil
+        requestedMonitorOperationalSessionUUID = nil
         backgroundRecordingStatus = "Idle"
         stopTimer()
         lastFileSizeRefreshAt = nil
@@ -264,7 +365,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         }
 
         updateMeters()
-        recordingSignalActive = recorder?.isRecording == true
+        recordingSignalActive = captureFanout != nil || recorder?.isRecording == true
         backgroundRecordingStatus = recordingSignalActive ? "Recording in background" : "Recording not active in background"
     }
 
@@ -275,7 +376,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
         }
 
         updateMeters()
-        recordingSignalActive = recorder?.isRecording == true
+        recordingSignalActive = captureFanout != nil || recorder?.isRecording == true
         if recordingSignalActive {
             backgroundRecordingStatus = "Recording continued in background"
         } else {
@@ -414,6 +515,19 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     }
 
     private func updateMeters() {
+        if let captureFanout {
+            elapsed = accumulatedDuration + captureFanout.evidenceDuration()
+            recordingSignalActive = isRecording
+            if let recordingURL, shouldRefreshFileSize() {
+                fileSize = finalizedSegments.reduce(Int64(0)) { $0 + $1.fileSize }
+                    + fileSizeFor(url: recordingURL)
+            }
+            refreshInputStateIfNeeded()
+            if captureFanout.evidenceDuration() >= segmentDurationSeconds {
+                rotateSegment()
+            }
+            return
+        }
         guard let recorder else { return }
         recorder.updateMeters()
         elapsed = accumulatedDuration + recorder.currentTime
@@ -481,6 +595,40 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
               let recordingID,
               let dir = try? RecordingStore.recordingsDirectory()
         else { return }
+        if let captureFanout, let recordingURL {
+            let previousIndex = currentSegmentIndex
+            let previousStartedAt = currentSegmentStartedAt ?? Date()
+            currentSegmentIndex += 1
+            let nextURL = segmentURL(recordingID: recordingID, index: currentSegmentIndex, directory: dir)
+            do {
+                let finalized = try captureFanout.rotateEvidence(to: nextURL)
+                if finalized.duration > 0.2 {
+                    let segment = AudioRecordingSegment(
+                        index: previousIndex,
+                        filePath: recordingURL.path,
+                        startedAt: previousStartedAt,
+                        duration: finalized.duration,
+                        fileSize: finalized.fileSize
+                    )
+                    finalizedSegments.append(segment)
+                    accumulatedDuration += finalized.duration
+                    onAudioSegmentsChanged?(finalizedSegments, nextURL.path)
+                }
+                self.recordingURL = nextURL
+                currentSegmentStartedAt = Date()
+                recordingSignalActive = true
+                onAudioEvent?(CVRRecordingEvent(
+                    severity: "info",
+                    type: "audio_segment_rotated",
+                    message: "Finalized audio segment \(previousIndex) without restarting capture."
+                ))
+            } catch {
+                currentSegmentIndex = previousIndex
+                lastError = "Could not rotate evidence writer: \(error.localizedDescription)"
+                recordingSignalActive = false
+            }
+            return
+        }
         finalizeCurrentSegment()
         currentSegmentIndex += 1
         let nextURL = segmentURL(recordingID: recordingID, index: currentSegmentIndex, directory: dir)
@@ -503,6 +651,22 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
     }
 
     private func finalizeCurrentSegment() {
+        if let captureFanout, let recordingURL {
+            let finalized = captureFanout.stop()
+            if finalized.duration > 0.2 {
+                let segment = AudioRecordingSegment(
+                    index: currentSegmentIndex,
+                    filePath: recordingURL.path,
+                    startedAt: currentSegmentStartedAt ?? Date().addingTimeInterval(-finalized.duration),
+                    duration: finalized.duration,
+                    fileSize: finalized.fileSize
+                )
+                finalizedSegments.append(segment)
+                accumulatedDuration += finalized.duration
+                onAudioSegmentsChanged?(finalizedSegments, recordingURL.path)
+            }
+            return
+        }
         guard let recorder, let recordingURL else { return }
         let duration = max(0, recorder.currentTime)
         recorder.stop()
@@ -741,7 +905,7 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             try? preferExternalInputIfAvailable()
             updateInputState()
             if isRecording {
-                recordingSignalActive = recorder?.isRecording == true
+                recordingSignalActive = captureFanout != nil || recorder?.isRecording == true
                 onAudioEvent?(CVRRecordingEvent(
                     severity: isAcceptedExternalInputActive ? "info" : "warning",
                     type: "audio_route_changed",
@@ -786,7 +950,29 @@ final class AudioRecorderManager: NSObject, ObservableObject, AVAudioRecorderDel
             case .ended:
                 let rawOptions = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
                 let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
-                if shouldResumeAfterInterruption && options.contains(.shouldResume), let recorder {
+                if shouldResumeAfterInterruption && options.contains(.shouldResume), let captureFanout {
+                    try? configureAudioSession()
+                    try? AVAudioSession.sharedInstance().setActive(true)
+                    do {
+                        try captureFanout.resumeAfterInterruption()
+                        recordingSignalActive = true
+                        backgroundRecordingStatus = "Recording resumed after interruption"
+                        onAudioEvent?(CVRRecordingEvent(
+                            severity: "info",
+                            type: "audio_interruption_ended",
+                            message: backgroundRecordingStatus
+                        ))
+                    } catch {
+                        recordingSignalActive = false
+                        backgroundRecordingStatus = "Evidence capture did not resume after interruption"
+                        lastError = "\(backgroundRecordingStatus): \(error.localizedDescription)"
+                        onAudioEvent?(CVRRecordingEvent(
+                            severity: "error",
+                            type: "audio_interruption_ended",
+                            message: lastError
+                        ))
+                    }
+                } else if shouldResumeAfterInterruption && options.contains(.shouldResume), let recorder {
                     try? configureAudioSession()
                     try? AVAudioSession.sharedInstance().setActive(true)
                     recorder.record()
