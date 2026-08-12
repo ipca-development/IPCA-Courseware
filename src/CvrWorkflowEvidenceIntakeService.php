@@ -13,8 +13,12 @@ final class CvrWorkflowEvidenceIntakeService
     {
     }
 
-    /** @param array<string,mixed> $payload @param array<string,mixed> $device */
-    public function receive(array $payload, array $device): array
+    /**
+     * @param array<string,mixed> $payload
+     * @param array<string,mixed> $device
+     * @param array{actor_type?:string,actor_user_id?:int,source?:string} $actor
+     */
+    public function receive(array $payload, array $device, array $actor = array()): array
     {
         $this->requireSchema();
         $canonicalPayload = $this->canonicalPayload($payload);
@@ -22,13 +26,6 @@ final class CvrWorkflowEvidenceIntakeService
         $canonical = $canonicalPayload['payload_json'];
         $hash = $canonicalPayload['payload_sha256'];
         $deviceId = (int)($device['id'] ?? 0);
-        $this->assertDispatchOwnership(
-            $normalized['dispatch_uuid'],
-            $normalized['flight_record_uuid'],
-            $normalized['operational_session_uuid'],
-            $deviceId
-        );
-
         $this->pdo->beginTransaction();
         try {
             $existing = $this->batch($normalized['component_uuid']);
@@ -43,6 +40,12 @@ final class CvrWorkflowEvidenceIntakeService
                 $receivedAt = (string)$existing['received_at'];
                 $batchUuid = (string)$existing['batch_uuid'];
             } else {
+                $this->assertDispatchOwnership(
+                    $normalized['dispatch_uuid'],
+                    $normalized['flight_record_uuid'],
+                    $normalized['operational_session_uuid'],
+                    $deviceId
+                );
                 $receipt = AuditEventService::uuid();
                 $batchUuid = AuditEventService::uuid();
                 $statement = $this->pdo->prepare(
@@ -71,6 +74,9 @@ final class CvrWorkflowEvidenceIntakeService
                     throw new CvrTemporaryTechnicalFailure('Workflow evidence receipt metadata is temporarily unavailable.');
                 }
                 $receivedAt = (string)$inserted['received_at'];
+                $actorType = trim((string)($actor['actor_type'] ?? 'device')) ?: 'device';
+                $actorUserId = (int)($actor['actor_user_id'] ?? 0) ?: null;
+                $auditSource = trim((string)($actor['source'] ?? 'cvr_app')) ?: 'cvr_app';
                 (new AuditEventService($this->pdo))->record(
                     'cvr_workflow_evidence_received',
                     'ipca_cvr_workflow_evidence_batches',
@@ -82,13 +88,15 @@ final class CvrWorkflowEvidenceIntakeService
                         'receipt_uuid' => $receipt,
                         'payload_sha256' => $hash,
                     ),
-                    'Authenticated immutable CVR workflow evidence received.',
-                    'device',
-                    null,
-                    $deviceId,
+                    $actorType === 'admin'
+                        ? 'Administrator recorded immutable CVR workflow evidence through the online scheduler.'
+                        : 'Authenticated immutable CVR workflow evidence received.',
+                    $actorType,
+                    $actorUserId,
+                    $actorType === 'device' ? $deviceId : null,
                     null,
                     max(1, (int)($device['organization_id'] ?? 1)),
-                    'cvr_app'
+                    $auditSource
                 );
             }
             $typedIdentifiers = $this->typedIdentifiers($batchId, $normalized['component_type']);
@@ -303,8 +311,8 @@ final class CvrWorkflowEvidenceIntakeService
     ): void
     {
         $statement = $this->pdo->prepare(
-            'SELECT device_id, workflow_flight_record_uuid, operational_session_uuid
-             FROM ipca_cvr_dispatches WHERE dispatch_uuid = ? LIMIT 1'
+            'SELECT device_id, workflow_flight_record_uuid, operational_session_uuid, status
+             FROM ipca_cvr_dispatches WHERE dispatch_uuid = ? LIMIT 1 FOR UPDATE'
         );
         $statement->execute(array($dispatchUuid));
         $dispatch = $statement->fetch(PDO::FETCH_ASSOC);
@@ -313,6 +321,11 @@ final class CvrWorkflowEvidenceIntakeService
         }
         if ((int)$dispatch['device_id'] !== $deviceId) {
             throw new CvrTechnicalReviewRequired('Dispatch ownership requires technical review.');
+        }
+        if (strtolower(trim((string)($dispatch['status'] ?? ''))) === 'released') {
+            throw new CvrUserCorrectionRequired(
+                'This Dispatch was administratively released. Its queued evidence is retained locally but cannot reopen the session.'
+            );
         }
         if (strtolower((string)$dispatch['workflow_flight_record_uuid']) !== $flightUuid) {
             throw new CvrTechnicalReviewRequired('Evidence Flight Record linkage requires technical review.');

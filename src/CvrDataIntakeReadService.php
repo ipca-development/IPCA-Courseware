@@ -307,6 +307,9 @@ final class CvrDataIntakeReadService
 
         $where = array('1=1');
         $params = array();
+        if (isset($columns['status'])) {
+            $where[] = "LOWER(TRIM(COALESCE({$tableAlias}.status, ''))) <> 'released'";
+        }
         if ($aircraftRegistration !== null) {
             $regColumn = $this->firstColumn($columns, array('aircraft_registration', 'tail_number'));
             if ($regColumn !== null) {

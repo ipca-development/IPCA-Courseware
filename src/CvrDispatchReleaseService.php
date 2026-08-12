@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/AuditEventService.php';
 require_once __DIR__ . '/CvrSyncException.php';
 require_once __DIR__ . '/FlightSessionService.php';
+require_once __DIR__ . '/tv_adsb_status.php';
 
 /**
  * Release an accidental Dispatch claim so the schedule slot can be used again.
@@ -11,8 +12,34 @@ require_once __DIR__ . '/FlightSessionService.php';
  */
 final class CvrDispatchReleaseService
 {
+    private const ADMIN_REASON_CODES = array(
+        'accidental_dispatch',
+        'avionics_maintenance_test',
+        'wrong_reservation',
+        'wrong_aircraft',
+        'wrong_crew',
+        'duplicate_dispatch',
+        'operation_cancelled',
+        'other',
+    );
+
     public function __construct(private PDO $pdo)
     {
+    }
+
+    /** @return array<string,string> */
+    public static function administrativeReasons(): array
+    {
+        return array(
+            'accidental_dispatch' => 'Accidental Dispatch',
+            'avionics_maintenance_test' => 'Avionics or maintenance test',
+            'wrong_reservation' => 'Wrong reservation',
+            'wrong_aircraft' => 'Wrong aircraft',
+            'wrong_crew' => 'Wrong crew',
+            'duplicate_dispatch' => 'Duplicate Dispatch',
+            'operation_cancelled' => 'Operation cancelled after Dispatch',
+            'other' => 'Other',
+        );
     }
 
     /**
@@ -77,6 +104,49 @@ final class CvrDispatchReleaseService
     }
 
     /**
+     * Administrative recovery for a Dispatch that may contain stationary recorder
+     * evidence but did not become a genuine flight.
+     *
+     * @return array<string,mixed>
+     */
+    public function releaseAdministrativelyBySchedulerRecordId(
+        string $schedulerRecordId,
+        string $reasonCode,
+        string $reasonText,
+        int $actorUserId,
+        string $actorType = 'admin'
+    ): array {
+        $schedulerRecordId = strtolower(trim($schedulerRecordId));
+        $reasonCode = strtolower(trim($reasonCode));
+        $reasonText = trim($reasonText);
+        if (!$this->isUuid($schedulerRecordId)) {
+            throw new CvrUserCorrectionRequired('Schedule record id must be a valid UUID.');
+        }
+        if (!in_array($reasonCode, self::ADMIN_REASON_CODES, true)) {
+            throw new CvrUserCorrectionRequired('Select a valid Undispatch reason.');
+        }
+        if ($reasonCode === 'other' && $reasonText === '') {
+            throw new CvrUserCorrectionRequired('Explain the reason for administrative Undispatch.');
+        }
+        if ($actorUserId <= 0) {
+            throw new CvrUserCorrectionRequired('Administrator identity is required for evidence-bearing Undispatch.');
+        }
+        if (!$this->tableExists('ipca_cvr_dispatch_release_events')) {
+            throw new CvrDependencyNotReady('Administrative Dispatch recovery migration is not available yet.');
+        }
+        return $this->release(
+            schedulerRecordId: $schedulerRecordId,
+            dispatchUuid: null,
+            actorUserId: $actorUserId,
+            actorType: $actorType,
+            deviceId: null,
+            administrativeOverride: true,
+            reasonCode: $reasonCode,
+            reasonText: $reasonText
+        );
+    }
+
+    /**
      * @return array{
      *   ok:bool,
      *   already_released:bool,
@@ -90,7 +160,10 @@ final class CvrDispatchReleaseService
         ?string $dispatchUuid,
         ?int $actorUserId,
         string $actorType,
-        ?int $deviceId
+        ?int $deviceId,
+        bool $administrativeOverride = false,
+        ?string $reasonCode = null,
+        ?string $reasonText = null
     ): array {
         if (!$this->tableExists('ipca_flight_schedule_slots') || !$this->tableExists('ipca_cvr_dispatches')) {
             throw new CvrDependencyNotReady('Dispatch release schema is not available yet.');
@@ -181,8 +254,16 @@ final class CvrDispatchReleaseService
             // Multi-leg reservations share one schedule slot. Earlier hops can mark the slot
             // completed while a later Dispatch still has no evidence and must remain releaseable.
             // Block "completed" only when THIS Dispatch itself already has closure/events/audio.
+            $evidenceSummary = array();
             if ($flightRecordUuid !== '') {
-                $this->assertNoFlightEvidence($flightRecordUuid);
+                if ($administrativeOverride) {
+                    $evidenceSummary = $this->assertAdministrativeReleaseAllowed(
+                        $flightRecordUuid,
+                        (string)($dispatch['aircraft_registration'] ?? '')
+                    );
+                } else {
+                    $this->assertNoFlightEvidence($flightRecordUuid);
+                }
             }
 
             if (is_array($dispatch)) {
@@ -208,6 +289,18 @@ final class CvrDispatchReleaseService
                 );
             }
 
+            if ($administrativeOverride && is_array($dispatch)) {
+                $this->recordAdministrativeRelease(
+                    $dispatch,
+                    $resolvedSchedulerId,
+                    (string)$reasonCode,
+                    (string)$reasonText,
+                    $evidenceSummary,
+                    $actorType,
+                    $actorUserId
+                );
+            }
+
             (new AuditEventService($this->pdo))->record(
                 'cvr_dispatch_released',
                 'ipca_flight_schedule_slots',
@@ -219,7 +312,10 @@ final class CvrDispatchReleaseService
                     'flight_record_uuid' => $flightRecordUuid !== '' ? $flightRecordUuid : null,
                     'actor_type' => $actorType,
                 ),
-                'Accidental Dispatch claim released before flight evidence.',
+                $administrativeOverride
+                    ? 'Administrative Undispatch: ' . (self::administrativeReasons()[(string)$reasonCode] ?? 'Other')
+                        . ((string)$reasonText !== '' ? ' — ' . (string)$reasonText : '')
+                    : 'Accidental Dispatch claim released before flight evidence.',
                 $actorType,
                 $actorUserId,
                 $deviceId,
@@ -235,6 +331,8 @@ final class CvrDispatchReleaseService
                 'scheduler_record_id' => $resolvedSchedulerId !== '' ? $resolvedSchedulerId : null,
                 'dispatch_uuid' => $resolvedDispatchUuid !== '' ? $resolvedDispatchUuid : null,
                 'flight_record_uuid' => $flightRecordUuid !== '' ? $flightRecordUuid : null,
+                'administrative_override' => $administrativeOverride,
+                'evidence_summary' => $evidenceSummary,
             );
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
@@ -373,6 +471,164 @@ final class CvrDispatchReleaseService
         );
         $byClaim->execute(array($claimed));
         return (bool)$byClaim->fetchColumn();
+    }
+
+    /**
+     * Audio and stationary recorder evidence are allowed for administrative
+     * recovery. A closure, Garmin data, airborne event, or meaningful movement
+     * still requires Check-In instead of Undispatch.
+     *
+     * @return array<string,mixed>
+     */
+    private function assertAdministrativeReleaseAllowed(
+        string $flightRecordUuid,
+        string $aircraftRegistration
+    ): array
+    {
+        $summary = array(
+            'closure_count' => 0,
+            'event_count' => 0,
+            'audio_count' => 0,
+            'garmin_count' => 0,
+            'airborne_event_count' => 0,
+            'maximum_ground_speed_kt' => 0.0,
+            'live_adsb_airborne' => false,
+            'live_adsb_checked' => false,
+        );
+        if ($this->tableExists('ipca_cvr_flight_closures')) {
+            $statement = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM ipca_cvr_flight_closures WHERE workflow_flight_record_uuid = ?'
+            );
+            $statement->execute(array($flightRecordUuid));
+            $summary['closure_count'] = (int)$statement->fetchColumn();
+        }
+        if ($summary['closure_count'] > 0) {
+            throw new CvrUserCorrectionRequired(
+                'Undispatch is blocked because Check-In already exists. Use an administrative flight correction instead.'
+            );
+        }
+
+        if ($this->tableExists('ipca_cvr_flight_events')) {
+            $statement = $this->pdo->prepare(
+                'SELECT event_type, ground_speed, payload_json
+                 FROM ipca_cvr_flight_events
+                 WHERE workflow_flight_record_uuid = ?
+                 ORDER BY id ASC'
+            );
+            $statement->execute(array($flightRecordUuid));
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $event) {
+                $summary['event_count']++;
+                $type = strtolower(trim((string)($event['event_type'] ?? '')));
+                if (str_contains($type, 'takeoff')
+                    || str_contains($type, 'landing')
+                    || str_contains($type, 'airborne')) {
+                    $summary['airborne_event_count']++;
+                }
+                $speed = is_numeric($event['ground_speed'] ?? null)
+                    ? (float)$event['ground_speed']
+                    : 0.0;
+                $payload = json_decode((string)($event['payload_json'] ?? '{}'), true);
+                if (is_array($payload)) {
+                    foreach (array('ground_speed', 'ground_speed_kt', 'groundspeed_kt') as $key) {
+                        if (is_numeric($payload[$key] ?? null)) {
+                            $speed = max($speed, (float)$payload[$key]);
+                        }
+                    }
+                }
+                $summary['maximum_ground_speed_kt'] = max(
+                    (float)$summary['maximum_ground_speed_kt'],
+                    $speed
+                );
+            }
+        }
+
+        if ($this->tableExists('ipca_cockpit_recordings')) {
+            $statement = $this->pdo->prepare(
+                "SELECT health_summary_json
+                 FROM ipca_cockpit_recordings
+                 WHERE LOWER(flight_session_uid) = LOWER(?)
+                   AND upload_status = 'uploaded'"
+            );
+            $statement->execute(array($flightRecordUuid));
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $recording) {
+                $summary['audio_count']++;
+                $health = json_decode((string)($recording['health_summary_json'] ?? '{}'), true);
+                $speed = $health['gps']['max_groundspeed_kt'] ?? null;
+                if (is_numeric($speed)) {
+                    $summary['maximum_ground_speed_kt'] = max(
+                        (float)$summary['maximum_ground_speed_kt'],
+                        (float)$speed
+                    );
+                }
+            }
+        }
+
+        if ($this->tableExists('ipca_garmin_csv_files')) {
+            $statement = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM ipca_garmin_csv_files WHERE workflow_flight_record_uuid = ?'
+            );
+            $statement->execute(array($flightRecordUuid));
+            $summary['garmin_count'] = (int)$statement->fetchColumn();
+        }
+        if ($summary['garmin_count'] > 0) {
+            throw new CvrUserCorrectionRequired(
+                'Undispatch is blocked because Garmin flight data exists. Complete Check-In or correct the flight administratively.'
+            );
+        }
+        if ($summary['airborne_event_count'] > 0 || (float)$summary['maximum_ground_speed_kt'] >= 30.0) {
+            throw new CvrUserCorrectionRequired(
+                'Undispatch is blocked because airborne or meaningful movement evidence exists. Complete Check-In instead.'
+            );
+        }
+        $aircraftRegistration = strtoupper(trim($aircraftRegistration));
+        if ($aircraftRegistration !== '') {
+            try {
+                $live = tv_adsb_fetch_by_registration($aircraftRegistration);
+                $summary['live_adsb_checked'] = true;
+                $summary['live_adsb_airborne'] = is_array($live)
+                    && tv_adsb_is_actively_airborne($live);
+            } catch (Throwable $e) {
+                $summary['live_adsb_error'] = substr($e->getMessage(), 0, 255);
+            }
+            if ($summary['live_adsb_airborne']) {
+                throw new CvrUserCorrectionRequired(
+                    'Undispatch is blocked because the aircraft is currently airborne. Complete Check-In instead.'
+                );
+            }
+        }
+        return $summary;
+    }
+
+    /** @param array<string,mixed> $dispatch @param array<string,mixed> $evidenceSummary */
+    private function recordAdministrativeRelease(
+        array $dispatch,
+        string $schedulerRecordId,
+        string $reasonCode,
+        string $reasonText,
+        array $evidenceSummary,
+        string $actorType,
+        ?int $actorUserId
+    ): void {
+        $this->pdo->prepare(
+            'INSERT INTO ipca_cvr_dispatch_release_events
+              (release_uuid, dispatch_id, dispatch_uuid, scheduler_record_id,
+               workflow_flight_record_uuid, operational_session_uuid, release_mode,
+               reason_code, reason_text, evidence_summary_json, actor_type, actor_user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute(array(
+            AuditEventService::uuid(),
+            (int)$dispatch['id'],
+            strtolower(trim((string)$dispatch['dispatch_uuid'])),
+            $schedulerRecordId !== '' ? $schedulerRecordId : null,
+            strtolower(trim((string)($dispatch['workflow_flight_record_uuid'] ?? ''))) ?: null,
+            strtolower(trim((string)($dispatch['operational_session_uuid'] ?? ''))) ?: null,
+            'administrative_evidence_release',
+            $reasonCode,
+            $reasonText !== '' ? substr($reasonText, 0, 512) : null,
+            AuditEventService::jsonEncode($evidenceSummary),
+            substr($actorType, 0, 32),
+            $actorUserId,
+        ));
     }
 
     private function assertNoFlightEvidence(string $flightRecordUuid): void

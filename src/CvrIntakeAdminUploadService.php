@@ -74,7 +74,9 @@ final class CvrIntakeAdminUploadService
         ?float $durationSeconds = null,
         string $studentName = '',
         string $instructorName = '',
-        string $missionCode = ''
+        string $missionCode = '',
+        ?string $workflowFlightRecordUuid = null,
+        ?string $operationalSessionUuid = null
     ): array {
         if ($aircraftId <= 0) {
             throw new RuntimeException('Select a valid aircraft for Cockpit Audio upload.');
@@ -101,6 +103,11 @@ final class CvrIntakeAdminUploadService
                 'intake_mission_code' => strtoupper(trim($missionCode)),
                 'intake_crew_json' => $crew === array() ? null : $crew,
             ));
+            $this->linkAudioToOperationalSession(
+                $recordingId,
+                $workflowFlightRecordUuid,
+                $operationalSessionUuid
+            );
         }
 
         return array(
@@ -110,6 +117,32 @@ final class CvrIntakeAdminUploadService
             'recording_uid' => (string)($result['recording']['recording_uid'] ?? ''),
             'message' => 'Cockpit Audio uploaded and queued for transcription.',
         );
+    }
+
+    private function linkAudioToOperationalSession(
+        int $recordingId,
+        ?string $workflowFlightRecordUuid,
+        ?string $operationalSessionUuid
+    ): void {
+        $flightUuid = strtolower(trim((string)$workflowFlightRecordUuid));
+        $sessionUuid = strtolower(trim((string)$operationalSessionUuid));
+        if ($recordingId <= 0 || $flightUuid === '') {
+            return;
+        }
+        if (!preg_match('/^[0-9a-f-]{36}$/', $flightUuid)
+            || ($sessionUuid !== '' && !preg_match('/^[0-9a-f-]{36}$/', $sessionUuid))) {
+            throw new RuntimeException('Operational Session audio linkage is invalid.');
+        }
+        $sets = array('flight_session_uid = ?', "intake_source = 'admin_manual_checkin'");
+        $params = array($flightUuid);
+        if ($sessionUuid !== '' && $this->columnExists('ipca_cockpit_recordings', 'operational_session_uuid')) {
+            $sets[] = 'operational_session_uuid = ?';
+            $params[] = $sessionUuid;
+        }
+        $params[] = $recordingId;
+        $this->pdo->prepare(
+            'UPDATE ipca_cockpit_recordings SET ' . implode(', ', $sets) . ' WHERE id = ?'
+        )->execute($params);
     }
 
     /**

@@ -72,6 +72,19 @@ final class CvrOperationalSessionLegReviewService
     }
 
     /** @return array<string,mixed> */
+    public function previewForAdmin(string $dispatchUuid): array
+    {
+        $dispatch = $this->dispatchForAdmin($dispatchUuid);
+        return $this->previewForDevice(
+            array(
+                'id' => (int)$dispatch['device_id'],
+                'organization_id' => (int)($dispatch['organization_id'] ?? 1),
+            ),
+            (string)$dispatch['dispatch_uuid']
+        );
+    }
+
+    /** @return array<string,mixed> */
     public function statusForDevice(array $device, string $dispatchUuid): array
     {
         $dispatch = $this->ownedDispatch($device, $dispatchUuid, false);
@@ -93,8 +106,13 @@ final class CvrOperationalSessionLegReviewService
         );
     }
 
-    /** @return array<string,mixed> */
-    public function acceptForDevice(array $device, array $input): array
+    /**
+     * @param array<string,mixed> $device
+     * @param array<string,mixed> $input
+     * @param array{actor_type?:string,actor_user_id?:int,review_source?:string} $actor
+     * @return array<string,mixed>
+     */
+    public function acceptForDevice(array $device, array $input, array $actor = array()): array
     {
         $revisionUuid = $this->uuid((string)($input['revision_uuid'] ?? ''), 'revision_uuid');
         $dispatchUuid = $this->uuid((string)($input['dispatch_uuid'] ?? ''), 'dispatch_uuid');
@@ -103,6 +121,9 @@ final class CvrOperationalSessionLegReviewService
         if ($deviceId <= 0) {
             throw new RuntimeException('Authenticated CVR device is required.');
         }
+        $actorType = trim((string)($actor['actor_type'] ?? 'device')) ?: 'device';
+        $actorUserId = (int)($actor['actor_user_id'] ?? 0) ?: null;
+        $reviewSource = trim((string)($actor['review_source'] ?? 'cvr_device')) ?: 'cvr_device';
 
         $this->pdo->beginTransaction();
         try {
@@ -166,8 +187,8 @@ final class CvrOperationalSessionLegReviewService
                 'INSERT INTO ipca_operational_session_leg_reviews
                  (revision_uuid, operational_session_uuid, dispatch_id, workflow_flight_record_uuid,
                   revision_number, status, evidence_sha256, evidence_source, legs_json, reviewed_by_device_id,
-                  supersedes_revision_uuid)
-                 VALUES (?, ?, ?, ?, ?, \'ACCEPTED\', ?, ?, ?, ?, ?)'
+                  reviewed_by_user_id, review_source, supersedes_revision_uuid)
+                 VALUES (?, ?, ?, ?, ?, \'ACCEPTED\', ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute(array(
                 $revisionUuid,
@@ -179,6 +200,8 @@ final class CvrOperationalSessionLegReviewService
                 $evidenceSource,
                 $canonicalLegs,
                 $deviceId,
+                $actorUserId,
+                $reviewSource,
                 $supersedes ?: null,
             ));
             $this->persistCurrentProjection((int)$dispatch['id'], $legs, $revisionUuid, $evidenceHash);
@@ -202,10 +225,12 @@ final class CvrOperationalSessionLegReviewService
                     'evidence_source' => $evidenceSource,
                     'evidence_discrepancies' => $evidenceDiscrepancies,
                 ),
-                'CVR device accepted evidence-derived Operational Session legs.',
-                'device',
-                null,
-                $deviceId
+                $actorType === 'admin'
+                    ? 'Administrator accepted Operational Session legs through the online Check-In workflow.'
+                    : 'CVR device accepted evidence-derived Operational Session legs.',
+                $actorType,
+                $actorUserId,
+                $actorType === 'device' ? $deviceId : null
             );
             $this->pdo->commit();
         } catch (Throwable $e) {
@@ -229,6 +254,27 @@ final class CvrOperationalSessionLegReviewService
             'revision_number' => $revisionNumber,
             'legs' => $legs,
             'evidence_discrepancies' => $evidenceDiscrepancies,
+        );
+    }
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    public function acceptForAdmin(int $actorUserId, array $input): array
+    {
+        if ($actorUserId <= 0) {
+            throw new RuntimeException('Administrator identity is required for leg verification.');
+        }
+        $dispatch = $this->dispatchForAdmin((string)($input['dispatch_uuid'] ?? ''));
+        return $this->acceptForDevice(
+            array(
+                'id' => (int)$dispatch['device_id'],
+                'organization_id' => (int)($dispatch['organization_id'] ?? 1),
+            ),
+            $input,
+            array(
+                'actor_type' => 'admin',
+                'actor_user_id' => $actorUserId,
+                'review_source' => 'admin_online_checkin',
+            )
         );
     }
 
@@ -315,6 +361,24 @@ final class CvrOperationalSessionLegReviewService
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
             throw new RuntimeException('Operational Session Dispatch was not found for this CVR device.');
+        }
+        return $row;
+    }
+
+    /** @return array<string,mixed> */
+    private function dispatchForAdmin(string $dispatchUuid): array
+    {
+        $uuid = $this->uuid($dispatchUuid, 'dispatch_uuid');
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ipca_cvr_dispatches
+             WHERE LOWER(dispatch_uuid) = ?
+               AND operational_session_uuid IS NOT NULL
+             LIMIT 1'
+        );
+        $stmt->execute(array($uuid));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new RuntimeException('Operational Session Dispatch was not found.');
         }
         return $row;
     }

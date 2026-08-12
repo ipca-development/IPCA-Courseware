@@ -130,22 +130,22 @@ require_contains(
     'live status layout is isolated from toolbar',
     $failures
 );
-require_not_contains(
+require_contains(
     $root . '/public/admin/assets/flight_schedule.js',
     "if (reservation.status === 'claimed') {\n      openDispatchedModal(reservation);",
-    'claimed reservation click no longer opens ADS-B modal',
+    'claimed reservation click opens operational ADS-B action modal',
     $failures
 );
-require_not_contains(
+require_contains(
     $root . '/public/admin/schedule.php',
-    'flightDispatchedUndispatchBtn',
-    'live ADS-B modal does not expose undispatch action',
+    'id="flightDispatchedUndispatch"',
+    'live ADS-B modal exposes administrative Undispatch',
     $failures
 );
-require_not_contains(
+require_contains(
     $root . '/public/admin/assets/flight_schedule.js',
-    "document.getElementById('flightDispatchedUndispatchBtn')",
-    'live ADS-B JavaScript does not wire undispatch action',
+    "document.getElementById('flightDispatchedUndispatch')",
+    'live ADS-B JavaScript wires administrative Undispatch',
     $failures
 );
 require_contains(

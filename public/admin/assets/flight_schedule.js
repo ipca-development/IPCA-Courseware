@@ -414,9 +414,10 @@
   }
 
   function openReservation(reservation) {
-    // Live ADS-B is opened from the aircraft tail number, not the reservation block.
-    // Dispatched / claimed blocks stay locked here; undispatch remains available from the ADS-B modal.
+    // A dispatched reservation opens the operational action menu together with
+    // its existing ADS-B, messaging, and live-audio controls.
     if (reservation.status === 'claimed') {
+      openDispatchedModal(reservation);
       return;
     }
     if (reservation.editable) {
@@ -913,12 +914,84 @@
     if (dispatchEl) {
       dispatchEl.textContent = reservation.claimed_dispatch_uuid || '—';
     }
+    var reason = form.querySelector('[name="reason_code"]');
+    var reasonText = form.querySelector('[name="reason_text"]');
+    if (reason) reason.value = '';
+    if (reasonText) reasonText.value = '';
     // Close track modal first so undispatch is the focused dialog.
     var trackModal = document.getElementById('flightDispatchedModal');
     if (trackModal && typeof trackModal.close === 'function' && trackModal.open) {
       trackModal.close();
     }
     showDialog('flightUndispatchModal');
+  }
+
+  function randomUuid() {
+    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+      return globalThis.crypto.randomUUID().toLowerCase();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (char) {
+      var value = Math.random() * 16 | 0;
+      var next = char === 'x' ? value : (value & 0x3 | 0x8);
+      return next.toString(16);
+    });
+  }
+
+  function localDateTimeValue(date) {
+    if (globalThis.Intl && config.operationalTimezone) {
+      try {
+        var parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: config.operationalTimezone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hourCycle: 'h23'
+        }).formatToParts(date).reduce(function (result, part) {
+          result[part.type] = part.value;
+          return result;
+        }, {});
+        if (parts.year && parts.month && parts.day && parts.hour && parts.minute) {
+          return parts.year + '-' + parts.month + '-' + parts.day + 'T' + parts.hour + ':' + parts.minute;
+        }
+      } catch (error) {}
+    }
+    var pad = function (value) { return String(value).padStart(2, '0'); };
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+      + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+
+  function openManualCheckInModal(reservation) {
+    var modal = document.getElementById('flightManualCheckInModal');
+    var form = document.getElementById('flightManualCheckInForm');
+    if (!modal || !form) return;
+    var context = reservation.dispatch_context || {};
+    var setValue = function (name, value) {
+      var input = form.querySelector('[name="' + name + '"]');
+      if (input) input.value = value == null ? '' : String(value);
+    };
+    setValue('scheduler_record_id', reservation.scheduler_record_id || '');
+    setValue('component_uuid', randomUuid());
+    setValue('closure_uuid', randomUuid());
+    setValue('engine_shutdown_local', localDateTimeValue(new Date()));
+    setValue('off_block_local', '');
+    setValue('ending_hobbs', context.starting_hobbs);
+    setValue('ending_tacho', context.starting_tacho);
+    setValue('fuel_remaining', context.fuel_onboard);
+    var aircraftEl = document.getElementById('flightCheckInAircraft');
+    var missionEl = document.getElementById('flightCheckInMission');
+    var hobbsEl = document.getElementById('flightCheckInStartingHobbs');
+    var tachoEl = document.getElementById('flightCheckInStartingTacho');
+    if (aircraftEl) aircraftEl.textContent = reservation.aircraft && reservation.aircraft.registration
+      ? reservation.aircraft.registration : '—';
+    if (missionEl) missionEl.textContent = reservation.mission && reservation.mission.code
+      ? reservation.mission.code : '—';
+    if (hobbsEl) hobbsEl.textContent = context.starting_hobbs == null ? '—' : Number(context.starting_hobbs).toFixed(1);
+    if (tachoEl) tachoEl.textContent = context.starting_tacho == null ? '—' : Number(context.starting_tacho).toFixed(1);
+    var trackModal = document.getElementById('flightDispatchedModal');
+    if (trackModal && typeof trackModal.close === 'function' && trackModal.open) trackModal.close();
+    showDialog('flightManualCheckInModal');
   }
 
   function openDispatchedModal(reservation) {
@@ -937,6 +1010,16 @@
         + '<p class="fltsch-muted">Live ADS-B follows this aircraft continuously. Full selected-aircraft track is shown; nearby traffic appears without trails.</p>';
     }
     showDialog('flightDispatchedModal');
+    var checkInButton = document.getElementById('flightDispatchedCheckIn');
+    var undispatchButton = document.getElementById('flightDispatchedUndispatch');
+    if (checkInButton) {
+      checkInButton.hidden = !reservation.can_admin_check_in;
+      checkInButton.onclick = function () { openManualCheckInModal(reservation); };
+    }
+    if (undispatchButton) {
+      undispatchButton.hidden = !reservation.can_admin_undispatch;
+      undispatchButton.onclick = function () { openUndispatchModal(reservation); };
+    }
     var messageEls = crewMessageElements();
     if (messageEls.text && !messageEls.text.dataset.bound) {
       messageEls.text.dataset.bound = '1';

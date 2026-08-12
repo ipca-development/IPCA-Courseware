@@ -64,6 +64,10 @@ final class FlightScheduleService
                    d.operational_session_uuid AS linked_operational_session_uuid,
                    d.current_version AS dispatch_version,
                    d.last_received_at AS dispatch_received_at,
+                   d.starting_hobbs AS dispatch_starting_hobbs,
+                   d.starting_tacho AS dispatch_starting_tacho,
+                   d.fuel_onboard AS dispatch_fuel_onboard,
+                   d.aircraft_registration AS dispatch_aircraft_registration,
                    EXISTS(
                      SELECT 1 FROM ipca_cvr_flight_closures fc
                      WHERE fc.workflow_flight_record_uuid = d.workflow_flight_record_uuid
@@ -1413,6 +1417,13 @@ final class FlightScheduleService
             && !$hasDisplayClosure
             && !$hasFlightData
             && empty($row['has_audio']);
+        $canAdminUndispatch = $status === 'claimed'
+            && $hasDispatch
+            && !$hasDisplayClosure;
+        $canAdminCheckIn = $status === 'claimed'
+            && $hasDispatch
+            && !$hasDisplayClosure
+            && $isOperationalSession;
         $payload = array(
             'scheduler_record_id' => (string)$row['scheduler_record_id'],
             'reservation_type' => (string)($row['reservation_type'] ?? 'flight_training'),
@@ -1444,11 +1455,28 @@ final class FlightScheduleService
             'status' => $status,
             'editable' => $editable,
             'can_undispatch' => $canUndispatch,
+            'can_admin_undispatch' => $canAdminUndispatch,
+            'can_admin_check_in' => $canAdminCheckIn,
             'lock_reason' => $editable ? null : ($hasDisplayClosure ? 'completed' : 'dispatch_claimed'),
             'claimed_dispatch_uuid' => trim((string)($row['claimed_dispatch_uuid'] ?? '')) ?: null,
             'claimed_at' => isset($row['claimed_at'])
                 ? $this->isoPrecise((string)$row['claimed_at'])
                 : null,
+            'dispatch_context' => array(
+                'dispatch_id' => isset($row['dispatch_id']) ? (int)$row['dispatch_id'] : null,
+                'dispatch_uuid' => trim((string)($row['linked_dispatch_uuid'] ?? '')) ?: null,
+                'workflow_flight_record_uuid' => trim((string)($row['workflow_flight_record_uuid'] ?? '')) ?: null,
+                'operational_session_uuid' => trim((string)($row['linked_operational_session_uuid'] ?? '')) ?: null,
+                'starting_hobbs' => isset($row['dispatch_starting_hobbs'])
+                    ? (float)$row['dispatch_starting_hobbs']
+                    : null,
+                'starting_tacho' => isset($row['dispatch_starting_tacho'])
+                    ? (float)$row['dispatch_starting_tacho']
+                    : null,
+                'fuel_onboard' => isset($row['dispatch_fuel_onboard'])
+                    ? (string)$row['dispatch_fuel_onboard']
+                    : null,
+            ),
             'evidence' => array(
                 'dispatch' => array(
                     'present' => $hasDispatch,

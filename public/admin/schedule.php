@@ -7,6 +7,9 @@ require_once __DIR__ . '/../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../src/FlightScheduleService.php';
 require_once __DIR__ . '/../../src/CockpitAircraftService.php';
 require_once __DIR__ . '/../../src/MissionCatalogService.php';
+require_once __DIR__ . '/../../src/CvrAdminManualCheckInService.php';
+require_once __DIR__ . '/../../src/CvrDispatchReleaseService.php';
+require_once __DIR__ . '/../../src/CvrIntakeAdminUploadService.php';
 
 if (!isset($flightScheduleContext) || !is_array($flightScheduleContext)) {
     cw_require_admin();
@@ -32,6 +35,8 @@ $notice = '';
 $warning = '';
 $error = '';
 $undispatchCandidate = null;
+$adminCheckInRecovery = null;
+$adminCheckInAutomaticResult = null;
 $selectedDate = substr((string)($_GET['date'] ?? $_GET['from'] ?? ''), 0, 10);
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
     // Operational "today" is Pacific — server UTC midnight must not advance the schedule day early.
@@ -60,14 +65,84 @@ try {
             $notice = 'Reservation deleted.';
             $editId = '';
         } elseif ($action === 'undispatch') {
-            require_once __DIR__ . '/../../src/CvrDispatchReleaseService.php';
-            (new CvrDispatchReleaseService($pdo))->releaseBySchedulerRecordId(
+            (new CvrDispatchReleaseService($pdo))->releaseAdministrativelyBySchedulerRecordId(
                 (string)($_POST['scheduler_record_id'] ?? ''),
+                (string)($_POST['reason_code'] ?? ''),
+                (string)($_POST['reason_text'] ?? ''),
                 (int)($currentUser['id'] ?? 0),
                 $scheduleActorType
             );
             $notice = 'Dispatch released. The reservation is available again.';
             $editId = '';
+        } elseif ($action === 'manual_checkin') {
+            $manualCheckIn = new CvrAdminManualCheckInService($pdo);
+            $adminCheckInRecovery = $manualCheckIn->checkIn(
+                (string)($_POST['scheduler_record_id'] ?? ''),
+                $_POST,
+                (int)($currentUser['id'] ?? 0)
+            );
+            $adminCheckInAutomaticResult = is_array($adminCheckInRecovery['automatic_leg_result'] ?? null)
+                ? $adminCheckInRecovery['automatic_leg_result']
+                : null;
+            $notice = 'Check-In recorded. Missing audio, Garmin CSV, or leg verification can be completed later.';
+            $editId = '';
+        } elseif ($action === 'manual_checkin_audio') {
+            $manualCheckIn = new CvrAdminManualCheckInService($pdo);
+            $flightUuid = (string)($_POST['workflow_flight_record_uuid'] ?? '');
+            $adminCheckInRecovery = $manualCheckIn->recoveryContext($flightUuid);
+            $manualCheckIn->parseAppArchive($_FILES['app_archive_json'] ?? array(), $flightUuid);
+            $crew = is_array($adminCheckInRecovery['crew'] ?? null) ? $adminCheckInRecovery['crew'] : array();
+            $studentName = '';
+            $instructorName = '';
+            foreach ($crew as $member) {
+                $role = strtolower((string)($member['role'] ?? ''));
+                $name = trim((string)($member['person_name'] ?? ''));
+                if ($studentName === '' && $role === 'student') {
+                    $studentName = $name;
+                } elseif ($instructorName === '' && in_array($role, array('instructor', 'examiner', 'supervising_instructor'), true)) {
+                    $instructorName = $name;
+                }
+            }
+            (new CvrIntakeAdminUploadService($pdo))->uploadAudio(
+                $_FILES['cockpit_audio'] ?? array(),
+                (int)$adminCheckInRecovery['aircraft_id'],
+                (string)($_POST['recording_started_at_local'] ?? ''),
+                isset($_POST['duration_seconds']) && $_POST['duration_seconds'] !== ''
+                    ? (float)$_POST['duration_seconds']
+                    : null,
+                $studentName,
+                $instructorName,
+                (string)$adminCheckInRecovery['mission_code'],
+                $flightUuid,
+                (string)$adminCheckInRecovery['operational_session_uuid']
+            );
+            $adminCheckInRecovery = $manualCheckIn->recoveryContext($flightUuid);
+            $notice = 'Cockpit Audio attached. Check-In remained complete throughout the upload.';
+        } elseif ($action === 'manual_checkin_csv') {
+            $manualCheckIn = new CvrAdminManualCheckInService($pdo);
+            $flightUuid = (string)($_POST['workflow_flight_record_uuid'] ?? '');
+            $adminCheckInRecovery = $manualCheckIn->recoveryContext($flightUuid);
+            (new CvrIntakeAdminUploadService($pdo))->uploadGarminCsv(
+                $_FILES['garmin_csv'] ?? array(),
+                (string)$adminCheckInRecovery['aircraft_registration'],
+                $flightUuid
+            );
+            $adminCheckInAutomaticResult = $manualCheckIn->attemptAutomaticLegVerification(
+                (string)$adminCheckInRecovery['dispatch_uuid'],
+                (int)($currentUser['id'] ?? 0)
+            );
+            $adminCheckInRecovery = $manualCheckIn->recoveryContext($flightUuid);
+            $notice = 'Garmin CSV attached. Check-In remained complete throughout the upload.';
+        } elseif ($action === 'manual_checkin_leg') {
+            $manualCheckIn = new CvrAdminManualCheckInService($pdo);
+            $flightUuid = (string)($_POST['workflow_flight_record_uuid'] ?? '');
+            $manualCheckIn->acceptManualSingleLeg(
+                $flightUuid,
+                $_POST,
+                (int)($currentUser['id'] ?? 0)
+            );
+            $adminCheckInRecovery = $manualCheckIn->recoveryContext($flightUuid);
+            $notice = 'Manual leg verification accepted and projected to the Master Logbook.';
         } elseif ($action === 'reschedule') {
             $result = $service->rescheduleSlot(
                 (string)($_POST['scheduler_record_id'] ?? ''),
@@ -442,6 +517,13 @@ compliance_page_open(array(
   .adsb-aircraft-label span{display:block;font-size:10px;font-weight:900}
   .adsb-aircraft-symbol-large-jet .adsb-aircraft-label,.adsb-aircraft-symbol-military .adsb-aircraft-label{left:34px;top:18px}
   .adsb-aircraft-symbol-business-jet .adsb-aircraft-label{left:32px;top:16px}
+  .fltsch-operational-actions{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px;padding:12px;border:1px solid #dbe3ee;border-radius:12px;background:#f8fafc}
+  .fltsch-recovery-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .fltsch-recovery-card{padding:14px;border:1px solid #dbe3ee;border-radius:12px;background:#f8fafc}
+  .fltsch-recovery-card h3{margin:0 0 6px;font-size:15px;color:#173f70}
+  .fltsch-recovery-card p{margin:0 0 12px;color:#64748b;font-size:13px}
+  .fltsch-recovery-card form{display:grid;gap:10px}
+  .fltsch-recovery-card-wide{grid-column:1/-1}
   @media(max-width:760px){.cmpcal-form-grid,.fltsch-crew-row{grid-template-columns:1fr}.fltsch-filters,.fltsch-filters .cmpcal-field{width:100%}.fltsch-filters .compliance-btn{width:100%}.fltsch-card{padding:14px}.fltsch-adsb-meta{grid-template-columns:1fr}}
 </style>
 <link rel="stylesheet" href="/admin/assets/flight_schedule.css?v=20260809.03">
@@ -600,19 +682,151 @@ compliance_page_open(array(
     <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
     <input type="hidden" name="scheduler_record_id" value="<?= h((string)($undispatchCandidate['scheduler_record_id'] ?? '')) ?>">
     <p class="fltsch-muted">
-      This reservation was claimed by Dispatch on the CVR Unit, but no flight events, audio, or Check-In evidence exist yet.
-      Undispatch releases the lock so the reservation appears again on the schedule and the device.
+      Administrative Undispatch releases the reservation even when stationary recorder evidence exists.
+      Check-In, Garmin, airborne events, or meaningful movement still block release.
     </p>
     <dl class="fltsch-change-details">
       <div><dt>Aircraft</dt><dd id="flightUndispatchAircraft"><?= h((string)($undispatchCandidate['aircraft']['registration'] ?? '—')) ?></dd></div>
       <div><dt>Mission</dt><dd id="flightUndispatchMission"><?= h((string)($undispatchCandidate['mission']['code'] ?? '—')) ?></dd></div>
       <div><dt>Dispatch</dt><dd id="flightUndispatchDispatch"><?= h((string)($undispatchCandidate['claimed_dispatch_uuid'] ?? '—')) ?></dd></div>
     </dl>
+    <div class="cmpcal-grid" style="margin-top:14px">
+      <label class="cmpcal-field">
+        <span>Required reason</span>
+        <select name="reason_code" id="flightUndispatchReason" required>
+          <option value="">Select reason</option>
+          <?php foreach (CvrDispatchReleaseService::administrativeReasons() as $reasonCode => $reasonLabel): ?>
+            <option value="<?= h($reasonCode) ?>"><?= h($reasonLabel) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </label>
+      <label class="cmpcal-field fltsch-field-full">
+        <span>Explanation</span>
+        <textarea name="reason_text" id="flightUndispatchReasonText" maxlength="512" placeholder="Required when Other is selected; recommended for every administrative release."></textarea>
+      </label>
+    </div>
     <div class="compliance-modal__footer">
       <button type="button" class="compliance-btn compliance-btn--secondary" data-compliance-modal-close>Cancel</button>
       <button type="submit" class="compliance-btn compliance-btn--primary">Undispatch</button>
     </div>
   </form>
+<?php compliance_modal_close(); ?>
+
+<?php compliance_modal_open('flightManualCheckInModal', 'Manual Check-In'); ?>
+  <form method="post" id="flightManualCheckInForm">
+    <input type="hidden" name="action" value="manual_checkin">
+    <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+    <input type="hidden" name="scheduler_record_id">
+    <input type="hidden" name="component_uuid">
+    <input type="hidden" name="closure_uuid">
+    <p class="fltsch-muted">
+      Check-In is saved as soon as this form is submitted. Audio, Garmin CSV, and leg verification are independent recovery steps and may be skipped until later.
+    </p>
+    <dl class="fltsch-change-details">
+      <div><dt>Aircraft</dt><dd id="flightCheckInAircraft">—</dd></div>
+      <div><dt>Mission</dt><dd id="flightCheckInMission">—</dd></div>
+      <div><dt>Starting Hobbs</dt><dd id="flightCheckInStartingHobbs">—</dd></div>
+      <div><dt>Starting Tacho</dt><dd id="flightCheckInStartingTacho">—</dd></div>
+    </dl>
+    <div class="cmpcal-grid" style="margin-top:14px">
+      <label class="cmpcal-field"><span>Engine shutdown (aircraft local time)</span><input type="datetime-local" name="engine_shutdown_local" required></label>
+      <label class="cmpcal-field"><span>Off Block (optional recovery)</span><input type="datetime-local" name="off_block_local"></label>
+      <label class="cmpcal-field"><span>Actual End Hobbs</span><input type="number" name="ending_hobbs" min="0" step="0.1" required></label>
+      <label class="cmpcal-field"><span>Actual End Tacho</span><input type="number" name="ending_tacho" min="0" step="0.1" required></label>
+      <label class="cmpcal-field"><span>Actual fuel remaining</span><input type="number" name="fuel_remaining" min="0" step="0.1" required></label>
+      <label class="cmpcal-field"><span>Verified takeoffs</span><input type="number" name="verified_takeoff_count" min="0" step="1" value="1"></label>
+      <label class="cmpcal-field"><span>Verified landings</span><input type="number" name="verified_landing_count" min="0" step="1" value="1"></label>
+      <label class="cmpcal-field fltsch-field-full"><span>Maintenance remark</span><textarea name="maintenance_remark" maxlength="1000"></textarea></label>
+    </div>
+    <div class="compliance-modal__footer">
+      <button type="button" class="compliance-btn compliance-btn--secondary" data-compliance-modal-close>Cancel</button>
+      <button type="submit" class="compliance-btn compliance-btn--primary">Record Check-In</button>
+    </div>
+  </form>
+<?php compliance_modal_close(); ?>
+
+<?php compliance_modal_open('flightCheckInRecoveryModal', 'Check-In evidence and leg verification'); ?>
+  <?php if (is_array($adminCheckInRecovery)): ?>
+    <?php
+      $recoveryFlightUuid = (string)($adminCheckInRecovery['workflow_flight_record_uuid'] ?? '');
+      $recoveryVerified = (string)($adminCheckInRecovery['leg_verification_status'] ?? '') === 'verified';
+      $recoveryAutomaticMessage = is_array($adminCheckInAutomaticResult)
+          ? (string)($adminCheckInAutomaticResult['message'] ?? '')
+          : '';
+      $defaultDeparture = '';
+      $defaultArrival = '';
+      foreach ($slots ?? array() as $slotForRecovery) {
+          if ((string)($slotForRecovery['scheduler_record_id'] ?? '') === (string)($adminCheckInRecovery['scheduler_record_id'] ?? '')) {
+              $defaultDeparture = (string)($slotForRecovery['planned_departure_airport'] ?? '');
+              $defaultArrival = (string)($slotForRecovery['planned_destination_airport'] ?? '');
+              break;
+          }
+      }
+    ?>
+    <p class="intake-notice" style="margin-top:0">
+      Check-In is complete for <?= h((string)$adminCheckInRecovery['aircraft_registration']) ?>.
+      Closing this dialog does not undo it.
+    </p>
+    <?php if ($recoveryAutomaticMessage !== ''): ?><p class="fltsch-muted"><?= h($recoveryAutomaticMessage) ?></p><?php endif; ?>
+    <div class="fltsch-recovery-grid">
+      <section class="fltsch-recovery-card">
+        <h3>1. Cockpit Audio</h3>
+        <p><?= !empty($adminCheckInRecovery['has_audio']) ? 'Audio attached.' : 'Optional now. It can also be attached later in the Master Logbook.' ?></p>
+        <?php if (empty($adminCheckInRecovery['has_audio'])): ?>
+          <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="action" value="manual_checkin_audio">
+            <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+            <input type="hidden" name="workflow_flight_record_uuid" value="<?= h($recoveryFlightUuid) ?>">
+            <label class="cmpcal-field"><span>App archive JSON (optional metadata verification)</span><input type="file" name="app_archive_json" accept=".json,application/json"></label>
+            <label class="cmpcal-field"><span>Cockpit audio</span><input type="file" name="cockpit_audio" accept=".m4a,.mp4,.wav,.aac,audio/*" required></label>
+            <label class="cmpcal-field"><span>Recording start (aircraft local)</span><input type="datetime-local" name="recording_started_at_local" required></label>
+            <label class="cmpcal-field"><span>Duration seconds (optional)</span><input type="number" name="duration_seconds" min="0" step="1"></label>
+            <button class="compliance-btn compliance-btn--secondary" type="submit">Attach Audio</button>
+          </form>
+        <?php endif; ?>
+      </section>
+      <section class="fltsch-recovery-card">
+        <h3>2. Garmin CSV</h3>
+        <p><?= !empty($adminCheckInRecovery['has_garmin_csv']) ? 'Garmin CSV attached.' : 'Optional now. Uploading later never changes the Check-In receipt.' ?></p>
+        <?php if (empty($adminCheckInRecovery['has_garmin_csv'])): ?>
+          <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="action" value="manual_checkin_csv">
+            <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+            <input type="hidden" name="workflow_flight_record_uuid" value="<?= h($recoveryFlightUuid) ?>">
+            <label class="cmpcal-field"><span>Garmin CSV</span><input type="file" name="garmin_csv" accept=".csv,text/csv" required></label>
+            <button class="compliance-btn compliance-btn--secondary" type="submit">Attach Garmin CSV</button>
+          </form>
+        <?php endif; ?>
+      </section>
+      <section class="fltsch-recovery-card fltsch-recovery-card-wide">
+        <h3>3. Leg Verification</h3>
+        <?php if ($recoveryVerified): ?>
+          <p>Leg verification is complete.</p>
+        <?php else: ?>
+          <p>Automatic verification runs when both CVR GPS and Garmin CSV are available. Otherwise verify a single leg below, or open the Master Logbook for a multi-leg correction.</p>
+          <form method="post">
+            <input type="hidden" name="action" value="manual_checkin_leg">
+            <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>">
+            <input type="hidden" name="workflow_flight_record_uuid" value="<?= h($recoveryFlightUuid) ?>">
+            <div class="cmpcal-grid">
+              <label class="cmpcal-field"><span>Departure airport</span><input name="departure_airport" maxlength="4" value="<?= h($defaultDeparture) ?>" required></label>
+              <label class="cmpcal-field"><span>Arrival airport</span><input name="arrival_airport" maxlength="4" value="<?= h($defaultArrival) ?>" required></label>
+              <label class="cmpcal-field"><span>Off Block (aircraft local)</span><input type="datetime-local" name="off_block_local" required></label>
+              <label class="cmpcal-field"><span>Takeoffs</span><input type="number" name="takeoff_count" min="0" step="1" value="1"></label>
+              <label class="cmpcal-field"><span>Landings</span><input type="number" name="landing_count" min="0" step="1" value="1"></label>
+            </div>
+            <button class="compliance-btn compliance-btn--secondary" type="submit">Verify Single Leg</button>
+          </form>
+        <?php endif; ?>
+        <p style="margin-bottom:0"><a class="compliance-btn compliance-btn--secondary" href="<?= h((string)$adminCheckInRecovery['master_logbook_url']) ?>">Open Master Logbook</a></p>
+      </section>
+    </div>
+  <?php else: ?>
+    <p class="fltsch-muted">Complete an online Check-In to open evidence recovery.</p>
+  <?php endif; ?>
+  <div class="compliance-modal__footer">
+    <button type="button" class="compliance-btn compliance-btn--primary" data-compliance-modal-close>Done</button>
+  </div>
 <?php compliance_modal_close(); ?>
 
 <?php compliance_modal_open('flightScheduleChangeModal', 'Confirm schedule change'); ?>
@@ -643,6 +857,10 @@ compliance_page_open(array(
 <?php compliance_modal_open('flightDispatchedModal', 'Live ADS-B'); ?>
   <div class="fltsch-live-track" id="flightDispatchedTrackRoot">
     <div id="flightDispatchedSummary"></div>
+    <div class="fltsch-operational-actions" id="flightDispatchedOperationalActions">
+      <button type="button" class="compliance-btn compliance-btn--primary" id="flightDispatchedCheckIn">Check In</button>
+      <button type="button" class="compliance-btn compliance-btn--secondary" id="flightDispatchedUndispatch">Undispatch</button>
+    </div>
     <div class="fltsch-adsb-panel">
       <div class="fltsch-adsb-head">
         <strong>Live ADS-B</strong>
@@ -709,6 +927,8 @@ window.IPCAFlightSchedule = <?= json_encode(array(
     'adsbTrackApiUrl' => '/admin/api/schedule_aircraft_adsb_track.php',
     'crewMessagesApiUrl' => '/admin/api/cvr_crew_messages.php',
     'crewMessagesCsrfToken' => $csrfToken,
+    'adminOperationalRecoveryEnabled' => true,
+    'operationalTimezone' => 'America/Los_Angeles',
 ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 document.querySelectorAll('[data-crew-user]').forEach(function(select) {
   function syncCrew() {
@@ -838,11 +1058,17 @@ document.querySelectorAll('[data-crew-user]').forEach(function(select) {
   if (form) form.addEventListener('submit', function() { modal.dataset.submitting = '1'; });
 })();
 <?php endif; ?>
+<?php if (is_array($adminCheckInRecovery)): ?>
+(function() {
+  var modal = document.getElementById('flightCheckInRecoveryModal');
+  if (modal && typeof modal.showModal === 'function') modal.showModal();
+})();
+<?php endif; ?>
 </script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" crossorigin=""></script>
 <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js" crossorigin=""></script>
 <script src="/admin/assets/leg_track_chart.js?v=20260808.21"></script>
-<script src="/admin/assets/flight_schedule.js?v=20260809.04"></script>
+<script src="/admin/assets/flight_schedule.js?v=20260812.01"></script>
 <?php compliance_page_close(); ?>
 <?php cw_footer(); ?>

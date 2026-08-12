@@ -388,6 +388,7 @@ final class CvrAutoReconstructionOrchestrator
             $statement = $this->pdo->prepare(
                 'SELECT * FROM ipca_cvr_dispatches
                  WHERE id = ? AND LOWER(workflow_flight_record_uuid) = ?
+                   AND LOWER(TRIM(COALESCE(status, \'\'))) <> \'released\'
                  LIMIT 1'
             );
             $statement->execute(array($preferredId, $flightUuid));
@@ -399,6 +400,7 @@ final class CvrAutoReconstructionOrchestrator
         $statement = $this->pdo->prepare(
             'SELECT * FROM ipca_cvr_dispatches
              WHERE LOWER(workflow_flight_record_uuid) = ?
+               AND LOWER(TRIM(COALESCE(status, \'\'))) <> \'released\'
              ORDER BY id DESC LIMIT 1'
         );
         $statement->execute(array($flightUuid));

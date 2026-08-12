@@ -61,6 +61,7 @@ final class CvrAdminLegSplitService
             'scheduler_record_id' => $context['scheduler_record_id'],
             'reservation_uuid' => $context['reservation_uuid'],
             'has_garmin_csv' => $context['garmin_path'] !== null,
+            'has_cvr_gps' => $this->hasCvrGps($context['flight_uuid']),
             'planned_hops' => $planned,
             'csv_ground_stops' => $stops,
             'csv_endpoints' => $csvEndpoints,
@@ -625,6 +626,29 @@ final class CvrAdminLegSplitService
             );
         }
         return $cycles;
+    }
+
+    private function hasCvrGps(string $flightUuid): bool
+    {
+        $events = $this->pdo->prepare(
+            'SELECT 1 FROM ipca_cvr_flight_events
+             WHERE LOWER(workflow_flight_record_uuid) = ?
+               AND latitude IS NOT NULL
+               AND longitude IS NOT NULL
+             LIMIT 1'
+        );
+        $events->execute(array(strtolower(trim($flightUuid))));
+        if ($events->fetchColumn()) {
+            return true;
+        }
+        $recordings = $this->pdo->prepare(
+            'SELECT 1 FROM ipca_cockpit_recordings
+             WHERE LOWER(flight_session_uid) = ?
+               AND COALESCE(gps_sample_count, 0) > 0
+             LIMIT 1'
+        );
+        $recordings->execute(array(strtolower(trim($flightUuid))));
+        return (bool)$recordings->fetchColumn();
     }
 
     /**

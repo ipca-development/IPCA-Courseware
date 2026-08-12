@@ -191,6 +191,7 @@ final class CvrFlightLogService
                   LIMIT 1
               )
             WHERE d.organization_id = :organization_id
+              AND LOWER(TRIM(COALESCE(d.status, ''))) <> 'released'
               AND {$aircraftPredicate}
             ORDER BY d.scheduled_date DESC, COALESCE(departure_event.timestamp_utc, d.first_received_at) DESC
             LIMIT 500
