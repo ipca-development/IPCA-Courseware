@@ -797,6 +797,13 @@
       });
     });
 
+    canvasEl.addEventListener('keydown', function (e) {
+      var list = e.target.closest && e.target.closest('.cpb-list');
+      if (!list || !list.isContentEditable || !canvasEl.contains(list)) return;
+      var blockEl = list.closest('.cpb-block');
+      if (blockEl) handleListKeyDown(e, list, blockEl);
+    }, true);
+
     canvasEl.addEventListener('pointerdown', function (e) {
       var tableCell = e.target.closest('.cpb-table th, .cpb-table td');
       if (tableCell && tableCell.isContentEditable && canvasEl.contains(tableCell)) {
@@ -1061,11 +1068,6 @@
         field.addEventListener('blur', function () {
           flushSave(blockEl);
         });
-        if (field.classList.contains('cpb-list')) {
-          field.addEventListener('keydown', function (e) {
-            handleListKeyDown(e, field, blockEl);
-          });
-        }
       });
     });
 
@@ -3154,6 +3156,23 @@
     return item && item.parentElement === list ? item : null;
   }
 
+  function insertListSoftBreak(item) {
+    var inserted = document.execCommand('insertHTML', false, '<br>');
+    if (inserted) return true;
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    var range = sel.getRangeAt(0);
+    if (!item.contains(range.commonAncestorContainer)) return false;
+    range.deleteContents();
+    var br = document.createElement('br');
+    range.insertNode(br);
+    range.setStartAfter(br);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  }
+
   function handleListKeyDown(e, list, blockEl) {
     if (e.key !== 'Enter' || e.isComposing) return;
     var item = activeDirectListItem(list);
@@ -3161,11 +3180,7 @@
 
     if (e.shiftKey) {
       e.preventDefault();
-      var inserted = document.execCommand('insertLineBreak', false, null);
-      if (!inserted) {
-        document.execCommand('insertHTML', false, '<br>');
-      }
-      scheduleSave(blockEl);
+      if (insertListSoftBreak(item)) scheduleSave(blockEl);
       return;
     }
 
