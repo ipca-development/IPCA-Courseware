@@ -814,6 +814,17 @@
 
     canvasEl.addEventListener('focusin', function (e) {
       var cell = e.target.closest('.cpb-table th, .cpb-table td');
+      if (listStartInput) {
+        var focusedOrderedList = e.target.closest('ol.cpb-list');
+        listStartInput.disabled = !focusedOrderedList;
+        if (focusedOrderedList) {
+          var firstOrderedList = focusedOrderedList.closest('.cpb-block').querySelector('ol.cpb-list');
+          listStartInput.value = String(Math.max(
+            1,
+            parseInt(firstOrderedList.getAttribute('start') || '1', 10) || 1
+          ));
+        }
+      }
       if (cell && cell.isContentEditable) {
         state.focusedTableCell = cell;
       } else if (e.target.closest('.cpb-callout-title, .cpb-callout-text, .cpb-paragraph, .cpb-heading, .cpb-list, .cpb-list-continuation')) {
@@ -4676,7 +4687,8 @@
       var orderedList = target.type === 'list' && target.el && target.el.tagName === 'OL'
         ? target.block.querySelector('ol.cpb-list')
         : null;
-      listStartInput.hidden = !orderedList;
+      listStartInput.hidden = false;
+      listStartInput.disabled = !orderedList;
       if (orderedList) {
         listStartInput.value = String(Math.max(
           1,

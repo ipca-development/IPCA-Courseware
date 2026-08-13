@@ -482,6 +482,11 @@
   background: #fff;
 }
 
+.cpb-tool-list-start:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .cpb-toolbar-shared {
   display: flex;
   align-items: center;
