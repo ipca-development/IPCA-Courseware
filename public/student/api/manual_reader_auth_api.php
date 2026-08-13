@@ -40,7 +40,23 @@ function mr_auth_user_payload(?array $user): ?array
     );
 }
 
+/**
+ * @param array<string,mixed>|null $user
+ */
+function mr_auth_can_preview_drafts(?array $user): bool
+{
+    if (!is_array($user)) {
+        return false;
+    }
+
+    $role = strtolower(trim((string)($user['role'] ?? '')));
+
+    return in_array($role, array('instructor', 'chief_instructor', 'admin'), true);
+}
+
 try {
+    $access = new ControlledPublishingReaderAccessService();
+
     $action = strtolower(trim((string)($_GET['action'] ?? '')));
     if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $in = mr_auth_input();
@@ -51,20 +67,19 @@ try {
         case 'session':
             $user = cw_current_user($pdo);
             if ($user === null) {
-            mr_auth_json(200, array(
-                'ok' => true,
-                'logged_in' => false,
-                'user' => null,
-                'can_preview_draft_manuals' => $access->canPreviewDraftManuals($user),
-            ));
+                mr_auth_json(200, array(
+                    'ok' => true,
+                    'logged_in' => false,
+                    'user' => null,
+                    'can_preview_draft_manuals' => false,
+                ));
             }
-            $access = new ControlledPublishingReaderAccessService();
             mr_auth_json(200, array(
                 'ok' => true,
                 'logged_in' => true,
                 'user' => mr_auth_user_payload($user),
                 'can_read_manuals' => $access->canReadManuals($user),
-                'can_preview_draft_manuals' => $access->canPreviewDraftManuals($user),
+                'can_preview_draft_manuals' => mr_auth_can_preview_drafts($user),
             ));
 
         case 'login':
@@ -78,7 +93,6 @@ try {
                 mr_auth_json(401, array('ok' => false, 'error' => 'Invalid email or password.'));
             }
             $user = cw_current_user($pdo);
-            $access = new ControlledPublishingReaderAccessService();
             if (!$access->canReadManuals($user)) {
                 cw_logout();
                 mr_auth_json(403, array('ok' => false, 'error' => 'Your account cannot access manuals.'));
@@ -87,7 +101,8 @@ try {
                 'ok' => true,
                 'logged_in' => true,
                 'user' => mr_auth_user_payload($user),
-                'can_preview_draft_manuals' => $access->canPreviewDraftManuals($user),
+                'can_read_manuals' => true,
+                'can_preview_draft_manuals' => mr_auth_can_preview_drafts($user),
             ));
 
         case 'logout':

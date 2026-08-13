@@ -52,19 +52,27 @@ struct ManualReaderAPIClient {
 
     func fetchSession() async throws -> AuthSessionResponse {
         if await isAuthAPIAvailable() {
-            return try await get("student/api/manual_reader_auth_api.php", query: [("action", "session")])
+            do {
+                return try await get("student/api/manual_reader_auth_api.php", query: [("action", "session")])
+            } catch ManualReaderAPIError.badResponse(let message) where message.contains("HTTP 5") {
+                return try await fetchSessionViaLibrary()
+            }
         }
         return try await fetchSessionViaLibrary()
     }
 
     func login(email: String, password: String) async throws -> AuthSessionResponse {
         if await isAuthAPIAvailable() {
-            let body: [String: String] = [
-                "action": "login",
-                "email": email,
-                "password": password,
-            ]
-            return try await postJSON("student/api/manual_reader_auth_api.php", body: body)
+            do {
+                let body: [String: String] = [
+                    "action": "login",
+                    "email": email,
+                    "password": password,
+                ]
+                return try await postJSON("student/api/manual_reader_auth_api.php", body: body)
+            } catch ManualReaderAPIError.badResponse(let message) where message.contains("HTTP 5") {
+                return try await loginViaWebForm(email: email, password: password)
+            }
         }
         return try await loginViaWebForm(email: email, password: password)
     }
@@ -96,7 +104,7 @@ struct ManualReaderAPIClient {
         do {
             let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else { return false }
-            return http.statusCode != 404
+            return (200...299).contains(http.statusCode)
         } catch {
             return false
         }
@@ -301,6 +309,9 @@ struct ManualReaderAPIClient {
         if statusCode == 404 {
             let path = url?.path ?? "requested path"
             return "Endpoint not found (HTTP 404): \(path). If this persists after updating the app, contact IPCA support."
+        }
+        if (500...599).contains(statusCode) {
+            return "Server error (HTTP \(statusCode)). The login service may need an update on the server — try again after deploy, or contact IPCA support."
         }
         let text = String(data: data, encoding: .utf8)?
             .replacingOccurrences(of: "\n", with: " ")
