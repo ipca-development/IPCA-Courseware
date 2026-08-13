@@ -1373,6 +1373,11 @@ body.cpb-browser-fullscreen .cpb-workspace {
   min-height: 1.35em;
 }
 
+.cpb-list-continuation:focus {
+  outline: none;
+  box-shadow: none;
+}
+
 .cpb-line-indent {
   display: block;
 }

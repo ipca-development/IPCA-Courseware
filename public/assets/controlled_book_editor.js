@@ -145,6 +145,7 @@
     part0SaveTimer: null,
     selectedTableCells: [],
     tableCellUndoLock: false,
+    contentUndoLock: false,
     isAnnexCrossRefSection: false,
     crossRefAnnexSectionId: 0,
     tocSyncTimer: null,
@@ -627,6 +628,13 @@
     var blocksRoot = canvasEl.querySelector('[data-blocks-root]');
     if (blocksRoot && snap.blocksHtml !== undefined) {
       blocksRoot.innerHTML = snap.blocksHtml;
+      blocksRoot.querySelectorAll('*').forEach(function (el) {
+        Array.prototype.slice.call(el.attributes || []).forEach(function (attr) {
+          if (attr.name === 'data-wired' || /^data-.*-wired$/.test(attr.name)) {
+            el.removeAttribute(attr.name);
+          }
+        });
+      });
       wireCanvas();
       saveAllBlocks();
     }
@@ -634,9 +642,19 @@
     saveLayout();
   }
 
-  function doUndo() {
+  function doUndo(snapshotOnly) {
     var active = document.activeElement;
     var inTableCell = active && active.closest && active.closest('.cpb-table th, .cpb-table td');
+    if (snapshotOnly) {
+      if (state.undoStack.length === 0) {
+        setStatus('Nothing to undo', '');
+        return;
+      }
+      state.redoStack.push(captureUndoSnapshot());
+      restoreUndoSnapshot(state.undoStack.pop());
+      setStatus('Undone', 'saved');
+      return;
+    }
     if (inTableCell && state.undoStack.length > 0) {
       state.redoStack.push(captureUndoSnapshot());
       restoreUndoSnapshot(state.undoStack.pop());
@@ -655,9 +673,19 @@
     setStatus('Undone', 'saved');
   }
 
-  function doRedo() {
+  function doRedo(snapshotOnly) {
     var active = document.activeElement;
     var inTableCell = active && active.closest && active.closest('.cpb-table th, .cpb-table td');
+    if (snapshotOnly) {
+      if (state.redoStack.length === 0) {
+        setStatus('Nothing to redo', '');
+        return;
+      }
+      state.undoStack.push(captureUndoSnapshot());
+      restoreUndoSnapshot(state.redoStack.pop());
+      setStatus('Redone', 'saved');
+      return;
+    }
     if (inTableCell && state.redoStack.length > 0) {
       state.undoStack.push(captureUndoSnapshot());
       restoreUndoSnapshot(state.redoStack.pop());
@@ -1061,6 +1089,12 @@
           refreshBlockTypographyFromBookStyles(field);
         }
         syncSectionNumberTypography(field);
+        field.addEventListener('beforeinput', function () {
+          if (field.closest('.cpb-table th, .cpb-table td') || state.contentUndoLock) return;
+          pushUndo();
+          state.contentUndoLock = true;
+          setTimeout(function () { state.contentUndoLock = false; }, 0);
+        });
         field.addEventListener('input', function () {
           scheduleSave(blockEl);
         });
@@ -6374,11 +6408,11 @@
       }
       if (e.target.closest('#cpbUndo')) {
         e.preventDefault();
-        doUndo();
+        doUndo(true);
       }
       if (e.target.closest('#cpbRedo')) {
         e.preventDefault();
-        doRedo();
+        doRedo(true);
       }
     });
   }
