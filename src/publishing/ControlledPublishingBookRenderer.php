@@ -1857,12 +1857,13 @@ final class ControlledPublishingBookRenderer
             $html .= '<section class="cpb-table-tools__group" aria-label="Table">'
                 . '<span class="cpb-table-style-label">Table</span>'
                 . '<div class="cpb-table-tools__controls">'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'left' ? ' is-active' : '') . '" data-table-action="table-align-left" title="Align table left">Left</button>'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'center' ? ' is-active' : '') . '" data-table-action="table-align-center" title="Align table center">Center</button>'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'right' ? ' is-active' : '') . '" data-table-action="table-align-right" title="Align table right">Right</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'left' ? ' is-active' : '') . '" data-table-action="table-align-left" title="Align table left">Table left</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'center' ? ' is-active' : '') . '" data-table-action="table-align-center" title="Align table center">Table center</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'right' ? ' is-active' : '') . '" data-table-action="table-align-right" title="Align table right">Table right</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="toggle-title">'
                 . ($hasTitleRow ? 'Remove title' : '+ Title')
                 . '</button>'
+                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="delete-table" title="Delete table">Delete table</button>'
                 . '</div></section>';
             $html .= '<section class="cpb-table-tools__group" aria-label="Rows and columns">'
                 . '<span class="cpb-table-style-label">Rows &amp; columns</span>'
@@ -1879,6 +1880,9 @@ final class ControlledPublishingBookRenderer
                 . '<div class="cpb-table-tools__controls">'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="merge-cells-right" title="Merge with cell to the right">Merge →</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="unmerge-cells" title="Split merged cell into columns">Unmerge</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-left" title="Align selected cell text left">Text left</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-center" title="Center selected cell text">Text center</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-right" title="Align selected cell text right">Text right</button>'
                 . '<label class="cpb-table-tools__color-label">Fill <input type="color" class="cpb-table-color" data-table-action="cell-bg" value="#ffffff" title="Cell background"></label>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="cell-bg-clear" title="Clear cell fill">Clear fill</button>'
                 . '<label class="cpb-table-tools__color-label">Text <input type="color" class="cpb-table-color" data-table-action="cell-text-color" value="#0f172a" title="Text color"></label>'
@@ -1896,9 +1900,7 @@ final class ControlledPublishingBookRenderer
                 . '<button type="button" class="cpb-mini-btn" data-table-action="formula-avg" title="Insert AVG formula">AVG</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="formula-custom" title="Insert custom formula">fx</button>'
                 . '</div></section>';
-            $html .= '<div class="cpb-table-tools__danger">'
-                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="delete-table" title="Delete table">Delete table</button>'
-                . '</div></div></div>';
+            $html .= '</div></div>';
         }
         $html .= '</div>';
         return $html;

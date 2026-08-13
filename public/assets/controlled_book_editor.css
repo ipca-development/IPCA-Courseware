@@ -1636,9 +1636,8 @@ ol.cpb-list > li[data-indent-level="8"] {
   display: none;
   position: absolute;
   z-index: 30;
-  width: min(520px, calc(100% - 16px));
-  max-height: min(230px, calc(100vh - 32px));
-  overflow: auto;
+  width: min(680px, calc(100% - 16px));
+  overflow: visible;
   flex-direction: column;
   margin: 0;
   padding: 0;
@@ -1702,16 +1701,15 @@ ol.cpb-list > li[data-indent-level="8"] {
 }
 
 .cpb-table-tools__body {
-  display: block;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .cpb-table-tools__group {
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  align-items: start;
-  gap: 6px;
+  display: block;
   min-width: 0;
-  padding: 5px 10px;
+  padding: 6px 10px;
+  border-right: 1px solid #e2e8f0;
   border-bottom: 1px solid #e2e8f0;
 }
 
@@ -1719,17 +1717,16 @@ ol.cpb-list > li[data-indent-level="8"] {
   border-right: 0;
 }
 
+.cpb-table-tools__group:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
 .cpb-table-tools__controls {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
   align-items: center;
-  margin-top: 0;
-}
-
-.cpb-table-tools__danger {
-  padding: 5px 10px;
-  background: #fffafa;
+  margin-top: 4px;
 }
 
 .cpb-table-tools__color-label {

@@ -964,7 +964,18 @@
       else if (action === 'formula-sum') insertTableFormula(blockEl, 'SUM');
       else if (action === 'formula-avg') insertTableFormula(blockEl, 'AVG');
       else if (action === 'formula-custom') insertTableFormula(blockEl, 'CUSTOM');
-      else if (action === 'table-align-left' || action === 'table-align-center' || action === 'table-align-right') {
+      else if (action === 'cell-align-left' || action === 'cell-align-center' || action === 'cell-align-right') {
+        var alignmentCell = resolveSelectedTableCell(blockEl);
+        if (!alignmentCell) return;
+        var cellAlign = action.replace('cell-align-', '');
+        getTableCellsForStyle({
+          block: blockEl,
+          el: alignmentCell,
+          type: 'table-cell',
+        }).forEach(function (cell) {
+          applyStyleToTableCell(cell, { align: cellAlign });
+        });
+      } else if (action === 'table-align-left' || action === 'table-align-center' || action === 'table-align-right') {
         applyTableBlockAlign(blockEl, action.replace('table-align-', ''));
       }
       wireTableResize(blockEl);
@@ -3614,9 +3625,28 @@
     setTableToolDisabled(blockEl, ['unmerge-cells'], !selectedCell || colspan <= 1);
     setTableToolDisabled(
       blockEl,
-      ['cell-bg', 'cell-bg-clear', 'cell-text-color', 'copy-cells', 'paste-cells'],
+      [
+        'cell-align-left',
+        'cell-align-center',
+        'cell-align-right',
+        'cell-bg',
+        'cell-bg-clear',
+        'cell-text-color',
+        'copy-cells',
+        'paste-cells',
+      ],
       selectedCount === 0
     );
+    var alignmentCells = selected.length > 1
+      ? selected
+      : (selectedCell ? [selectedCell] : []);
+    blockEl.querySelectorAll('[data-table-action^="cell-align-"]').forEach(function (btn) {
+      var align = btn.getAttribute('data-table-action').replace('cell-align-', '');
+      var allMatch = alignmentCells.length > 0 && alignmentCells.every(function (cell) {
+        return extractCellAlign(cell) === align;
+      });
+      btn.classList.toggle('is-active', allMatch);
+    });
     setTableToolDisabled(
       blockEl,
       ['formula-sum', 'formula-avg', 'formula-custom'],
