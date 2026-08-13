@@ -367,6 +367,8 @@ final class ControlledPublishingTocService
             $blockAnchor = (string)($row['stable_anchor'] ?? '');
             $number = $sectionNumberDisplay[$blockId] ?? '';
             $label = $number !== '' ? $number . ' ' . $text : $text;
+            $label = ControlledPublishingDocxReader::normalizeTocLabel($label);
+            $text = ControlledPublishingDocxReader::normalizeTocLabel($text);
             if ($this->isSkippableTocEntry($number, $text, $label)) {
                 continue;
             }

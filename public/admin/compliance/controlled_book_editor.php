@@ -7,7 +7,6 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
-require_once __DIR__ . '/../../../src/publishing/ControlledPublishingCrossRefAnnex.php';
 
 $user = compliance_require_access($pdo);
 $foundation = new ControlledPublishingFoundationService($pdo);
@@ -92,8 +91,7 @@ compliance_page_open(array(
 
 <div class="cpb-editor-root" id="cpbEditorRoot"
      data-version-id="<?= (int)$versionId ?>"
-     data-section-id="<?= (int)$sectionId ?>"
-     data-cross-ref-annex="<?= h(json_encode(ControlledPublishingCrossRefAnnex::catalog(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)) ?>">
+     data-section-id="<?= (int)$sectionId ?>">
   <div class="cpb-editor-shell">
     <aside class="cpb-tree-panel">
       <div class="cpb-tree-head">

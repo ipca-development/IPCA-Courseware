@@ -147,13 +147,10 @@
     part0SaveTimer: null,
     selectedTableCells: [],
     tableCellUndoLock: false,
+    isAnnexCrossRefSection: false,
+    crossRefAnnexSectionId: 0,
+    tocSyncTimer: null,
   };
-
-  try {
-    crossRefAnnex = JSON.parse(root.getAttribute('data-cross-ref-annex') || '{}') || {};
-  } catch (err) {
-    crossRefAnnex = {};
-  }
 
   var INDENT_STEP_PX = 24;
   var INDENT_MAX_LEVEL = 8;
@@ -410,7 +407,10 @@
       state.isLepSection = !!res.is_lep_section;
       state.isPart0Section = !!res.is_part0_section;
       state.isAnnexRegisterSection = !!res.is_annex_register_section;
+      state.isAnnexCrossRefSection = !!res.is_annex_cross_ref_section;
       state.isAnnexHighlightsSection = !!res.is_annex_highlights_section;
+      state.crossRefAnnexSectionId = parseInt(res.cross_ref_annex_section_id || '0', 10) || 0;
+      applyCrossRefAnnexCatalog(res.cross_ref_annex);
       state.isAnnexContentSection = !!res.is_annex_content_section;
       state.part0SectionKey = res.part0_section_key || '';
       state.part0Structured = !!res.part0_structured;
@@ -445,7 +445,7 @@
       if (state.isPart0Section) {
         refreshPart0TypographyFromBookStyles();
       }
-      if (state.isAnnexRegisterSection || state.isAnnexHighlightsSection) {
+      if (state.isAnnexRegisterSection || state.isAnnexCrossRefSection || state.isAnnexHighlightsSection) {
         refreshAnnexAdminTypographyFromBookStyles();
       }
       applyCanvasZoom(state.canvasZoom, false);
@@ -1209,6 +1209,16 @@
     });
   }
 
+  function applyCrossRefAnnexCatalog(catalog) {
+    crossRefAnnex = catalog && typeof catalog === 'object' ? catalog : {};
+    initCrossRefAnnexSelects();
+    var target = getActiveStyleTarget();
+    if (target && target.type === 'paragraph') {
+      var ps = canonicalParagraphStyleKey(target.el.getAttribute('data-paragraph-style') || 'body');
+      updateCrossRefFieldVisibility(ps, target.el);
+    }
+  }
+
   function populateCrossRefKeySelect(documentKey) {
     if (!crossRefKeySelect) return;
     crossRefKeySelect.innerHTML = '<option value="">Select reference…</option>';
@@ -1381,7 +1391,13 @@
     apiPost('update_block', { version_id: state.versionId, block_id: blockId, payload: payload }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Save failed');
       applyNumberingState(res);
+      if (res.cross_ref_annex) {
+        applyCrossRefAnnexCatalog(res.cross_ref_annex);
+      }
       setStatus('Saved', 'saved');
+      if (blockNeedsTocRefresh(blockEl)) {
+        scheduleTocSync();
+      }
       if (refreshNumbering) {
         return recomputeSectionNumbers().catch(showError);
       }
@@ -3000,6 +3016,46 @@
     }
   }
 
+  function styleNeedsTocRefresh(styleKey) {
+    return styleKey === 'title'
+      || styleKey === 'subtitle_1'
+      || styleKey === 'subtitle_2'
+      || styleKey === 'subtitle_3'
+      || styleKey === 'subtitle_4';
+  }
+
+  function blockNeedsTocRefresh(blockEl) {
+    if (!blockEl) return false;
+    var el = blockEl.querySelector('.cpb-paragraph, .cpb-heading');
+    if (!el) return false;
+    return styleNeedsTocRefresh(canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body'));
+  }
+
+  function scheduleTocSync() {
+    if (!state.editable) return;
+    clearTimeout(state.tocSyncTimer);
+    state.tocSyncTimer = setTimeout(function () {
+      var req = {
+        version_id: state.versionId,
+        toc_settings: state.tocSettings || defaultTocSettings(),
+      };
+      if (state.isTocSection) {
+        req.section_id = state.sectionId;
+      }
+      apiPost('regenerate_toc', req).then(function (res) {
+        if (!res.ok) return;
+        state.tocSettings = res.toc_settings || state.tocSettings;
+        state.tocSettingsCatalog = res.toc_settings_catalog || state.tocSettingsCatalog;
+        if (state.isTocSection && res.page_html) {
+          canvasEl.innerHTML = res.page_html;
+          wireCanvas();
+          updateTocToolbarCheckboxes();
+          refreshTocTypographyFromBookStyles();
+        }
+      }).catch(function () { /* background TOC sync — ignore */ });
+    }, 900);
+  }
+
   function styleNeedsNumberingRefresh(styleKey) {
     return !!NUMBERED_PARAGRAPH_STYLES[styleKey] || styleKey === 'regulatory_reference';
   }
@@ -3012,6 +3068,7 @@
       if (!res.ok) throw new Error(res.error || 'Numbering refresh failed');
       applyNumberingState(res);
       applyPageHtmlFromResponse(res.page_html);
+      scheduleTocSync();
       return res;
     });
   }
@@ -5143,7 +5200,7 @@
   }
 
   function currentHeaderScope() {
-    if (state.isAnnexRegisterSection || state.isAnnexHighlightsSection || state.isAnnexContentSection) {
+    if (state.isAnnexRegisterSection || state.isAnnexCrossRefSection || state.isAnnexHighlightsSection || state.isAnnexContentSection) {
       return 'annex';
     }
     return state.pageHeaderScope === 'annex' ? 'annex' : 'main';

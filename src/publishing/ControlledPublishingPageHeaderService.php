@@ -28,7 +28,7 @@ final class ControlledPublishingPageHeaderService
         'annex_revision_date' => array('label' => 'Annex revision date', 'description' => 'Annex revision date'),
     );
 
-    private const ANNEX_FAMILY_SECTION_KEYS = array('annexes', 'annexes_register', 'annexes_highlights');
+    private const ANNEX_FAMILY_SECTION_KEYS = array('annexes', 'annexes_register', 'annexes_cross_ref', 'annexes_highlights');
     private const ANNEX_CONTENT_SECTION_PREFIX = 'annexes_annex_';
     private const ANNEX_CENTER_TEXT = '{book_title} ({manual_code}) Annexes';
     public const SCOPE_MAIN = 'main';

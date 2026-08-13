@@ -175,7 +175,7 @@ try {
             cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
             break;
         case 'update_block':
-            cp_editor_handle_update_block($blocks, $renderer, $styleSvc, $foundation, $numberSvc, $uid);
+            cp_editor_handle_update_block($blocks, $renderer, $styleSvc, $foundation, $numberSvc, $annexSvc, $uid);
             break;
         case 'delete_block':
             cp_editor_handle_delete_block($blocks, $uid);
@@ -324,6 +324,11 @@ function cp_editor_is_annex_register_section(array $section): bool
     return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::REGISTER_SECTION_KEY;
 }
 
+function cp_editor_is_annex_cross_ref_section(array $section): bool
+{
+    return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::CROSS_REF_SECTION_KEY;
+}
+
 function cp_editor_is_annex_highlights_section(array $section): bool
 {
     return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::HIGHLIGHTS_SECTION_KEY;
@@ -332,7 +337,7 @@ function cp_editor_is_annex_highlights_section(array $section): bool
 function cp_editor_is_annex_family_section(array $section): bool
 {
     $key = (string)($section['section_key'] ?? '');
-    if (in_array($key, array('annexes', 'annexes_register', 'annexes_highlights'), true)) {
+    if (in_array($key, array('annexes', 'annexes_register', 'annexes_cross_ref', 'annexes_highlights'), true)) {
         return true;
     }
     return str_starts_with($key, ControlledPublishingAnnexService::ANNEX_SECTION_PREFIX);
@@ -394,7 +399,7 @@ function cp_editor_is_section_editable(array $version, array $section): bool
     if (cp_editor_is_part0_structured_section($section)) {
         return true;
     }
-    if (cp_editor_is_annex_highlights_section($section) || cp_editor_is_annex_content_section($section)) {
+    if (cp_editor_is_annex_highlights_section($section) || cp_editor_is_annex_cross_ref_section($section) || cp_editor_is_annex_content_section($section)) {
         return true;
     }
     return cp_editor_is_cover_section($section) || cp_editor_is_lep_section($section);
@@ -504,6 +509,9 @@ function cp_editor_render_page_html(
         $register = $annexSvc->resolveRegisterPage((int)$version['id']);
         $rows = is_array($register['rows'] ?? null) ? $register['rows'] : array();
         return $renderer->renderAnnexRegisterShell($version, $section, $rows, $mode, $pageHeaderConfig);
+    }
+    if (cp_editor_is_annex_cross_ref_section($section)) {
+        return $renderer->renderAnnexCrossRefShell($version, $section, $blocksHtml, $mode, $pageHeaderConfig);
     }
     if (cp_editor_is_annex_highlights_section($section)) {
         $manual = array();
@@ -777,6 +785,9 @@ function cp_editor_handle_load(
         'is_lep_section' => cp_editor_is_lep_section($section),
         'is_part0_section' => cp_editor_is_part0_shell_section($section),
         'is_annex_register_section' => cp_editor_is_annex_register_section($section),
+        'is_annex_cross_ref_section' => cp_editor_is_annex_cross_ref_section($section),
+        'cross_ref_annex_section_id' => $annexSvc->crossRefSectionId($versionId),
+        'cross_ref_annex' => $annexSvc->resolveCrossRefCatalog($versionId, $uid),
         'is_annex_highlights_section' => cp_editor_is_annex_highlights_section($section),
         'is_annex_content_section' => cp_editor_is_annex_content_section($section),
         'part0_section_key' => (string)($section['section_key'] ?? ''),
@@ -2407,6 +2418,7 @@ function cp_editor_handle_update_block(
     ControlledPublishingBookStyleService $styleSvc,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingAnnexService $annexSvc,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -2431,11 +2443,19 @@ function cp_editor_handle_update_block(
         cp_editor_json(404, array('ok' => false, 'error' => 'Block not found'));
     }
 
-    cp_editor_json(200, array_merge(array(
+    $response = array_merge(array(
         'ok' => true,
         'block' => $block,
         'block_html' => $renderer->renderBlock($block, ControlledPublishingBookRenderer::MODE_EDIT),
-    ), cp_editor_numbering_payload($numbering)));
+    ), cp_editor_numbering_payload($numbering));
+
+    $versionId = (int)($block['book_version_id'] ?? 0);
+    $sectionId = (int)($block['section_id'] ?? 0);
+    if ($versionId > 0 && $annexSvc->crossRefSectionId($versionId) === $sectionId) {
+        $response['cross_ref_annex'] = $annexSvc->resolveCrossRefCatalog($versionId, $uid);
+    }
+
+    cp_editor_json(200, $response);
 }
 
 /**

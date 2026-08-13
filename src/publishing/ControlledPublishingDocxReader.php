@@ -380,8 +380,34 @@ final class ControlledPublishingDocxReader
             return '';
         }
         $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (str_contains($text, '&')) {
+            $decoded = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($decoded !== $text) {
+                $text = $decoded;
+            }
+        }
 
         return self::sanitizeImportedText($text);
+    }
+
+    /**
+     * Normalize text for display in the Table of Contents (entity decode + Word suffix cleanup).
+     */
+    public static function normalizeTocLabel(string $label): string
+    {
+        $label = trim($label);
+        if ($label === '') {
+            return '';
+        }
+        $label = html_entity_decode($label, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (str_contains($label, '&')) {
+            $decoded = html_entity_decode($label, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($decoded !== $label) {
+                $label = $decoded;
+            }
+        }
+
+        return self::sanitizeSectionTitle($label);
     }
 
     /**
@@ -393,6 +419,10 @@ final class ControlledPublishingDocxReader
         if ($text === '') {
             return '';
         }
+
+        // Word bookmark / cross-ref suffixes such as "Electronic Mass & Balance-92178".
+        $text = preg_replace('/-\d{4,}-?\s*$/u', '', $text) ?? $text;
+        $text = preg_replace('/-\d{4,}-(?=\s|$)/u', ' ', $text) ?? $text;
 
         // Trailing cross-ref suffixes such as "**-116740251973" or "-116740251973".
         $text = preg_replace('/\*\*-?\d{8,}\s*$/u', '**', $text) ?? $text;

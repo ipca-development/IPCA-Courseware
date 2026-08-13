@@ -264,6 +264,7 @@ final class ControlledPublishingEditorNavService
     private function formatAnnexSubsections(array $rows): array
     {
         $register = null;
+        $crossRef = null;
         $highlights = null;
         $content = array();
 
@@ -271,6 +272,10 @@ final class ControlledPublishingEditorNavService
             $key = (string)($row['section_key'] ?? '');
             if ($key === ControlledPublishingAnnexService::REGISTER_SECTION_KEY) {
                 $register = $row;
+                continue;
+            }
+            if ($key === ControlledPublishingAnnexService::CROSS_REF_SECTION_KEY) {
+                $crossRef = $row;
                 continue;
             }
             if ($key === ControlledPublishingAnnexService::HIGHLIGHTS_SECTION_KEY) {
@@ -289,6 +294,12 @@ final class ControlledPublishingEditorNavService
         $nodes = array();
         if (is_array($register)) {
             $nodes[] = $this->leafNode($register, 'Annex Register', array(
+                'label_style' => 'part0',
+                'truncate' => true,
+            ));
+        }
+        if (is_array($crossRef)) {
+            $nodes[] = $this->leafNode($crossRef, 'Cross Reference Annex', array(
                 'label_style' => 'part0',
                 'truncate' => true,
             ));

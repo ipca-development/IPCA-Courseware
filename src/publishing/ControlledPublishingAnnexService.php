@@ -11,6 +11,7 @@ require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingLepService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
+require_once __DIR__ . '/ControlledPublishingCrossRefAnnex.php';
 
 /**
  * Annex register, per-annex sections, import (image / DOCX), and revision metadata.
@@ -18,6 +19,7 @@ require_once __DIR__ . '/ControlledPublishingSectionService.php';
 final class ControlledPublishingAnnexService
 {
     public const REGISTER_SECTION_KEY = 'annexes_register';
+    public const CROSS_REF_SECTION_KEY = 'annexes_cross_ref';
     public const HIGHLIGHTS_SECTION_KEY = 'annexes_highlights';
     public const PARENT_SECTION_KEY = 'annexes';
     public const ANNEX_SECTION_PREFIX = 'annexes_annex_';
@@ -33,9 +35,9 @@ final class ControlledPublishingAnnexService
     }
 
     /**
-     * Ensure annex register + highlights child sections exist under the annexes parent.
+     * Ensure annex register, cross-reference annex, and highlights child sections exist under the annexes parent.
      *
-     * @return array{register_id:int,highlights_id:int,created:int}
+     * @return array{register_id:int,cross_ref_id:int,highlights_id:int,created:int}
      */
     public function ensureAnnexInfrastructure(int $versionId, ?int $actorUserId = null): array
     {
@@ -79,6 +81,19 @@ final class ControlledPublishingAnnexService
             $actorUserId,
             $created
         );
+        $crossRefId = $this->ensureChildSystemSection(
+            $versionId,
+            $parentId,
+            $parentAnchor,
+            self::CROSS_REF_SECTION_KEY,
+            'Cross Reference Annex',
+            'cross_ref_annex',
+            15,
+            $bookKey,
+            $versionLabel,
+            $actorUserId,
+            $created
+        );
         $highlightsId = $this->ensureChildSystemSection(
             $versionId,
             $parentId,
@@ -93,11 +108,66 @@ final class ControlledPublishingAnnexService
             $created
         );
 
+        $this->seedCrossRefAnnexIfEmpty($versionId, $crossRefId, $actorUserId);
+
         return array(
             'register_id' => $registerId,
+            'cross_ref_id' => $crossRefId,
             'highlights_id' => $highlightsId,
             'created' => $created,
         );
+    }
+
+    /**
+     * Cross-reference catalog for the editor toolbar, parsed from the Cross Reference Annex section.
+     *
+     * @return array<string,list<array{key:string,label:string}>>
+     */
+    public function resolveCrossRefCatalog(int $versionId, ?int $actorUserId = null): array
+    {
+        $this->ensureAnnexInfrastructure($versionId, $actorUserId);
+        $sectionId = $this->sectionIdByKey($versionId, self::CROSS_REF_SECTION_KEY);
+        if ($sectionId <= 0) {
+            return ControlledPublishingCrossRefAnnex::defaultCatalog();
+        }
+
+        $blocks = $this->blocks->listSectionBlocks($sectionId);
+        if ($blocks === array()) {
+            $this->seedCrossRefAnnexIfEmpty($versionId, $sectionId, $actorUserId);
+            $blocks = $this->blocks->listSectionBlocks($sectionId);
+        }
+
+        $catalog = ControlledPublishingCrossRefAnnex::parseCatalogFromBlocks(
+            $blocks,
+            fn(array $block): array => $this->blocks->decodePayload($block)
+        );
+
+        return $catalog !== array() ? $catalog : ControlledPublishingCrossRefAnnex::defaultCatalog();
+    }
+
+    public function crossRefSectionId(int $versionId): int
+    {
+        return $this->sectionIdByKey($versionId, self::CROSS_REF_SECTION_KEY);
+    }
+
+    private function seedCrossRefAnnexIfEmpty(int $versionId, int $sectionId, ?int $actorUserId): void
+    {
+        if ($sectionId <= 0) {
+            return;
+        }
+        if ($this->blocks->listSectionBlocks($sectionId) !== array()) {
+            return;
+        }
+
+        foreach (ControlledPublishingCrossRefAnnex::seedBlockSpecs() as $spec) {
+            $this->blocks->createBlock(
+                $versionId,
+                $sectionId,
+                (string)$spec['block_type'],
+                is_array($spec['payload'] ?? null) ? $spec['payload'] : array(),
+                $actorUserId
+            );
+        }
     }
 
     /**

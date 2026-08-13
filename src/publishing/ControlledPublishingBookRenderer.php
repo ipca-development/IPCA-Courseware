@@ -499,6 +499,41 @@ final class ControlledPublishingBookRenderer
             . '</div>';
     }
 
+    public function renderAnnexCrossRefShell(
+        array $version,
+        array $section,
+        string $blocksHtml,
+        string $mode = self::MODE_READ,
+        ?array $pageHeaderConfig = null
+    ): string {
+        $headerSvc = $this->pageHeaderService;
+        $defaults = $headerSvc !== null
+            ? $headerSvc->resolveFromMetadata(array())
+            : array('page_header' => array('enabled' => true), 'page_footer' => array('enabled' => true));
+        $config = $this->resolvePageHeaderConfig($version, $section, $pageHeaderConfig, $defaults);
+        $pageHeader = $config['page_header'];
+        $pageFooter = $config['page_footer'];
+        $tokenContext = $this->buildHeaderTokenContext($version, $section, $mode, $config);
+
+        $headerHtml = !empty($pageHeader['enabled'])
+            ? $this->renderPageHeaderTable($pageHeader, $tokenContext, false, $headerSvc)
+            : '';
+        $footerHtml = !empty($pageFooter['enabled'])
+            ? $this->renderPageFooterTable($pageFooter, $tokenContext, false, $headerSvc)
+            : '';
+
+        $titleHtml = $this->renderAnnexAdminTitle('Cross Reference Annex');
+
+        return '<div class="cpb-sheet cpb-sheet--annex-admin cpb-sheet--cross-ref-annex" data-section-id="' . (int)($section['id'] ?? 0) . '">'
+            . $headerHtml
+            . '<div class="cpb-annex-admin">'
+            . $titleHtml
+            . '<div class="cpb-annex-cross-ref-body">' . $blocksHtml . '</div>'
+            . '</div>'
+            . $footerHtml
+            . '</div>';
+    }
+
     /**
      * System-managed annex admin page title (Subtitle 1, no section numbering).
      */
@@ -1532,6 +1567,10 @@ final class ControlledPublishingBookRenderer
             $style = (string)($entry['style'] ?? 'body');
             $depth = max(0, min(4, (int)($entry['depth'] ?? 0)));
             $label = (string)($entry['label'] ?? '');
+            if ($label === '') {
+                continue;
+            }
+            $label = ControlledPublishingDocxReader::normalizeTocLabel($label);
             if ($label === '') {
                 continue;
             }
