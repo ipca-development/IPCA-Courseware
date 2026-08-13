@@ -4584,19 +4584,18 @@
   }
 
   function refreshTocTypographyFromBookStyles() {
-    var titleDef = paragraphStyleDef('title');
-    var titleColor = titleDef.color || '#0f2744';
-    var styleKeys = ['title', 'subtitle_1', 'subtitle_2', 'subtitle_3', 'subtitle_4', 'body'];
+    var bodyDef = paragraphStyleDef('body');
+    var tocColor = bodyDef.color || '#0f172a';
     canvasEl.querySelectorAll('.cpb-toc-row[data-toc-style]').forEach(function (row) {
       var styleKey = row.getAttribute('data-toc-style') || 'body';
       var def = paragraphStyleDef(styleKey);
       var size = Math.max(6, (parseInt(def.font_size, 10) || 11) - 4);
-      row.style.color = titleColor;
+      row.style.color = tocColor;
       row.style.fontSize = size + 'pt';
-      row.setAttribute('data-text-color', titleColor);
+      row.setAttribute('data-text-color', tocColor);
       row.setAttribute('data-font-size', String(size));
       row.querySelectorAll('.cpb-toc-label, .cpb-toc-page, .cpb-toc-link').forEach(function (el) {
-        el.style.color = titleColor;
+        el.style.color = tocColor;
         el.style.fontSize = size + 'pt';
       });
     });

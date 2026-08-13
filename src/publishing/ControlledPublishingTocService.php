@@ -186,6 +186,10 @@ final class ControlledPublishingTocService
         $entries = $part0Svc->collectOutlineTocEntries($versionId);
 
         foreach ($this->loadChaptersGroupedByPart($versionId) as $partKey => $chapters) {
+            // Annexes use their own register TOC; do not duplicate them in the main TOC.
+            if ($partKey === 'annexes') {
+                continue;
+            }
             $partTitle = $this->resolvePartTitle($versionId, $partKey);
             if ($partTitle !== '') {
                 $entries[] = $this->partContainerEntry($partKey, $partTitle, $chapters);
@@ -229,20 +233,7 @@ final class ControlledPublishingTocService
             }
         }
 
-        $annexStmt = $this->pdo->prepare("
-            SELECT id, section_key, title, stable_anchor, sort_order
-            FROM ipca_publishing_book_sections
-            WHERE book_version_id = :version_id
-              AND section_key REGEXP '^annexes_annex_[0-9]+[a-z]?$'
-            ORDER BY section_key
-        ");
-        $annexStmt->execute(array(':version_id' => $versionId));
-        $annexRows = $annexStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
-        if ($annexRows !== array()) {
-            $grouped['annexes'] = $annexRows;
-        }
-
-        foreach (array('part_1', 'part_2', 'part_3', 'part_4', 'annexes') as $partKey) {
+        foreach (array('part_1', 'part_2', 'part_3', 'part_4') as $partKey) {
             if (!isset($grouped[$partKey])) {
                 continue;
             }

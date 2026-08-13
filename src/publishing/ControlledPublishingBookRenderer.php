@@ -1558,7 +1558,7 @@ final class ControlledPublishingBookRenderer
             return '<nav class="cpb-toc" aria-label="Table of contents"><p class="cpb-toc-empty">No entries.</p></nav>';
         }
 
-        $titleColor = (string)$this->resolveTypography(array('paragraph_style' => 'title'))['color'];
+        $tocTextColor = (string)$this->resolveTypography(array('paragraph_style' => 'body'))['color'];
         $rows = '';
         foreach ($entries as $entry) {
             if (!is_array($entry)) {
@@ -1581,7 +1581,7 @@ final class ControlledPublishingBookRenderer
 
             $typoPayload = array(
                 'paragraph_style' => $style,
-                'text_color' => $titleColor,
+                'text_color' => $tocTextColor,
             );
             $baseTypography = $this->resolveTypography($typoPayload);
             $typoPayload['font_size'] = max(6, (int)$baseTypography['font_size'] - self::TOC_FONT_SIZE_DELTA);
