@@ -1,8 +1,12 @@
 import SwiftUI
 
 enum IPCAReaderTheme {
-    static let accent = Color(red: 0.06, green: 0.15, blue: 0.27)
-    static let shelfBackground = Color(red: 0.92, green: 0.92, blue: 0.94)
+    static let navy = Color(red: 22 / 255, green: 35 / 255, blue: 60 / 255)
+    static let navyLight = Color(red: 35 / 255, green: 54 / 255, blue: 88 / 255)
+    static let accent = navy
+    static let shelfBackground = Color(red: 248 / 255, green: 249 / 255, blue: 251 / 255)
+    static let cardBackground = Color.white
+    static let divider = Color.black.opacity(0.08)
     static let muted = Color.secondary
 }
 

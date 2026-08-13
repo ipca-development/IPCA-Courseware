@@ -210,6 +210,23 @@ struct ManualReaderAPIClient {
         )
     }
 
+    func downloadManualPackage(
+        bookKey: String,
+        versionId: Int? = nil,
+        isPreview: Bool = false
+    ) async throws -> ManualDownloadPackageResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: readerQuery(
+                bookKey: bookKey,
+                versionId: versionId,
+                isPreview: isPreview,
+                action: "download_package"
+            ),
+            timeoutInterval: 180
+        )
+    }
+
     func fetchPage(bookKey: String, pageNumber: Int, versionId: Int? = nil, isPreview: Bool = false) async throws -> FrozenPageResponse {
         try await get(
             "student/api/manual_reader_api.php",
@@ -265,7 +282,11 @@ struct ManualReaderAPIClient {
 
     // MARK: - Transport
 
-    private func get<T: Decodable>(_ path: String, query: [(String, String)]) async throws -> T {
+    private func get<T: Decodable>(
+        _ path: String,
+        query: [(String, String)],
+        timeoutInterval: TimeInterval? = nil
+    ) async throws -> T {
         var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)
         components?.queryItems = query.map { URLQueryItem(name: $0.0, value: $0.1) }
         guard let url = components?.url else { throw ManualReaderAPIError.invalidServerURL }
@@ -273,6 +294,9 @@ struct ManualReaderAPIClient {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
 
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
@@ -374,10 +398,25 @@ struct ManualReaderAPIClient {
 
 extension ManualReaderAPIClient {
     /// Wrap frozen page HTML with the same stylesheets as the web reader for pixel-identical layout.
-    func pageHTMLDocument(pageHtml: String, settings: ReaderSettings, cssVersion: String = "") -> String {
+    func pageHTMLDocument(
+        pageHtml: String,
+        settings: ReaderSettings,
+        cssVersion: String = "",
+        embeddedEditorCSS: String? = nil,
+        embeddedReaderCSS: String? = nil
+    ) -> String {
         let v = cssVersion.isEmpty ? String(Int(Date().timeIntervalSince1970)) : cssVersion
         let editorCSS = baseURL.appending(path: "assets/controlled_book_editor.css").absoluteString + "?v=\(v)"
         let readerCSS = baseURL.appending(path: "assets/manual_reader.css").absoluteString + "?v=\(v)"
+        let stylesheetMarkup: String
+        if let embeddedEditorCSS, let embeddedReaderCSS {
+            stylesheetMarkup = "<style>\(embeddedEditorCSS)\n\(embeddedReaderCSS)</style>"
+        } else {
+            stylesheetMarkup = """
+              <link rel="stylesheet" href="\(editorCSS)">
+              <link rel="stylesheet" href="\(readerCSS)">
+            """
+        }
         let theme = settings.theme.rawValue
         let zoomClass: String = {
             switch settings.zoom {
@@ -395,8 +434,7 @@ extension ManualReaderAPIClient {
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-          <link rel="stylesheet" href="\(editorCSS)">
-          <link rel="stylesheet" href="\(readerCSS)">
+          \(stylesheetMarkup)
           <style>
             html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--mr-bg, #ebebef); }
             .mr-ios-shell { width: 100%; height: 100%; display: flex; align-items: flex-start; justify-content: center; overflow: hidden; }

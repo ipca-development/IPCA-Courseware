@@ -3,6 +3,7 @@ import SwiftUI
 struct ReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var session = ManualReaderSessionStore.shared
+    @ObservedObject private var downloads = ManualDownloadManager.shared
     @StateObject private var viewModel: ReaderViewModel
 
     @State private var showChrome = true
@@ -22,7 +23,14 @@ struct ReaderView: View {
             readerBackground.ignoresSafeArea()
 
             if viewModel.isLoading {
-                ProgressView("Opening manual…")
+                VStack(spacing: 14) {
+                    ProgressView(value: openingProgress)
+                        .progressViewStyle(.linear)
+                        .frame(maxWidth: 280)
+                    Text(openingMessage)
+                        .font(.subheadline.weight(.medium))
+                }
+                .padding(24)
             } else if let error = viewModel.errorMessage, viewModel.pages.isEmpty {
                 ContentUnavailableView("Unable to Open Manual", systemImage: "exclamationmark.triangle", description: Text(error))
             } else {
@@ -74,6 +82,20 @@ struct ReaderView: View {
         .onChange(of: session.settings) { _, _ in
             Task { await viewModel.reloadCurrentPageStyles() }
         }
+    }
+
+    private var openingProgress: Double? {
+        if case .downloading(let progress) = downloads.status(for: viewModel.book) {
+            return progress
+        }
+        return nil
+    }
+
+    private var openingMessage: String {
+        if case .downloading(let progress) = downloads.status(for: viewModel.book) {
+            return "Downloading manual… \(Int(progress * 100))%"
+        }
+        return "Opening manual…"
     }
 
     private var readerBackground: some View {

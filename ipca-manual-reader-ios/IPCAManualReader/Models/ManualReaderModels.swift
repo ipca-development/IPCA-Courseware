@@ -54,6 +54,7 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     var hasPageMap: Bool
     var continueSectionId: Int?
     var continueStableAnchor: String?
+    var continuePageNumber: Int?
 
     var id: String { "\(bookKey)-\(versionId)" }
 
@@ -75,6 +76,7 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         case hasPageMap = "has_page_map"
         case continueSectionId = "continue_section_id"
         case continueStableAnchor = "continue_stable_anchor"
+        case continuePageNumber = "continue_page_number"
     }
 
     var displayTitle: String {
@@ -165,6 +167,28 @@ struct FrozenPageResponse: Codable {
         case pageNumber = "page_number"
         case pageHtml = "page_html"
         case bookKey = "book_key"
+        case error
+    }
+}
+
+struct ManualDownloadPackageResponse: Codable {
+    var ok: Bool
+    var bookKey: String?
+    var versionId: Int?
+    var isPreview: Bool?
+    var pageMap: PageMapResponse
+    var tableOfContents: TocResponse
+    var pages: [FrozenPageResponse]
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case bookKey = "book_key"
+        case versionId = "version_id"
+        case isPreview = "is_preview"
+        case pageMap = "page_map"
+        case tableOfContents = "table_of_contents"
+        case pages
         case error
     }
 }

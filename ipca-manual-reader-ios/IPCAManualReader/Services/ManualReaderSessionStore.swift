@@ -14,6 +14,7 @@ final class ManualReaderSessionStore: ObservableObject {
     private let baseURLKey = "ipca.manual_reader.base_url"
     private let settingsKey = "ipca.manual_reader.settings"
     private let bookmarksKey = "ipca.manual_reader.bookmarks"
+    private let offlineUserKey = "ipca.manual_reader.offline_user"
 
     private init() {
         if let raw = UserDefaults.standard.string(forKey: baseURLKey),
@@ -28,6 +29,11 @@ final class ManualReaderSessionStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: bookmarksKey),
            let decoded = try? JSONDecoder().decode([LocalBookmark].self, from: data) {
             bookmarks = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: offlineUserKey),
+           let decoded = try? JSONDecoder().decode(ReaderUser.self, from: data) {
+            user = decoded
+            isLoggedIn = true
         }
     }
 
@@ -98,12 +104,19 @@ final class ManualReaderSessionStore: ObservableObject {
         if user != response.user {
             user = response.user
         }
+        if loggedIn, let user = response.user,
+           let data = try? JSONEncoder().encode(user) {
+            UserDefaults.standard.set(data, forKey: offlineUserKey)
+        } else if !loggedIn {
+            UserDefaults.standard.removeObject(forKey: offlineUserKey)
+        }
     }
 
     func clearSession() {
         guard isLoggedIn || user != nil else { return }
         isLoggedIn = false
         user = nil
+        UserDefaults.standard.removeObject(forKey: offlineUserKey)
     }
 
     func restoreSession() async throws {
@@ -121,7 +134,7 @@ final class ManualReaderSessionStore: ObservableObject {
         do {
             try await restoreSession()
         } catch {
-            clearSession()
+            // Preserve the last authenticated identity so downloaded manuals remain usable offline.
         }
     }
 

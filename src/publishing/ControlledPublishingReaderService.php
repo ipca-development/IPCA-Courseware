@@ -137,6 +137,7 @@ final class ControlledPublishingReaderService
             'has_page_map' => $isPreview ? true : $this->safeHasApprovedPageMap($version, $bookKey),
             'continue_section_id' => is_array($progress) ? (int)($progress['section_id'] ?? 0) : null,
             'continue_stable_anchor' => is_array($progress) ? (string)($progress['stable_anchor'] ?? '') : '',
+            'continue_page_number' => is_array($progress) ? (int)($progress['scroll_pct'] ?? 0) : null,
         );
     }
 
