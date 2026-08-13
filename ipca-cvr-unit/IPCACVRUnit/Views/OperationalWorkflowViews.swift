@@ -4409,6 +4409,9 @@ struct InFlightWorkflowView: View {
                                         metrics: metrics
                                     )
                                     inFlightRecordingStrip(now: timeline.date)
+                                    if audio.isLiveBroadcastActive {
+                                        liveBroadcastNotice
+                                    }
                                     HStack(spacing: metrics.spacing) {
                                         CVROperationalTile(
                                             title: "HOBBS",
@@ -4539,15 +4542,6 @@ struct InFlightWorkflowView: View {
             Text(audio.isRecording ? "RECORDING" : "RECORDER IDLE")
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(audio.isRecording ? CVROperationalPalette.critical : CVROperationalPalette.textSecondary)
-            if audio.isLiveBroadcastActive {
-                Label("LIVE BROADCAST ACTIVE", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(CVROperationalPalette.critical, in: Capsule())
-                    .accessibilityLabel("Live broadcast active")
-            }
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule().fill(CVROperationalPalette.cardBorder.opacity(0.45))
@@ -4566,6 +4560,25 @@ struct InFlightWorkflowView: View {
         .padding(.vertical, 8)
         .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+    }
+
+    private var liveBroadcastNotice: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+            Text("LIVE AUDIO STREAMING")
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 10, weight: .semibold, design: .rounded))
+        .tracking(0.6)
+        .foregroundStyle(CVROperationalPalette.secondaryBlue)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(CVROperationalPalette.primaryBlue.opacity(0.45), lineWidth: 1)
+        )
+        .accessibilityLabel("Live audio streaming")
     }
 
     private var recordingLevelFraction: CGFloat {

@@ -68,13 +68,21 @@ final class ManualReaderSessionStore: ObservableObject {
         }
     }
 
-    func addBookmark(bookKey: String, pageNumber: Int, label: String) {
+    func addBookmark(
+        bookKey: String,
+        pageNumber: Int,
+        label: String,
+        stableAnchor: String? = nil,
+        blockAnchor: String? = nil
+    ) {
         let bookmark = LocalBookmark(
             id: UUID(),
             bookKey: bookKey,
             pageNumber: pageNumber,
             label: label,
-            createdAt: Date()
+            createdAt: Date(),
+            stableAnchor: stableAnchor,
+            blockAnchor: blockAnchor
         )
         bookmarks.removeAll { $0.bookKey == bookKey && $0.pageNumber == pageNumber }
         bookmarks.insert(bookmark, at: 0)

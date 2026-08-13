@@ -1034,11 +1034,32 @@ final class ControlledPublishingReaderService
      *
      * @return array<string,mixed>
      */
-    public function buildPaginateSource(string $bookKey): array
+    public function buildPaginateSource(string $bookKey, ?array $version = null): array
     {
         require_once __DIR__ . '/ControlledPublishingPaginationService.php';
 
-        return (new ControlledPublishingPaginationService($this))->buildPaginateSource($bookKey);
+        return (new ControlledPublishingPaginationService($this))->buildPaginateSource($bookKey, $version);
+    }
+
+    /**
+     * Read-only pagination source for a reader-specific, client-side page map.
+     *
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    public function loadReaderPaginateSource(array $version): array
+    {
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? '')));
+        $source = $this->buildPaginateSource($bookKey, $version);
+        foreach ($source['sections'] ?? array() as $index => $section) {
+            if (!is_array($section)) {
+                continue;
+            }
+            unset($section['token_context']);
+            $source['sections'][$index] = $section;
+        }
+
+        return $source;
     }
 
     public function pageMapStore(): ControlledPublishingReaderPageMapStore

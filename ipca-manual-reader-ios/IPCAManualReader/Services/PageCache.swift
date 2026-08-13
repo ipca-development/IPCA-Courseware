@@ -44,6 +44,7 @@ struct OfflineManualPackage: Codable {
     let coverImageData: Data?
     let editorCSS: String?
     let readerCSS: String?
+    let paginateSourceData: Data?
 
     func page(number: Int) -> FrozenPageResponse? {
         pages.first { $0.pageNumber == number }
@@ -147,6 +148,28 @@ final class ManualDownloadManager: ObservableObject {
         forceRefresh: Bool = false
     ) async throws -> OfflineManualPackage {
         if !forceRefresh, let existing = await package(for: book) {
+            if existing.paginateSourceData == nil,
+               let sourceData = try? await client.fetchPaginateSource(
+                   bookKey: book.bookKey,
+                   versionId: book.versionId > 0 ? book.versionId : nil,
+                   isPreview: book.isDraftPreview
+               ) {
+                let upgraded = OfflineManualPackage(
+                    bookID: existing.bookID,
+                    versionID: existing.versionID,
+                    downloadedAt: existing.downloadedAt,
+                    pageMap: existing.pageMap,
+                    tableOfContents: existing.tableOfContents,
+                    pages: existing.pages,
+                    coverImageData: existing.coverImageData,
+                    editorCSS: existing.editorCSS,
+                    readerCSS: existing.readerCSS,
+                    paginateSourceData: sourceData
+                )
+                try? await diskStore.save(upgraded)
+                packages[book.id] = upgraded
+                return upgraded
+            }
             return existing
         }
 
@@ -160,6 +183,11 @@ final class ManualDownloadManager: ObservableObject {
                 isPreview: isPreview
             )
             async let tocTask = client.fetchToc(
+                bookKey: book.bookKey,
+                versionId: versionID,
+                isPreview: isPreview
+            )
+            async let paginateSourceTask: Data? = try? await client.fetchPaginateSource(
                 bookKey: book.bookKey,
                 versionId: versionID,
                 isPreview: isPreview
@@ -185,7 +213,11 @@ final class ManualDownloadManager: ObservableObject {
                 path: "assets/manual_reader.css",
                 client: client
             )
-            let (pageMap, tableOfContents) = try await (pageMapTask, tocTask)
+            let (pageMap, tableOfContents, paginateSourceData) = try await (
+                pageMapTask,
+                tocTask,
+                paginateSourceTask
+            )
             let pageNumbers = pageMap.pages
                 .map(\.pageNumber)
                 .sorted()
@@ -225,7 +257,8 @@ final class ManualDownloadManager: ObservableObject {
                 pages: downloadedPages,
                 coverImageData: coverData,
                 editorCSS: editorCSS,
-                readerCSS: readerCSS
+                readerCSS: readerCSS,
+                paginateSourceData: paginateSourceData
             )
             try await diskStore.save(package)
             packages[book.id] = package

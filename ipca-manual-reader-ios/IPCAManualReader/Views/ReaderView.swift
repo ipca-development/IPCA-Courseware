@@ -6,81 +6,84 @@ struct ReaderView: View {
     @ObservedObject private var downloads = ManualDownloadManager.shared
     @StateObject private var viewModel: ReaderViewModel
 
-    @State private var showChrome = true
+    @State private var showChrome = false
     @State private var showTOC = false
     @State private var showSearch = false
     @State private var showSettings = false
-    @State private var showBookmarks = false
     @State private var searchQuery = ""
-    @State private var containerSize: CGSize = .zero
+    @State private var controlsHideTask: Task<Void, Never>?
 
     init(book: LibraryBook) {
         _viewModel = StateObject(wrappedValue: ReaderViewModel(book: book))
     }
 
     var body: some View {
-        ZStack {
-            readerBackground.ignoresSafeArea()
+        GeometryReader { proxy in
+            ZStack {
+                readerBackground.ignoresSafeArea()
 
-            if viewModel.isLoading {
-                VStack(spacing: 14) {
-                    ProgressView(value: openingProgress)
-                        .progressViewStyle(.linear)
-                        .frame(maxWidth: 280)
-                    Text(openingMessage)
-                        .font(.subheadline.weight(.medium))
+                if viewModel.isLoading {
+                    VStack(spacing: 14) {
+                        ProgressView(value: openingProgress)
+                            .progressViewStyle(.linear)
+                            .frame(maxWidth: 280)
+                        Text(openingMessage)
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .padding(24)
+                } else if let error = viewModel.errorMessage, viewModel.pages.isEmpty {
+                    ContentUnavailableView(
+                        "Unable to Open Manual",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(error)
+                    )
+                } else {
+                    physicalBookReader(size: proxy.size)
                 }
-                .padding(24)
-            } else if let error = viewModel.errorMessage, viewModel.pages.isEmpty {
-                ContentUnavailableView("Unable to Open Manual", systemImage: "exclamationmark.triangle", description: Text(error))
-            } else {
-                pageReader
-            }
 
-            if showChrome {
-                chromeOverlay
+                if showChrome && !viewModel.isLoading {
+                    ReaderControlsOverlay(
+                        pageDescription: pageDescription,
+                        isBookmarked: viewModel.isCurrentPageBookmarked(),
+                        onClose: { dismiss() },
+                        onSearch: {
+                            showSearch = true
+                            scheduleControlsAutoHide()
+                        },
+                        onContents: {
+                            showTOC = true
+                            scheduleControlsAutoHide()
+                        },
+                        onBookmark: {
+                            viewModel.toggleBookmark(label: "Page \(viewModel.currentPage?.pageNumber ?? 0)")
+                            scheduleControlsAutoHide()
+                        },
+                        showSearch: $showSearch,
+                        showContents: $showTOC,
+                        showSettings: $showSettings,
+                        searchContent: { searchPopover },
+                        contentsContent: { contentsPopover },
+                        settingsContent: { settingsPopover },
+                        onThemeSelected: applyTheme
+                    )
+                    .padding(.top, max(8, proxy.safeAreaInsets.top + 4))
+                    .padding(.horizontal, 18)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
-        .statusBarHidden(!showChrome)
-        .persistentSystemOverlays(showChrome ? .automatic : .hidden)
-        .sheet(isPresented: $showTOC) {
-            TableOfContentsView(
-                nav: viewModel.nav,
-                sectionPageIndex: viewModel.sectionPageIndex,
-                currentSectionId: viewModel.currentPage?.sectionId
-            ) { sectionId in
-                showTOC = false
-                Task { await viewModel.goToSection(sectionId) }
-            }
-        }
-        .sheet(isPresented: $showSearch) {
-            SearchSheetView(
-                query: $searchQuery,
-                results: viewModel.searchResults,
-                sectionPageIndex: viewModel.sectionPageIndex,
-                isSearching: viewModel.isSearching
-            ) { sectionId in
-                showSearch = false
-                Task { await viewModel.goToSection(sectionId) }
-            }
-            .onChange(of: searchQuery) { _, newValue in
-                Task { await viewModel.search(query: newValue) }
-            }
-        }
-        .sheet(isPresented: $showSettings) {
-            ReaderSettingsView(showServer: false) {
-                Task { await viewModel.reloadCurrentPageStyles() }
-            }
-        }
-        .sheet(isPresented: $showBookmarks) {
-            BookmarksSheetView(bookKey: viewModel.book.bookKey) { pageNumber in
-                showBookmarks = false
-                Task { await viewModel.goToPageNumber(pageNumber) }
-            }
-        }
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         .task { await viewModel.load() }
+        .onChange(of: viewModel.currentIndex) { _, newIndex in
+            Task { await viewModel.goToIndex(newIndex) }
+        }
         .onChange(of: session.settings) { _, _ in
             Task { await viewModel.reloadCurrentPageStyles() }
+        }
+        .onDisappear {
+            controlsHideTask?.cancel()
         }
     }
 
@@ -108,175 +111,261 @@ struct ReaderView: View {
         }
     }
 
-    private var pageReader: some View {
-        GeometryReader { proxy in
-            ZStack {
-                if let baseURL = session.baseURL, !viewModel.currentPageHTML.isEmpty {
-                    ManualPageWebView(
-                        html: viewModel.currentPageHTML,
-                        baseURL: baseURL,
-                        zoomMode: session.settings.zoom,
-                        containerSize: proxy.size
-                    )
-                    .id(viewModel.currentPage?.pageNumber ?? 0)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: swipeEdge).combined(with: .opacity),
-                        removal: .move(edge: swipeEdge == .leading ? .trailing : .leading).combined(with: .opacity)
-                    ))
-                } else {
-                    ProgressView()
+    private func physicalBookReader(size: CGSize) -> some View {
+        let landscape = size.width > size.height
+        let pageAspect = ManualPageLayout.width / ManualPageLayout.height
+        let availableWidth = max(1, size.width - (landscape ? 20 : 24))
+        let availableHeight = max(1, size.height - 20)
+        let pageWidth = min(
+            landscape ? availableWidth / 2 : availableWidth,
+            availableHeight * pageAspect
+        )
+        let pageHeight = pageWidth / pageAspect
+        let readerWidth = landscape ? pageWidth * 2 : pageWidth
+
+        return ZStack {
+            if let baseURL = session.baseURL, !viewModel.pageHTMLByIndex.isEmpty {
+                BookPageCurlView(
+                    pages: viewModel.pages,
+                    htmlByIndex: viewModel.pageHTMLByIndex,
+                    baseURL: baseURL,
+                    isLandscape: landscape,
+                    currentIndex: $viewModel.currentIndex,
+                    onTap: toggleControls
+                )
+                .id(landscape)
+
+                if landscape {
+                    BookGutterView()
                 }
+            } else {
+                ProgressView()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear { containerSize = proxy.size }
-            .onChange(of: proxy.size) { _, newSize in containerSize = newSize }
-            .contentShape(Rectangle())
-            .gesture(pageSwipeGesture)
-            .onTapGesture {
+        }
+        .frame(width: readerWidth, height: pageHeight)
+        .background(Color.white)
+        .shadow(color: .black.opacity(landscape ? 0.12 : 0.16), radius: landscape ? 10 : 12, y: 3)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var pageDescription: String {
+        guard let page = viewModel.currentPage else { return "" }
+        return "Page \(page.pageNumber) of \(viewModel.pageCount)"
+    }
+
+    private var contentsPopover: some View {
+        TableOfContentsView(
+            nav: viewModel.nav,
+            sectionPageIndex: viewModel.sectionPageIndex,
+            currentSectionId: viewModel.currentPage?.sectionId
+        ) { sectionId in
+            showTOC = false
+            Task { await viewModel.goToSection(sectionId) }
+        }
+        .frame(minWidth: 390, idealWidth: 430, minHeight: 520)
+    }
+
+    private var searchPopover: some View {
+        SearchSheetView(
+            query: $searchQuery,
+            results: viewModel.searchResults,
+            sectionPageIndex: viewModel.sectionPageIndex,
+            isSearching: viewModel.isSearching
+        ) { sectionId in
+            showSearch = false
+            Task { await viewModel.goToSection(sectionId) }
+        }
+        .frame(minWidth: 390, idealWidth: 430, minHeight: 480)
+        .onChange(of: searchQuery) { _, newValue in
+            Task { await viewModel.search(query: newValue) }
+        }
+    }
+
+    private var settingsPopover: some View {
+        CompactReaderSettingsView {
+            Task { await viewModel.reloadCurrentPageStyles() }
+        }
+        .frame(width: 320)
+    }
+
+    private func toggleControls() {
+        controlsHideTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showChrome.toggle()
+        }
+        if showChrome {
+            scheduleControlsAutoHide()
+        }
+    }
+
+    private func scheduleControlsAutoHide() {
+        controlsHideTask?.cancel()
+        controlsHideTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled, !showTOC, !showSearch, !showSettings else { return }
+            await MainActor.run {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    showChrome.toggle()
+                    showChrome = false
                 }
             }
         }
     }
 
-    @State private var swipeEdge: Edge = .trailing
-
-    private var pageSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24, coordinateSpace: .local)
-            .onEnded { value in
-                let horizontal = value.translation.width
-                if horizontal < -50 {
-                    swipeEdge = .trailing
-                    Task { await viewModel.nextPage() }
-                } else if horizontal > 50 {
-                    swipeEdge = .leading
-                    Task { await viewModel.previousPage() }
-                }
-            }
+    private func applyTheme(_ theme: ReaderTheme) {
+        session.settings.theme = theme
+        session.saveSettings()
+        Task { await viewModel.reloadCurrentPageStyles() }
+        scheduleControlsAutoHide()
     }
+}
 
-    private var chromeOverlay: some View {
-        VStack(spacing: 0) {
-            if viewModel.book.isDraftPreview {
-                Text("Draft preview — not the official released manual")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.orange.opacity(0.15))
-            }
-            topBar
-            Spacer()
-            if session.settings.showFilmstrip {
-                filmstrip
-            }
-            bottomBar
-        }
-        .transition(.opacity)
-    }
+private struct ReaderControlsOverlay<SearchContent: View, ContentsContent: View, SettingsContent: View>: View {
+    let pageDescription: String
+    let isBookmarked: Bool
+    let onClose: () -> Void
+    let onSearch: () -> Void
+    let onContents: () -> Void
+    let onBookmark: () -> Void
+    @Binding var showSearch: Bool
+    @Binding var showContents: Bool
+    @Binding var showSettings: Bool
+    @ViewBuilder let searchContent: () -> SearchContent
+    @ViewBuilder let contentsContent: () -> ContentsContent
+    @ViewBuilder let settingsContent: () -> SettingsContent
+    let onThemeSelected: (ReaderTheme) -> Void
 
-    private var topBar: some View {
-        HStack(spacing: 16) {
-            Button { dismiss() } label: {
-                Image(systemName: "chevron.backward")
-                    .font(.body.weight(.semibold))
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Button(action: onClose) {
+                Image(systemName: "xmark")
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(viewModel.book.displayTitle)
-                    .font(.headline)
-                    .lineLimit(1)
-                if let page = viewModel.currentPage {
-                    Text("Page \(page.pageNumber) of \(viewModel.pageCount)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Button { showSearch = true } label: { Image(systemName: "magnifyingglass") }
-            Button { showTOC = true } label: { Image(systemName: "list.bullet") }
-            Button {
-                viewModel.toggleBookmark(label: "Page \(viewModel.currentPage?.pageNumber ?? 0)")
-            } label: {
-                Image(systemName: viewModel.isCurrentPageBookmarked() ? "bookmark.fill" : "bookmark")
-            }
-            Button { showSettings = true } label: { Image(systemName: "textformat.size") }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
-    }
+            .accessibilityLabel("Close manual")
+            .frame(width: 42, height: 42)
+            .background(IPCAReaderTheme.navy)
+            .clipShape(Circle())
 
-    private var bottomBar: some View {
-        HStack {
-            Button {
-                Task { await viewModel.previousPage() }
-            } label: {
-                Label("Previous", systemImage: "chevron.left")
-            }
-            .disabled(viewModel.currentIndex <= 0)
+            Spacer(minLength: 0)
 
-            Spacer()
-
-            Button { showBookmarks = true } label: {
-                Image(systemName: "book.closed")
-            }
-
-            Spacer()
-
-            Button {
-                Task { await viewModel.nextPage() }
-            } label: {
-                Label("Next", systemImage: "chevron.right")
-            }
-            .disabled(viewModel.currentIndex >= viewModel.pageCount - 1)
-        }
-        .labelStyle(.iconOnly)
-        .font(.title3)
-        .padding(.horizontal, 28)
-        .padding(.vertical, 14)
-        .background(.ultraThinMaterial)
-    }
-
-    private var filmstrip: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(Array(viewModel.pages.enumerated()), id: \.element.id) { index, page in
-                        Button {
-                            Task { await viewModel.goToIndex(index) }
-                        } label: {
-                            VStack(spacing: 4) {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.white.opacity(page.isCover ? 0.35 : 0.18))
-                                    .frame(width: 44, height: 58)
-                                    .overlay {
-                                        Text("\(page.pageNumber)")
-                                            .font(.caption2.weight(.semibold))
-                                    }
-                                if page.isSectionStart {
-                                    Circle()
-                                        .fill(IPCAReaderTheme.accent)
-                                        .frame(width: 4, height: 4)
-                                }
-                            }
-                            .padding(4)
-                            .background(index == viewModel.currentIndex ? Color.white.opacity(0.22) : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+            VStack(spacing: 3) {
+                HStack(spacing: 5) {
+                    controlButton("magnifyingglass", label: "Search", action: onSearch)
+                        .popover(isPresented: $showSearch, arrowEdge: .top) {
+                            searchContent()
                         }
-                        .buttonStyle(.plain)
-                        .id(index)
+
+                    controlButton("list.bullet", label: "Table of contents", action: onContents)
+                        .popover(isPresented: $showContents, arrowEdge: .top) {
+                            contentsContent()
+                        }
+
+                    controlButton(
+                        isBookmarked ? "bookmark.fill" : "bookmark",
+                        label: isBookmarked ? "Remove bookmark" : "Bookmark page",
+                        action: onBookmark
+                    )
+
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Text("AA")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .frame(width: 36, height: 36)
+                    }
+                    .accessibilityLabel("Reader settings")
+                    .popover(isPresented: $showSettings, arrowEdge: .top) {
+                        settingsContent()
+                    }
+
+                    Menu {
+                        ForEach(ReaderTheme.allCases) { theme in
+                            Button(theme.label) {
+                                onThemeSelected(theme)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "circle.lefthalf.filled")
+                            .frame(width: 36, height: 36)
+                    }
+                    .accessibilityLabel("Reader theme")
+                }
+
+                if !pageDescription.isEmpty {
+                    Text(pageDescription)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial)
+            .background(IPCAReaderTheme.navy.opacity(0.94))
+            .clipShape(Capsule())
+            .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+
+            Spacer(minLength: 56)
+        }
+        .foregroundStyle(.white)
+        .font(.body.weight(.semibold))
+        .buttonStyle(.plain)
+    }
+
+    private func controlButton(
+        _ systemName: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(label)
+    }
+}
+
+private struct CompactReaderSettingsView: View {
+    @ObservedObject private var session = ManualReaderSessionStore.shared
+    let onChanged: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Reader Settings")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Text size")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Text size", selection: $session.settings.fontSize) {
+                    ForEach(ReaderFontSize.allCases) { size in
+                        Text(size.label).tag(size)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .labelsHidden()
             }
-            .background(.ultraThinMaterial)
-            .onChange(of: viewModel.currentIndex) { _, newIndex in
-                withAnimation {
-                    proxy.scrollTo(newIndex, anchor: .center)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Appearance")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Appearance", selection: $session.settings.theme) {
+                    ForEach(ReaderTheme.allCases) { theme in
+                        Text(theme.label).tag(theme)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
+        }
+        .padding(20)
+        .onChange(of: session.settings.fontSize) { _, _ in
+            session.saveSettings()
+            onChanged()
+        }
+        .onChange(of: session.settings.theme) { _, _ in
+            session.saveSettings()
+            onChanged()
         }
     }
 }
@@ -438,12 +527,11 @@ struct ReaderSettingsView: View {
                             Text(theme.label).tag(theme)
                         }
                     }
-                    Picker("Page Zoom", selection: $session.settings.zoom) {
-                        ForEach(ReaderZoomMode.allCases) { mode in
-                            Text(mode.label).tag(mode)
+                    Picker("Text Size", selection: $session.settings.fontSize) {
+                        ForEach(ReaderFontSize.allCases) { size in
+                            Text(size.label).tag(size)
                         }
                     }
-                    Toggle("Page Scrubber", isOn: $session.settings.showFilmstrip)
                 }
             }
             .navigationTitle("Reading Settings")
@@ -461,8 +549,7 @@ struct ReaderSettingsView: View {
                 serverURL = session.baseURL?.absoluteString ?? ""
             }
             .onChange(of: session.settings.theme) { _, _ in session.saveSettings(); onChanged?() }
-            .onChange(of: session.settings.zoom) { _, _ in session.saveSettings(); onChanged?() }
-            .onChange(of: session.settings.showFilmstrip) { _, _ in session.saveSettings() }
+            .onChange(of: session.settings.fontSize) { _, _ in session.saveSettings(); onChanged?() }
         }
     }
 }

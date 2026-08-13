@@ -37,16 +37,22 @@ struct StatusDashboardView: View {
                             metrics: metrics
                         )
                         if audio.isLiveBroadcastActive {
-                            HStack(spacing: 7) {
+                            HStack(spacing: 6) {
                                 Image(systemName: "dot.radiowaves.left.and.right")
-                                Text("LIVE BROADCAST ACTIVE")
+                                Text("LIVE AUDIO STREAMING")
+                                Spacer(minLength: 0)
                             }
-                            .font(.system(size: metrics.isCompact ? 11 : 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(CVRPalette.critical, in: Capsule())
-                            .accessibilityLabel("Live broadcast active")
+                            .font(.system(size: metrics.isCompact ? 9 : 10, weight: .semibold, design: .rounded))
+                            .tracking(0.6)
+                            .foregroundStyle(CVRPalette.secondaryBlue)
+                            .padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                            .background(CVRPalette.cardBackground, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(CVRPalette.primaryBlue.opacity(0.45), lineWidth: 1)
+                            )
+                            .accessibilityLabel("Live audio streaming")
                         }
                         AudioInputHealthCard(
                             sourceName: publicAudioSourceName,

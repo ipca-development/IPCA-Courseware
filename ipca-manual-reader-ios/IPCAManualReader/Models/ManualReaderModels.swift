@@ -309,10 +309,55 @@ enum ReaderZoomMode: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+enum ReaderFontSize: String, CaseIterable, Identifiable, Codable {
+    case small
+    case standard
+    case large
+    case extraLarge
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .small: "Small"
+        case .standard: "Standard"
+        case .large: "Large"
+        case .extraLarge: "Extra Large"
+        }
+    }
+
+    var scale: Double {
+        switch self {
+        case .small: 0.9
+        case .standard: 1
+        case .large: 1.12
+        case .extraLarge: 1.24
+        }
+    }
+}
+
 struct ReaderSettings: Codable, Equatable {
     var theme: ReaderTheme = .light
     var zoom: ReaderZoomMode = .fitWidth
     var showFilmstrip: Bool = true
+    var fontSize: ReaderFontSize = .standard
+
+    private enum CodingKeys: String, CodingKey {
+        case theme
+        case zoom
+        case showFilmstrip
+        case fontSize
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        theme = try container.decodeIfPresent(ReaderTheme.self, forKey: .theme) ?? .light
+        zoom = try container.decodeIfPresent(ReaderZoomMode.self, forKey: .zoom) ?? .fitWidth
+        showFilmstrip = try container.decodeIfPresent(Bool.self, forKey: .showFilmstrip) ?? true
+        fontSize = try container.decodeIfPresent(ReaderFontSize.self, forKey: .fontSize) ?? .standard
+    }
 }
 
 struct LocalBookmark: Codable, Identifiable, Hashable {
@@ -321,6 +366,8 @@ struct LocalBookmark: Codable, Identifiable, Hashable {
     var pageNumber: Int
     var label: String
     var createdAt: Date
+    var stableAnchor: String?
+    var blockAnchor: String?
 }
 
 // Official frozen page dimensions (matches ControlledPublishingReaderLayoutProfile)

@@ -86,8 +86,8 @@ $checks = array(
         && str_contains($monitorStore, 'uploadInFlight')
         && str_contains($apiClient, 'uploadLiveCockpitMonitorChunk'),
     'crew receives a persistent live broadcast notice without controls' =>
-        str_contains($statusView, 'LIVE BROADCAST ACTIVE')
-        && str_contains($operationalViews, 'LIVE BROADCAST ACTIVE')
+        str_contains($statusView, 'LIVE AUDIO STREAMING')
+        && str_contains($operationalViews, 'LIVE AUDIO STREAMING')
         && !str_contains($statusView, 'Stop Broadcast')
         && !str_contains($operationalViews, 'Stop Broadcast'),
     'scheduler player exposes required states and heartbeat reconnect' =>

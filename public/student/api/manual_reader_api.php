@@ -153,6 +153,16 @@ try {
             }
             mr_json(200, $reader->loadFrozenPageMap($bookKey));
 
+        case 'paginate_source':
+            $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            mr_json(200, array(
+                'ok' => true,
+                'book_key' => $bookKey,
+                'version_id' => (int)$ctx['version']['id'],
+                'source' => $reader->loadReaderPaginateSource($ctx['version']),
+            ));
+
         case 'download_pages':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);

@@ -210,6 +210,37 @@ struct ManualReaderAPIClient {
         )
     }
 
+    func fetchPaginateSource(
+        bookKey: String,
+        versionId: Int? = nil,
+        isPreview: Bool = false
+    ) async throws -> Data {
+        let query = readerQuery(
+            bookKey: bookKey,
+            versionId: versionId,
+            isPreview: isPreview,
+            action: "paginate_source"
+        )
+        var components = URLComponents(
+            url: baseURL.appending(path: "student/api/manual_reader_api.php"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = query.map { URLQueryItem(name: $0.0, value: $0.1) }
+        guard let url = components?.url else { throw ManualReaderAPIError.invalidServerURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 90
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let source = envelope["source"],
+              JSONSerialization.isValidJSONObject(source) else {
+            throw ManualReaderAPIError.badResponse("Invalid pagination source response.")
+        }
+        return try JSONSerialization.data(withJSONObject: source)
+    }
+
     func downloadManualPages(
         bookKey: String,
         pageNumbers: [Int],
@@ -429,6 +460,11 @@ extension ManualReaderAPIClient {
             case .percent125: "is-zoom-125"
             }
         }()
+        let fontScale = settings.fontSize.scale
+        let scaledFontRules = [8, 9, 10, 11, 12, 14, 16, 18, 24].map { size in
+            let scaled = Double(size) * fontScale
+            return ".mr-ios-frame [data-font-size=\"\(size)\"] { font-size: \(scaled)pt !important; }"
+        }.joined(separator: "\n")
 
         return """
         <!DOCTYPE html>
@@ -438,10 +474,11 @@ extension ManualReaderAPIClient {
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
           \(stylesheetMarkup)
           <style>
-            html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--mr-bg, #ebebef); }
+            html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
             .mr-ios-shell { width: 100%; height: 100%; display: flex; align-items: flex-start; justify-content: center; overflow: hidden; }
             .mr-ios-frame { position: relative; width: \(Int(ManualPageLayout.width))px; height: \(Int(ManualPageLayout.height))px; transform-origin: top center; }
-            .mr-ios-frame .cpb-sheet { margin: 0 auto; box-shadow: var(--mr-shadow, 0 4px 24px rgba(0,0,0,.08)); }
+            .mr-ios-frame .cpb-sheet { margin: 0 auto; box-shadow: none !important; font-size: \(11 * fontScale)pt; }
+            \(scaledFontRules)
             .mr-app .cpb-block-chrome, .mr-app .cpb-dropzone, .mr-app .cpb-change-marker, .mr-app .cpb-page-layout-toggle { display: none !important; }
           </style>
         </head>
