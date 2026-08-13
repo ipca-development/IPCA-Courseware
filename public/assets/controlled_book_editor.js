@@ -124,6 +124,7 @@
     tableClipboard: '',
     canvasZoom: 100,
     lastStyleTarget: null,
+    activeOrderedList: null,
     savedSelectionRange: null,
     isCoverSection: false,
     coverPage: null,
@@ -815,10 +816,13 @@
     canvasEl.addEventListener('focusin', function (e) {
       var cell = e.target.closest('.cpb-table th, .cpb-table td');
       if (listStartInput) {
-        var focusedOrderedList = e.target.closest('ol.cpb-list');
+        var focusedOrderedList = e.target.closest('ol');
+        state.activeOrderedList = focusedOrderedList;
         listStartInput.disabled = !focusedOrderedList;
         if (focusedOrderedList) {
-          var firstOrderedList = focusedOrderedList.closest('.cpb-block').querySelector('ol.cpb-list');
+          var firstOrderedList = focusedOrderedList.classList.contains('cpb-list')
+            ? focusedOrderedList.closest('.cpb-block').querySelector('ol.cpb-list')
+            : focusedOrderedList;
           listStartInput.value = String(Math.max(
             1,
             parseInt(firstOrderedList.getAttribute('start') || '1', 10) || 1
@@ -3304,10 +3308,16 @@
   }
 
   function applyOrderedListStart(value) {
-    var target = getActiveStyleTarget();
-    if (!target || target.type !== 'list' || target.el.tagName !== 'OL') return;
+    var orderedList = isConnectedEl(state.activeOrderedList)
+      ? state.activeOrderedList
+      : orderedListAtSelection(getActiveStyleTarget());
+    if (!orderedList) return;
+    var block = orderedList.closest('.cpb-block');
+    if (!block) return;
     var startNumber = Math.max(1, parseInt(value, 10) || 1);
-    var segments = target.block.querySelectorAll('ol.cpb-list');
+    var segments = orderedList.classList.contains('cpb-list')
+      ? block.querySelectorAll('ol.cpb-list')
+      : [orderedList];
     if (!segments.length) return;
     pushUndo();
     var precedingItems = 0;
@@ -3316,8 +3326,8 @@
       precedingItems += segment.querySelectorAll(':scope > li').length;
     });
     if (listStartInput) listStartInput.value = String(startNumber);
-    scheduleSave(target.block);
-    flushSave(target.block);
+    scheduleSave(block);
+    flushSave(block);
   }
 
   function stripLeadingSectionNumberText(text) {
@@ -4681,18 +4691,40 @@
     return null;
   }
 
+  function orderedListAtSelection(target) {
+    var sel = window.getSelection();
+    if (sel && sel.anchorNode) {
+      var selectionNode = sel.anchorNode.nodeType === 1
+        ? sel.anchorNode
+        : sel.anchorNode.parentElement;
+      var selectedList = selectionNode && selectionNode.closest
+        ? selectionNode.closest('ol')
+        : null;
+      if (selectedList && canvasEl.contains(selectedList)) return selectedList;
+      if (selectionNode && canvasEl.contains(selectionNode)) return null;
+    }
+    if (target && target.el) {
+      if (target.el.tagName === 'OL') return target.el;
+      var targetList = target.el.closest ? target.el.closest('ol') : null;
+      if (targetList && canvasEl.contains(targetList)) return targetList;
+    }
+    return null;
+  }
+
   function syncToolbarFromTarget(target) {
     if (!target) return;
     if (listStartInput) {
-      var orderedList = target.type === 'list' && target.el && target.el.tagName === 'OL'
-        ? target.block.querySelector('ol.cpb-list')
-        : null;
+      var orderedList = orderedListAtSelection(target);
+      state.activeOrderedList = orderedList;
       listStartInput.hidden = false;
       listStartInput.disabled = !orderedList;
       if (orderedList) {
+        var displayedOrderedList = orderedList.classList.contains('cpb-list')
+          ? orderedList.closest('.cpb-block').querySelector('ol.cpb-list')
+          : orderedList;
         listStartInput.value = String(Math.max(
           1,
-          parseInt(orderedList.getAttribute('start') || '1', 10) || 1
+          parseInt(displayedOrderedList.getAttribute('start') || '1', 10) || 1
         ));
       }
     }

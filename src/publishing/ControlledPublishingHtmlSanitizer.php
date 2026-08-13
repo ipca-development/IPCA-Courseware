@@ -70,6 +70,12 @@ final class ControlledPublishingHtmlSanitizer
                     $keepAttrs['class'] = 'cpb-line-indent';
                     $keepAttrs['data-indent-level'] = (string)max(0, min(8, $level));
                 }
+                if ($tag === 'ol') {
+                    $start = (int)$child->getAttribute('start');
+                    if ($start > 1) {
+                        $keepAttrs['start'] = (string)min(9999, $start);
+                    }
+                }
                 if ($tag === 'a') {
                     $href = trim((string)$child->getAttribute('href'));
                     if ($href !== '' && preg_match('/^(https?:\/\/|\/)/i', $href) === 1) {
