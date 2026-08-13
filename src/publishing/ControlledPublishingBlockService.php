@@ -445,6 +445,8 @@ final class ControlledPublishingBlockService
         $headers = array();
         $rows = array();
         $colWidths = array();
+        $headerColspans = array();
+        $rowColspans = array();
 
         if (is_array($payload['headers'] ?? null)) {
             foreach ($payload['headers'] as $cell) {
@@ -467,31 +469,93 @@ final class ControlledPublishingBlockService
             }
         }
 
+        if (is_array($payload['header_colspans'] ?? null)) {
+            foreach ($payload['header_colspans'] as $span) {
+                $headerColspans[] = max(1, (int)$span);
+            }
+        }
+        if (is_array($payload['row_colspans'] ?? null)) {
+            foreach ($payload['row_colspans'] as $spans) {
+                if (!is_array($spans)) {
+                    $rowColspans[] = array();
+                    continue;
+                }
+                $rowColspans[] = array_map(
+                    static fn (mixed $span): int => max(1, (int)$span),
+                    array_values($spans)
+                );
+            }
+        }
+
         // Legacy tables stored everything in rows[] with first row as header.
         if ($hasHeaderRow && $headers === array() && $rows !== array()) {
             $headers = array_shift($rows) ?: array();
+            $headerColspans = array_shift($rowColspans) ?: array();
+        }
+
+        $logicalWidth = static function (array $cells, array $spans): int {
+            $width = 0;
+            foreach ($cells as $index => $_cell) {
+                $width += max(1, (int)($spans[$index] ?? 1));
+            }
+            return $width;
+        };
+        $colCount = max(
+            1,
+            is_array($payload['col_widths'] ?? null) ? count($payload['col_widths']) : 0,
+            $logicalWidth($headers, $headerColspans)
+        );
+        foreach ($rows as $rowIndex => $row) {
+            $colCount = max($colCount, $logicalWidth($row, $rowColspans[$rowIndex] ?? array()));
         }
 
         if ($headers === array()) {
-            $columnCount = max(
-                1,
-                count($rows[0] ?? array()),
-                is_array($payload['col_widths'] ?? null) ? count($payload['col_widths']) : 0
-            );
             $headers = $hasHeaderRow
-                ? array_pad(array('Column 1', 'Column 2'), $columnCount, '')
-                : array_fill(0, $columnCount, '');
+                ? array_pad(array('Column 1', 'Column 2'), $colCount, '')
+                : array_fill(0, $colCount, '');
+            $headerColspans = array_fill(0, $colCount, 1);
         }
         if ($rows === array()) {
-            $rows = array(array_fill(0, count($headers), ''));
+            $rows = array(array_fill(0, $colCount, ''));
+            $rowColspans = array(array_fill(0, $colCount, 1));
         }
 
-        $colCount = count($headers);
-        $headers = array_pad(array_slice($headers, 0, $colCount), $colCount, '');
+        $normalizeRow = static function (array $cells, array $spans) use ($colCount): array {
+            $normalizedCells = array();
+            $normalizedSpans = array();
+            $coveredColumns = 0;
+            foreach ($cells as $index => $cell) {
+                if ($coveredColumns >= $colCount) {
+                    break;
+                }
+                $span = min(
+                    max(1, (int)($spans[$index] ?? 1)),
+                    $colCount - $coveredColumns
+                );
+                $normalizedCells[] = $cell;
+                $normalizedSpans[] = $span;
+                $coveredColumns += $span;
+            }
+            while ($coveredColumns < $colCount) {
+                $normalizedCells[] = '';
+                $normalizedSpans[] = 1;
+                $coveredColumns++;
+            }
+            return array($normalizedCells, $normalizedSpans);
+        };
+
+        [$headers, $headerColspans] = $normalizeRow($headers, $headerColspans);
         $normalizedRows = array();
-        foreach ($rows as $row) {
-            $normalizedRows[] = array_pad(array_slice($row, 0, $colCount), $colCount, '');
+        $normalizedRowColspans = array();
+        foreach ($rows as $rowIndex => $row) {
+            [$normalizedRow, $normalizedSpans] = $normalizeRow(
+                $row,
+                $rowColspans[$rowIndex] ?? array()
+            );
+            $normalizedRows[] = $normalizedRow;
+            $normalizedRowColspans[] = $normalizedSpans;
         }
+        $rowColspans = $normalizedRowColspans;
 
         if (is_array($payload['col_widths'] ?? null)) {
             foreach ($payload['col_widths'] as $width) {
@@ -580,7 +644,9 @@ final class ControlledPublishingBlockService
             'has_title_row' => $hasTitleRow,
             'has_header_row' => $hasHeaderRow,
             'headers' => $headers,
+            'header_colspans' => $headerColspans,
             'rows' => $normalizedRows,
+            'row_colspans' => $rowColspans,
             'col_widths' => $colWidths,
             'border_width' => $borderWidth,
             'border_color' => $borderColor,

@@ -1760,11 +1760,11 @@ final class ControlledPublishingBookRenderer
             foreach ($headers as $headerIndex => $header) {
                 $colspan = max(1, (int)($headerColspans[$headerIndex] ?? 1));
                 $headerEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
-                $headerBg = (string)($headerBgs[$colIndex] ?? '');
-                $headerAlign = (string)($headerAligns[$colIndex] ?? 'left');
-                $headerFont = (string)($headerFontFamilies[$colIndex] ?? '');
-                $headerSize = (int)($headerFontSizes[$colIndex] ?? 0);
-                $headerColor = (string)($headerTextColors[$colIndex] ?? '');
+                $headerBg = (string)($headerBgs[$headerIndex] ?? '');
+                $headerAlign = (string)($headerAligns[$headerIndex] ?? 'left');
+                $headerFont = (string)($headerFontFamilies[$headerIndex] ?? '');
+                $headerSize = (int)($headerFontSizes[$headerIndex] ?? 0);
+                $headerColor = (string)($headerTextColors[$headerIndex] ?? '');
                 $effectiveHeaderFont = $headerFont !== ''
                     ? $headerFont
                     : (string)($headerRowStyle['font_family'] ?? 'sans');
@@ -1808,11 +1808,11 @@ final class ControlledPublishingBookRenderer
             foreach ($row as $cellPos => $cell) {
                 $colspan = max(1, (int)($spans[$cellPos] ?? 1));
                 $cellEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
-                $bg = (string)($cellBgs[$rowIndex][$cellIndex] ?? '');
-                $align = (string)($cellAligns[$rowIndex][$cellIndex] ?? 'left');
-                $cellFont = (string)($cellFontFamilies[$rowIndex][$cellIndex] ?? '');
-                $cellSize = (int)($cellFontSizes[$rowIndex][$cellIndex] ?? 0);
-                $cellColor = (string)($cellTextColors[$rowIndex][$cellIndex] ?? '');
+                $bg = (string)($cellBgs[$rowIndex][$cellPos] ?? '');
+                $align = (string)($cellAligns[$rowIndex][$cellPos] ?? 'left');
+                $cellFont = (string)($cellFontFamilies[$rowIndex][$cellPos] ?? '');
+                $cellSize = (int)($cellFontSizes[$rowIndex][$cellPos] ?? 0);
+                $cellColor = (string)($cellTextColors[$rowIndex][$cellPos] ?? '');
                 $effectiveCellFont = $cellFont !== ''
                     ? $cellFont
                     : (string)($bodyRowStyle['font_family'] ?? 'sans');
@@ -1917,6 +1917,8 @@ final class ControlledPublishingBookRenderer
         $headers = array();
         $rows = array();
         $colWidths = array();
+        $headerColspans = array();
+        $rowColspans = array();
 
         if (is_array($payload['headers'] ?? null)) {
             foreach ($payload['headers'] as $cell) {
@@ -1935,28 +1937,91 @@ final class ControlledPublishingBookRenderer
                 $rows[] = $line;
             }
         }
+        if (is_array($payload['header_colspans'] ?? null)) {
+            foreach ($payload['header_colspans'] as $span) {
+                $headerColspans[] = max(1, (int)$span);
+            }
+        }
+        if (is_array($payload['row_colspans'] ?? null)) {
+            foreach ($payload['row_colspans'] as $spans) {
+                if (!is_array($spans)) {
+                    $rowColspans[] = array();
+                    continue;
+                }
+                $rowColspans[] = array_map(
+                    static fn (mixed $span): int => max(1, (int)$span),
+                    array_values($spans)
+                );
+            }
+        }
         if ($hasHeaderRow && $headers === array() && $rows !== array()) {
             $headers = array_shift($rows) ?: array('Column 1', 'Column 2');
+            $headerColspans = array_shift($rowColspans) ?: array();
         }
+
+        $logicalWidth = static function (array $cells, array $spans): int {
+            $width = 0;
+            foreach ($cells as $index => $_cell) {
+                $width += max(1, (int)($spans[$index] ?? 1));
+            }
+            return $width;
+        };
+        $colCount = max(
+            1,
+            is_array($payload['col_widths'] ?? null) ? count($payload['col_widths']) : 0,
+            $logicalWidth($headers, $headerColspans)
+        );
+        foreach ($rows as $rowIndex => $row) {
+            $colCount = max($colCount, $logicalWidth($row, $rowColspans[$rowIndex] ?? array()));
+        }
+
         if ($headers === array()) {
-            $columnCount = max(
-                1,
-                count($rows[0] ?? array()),
-                is_array($payload['col_widths'] ?? null) ? count($payload['col_widths']) : 0
-            );
             $headers = $hasHeaderRow
-                ? array_pad(array('Column 1', 'Column 2'), $columnCount, '')
-                : array_fill(0, $columnCount, '');
+                ? array_pad(array('Column 1', 'Column 2'), $colCount, '')
+                : array_fill(0, $colCount, '');
+            $headerColspans = array_fill(0, $colCount, 1);
         }
         if ($rows === array()) {
-            $rows = array(array_fill(0, count($headers), ''));
+            $rows = array(array_fill(0, $colCount, ''));
+            $rowColspans = array(array_fill(0, $colCount, 1));
         }
-        $colCount = count($headers);
-        $headers = array_pad(array_slice($headers, 0, $colCount), $colCount, '');
+
+        $normalizeRow = static function (array $cells, array $spans) use ($colCount): array {
+            $normalizedCells = array();
+            $normalizedSpans = array();
+            $coveredColumns = 0;
+            foreach ($cells as $index => $cell) {
+                if ($coveredColumns >= $colCount) {
+                    break;
+                }
+                $span = min(
+                    max(1, (int)($spans[$index] ?? 1)),
+                    $colCount - $coveredColumns
+                );
+                $normalizedCells[] = $cell;
+                $normalizedSpans[] = $span;
+                $coveredColumns += $span;
+            }
+            while ($coveredColumns < $colCount) {
+                $normalizedCells[] = '';
+                $normalizedSpans[] = 1;
+                $coveredColumns++;
+            }
+            return array($normalizedCells, $normalizedSpans);
+        };
+
+        [$headers, $headerColspans] = $normalizeRow($headers, $headerColspans);
         $normalizedRows = array();
-        foreach ($rows as $row) {
-            $normalizedRows[] = array_pad(array_slice($row, 0, $colCount), $colCount, '');
+        $normalizedRowColspans = array();
+        foreach ($rows as $rowIndex => $row) {
+            [$normalizedRow, $normalizedSpans] = $normalizeRow(
+                $row,
+                $rowColspans[$rowIndex] ?? array()
+            );
+            $normalizedRows[] = $normalizedRow;
+            $normalizedRowColspans[] = $normalizedSpans;
         }
+        $rowColspans = $normalizedRowColspans;
         if (is_array($payload['col_widths'] ?? null)) {
             foreach ($payload['col_widths'] as $width) {
                 $colWidths[] = max(60, min(600, (int)$width));
@@ -2046,33 +2111,6 @@ final class ControlledPublishingBookRenderer
         $cellFontFamily = $this->normalizeTableOptionalFontGrid($payload, 'cell_font_family', count($normalizedRows), $colCount);
         $cellFontSize = $this->normalizeTableOptionalFontSizeGrid($payload, 'cell_font_size', count($normalizedRows), $colCount);
         $cellTextColor = $this->normalizeTableOptionalColorGrid($payload, 'cell_text_color', count($normalizedRows), $colCount);
-
-        $headerColspans = array();
-        if (is_array($payload['header_colspans'] ?? null)) {
-            foreach ($payload['header_colspans'] as $span) {
-                $headerColspans[] = max(1, (int)$span);
-            }
-        }
-        if ($headerColspans === array()) {
-            $headerColspans = array_fill(0, $colCount, 1);
-        }
-
-        $rowColspans = array();
-        if (is_array($payload['row_colspans'] ?? null)) {
-            foreach ($payload['row_colspans'] as $row) {
-                if (!is_array($row)) {
-                    continue;
-                }
-                $line = array();
-                foreach ($row as $span) {
-                    $line[] = max(1, (int)$span);
-                }
-                $rowColspans[] = $line;
-            }
-        }
-        while (count($rowColspans) < count($normalizedRows)) {
-            $rowColspans[] = array_fill(0, max(1, count($normalizedRows[count($rowColspans)] ?? array())), 1);
-        }
 
         return array(
             'title' => $title,

@@ -1637,7 +1637,7 @@ ol.cpb-list > li[data-indent-level="8"] {
   position: absolute;
   z-index: 30;
   width: min(520px, calc(100% - 16px));
-  max-height: min(440px, calc(100vh - 32px));
+  max-height: min(230px, calc(100vh - 32px));
   overflow: auto;
   flex-direction: column;
   margin: 0;
@@ -1662,7 +1662,7 @@ ol.cpb-list > li[data-indent-level="8"] {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 7px 10px;
   border-bottom: 1px solid #e2e8f0;
   background: #f8fafc;
 }
@@ -1702,15 +1702,16 @@ ol.cpb-list > li[data-indent-level="8"] {
 }
 
 .cpb-table-tools__body {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
+  display: block;
 }
 
 .cpb-table-tools__group {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
   min-width: 0;
-  padding: 10px 12px;
-  border-right: 1px solid #e2e8f0;
+  padding: 5px 10px;
   border-bottom: 1px solid #e2e8f0;
 }
 
@@ -1723,12 +1724,11 @@ ol.cpb-list > li[data-indent-level="8"] {
   flex-wrap: wrap;
   gap: 5px;
   align-items: center;
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 .cpb-table-tools__danger {
-  grid-column: 1 / -1;
-  padding: 8px 12px;
+  padding: 5px 10px;
   background: #fffafa;
 }
 
