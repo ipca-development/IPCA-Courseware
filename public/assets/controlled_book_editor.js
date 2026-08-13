@@ -3692,6 +3692,7 @@
     return {
       title: title,
       has_title_row: !!blockEl.querySelector('tr[data-title-row]'),
+      has_header_row: !!tableHeaderRow(blockEl),
       headers: headers,
       header_colspans: headerColspans,
       rows: rows,
@@ -3730,8 +3731,18 @@
   }
 
   function tableColCount(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return 2;
+    var cols = table.querySelectorAll('colgroup col');
+    if (cols.length) return cols.length;
     var head = tableHeaderRow(blockEl);
-    return head ? head.cells.length : 2;
+    if (head) {
+      return Array.prototype.reduce.call(head.cells, function (total, cell) {
+        return total + (parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
+      }, 0);
+    }
+    var bodyRow = table.querySelector('tbody[data-table-part="body"] tr');
+    return bodyRow && bodyRow.cells.length ? bodyRow.cells.length : 2;
   }
 
   function getTableCellCoords(blockEl, cell) {
@@ -4129,6 +4140,27 @@
         state.focusedTableCell = null;
       }
       setStatus('Title row deleted', 'saved');
+      return true;
+    }
+
+    var headerRow = selectedCell ? selectedCell.closest('tr.cpb-table-header-row') : null;
+    if (headerRow) {
+      var headerText = headerRow.textContent.replace(/\s+/g, ' ').trim();
+      if (headerText && !confirm('Delete this table header row?')) {
+        return false;
+      }
+      headerRow.remove();
+      clearTableCellSelection();
+      var firstBodyCell = tbody.querySelector('td');
+      if (firstBodyCell) {
+        addTableCellToSelection(firstBodyCell);
+        state.focusedTableCell = firstBodyCell;
+        state.lastStyleTarget = { block: blockEl, el: firstBodyCell, type: 'table-cell' };
+        firstBodyCell.focus();
+      } else {
+        state.focusedTableCell = null;
+      }
+      setStatus('Header row deleted', 'saved');
       return true;
     }
 

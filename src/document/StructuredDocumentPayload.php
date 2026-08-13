@@ -225,6 +225,8 @@ final class StructuredDocumentPayload
             'header_colspans' => is_array($payload['header_colspans'] ?? null) ? $payload['header_colspans'] : array(),
             'row_colspans' => is_array($payload['row_colspans'] ?? null) ? $payload['row_colspans'] : array(),
             'has_title_row' => !empty($payload['has_title_row']),
+            'has_header_row' => !array_key_exists('has_header_row', $payload)
+                || !empty($payload['has_header_row']),
             'title_bg' => trim((string)($payload['title_bg'] ?? '')),
             'title_align' => trim((string)($payload['title_align'] ?? 'center')),
             'title_font_family' => trim((string)($payload['title_font_family'] ?? '')),

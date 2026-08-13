@@ -419,6 +419,8 @@ final class ControlledPublishingBlockService
     {
         $title = $this->sanitizeTableCellValue(trim((string)($payload['title'] ?? '')));
         $hasTitleRow = !empty($payload['has_title_row']);
+        $hasHeaderRow = !array_key_exists('has_header_row', $payload)
+            || !empty($payload['has_header_row']);
         $headers = array();
         $rows = array();
         $colWidths = array();
@@ -445,12 +447,19 @@ final class ControlledPublishingBlockService
         }
 
         // Legacy tables stored everything in rows[] with first row as header.
-        if ($headers === array() && $rows !== array()) {
+        if ($hasHeaderRow && $headers === array() && $rows !== array()) {
             $headers = array_shift($rows) ?: array();
         }
 
         if ($headers === array()) {
-            $headers = array('Column 1', 'Column 2');
+            $columnCount = max(
+                1,
+                count($rows[0] ?? array()),
+                is_array($payload['col_widths'] ?? null) ? count($payload['col_widths']) : 0
+            );
+            $headers = $hasHeaderRow
+                ? array_pad(array('Column 1', 'Column 2'), $columnCount, '')
+                : array_fill(0, $columnCount, '');
         }
         if ($rows === array()) {
             $rows = array(array_fill(0, count($headers), ''));
@@ -548,6 +557,7 @@ final class ControlledPublishingBlockService
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
+            'has_header_row' => $hasHeaderRow,
             'headers' => $headers,
             'rows' => $normalizedRows,
             'col_widths' => $colWidths,

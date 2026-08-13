@@ -1640,6 +1640,7 @@ final class ControlledPublishingBookRenderer
         $headerColspans = $table['header_colspans'];
         $rowColspans = $table['row_colspans'];
         $hasTitleRow = !empty($table['has_title_row']);
+        $hasHeaderRow = !empty($table['has_header_row']);
         $tableAlign = (string)$table['table_align'];
         $tableStyleKind = strtolower(trim((string)($payload['table_style_kind'] ?? 'standard')));
         if (!in_array($tableStyleKind, array('standard', 'text'), true)) {
@@ -1702,46 +1703,49 @@ final class ControlledPublishingBookRenderer
             $html .= '</tr>';
         }
 
-        $html .= '<tr class="cpb-table-header-row">';
-        $colIndex = 0;
-        foreach ($headers as $headerIndex => $header) {
-            $colspan = max(1, (int)($headerColspans[$headerIndex] ?? 1));
-            $headerEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
-            $headerBg = (string)($headerBgs[$colIndex] ?? '');
-            $headerAlign = (string)($headerAligns[$colIndex] ?? 'left');
-            $headerFont = (string)($headerFontFamilies[$colIndex] ?? '');
-            $headerSize = (int)($headerFontSizes[$colIndex] ?? 0);
-            $headerColor = (string)($headerTextColors[$colIndex] ?? '');
-            $effectiveHeaderFont = $headerFont !== ''
-                ? $headerFont
-                : (string)($headerRowStyle['font_family'] ?? 'sans');
-            $effectiveHeaderSize = $headerSize > 0
-                ? $headerSize
-                : (int)($headerRowStyle['font_size'] ?? 10);
-            $effectiveHeaderColor = $headerColor !== ''
-                ? $headerColor
-                : (string)($headerRowStyle['color'] ?? '#0f172a');
-            $headerBold = $this->normalizeDecorationBool($headerRowStyle['font_bold'] ?? null, true);
-            $headerItalic = $this->normalizeDecorationBool($headerRowStyle['font_italic'] ?? null, false);
-            $headerUnderline = $this->normalizeDecorationBool($headerRowStyle['font_underline'] ?? null, false);
-            $html .= '<th colspan="' . $colspan . '"' . $headerEdit . $this->tableCellVisualAttr(
-                $headerBg,
-                $headerAlign,
-                $effectiveHeaderFont,
-                $effectiveHeaderSize,
-                $effectiveHeaderColor,
-                $headerBold,
-                $headerItalic,
-                $headerUnderline
-            ) . ' data-col-index="' . $colIndex . '">';
-            $html .= '<span class="cpb-th-text">' . $this->renderTableCellInner((string)$header, $edit, $rows) . '</span>';
-            if ($edit) {
-                $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
+        if ($hasHeaderRow) {
+            $html .= '<tr class="cpb-table-header-row">';
+            $colIndex = 0;
+            foreach ($headers as $headerIndex => $header) {
+                $colspan = max(1, (int)($headerColspans[$headerIndex] ?? 1));
+                $headerEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
+                $headerBg = (string)($headerBgs[$colIndex] ?? '');
+                $headerAlign = (string)($headerAligns[$colIndex] ?? 'left');
+                $headerFont = (string)($headerFontFamilies[$colIndex] ?? '');
+                $headerSize = (int)($headerFontSizes[$colIndex] ?? 0);
+                $headerColor = (string)($headerTextColors[$colIndex] ?? '');
+                $effectiveHeaderFont = $headerFont !== ''
+                    ? $headerFont
+                    : (string)($headerRowStyle['font_family'] ?? 'sans');
+                $effectiveHeaderSize = $headerSize > 0
+                    ? $headerSize
+                    : (int)($headerRowStyle['font_size'] ?? 10);
+                $effectiveHeaderColor = $headerColor !== ''
+                    ? $headerColor
+                    : (string)($headerRowStyle['color'] ?? '#0f172a');
+                $headerBold = $this->normalizeDecorationBool($headerRowStyle['font_bold'] ?? null, true);
+                $headerItalic = $this->normalizeDecorationBool($headerRowStyle['font_italic'] ?? null, false);
+                $headerUnderline = $this->normalizeDecorationBool($headerRowStyle['font_underline'] ?? null, false);
+                $html .= '<th colspan="' . $colspan . '"' . $headerEdit . $this->tableCellVisualAttr(
+                    $headerBg,
+                    $headerAlign,
+                    $effectiveHeaderFont,
+                    $effectiveHeaderSize,
+                    $effectiveHeaderColor,
+                    $headerBold,
+                    $headerItalic,
+                    $headerUnderline
+                ) . ' data-col-index="' . $colIndex . '">';
+                $html .= '<span class="cpb-th-text">' . $this->renderTableCellInner((string)$header, $edit, $rows) . '</span>';
+                if ($edit) {
+                    $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
+                }
+                $html .= '</th>';
+                $colIndex += $colspan;
             }
-            $html .= '</th>';
-            $colIndex += $colspan;
+            $html .= '</tr>';
         }
-        $html .= '</tr></thead>';
+        $html .= '</thead>';
 
         $html .= '<tbody data-table-part="body">';
         $rowIndex = 0;
@@ -1849,6 +1853,8 @@ final class ControlledPublishingBookRenderer
     {
         $title = $this->sanitizeTableCellValue(trim((string)($payload['title'] ?? '')));
         $hasTitleRow = !empty($payload['has_title_row']);
+        $hasHeaderRow = !array_key_exists('has_header_row', $payload)
+            || !empty($payload['has_header_row']);
         $headers = array();
         $rows = array();
         $colWidths = array();
@@ -1870,11 +1876,18 @@ final class ControlledPublishingBookRenderer
                 $rows[] = $line;
             }
         }
-        if ($headers === array() && $rows !== array()) {
+        if ($hasHeaderRow && $headers === array() && $rows !== array()) {
             $headers = array_shift($rows) ?: array('Column 1', 'Column 2');
         }
         if ($headers === array()) {
-            $headers = array('Column 1', 'Column 2');
+            $columnCount = max(
+                1,
+                count($rows[0] ?? array()),
+                is_array($payload['col_widths'] ?? null) ? count($payload['col_widths']) : 0
+            );
+            $headers = $hasHeaderRow
+                ? array_pad(array('Column 1', 'Column 2'), $columnCount, '')
+                : array_fill(0, $columnCount, '');
         }
         if ($rows === array()) {
             $rows = array(array_fill(0, count($headers), ''));
@@ -2005,6 +2018,7 @@ final class ControlledPublishingBookRenderer
         return array(
             'title' => $title,
             'has_title_row' => $hasTitleRow,
+            'has_header_row' => $hasHeaderRow,
             'headers' => $headers,
             'header_colspans' => $headerColspans,
             'rows' => $normalizedRows,
