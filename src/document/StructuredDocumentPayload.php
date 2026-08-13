@@ -181,6 +181,10 @@ final class StructuredDocumentPayload
                 ? $itemIndentLevels
                 : array(0),
             'continuation_html' => $continuationHtml,
+            'continuation_after' => max(0, min(
+                count($items),
+                (int)($payload['continuation_after'] ?? count($items))
+            )),
         ));
     }
 

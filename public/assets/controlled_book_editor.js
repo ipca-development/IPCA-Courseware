@@ -21,8 +21,6 @@
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
   var imageInput = document.getElementById('cpbImageInput');
-  var undoBtn = document.getElementById('cpbUndo');
-  var redoBtn = document.getElementById('cpbRedo');
   var paragraphStyleSelect = document.getElementById('cpbParagraphStyleSelect');
   var regulatoryRefInput = document.getElementById('cpbRegulatoryRef');
   var crossRefDocSelect = document.getElementById('cpbCrossRefDoc');
@@ -3180,6 +3178,14 @@
       list.insertAdjacentElement('afterend', continuation);
     }
 
+    var trailingItems = [];
+    var nextItem = item.nextElementSibling;
+    while (nextItem) {
+      var following = nextItem.nextElementSibling;
+      if (nextItem.tagName === 'LI') trailingItems.push(nextItem);
+      nextItem = following;
+    }
+
     if (moveTrailingContent) {
       var sel = window.getSelection();
       if (sel && sel.rangeCount > 0) {
@@ -3197,6 +3203,27 @@
     if (item.textContent.replace(/\u00a0/g, ' ').trim() === '') {
       item.remove();
     }
+
+    if (trailingItems.length) {
+      var nextList = list.cloneNode(false);
+      nextList.removeAttribute('start');
+      nextList.removeAttribute('data-input-wired');
+      continuation.insertAdjacentElement('afterend', nextList);
+      trailingItems.forEach(function (trailingItem) {
+        nextList.appendChild(trailingItem);
+      });
+      if (nextList.tagName === 'OL') {
+        var priorItems = 0;
+        blockEl.querySelectorAll('.cpb-list').forEach(function (segment) {
+          if (segment === nextList) return;
+          if (segment.compareDocumentPosition(nextList) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            priorItems += segment.querySelectorAll(':scope > li').length;
+          }
+        });
+        nextList.setAttribute('start', String(priorItems + 1));
+      }
+    }
+
     if (!continuation.hasChildNodes()) continuation.appendChild(document.createElement('br'));
     wireCanvas();
     continuation.focus();
@@ -3251,11 +3278,25 @@
       }, extractStyleFields(blockEl, blockType));
     }
     if (blockType === 'list') {
-      var list = blockEl.querySelector('.cpb-list');
+      var lists = Array.prototype.slice.call(blockEl.querySelectorAll('.cpb-list'));
+      var list = lists[0] || null;
       var ordered = list && list.tagName === 'OL';
-      var items = normalizeListItemsFromElement(list);
-      var itemIndentLevels = normalizeListIndentLevelsFromElement(list);
+      var items = [];
+      var itemIndentLevels = [];
+      lists.forEach(function (segment) {
+        items = items.concat(normalizeListItemsFromElement(segment));
+        itemIndentLevels = itemIndentLevels.concat(normalizeListIndentLevelsFromElement(segment));
+      });
       var continuation = blockEl.querySelector('.cpb-list-continuation');
+      var continuationAfter = items.length;
+      if (continuation) {
+        continuationAfter = 0;
+        lists.forEach(function (segment) {
+          if (segment.compareDocumentPosition(continuation) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            continuationAfter += normalizeListItemsFromElement(segment).length;
+          }
+        });
+      }
       return Object.assign({
         ordered: ordered,
         items: items,
@@ -3263,6 +3304,7 @@
         continuation_html: continuation
           ? stripEditorChromeFromHtml(continuation.innerHTML)
           : '',
+        continuation_after: continuationAfter,
       }, extractStyleFields(blockEl, 'list'));
     }
     if (blockType === 'table') {
@@ -4515,7 +4557,8 @@
     }
     var heading = block.querySelector('.cpb-heading');
     var paragraph = block.querySelector('.cpb-paragraph');
-    var list = block.querySelector('.cpb-list');
+    var list = node.closest && node.closest('.cpb-list');
+    if (!list && focused && focused.closest) list = focused.closest('.cpb-list');
     var listContinuation = block.querySelector('.cpb-list-continuation');
     if (heading && (heading.contains(node) || node === heading || (focused && focused.closest('.cpb-heading')))) {
       return { block: block, el: heading, type: 'heading' };
@@ -6490,20 +6533,6 @@
     var savedZoom = parseInt(sessionStorage.getItem('cpb_canvas_zoom') || '100', 10);
     if (!isNaN(savedZoom)) applyCanvasZoom(savedZoom, false);
   } catch (err) { /* ignore */ }
-
-  if (undoBtn) {
-    undoBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      doUndo();
-    });
-  }
-
-  if (redoBtn) {
-    redoBtn.addEventListener('click', function (e) {
-      e.preventDefault();
-      doRedo();
-    });
-  }
 
   if (detectSelect) {
     detectSelect.addEventListener('change', function () {

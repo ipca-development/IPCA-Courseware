@@ -415,12 +415,17 @@ final class ControlledPublishingBlockService
             $items = array('List item');
             $itemIndentLevels = array(0);
         }
+        $continuationAfter = max(0, min(
+            count($items),
+            (int)($payload['continuation_after'] ?? count($items))
+        ));
         return array_merge(
             array(
                 'ordered' => $ordered,
                 'items' => $items,
                 'item_indent_levels' => $itemIndentLevels,
                 'continuation_html' => $continuationHtml,
+                'continuation_after' => $continuationAfter,
             ),
             $this->normalizeStyleFields($payload)
         );

@@ -1537,26 +1537,51 @@ final class ControlledPublishingBookRenderer
         $continuationHtml = ControlledPublishingHtmlSanitizer::sanitizeInline(
             (string)($payload['continuation_html'] ?? '')
         );
+        $continuationAfter = max(0, min(
+            count($items),
+            (int)($payload['continuation_after'] ?? count($items))
+        ));
         $tag = $ordered ? 'ol' : 'ul';
         $edit = $mode === self::MODE_EDIT
             ? ' contenteditable="true" data-field="items" spellcheck="true"'
             : '';
         $style = $this->styleAttr($payload);
         $html = '';
-        if ($items !== array() || $continuationHtml === '') {
-            $html .= '<' . $tag . ' class="cpb-list' . $this->styleClass($payload) . '"' . $style . $edit . '>';
-            if ($items === array() && $mode === self::MODE_EDIT) {
-                $html .= '<li data-placeholder="1">List item</li>';
+        $renderSegment = function (array $segmentItems, int $offset) use (
+            $tag,
+            $ordered,
+            $edit,
+            $style,
+            $payload,
+            $itemIndentLevels
+        ): string {
+            if ($segmentItems === array()) {
+                return '';
             }
-            foreach ($items as $index => $item) {
+            $startAttr = $ordered && $offset > 0 ? ' start="' . ($offset + 1) . '"' : '';
+            $segmentHtml = '<' . $tag . ' class="cpb-list' . $this->styleClass($payload) . '"'
+                . $startAttr . $style . $edit . '>';
+            foreach ($segmentItems as $localIndex => $item) {
+                $index = $offset + $localIndex;
                 $indentLevel = max(0, min(8, (int)($itemIndentLevels[$index] ?? 0)));
                 $indentAttr = $indentLevel > 0
                     ? ' data-indent-level="' . $indentLevel . '"'
                     : '';
                 $itemHtml = ControlledPublishingHtmlSanitizer::sanitizeInline((string)$item);
-                $html .= '<li' . $indentAttr . '>' . $itemHtml . '</li>';
+                $segmentHtml .= '<li' . $indentAttr . '>' . $itemHtml . '</li>';
             }
-            $html .= '</' . $tag . '>';
+            return $segmentHtml . '</' . $tag . '>';
+        };
+
+        if ($continuationHtml === '') {
+            if ($items === array() && $mode === self::MODE_EDIT) {
+                $items = array('List item');
+            }
+            $html .= $renderSegment($items, 0);
+        } else {
+            $beforeItems = array_slice($items, 0, $continuationAfter);
+            $afterItems = array_slice($items, $continuationAfter);
+            $html .= $renderSegment($beforeItems, 0);
         }
         if ($continuationHtml !== '') {
             $continuationEdit = $mode === self::MODE_EDIT
@@ -1564,6 +1589,7 @@ final class ControlledPublishingBookRenderer
                 : '';
             $html .= '<div class="cpb-list-continuation' . $this->styleClass($payload) . '"'
                 . $style . $continuationEdit . '>' . $continuationHtml . '</div>';
+            $html .= $renderSegment($afterItems, $continuationAfter);
         }
         return $html;
     }
