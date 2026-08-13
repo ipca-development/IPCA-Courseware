@@ -165,12 +165,18 @@ final class StructuredDocumentPayload
     {
         $out = $payload;
         $items = array();
-        foreach ((array)($payload['items'] ?? array()) as $item) {
+        $itemIndentLevels = array();
+        $rawIndentLevels = is_array($payload['item_indent_levels'] ?? null)
+            ? $payload['item_indent_levels']
+            : array();
+        foreach ((array)($payload['items'] ?? array()) as $index => $item) {
             $items[] = (string)$item;
+            $itemIndentLevels[] = max(0, min(8, (int)($rawIndentLevels[$index] ?? 0)));
         }
         return array_merge($out, self::normalizeTextPayload($payload, false), array(
             'ordered' => !empty($payload['ordered']),
             'items' => $items !== array() ? $items : array('List item'),
+            'item_indent_levels' => $items !== array() ? $itemIndentLevels : array(0),
         ));
     }
 

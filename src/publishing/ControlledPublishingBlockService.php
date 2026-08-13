@@ -386,17 +386,22 @@ final class ControlledPublishingBlockService
     }
 
     /**
-     * @return array{ordered:bool,items:list<string>}
+     * @return array{ordered:bool,items:list<string>,item_indent_levels:list<int>}
      */
     private function normalizeListPayload(array $payload, bool $strict): array
     {
         $ordered = !empty($payload['ordered']);
         $items = array();
+        $itemIndentLevels = array();
+        $rawIndentLevels = is_array($payload['item_indent_levels'] ?? null)
+            ? $payload['item_indent_levels']
+            : array();
         if (is_array($payload['items'] ?? null)) {
-            foreach ($payload['items'] as $item) {
+            foreach ($payload['items'] as $index => $item) {
                 $t = trim((string)$item);
                 if ($t !== '') {
                     $items[] = $t;
+                    $itemIndentLevels[] = max(0, min(8, (int)($rawIndentLevels[$index] ?? 0)));
                 }
             }
         }
@@ -405,9 +410,14 @@ final class ControlledPublishingBlockService
         }
         if ($items === array()) {
             $items = array('List item');
+            $itemIndentLevels = array(0);
         }
         return array_merge(
-            array('ordered' => $ordered, 'items' => $items),
+            array(
+                'ordered' => $ordered,
+                'items' => $items,
+                'item_indent_levels' => $itemIndentLevels,
+            ),
             $this->normalizeStyleFields($payload)
         );
     }

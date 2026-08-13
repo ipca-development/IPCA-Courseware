@@ -152,7 +152,6 @@
     tocSyncTimer: null,
   };
 
-  var INDENT_STEP_PX = 24;
   var INDENT_MAX_LEVEL = 8;
   var ZOOM_MIN = 50;
   var ZOOM_MAX = 200;
@@ -1186,30 +1185,6 @@
     });
     state.pending = {};
     return promises.length ? Promise.all(promises) : Promise.resolve();
-  }
-
-  function syncIndentLevelFromElement(el) {
-    if (!el) return;
-    var level = parseInt(el.getAttribute('data-indent-level') || '0', 10) || 0;
-    var margin = parseInt(String(el.style.marginLeft || '0').replace('px', ''), 10) || 0;
-    if (margin > 0) {
-      level = Math.max(level, Math.round(margin / INDENT_STEP_PX));
-    }
-    var blockquotes = 0;
-    var node = el;
-    while (node && node !== canvasEl) {
-      if (node.tagName === 'BLOCKQUOTE') blockquotes++;
-      node = node.parentElement;
-    }
-    level = Math.max(level, blockquotes);
-    level = Math.max(0, Math.min(INDENT_MAX_LEVEL, level));
-    el.setAttribute('data-indent-level', String(level));
-    if (level > 0) {
-      el.style.marginLeft = (level * INDENT_STEP_PX) + 'px';
-    } else {
-      el.style.marginLeft = '';
-    }
-    return level;
   }
 
   function formatCrossRefDisplay(documentKey, refKey) {
@@ -3009,7 +2984,8 @@
     else if (blockType === 'paragraph') el = blockEl.querySelector('.cpb-paragraph');
     else if (blockType === 'list') el = blockEl.querySelector('.cpb-list');
     if (!el) return {};
-    syncIndentLevelFromElement(el);
+    el.style.marginLeft = '';
+    el.setAttribute('data-indent-level', '0');
     var styleKey = canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
     var fields = {
       paragraph_style: styleKey,
@@ -3017,7 +2993,7 @@
       text_align: el.getAttribute('data-text-align') || 'left',
       font_size: parseInt(el.getAttribute('data-font-size') || '11', 10) || 11,
       text_color: el.getAttribute('data-text-color') || '#0f172a',
-      indent_level: parseInt(el.getAttribute('data-indent-level') || '0', 10) || 0,
+      indent_level: 0,
     };
     var def = paragraphStyleDef(styleKey);
     var out = {
@@ -3164,7 +3140,7 @@
   function normalizeListItemsFromElement(list) {
     var items = [];
     if (!list) return items;
-    var lis = list.querySelectorAll('li');
+    var lis = list.querySelectorAll(':scope > li');
     if (lis.length === 1) {
       return splitMergedListItemText(lis[0].textContent);
     }
@@ -3173,6 +3149,20 @@
       if (t) items.push(t);
     });
     return items;
+  }
+
+  function normalizeListIndentLevelsFromElement(list) {
+    var levels = [];
+    if (!list) return levels;
+    list.querySelectorAll(':scope > li').forEach(function (li) {
+      var text = li.textContent.replace(/\u00a0/g, ' ').trim();
+      if (!text) return;
+      levels.push(Math.max(0, Math.min(
+        INDENT_MAX_LEVEL,
+        parseInt(li.getAttribute('data-indent-level') || '0', 10) || 0
+      )));
+    });
+    return levels;
   }
 
   function repairListDomStructure(list) {
@@ -3216,7 +3206,12 @@
       repairListDomStructure(list);
       var ordered = list && list.tagName === 'OL';
       var items = normalizeListItemsFromElement(list);
-      return Object.assign({ ordered: ordered, items: items }, extractStyleFields(blockEl, 'list'));
+      var itemIndentLevels = normalizeListIndentLevelsFromElement(list);
+      return Object.assign({
+        ordered: ordered,
+        items: items,
+        item_indent_levels: itemIndentLevels,
+      }, extractStyleFields(blockEl, 'list'));
     }
     if (blockType === 'table') {
       return extractTablePayload(blockEl);
@@ -4661,14 +4656,117 @@
     return true;
   }
 
-  function applyIndentToElement(el, level) {
-    level = Math.max(0, Math.min(INDENT_MAX_LEVEL, level));
-    el.setAttribute('data-indent-level', String(level));
-    if (level > 0) {
-      el.style.marginLeft = (level * INDENT_STEP_PX) + 'px';
-    } else {
-      el.style.marginLeft = '';
+  function indentSelectionRange(rootEl) {
+    restoreSelectionRange();
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    var range = sel.getRangeAt(0);
+    var container = range.commonAncestorContainer.nodeType === 1
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    return container && rootEl.contains(container) ? range : null;
+  }
+
+  function rangeTouchesNode(range, node) {
+    if (!range || !node) return false;
+    if (range.collapsed) {
+      return node === range.startContainer || node.contains(range.startContainer);
     }
+    try {
+      return range.intersectsNode(node);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function directLineUnit(rootEl, node) {
+    var el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    while (el && el !== rootEl) {
+      if (el.parentElement === rootEl
+        && (el.tagName === 'P' || el.tagName === 'DIV' || el.classList.contains('cpb-line-indent'))) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function wrapSelectedInlineLines(rootEl, range) {
+    var lines = [[]];
+    Array.prototype.slice.call(rootEl.childNodes).forEach(function (node) {
+      if (node.nodeType === 1 && node.tagName === 'BR') {
+        lines.push([]);
+      } else {
+        lines[lines.length - 1].push(node);
+      }
+    });
+    var units = [];
+    lines.forEach(function (line) {
+      if (!line.length || !line.some(function (node) { return rangeTouchesNode(range, node); })) return;
+      if (line.length === 1 && line[0].nodeType === 1
+        && line[0].classList.contains('cpb-line-indent')) {
+        units.push(line[0]);
+        return;
+      }
+      var wrapper = document.createElement('span');
+      wrapper.className = 'cpb-line-indent';
+      wrapper.setAttribute('data-indent-level', '0');
+      rootEl.insertBefore(wrapper, line[0]);
+      line.forEach(function (node) { wrapper.appendChild(node); });
+      units.push(wrapper);
+    });
+    return units;
+  }
+
+  function selectedTextLineUnits(rootEl, range) {
+    var units = [];
+    rootEl.querySelectorAll(':scope > p, :scope > div, :scope > .cpb-line-indent').forEach(function (el) {
+      if (rangeTouchesNode(range, el)) units.push(el);
+    });
+    if (units.length) return units;
+    var direct = directLineUnit(rootEl, range.startContainer);
+    if (direct) return [direct];
+    return wrapSelectedInlineLines(rootEl, range);
+  }
+
+  function setLineIndentLevel(el, level) {
+    level = Math.max(0, Math.min(INDENT_MAX_LEVEL, level));
+    if (level > 0) {
+      el.classList.add('cpb-line-indent');
+      el.setAttribute('data-indent-level', String(level));
+      return;
+    }
+    el.removeAttribute('data-indent-level');
+    if (el.tagName === 'SPAN' && el.classList.contains('cpb-line-indent')) {
+      unwrapElement(el);
+    } else {
+      el.classList.remove('cpb-line-indent');
+    }
+  }
+
+  function applyListItemIndent(target, delta) {
+    var list = target.el;
+    var range = indentSelectionRange(list);
+    if (!range) return false;
+    var items = Array.prototype.slice.call(list.querySelectorAll(':scope > li')).filter(function (li) {
+      return rangeTouchesNode(range, li);
+    });
+    if (!items.length) {
+      var activeItem = range.startContainer.nodeType === 1
+        ? range.startContainer.closest('li')
+        : range.startContainer.parentElement && range.startContainer.parentElement.closest('li');
+      if (activeItem && activeItem.parentElement === list) items = [activeItem];
+    }
+    if (!items.length) return false;
+    list.style.marginLeft = '';
+    list.setAttribute('data-indent-level', '0');
+    items.forEach(function (li) {
+      var level = parseInt(li.getAttribute('data-indent-level') || '0', 10) || 0;
+      var nextLevel = Math.max(0, Math.min(INDENT_MAX_LEVEL, level + delta));
+      if (nextLevel > 0) li.setAttribute('data-indent-level', String(nextLevel));
+      else li.removeAttribute('data-indent-level');
+    });
+    return true;
   }
 
   function applyIndentDelta(delta) {
@@ -4676,10 +4774,23 @@
     if (!target || target.type === 'table-cell') return;
     if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
     pushUndo();
-    syncIndentLevelFromElement(target.el);
-    var level = parseInt(target.el.getAttribute('data-indent-level') || '0', 10) || 0;
-    var newLevel = Math.max(0, Math.min(INDENT_MAX_LEVEL, level + delta));
-    applyIndentToElement(target.el, newLevel);
+    var changed = false;
+    if (target.type === 'list') {
+      changed = applyListItemIndent(target, delta);
+    } else {
+      var range = indentSelectionRange(target.el);
+      if (range) {
+        target.el.style.marginLeft = '';
+        target.el.setAttribute('data-indent-level', '0');
+        var units = selectedTextLineUnits(target.el, range);
+        units.forEach(function (unit) {
+          var level = parseInt(unit.getAttribute('data-indent-level') || '0', 10) || 0;
+          setLineIndentLevel(unit, level + delta);
+        });
+        changed = units.length > 0;
+      }
+    }
+    if (!changed) return;
     scheduleSave(target.block);
     flushSave(target.block);
   }

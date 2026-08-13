@@ -17,7 +17,7 @@ final class ControlledPublishingHtmlSanitizer
             return '';
         }
 
-        $allowed = array('b', 'strong', 'i', 'em', 'u', 'br', 'ul', 'ol', 'li', 'p', 'span', 'a');
+        $allowed = array('b', 'strong', 'i', 'em', 'u', 'br', 'ul', 'ol', 'li', 'p', 'div', 'span', 'a');
         $doc = new DOMDocument();
         $prev = libxml_use_internal_errors(true);
         $wrapped = '<?xml encoding="utf-8" ?><div>' . $html . '</div>';
@@ -63,6 +63,12 @@ final class ControlledPublishingHtmlSanitizer
                     if (preg_match('/color\s*:\s*(#[0-9a-fA-F]{3,8})/', $style, $m) === 1) {
                         $keepAttrs['style'] = 'color:' . strtolower($m[1]);
                     }
+                }
+                if (in_array($tag, array('span', 'p', 'div'), true)
+                    && $child->getAttribute('class') === 'cpb-line-indent') {
+                    $level = (int)$child->getAttribute('data-indent-level');
+                    $keepAttrs['class'] = 'cpb-line-indent';
+                    $keepAttrs['data-indent-level'] = (string)max(0, min(8, $level));
                 }
                 if ($tag === 'a') {
                     $href = trim((string)$child->getAttribute('href'));

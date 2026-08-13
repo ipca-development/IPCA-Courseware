@@ -1368,6 +1368,51 @@ body.cpb-browser-fullscreen .cpb-workspace {
   padding-left: 1.4em;
 }
 
+.cpb-line-indent {
+  display: block;
+}
+
+.cpb-line-indent[data-indent-level="1"],
+.cpb-list > li[data-indent-level="1"] { margin-left: 24px; }
+.cpb-line-indent[data-indent-level="2"],
+.cpb-list > li[data-indent-level="2"] { margin-left: 48px; }
+.cpb-line-indent[data-indent-level="3"],
+.cpb-list > li[data-indent-level="3"] { margin-left: 72px; }
+.cpb-line-indent[data-indent-level="4"],
+.cpb-list > li[data-indent-level="4"] { margin-left: 96px; }
+.cpb-line-indent[data-indent-level="5"],
+.cpb-list > li[data-indent-level="5"] { margin-left: 120px; }
+.cpb-line-indent[data-indent-level="6"],
+.cpb-list > li[data-indent-level="6"] { margin-left: 144px; }
+.cpb-line-indent[data-indent-level="7"],
+.cpb-list > li[data-indent-level="7"] { margin-left: 168px; }
+.cpb-line-indent[data-indent-level="8"],
+.cpb-list > li[data-indent-level="8"] { margin-left: 192px; }
+
+ul.cpb-list > li[data-indent-level="1"],
+ul.cpb-list > li[data-indent-level="4"],
+ul.cpb-list > li[data-indent-level="7"] {
+  list-style-type: circle;
+}
+
+ul.cpb-list > li[data-indent-level="2"],
+ul.cpb-list > li[data-indent-level="5"],
+ul.cpb-list > li[data-indent-level="8"] {
+  list-style-type: square;
+}
+
+ol.cpb-list > li[data-indent-level="1"],
+ol.cpb-list > li[data-indent-level="4"],
+ol.cpb-list > li[data-indent-level="7"] {
+  list-style-type: lower-alpha;
+}
+
+ol.cpb-list > li[data-indent-level="2"],
+ol.cpb-list > li[data-indent-level="5"],
+ol.cpb-list > li[data-indent-level="8"] {
+  list-style-type: lower-roman;
+}
+
 .cpb-table-block {
   display: flex;
   flex-direction: column;

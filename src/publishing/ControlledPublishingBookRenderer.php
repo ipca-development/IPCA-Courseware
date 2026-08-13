@@ -1531,6 +1531,9 @@ final class ControlledPublishingBookRenderer
     {
         $ordered = !empty($payload['ordered']);
         $items = is_array($payload['items'] ?? null) ? $payload['items'] : array();
+        $itemIndentLevels = is_array($payload['item_indent_levels'] ?? null)
+            ? $payload['item_indent_levels']
+            : array();
         $tag = $ordered ? 'ol' : 'ul';
         $edit = $mode === self::MODE_EDIT
             ? ' contenteditable="true" data-field="items" spellcheck="true"'
@@ -1540,8 +1543,12 @@ final class ControlledPublishingBookRenderer
         if ($items === array() && $mode === self::MODE_EDIT) {
             $html .= '<li data-placeholder="1">List item</li>';
         } else {
-            foreach ($items as $item) {
-                $html .= '<li>' . h((string)$item) . '</li>';
+            foreach ($items as $index => $item) {
+                $indentLevel = max(0, min(8, (int)($itemIndentLevels[$index] ?? 0)));
+                $indentAttr = $indentLevel > 0
+                    ? ' data-indent-level="' . $indentLevel . '"'
+                    : '';
+                $html .= '<li' . $indentAttr . '>' . h((string)$item) . '</li>';
             }
         }
         $html .= '</' . $tag . '>';
@@ -2483,10 +2490,6 @@ final class ControlledPublishingBookRenderer
             'font-style:' . (!empty($typography['font_italic']) ? 'italic' : 'normal'),
             'text-decoration:' . (!empty($typography['font_underline']) ? 'underline' : 'none'),
         );
-        $indentLevel = (int)$typography['indent_level'];
-        if ($indentLevel > 0) {
-            $styles[] = 'margin-left:' . ($indentLevel * 24) . 'px';
-        }
         $attrs = ' style="' . h(implode(';', $styles)) . '"'
             . ' data-font-family="' . h((string)$typography['font_family']) . '"'
             . ' data-text-align="' . h((string)$typography['text_align']) . '"'
@@ -2495,7 +2498,7 @@ final class ControlledPublishingBookRenderer
             . ' data-font-bold="' . (!empty($typography['font_bold']) ? '1' : '0') . '"'
             . ' data-font-italic="' . (!empty($typography['font_italic']) ? '1' : '0') . '"'
             . ' data-font-underline="' . (!empty($typography['font_underline']) ? '1' : '0') . '"'
-            . ' data-indent-level="' . $indentLevel . '"';
+            . ' data-indent-level="0"';
         if ($paragraphStyle !== '') {
             $attrs .= ' data-paragraph-style="' . h($paragraphStyle) . '"';
         }
