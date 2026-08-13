@@ -1530,6 +1530,7 @@ final class ControlledPublishingBookRenderer
     private function renderList(array $payload, string $mode, int $blockId = 0): string
     {
         $ordered = !empty($payload['ordered']);
+        $startNumber = max(1, min(9999, (int)($payload['start_number'] ?? 1)));
         $items = is_array($payload['items'] ?? null) ? $payload['items'] : array();
         $itemIndentLevels = is_array($payload['item_indent_levels'] ?? null)
             ? $payload['item_indent_levels']
@@ -1550,6 +1551,7 @@ final class ControlledPublishingBookRenderer
         $renderSegment = function (array $segmentItems, int $offset) use (
             $tag,
             $ordered,
+            $startNumber,
             $edit,
             $style,
             $payload,
@@ -1558,7 +1560,10 @@ final class ControlledPublishingBookRenderer
             if ($segmentItems === array()) {
                 return '';
             }
-            $startAttr = $ordered && $offset > 0 ? ' start="' . ($offset + 1) . '"' : '';
+            $segmentStart = $startNumber + $offset;
+            $startAttr = $ordered && $segmentStart !== 1
+                ? ' start="' . $segmentStart . '"'
+                : '';
             $segmentHtml = '<' . $tag . ' class="cpb-list' . $this->styleClass($payload) . '"'
                 . $startAttr . $style . $edit . '>';
             foreach ($segmentItems as $localIndex => $item) {

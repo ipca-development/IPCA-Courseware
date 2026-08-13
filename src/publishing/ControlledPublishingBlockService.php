@@ -391,6 +391,7 @@ final class ControlledPublishingBlockService
     private function normalizeListPayload(array $payload, bool $strict): array
     {
         $ordered = !empty($payload['ordered']);
+        $startNumber = max(1, min(9999, (int)($payload['start_number'] ?? 1)));
         $continuationHtml = ControlledPublishingHtmlSanitizer::sanitizeInline(
             (string)($payload['continuation_html'] ?? '')
         );
@@ -422,6 +423,7 @@ final class ControlledPublishingBlockService
         return array_merge(
             array(
                 'ordered' => $ordered,
+                'start_number' => $startNumber,
                 'items' => $items,
                 'item_indent_levels' => $itemIndentLevels,
                 'continuation_html' => $continuationHtml,

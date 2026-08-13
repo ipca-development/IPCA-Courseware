@@ -471,6 +471,17 @@
   margin-left: 0;
 }
 
+.cpb-tool-list-start {
+  width: 52px;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #0f172a;
+  background: #fff;
+}
+
 .cpb-toolbar-shared {
   display: flex;
   align-items: center;

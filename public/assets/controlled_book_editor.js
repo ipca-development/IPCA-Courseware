@@ -38,6 +38,7 @@
   var detectSelect = document.getElementById('cpbDetectSelect');
   var syncSelect = document.getElementById('cpbSyncSelect');
   var textColorInput = document.getElementById('cpbTextColor');
+  var listStartInput = document.getElementById('cpbListStart');
   var fullscreenBtn = document.getElementById('cpbFullscreen');
   var zoomInBtn = document.getElementById('cpbZoomIn');
   var zoomOutBtn = document.getElementById('cpbZoomOut');
@@ -3247,6 +3248,10 @@
         nextList.appendChild(trailingItem);
       });
       if (nextList.tagName === 'OL') {
+        var firstOrderedList = blockEl.querySelector('ol.cpb-list');
+        var baseStart = firstOrderedList
+          ? Math.max(1, parseInt(firstOrderedList.getAttribute('start') || '1', 10) || 1)
+          : 1;
         var priorItems = 0;
         blockEl.querySelectorAll('.cpb-list').forEach(function (segment) {
           if (segment === nextList) return;
@@ -3254,7 +3259,7 @@
             priorItems += segment.querySelectorAll(':scope > li').length;
           }
         });
-        nextList.setAttribute('start', String(priorItems + 1));
+        nextList.setAttribute('start', String(baseStart + priorItems));
       }
     }
 
@@ -3287,6 +3292,23 @@
     exitListWithinBlock(list, blockEl, item, false);
   }
 
+  function applyOrderedListStart(value) {
+    var target = getActiveStyleTarget();
+    if (!target || target.type !== 'list' || target.el.tagName !== 'OL') return;
+    var startNumber = Math.max(1, parseInt(value, 10) || 1);
+    var segments = target.block.querySelectorAll('ol.cpb-list');
+    if (!segments.length) return;
+    pushUndo();
+    var precedingItems = 0;
+    segments.forEach(function (segment) {
+      segment.setAttribute('start', String(startNumber + precedingItems));
+      precedingItems += segment.querySelectorAll(':scope > li').length;
+    });
+    if (listStartInput) listStartInput.value = String(startNumber);
+    scheduleSave(target.block);
+    flushSave(target.block);
+  }
+
   function stripLeadingSectionNumberText(text) {
     text = String(text || '').trim();
     var prev = null;
@@ -3315,6 +3337,9 @@
       var lists = Array.prototype.slice.call(blockEl.querySelectorAll('.cpb-list'));
       var list = lists[0] || null;
       var ordered = list && list.tagName === 'OL';
+      var startNumber = ordered
+        ? Math.max(1, parseInt(list.getAttribute('start') || '1', 10) || 1)
+        : 1;
       var items = [];
       var itemIndentLevels = [];
       lists.forEach(function (segment) {
@@ -3333,6 +3358,7 @@
       }
       return Object.assign({
         ordered: ordered,
+        start_number: startNumber,
         items: items,
         item_indent_levels: itemIndentLevels,
         continuation_html: continuation
@@ -4646,6 +4672,18 @@
 
   function syncToolbarFromTarget(target) {
     if (!target) return;
+    if (listStartInput) {
+      var orderedList = target.type === 'list' && target.el && target.el.tagName === 'OL'
+        ? target.block.querySelector('ol.cpb-list')
+        : null;
+      listStartInput.hidden = !orderedList;
+      if (orderedList) {
+        listStartInput.value = String(Math.max(
+          1,
+          parseInt(orderedList.getAttribute('start') || '1', 10) || 1
+        ));
+      }
+    }
     if (target.type === 'table-cell') {
       var cellEffective = readEffectiveTypographyForElement(target.el);
       if (fontSelect) fontSelect.value = cellEffective.font_family;
@@ -6450,6 +6488,13 @@
       if (value === paragraphStyleSelectValueOnFocus) {
         applyParagraphStyle(value);
       }
+    });
+  }
+
+  if (listStartInput) {
+    listStartInput.addEventListener('focus', rememberStyleTarget);
+    listStartInput.addEventListener('change', function () {
+      applyOrderedListStart(listStartInput.value);
     });
   }
 

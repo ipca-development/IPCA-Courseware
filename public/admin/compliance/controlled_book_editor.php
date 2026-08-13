@@ -164,6 +164,8 @@ compliance_page_open(array(
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-cmd="insertUnorderedList" title="Bullet list">•</button>
           <button type="button" class="cpb-tool-btn" data-cmd="insertOrderedList" title="Numbered list">1.</button>
+          <input type="number" id="cpbListStart" class="cpb-tool-list-start" min="1" step="1" value="1"
+                 title="Starting number for the selected numbered list" aria-label="Numbered list start" hidden>
           <button type="button" class="cpb-tool-btn" data-cmd="removeList" title="Remove list formatting">☐</button>
         </div>
         <div class="cpb-toolbar-group">

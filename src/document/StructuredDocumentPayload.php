@@ -176,6 +176,7 @@ final class StructuredDocumentPayload
         $continuationHtml = (string)($payload['continuation_html'] ?? '');
         return array_merge($out, self::normalizeTextPayload($payload, false), array(
             'ordered' => !empty($payload['ordered']),
+            'start_number' => max(1, min(9999, (int)($payload['start_number'] ?? 1))),
             'items' => $items !== array() || $continuationHtml !== '' ? $items : array('List item'),
             'item_indent_levels' => $items !== array() || $continuationHtml !== ''
                 ? $itemIndentLevels
