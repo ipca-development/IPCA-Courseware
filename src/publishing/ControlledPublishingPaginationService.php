@@ -191,7 +191,7 @@ final class ControlledPublishingPaginationService
             'layout' => ControlledPublishingReaderLayoutProfile::spec(),
             'layout_profile' => ControlledPublishingReaderLayoutProfile::profileKey(),
             'layout_hash' => ControlledPublishingReaderLayoutProfile::layoutHash(),
-            'nav' => $this->reader->buildReaderNavTree($bookKey),
+            'nav' => $this->reader->buildReaderNavTree($bookKey, $version),
             'sections' => $sectionsOut,
         );
     }
@@ -1100,9 +1100,11 @@ final class ControlledPublishingPaginationService
         array $tocSection,
         array $sectionPageIndex
     ): array {
-        $bookKey = (string)($source['book_key'] ?? 'OM');
-        $version = $this->reader->requireReleasedVersion($bookKey);
-        $versionId = (int)$version['id'];
+        $versionId = (int)($source['version_id'] ?? 0);
+        $version = $this->reader->resolveVersionById($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Manual version not found.');
+        }
         $sectionId = (int)($tocSection['section_id'] ?? 0);
         if ($sectionId <= 0) {
             return $tocSection;
