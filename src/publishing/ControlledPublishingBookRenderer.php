@@ -1558,7 +1558,7 @@ final class ControlledPublishingBookRenderer
             return '<nav class="cpb-toc" aria-label="Table of contents"><p class="cpb-toc-empty">No entries.</p></nav>';
         }
 
-        $tocTextColor = (string)$this->resolveTypography(array('paragraph_style' => 'body'))['color'];
+        $tocTextColor = '#000000';
         $rows = '';
         foreach ($entries as $entry) {
             if (!is_array($entry)) {

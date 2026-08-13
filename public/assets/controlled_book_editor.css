@@ -2619,6 +2619,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
   gap: 8px;
   min-height: 1.35em;
   margin-bottom: 4px;
+  color: #000000 !important;
 }
 
 .cpb-tree-separator {
@@ -2659,8 +2660,9 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-toc-label,
+.cpb-toc-page,
 .cpb-toc-link {
-  color: inherit;
+  color: #000000 !important;
 }
 
 .cpb-toc-label {
@@ -2673,7 +2675,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-toc-link:hover {
   text-decoration: underline;
-  color: inherit;
+  color: #000000 !important;
   opacity: 0.85;
 }
 

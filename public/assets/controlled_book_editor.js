@@ -4584,8 +4584,7 @@
   }
 
   function refreshTocTypographyFromBookStyles() {
-    var bodyDef = paragraphStyleDef('body');
-    var tocColor = bodyDef.color || '#0f172a';
+    var tocColor = '#000000';
     canvasEl.querySelectorAll('.cpb-toc-row[data-toc-style]').forEach(function (row) {
       var styleKey = row.getAttribute('data-toc-style') || 'body';
       var def = paragraphStyleDef(styleKey);
