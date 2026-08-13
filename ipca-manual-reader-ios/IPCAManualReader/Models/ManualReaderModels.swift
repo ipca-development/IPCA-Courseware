@@ -82,7 +82,16 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         return bookTitle
     }
 
-    var isDraftPreview: Bool { isPreview == true }
+    var isDraftPreview: Bool {
+        if isPreview == true {
+            return true
+        }
+        guard let lifecycleStatus else {
+            return false
+        }
+        let status = lifecycleStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["draft", "in_review", "approved"].contains(status)
+    }
 
     var coverAbsoluteURL: URL? {
         guard let path = coverImageUrl ?? coverUrl,

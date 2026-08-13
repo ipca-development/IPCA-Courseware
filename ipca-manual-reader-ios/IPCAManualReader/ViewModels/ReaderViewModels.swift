@@ -63,9 +63,15 @@ final class ReaderViewModel: ObservableObject {
             let isPreview = book.isDraftPreview
             async let mapTask = client.fetchPageMap(bookKey: book.bookKey, versionId: versionId, isPreview: isPreview)
             async let tocTask = client.fetchToc(bookKey: book.bookKey, versionId: versionId, isPreview: isPreview)
-            async let progressTask = client.fetchProgress(bookKey: book.bookKey, versionId: versionId, isPreview: isPreview)
 
-            let (map, toc, progress) = try await (mapTask, tocTask, progressTask)
+            let progress: ProgressGetResponse? = isPreview
+                ? nil
+                : try await client.fetchProgress(
+                    bookKey: book.bookKey,
+                    versionId: versionId,
+                    isPreview: false
+                )
+            let (map, toc) = try await (mapTask, tocTask)
             pages = map.pages.sorted { $0.pageNumber < $1.pageNumber }
             nav = toc.nav
             sectionPageIndex = toc.sectionPageIndex.reduce(into: [:]) { result, pair in
@@ -80,7 +86,7 @@ final class ReaderViewModel: ObservableObject {
                let match = pages.firstIndex(where: { $0.stableAnchor == anchor }) {
                 startIndex = match
             } else if !isPreview,
-                      let pageNum = progress.progress?.pageNumber,
+                      let pageNum = progress?.progress?.pageNumber,
                       let match = pages.firstIndex(where: { $0.pageNumber == pageNum }) {
                 startIndex = match
             }

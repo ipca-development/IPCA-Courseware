@@ -206,10 +206,7 @@ try {
                     'default_section_id' => $reader->defaultSectionId($bookKey, $ctx['version']),
                 ));
             }
-            $version = $reader->resolveLatestReleasedVersion($bookKey);
-            if ($version === null) {
-                mr_json(404, array('ok' => false, 'error' => 'No released manual available'));
-            }
+            $version = $ctx['version'];
             $progress = $reader->getReadingProgress($userId, $bookKey);
             mr_json(200, array(
                 'ok' => true,
