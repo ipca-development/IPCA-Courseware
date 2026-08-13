@@ -9,6 +9,7 @@ require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
 require_once __DIR__ . '/ControlledPublishingCoverPageService.php';
 require_once __DIR__ . '/ControlledPublishingLepService.php';
+require_once __DIR__ . '/ControlledPublishingCrossRefAnnex.php';
 
 /**
  * Shared render pipeline for editor canvas, e-reader, and PDF source HTML.
@@ -1387,10 +1388,43 @@ final class ControlledPublishingBookRenderer
         $regRef = $this->renderRegulatoryRefPrefix($payload, $blockId);
         $canonRef = trim((string)($payload['canonical_section_ref'] ?? ''));
         $canonAttr = $canonRef !== '' ? ' data-canonical-section-ref="' . h($canonRef) . '"' : '';
+        $crossRef = $this->renderCrossRefLine($payload, $mode);
         return '<div class="cpb-paragraph-row"' . $canonAttr . '>'
             . $prefix . $regRef
+            . '<div class="cpb-paragraph-stack">'
             . '<div class="cpb-paragraph' . $this->styleClass($payload) . '"' . $style . $edit . '>'
-            . $html . '</div></div>';
+            . $html . '</div>'
+            . $crossRef
+            . '</div></div>';
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function renderCrossRefLine(array $payload, string $mode): string
+    {
+        $key = trim((string)($payload['cross_ref_key'] ?? ''));
+        if ($key === '') {
+            return '';
+        }
+        $document = trim((string)($payload['cross_ref_document'] ?? ''));
+        $display = ControlledPublishingCrossRefAnnex::formatDisplay($document, $key);
+        if ($display === '') {
+            return '';
+        }
+        $edit = $mode === self::MODE_EDIT ? ' contenteditable="false"' : '';
+        $docAttr = $document !== '' ? ' data-cross-ref-document="' . h($document) . '"' : '';
+        $bodyTypo = $this->resolveBodyTypography();
+        $fontFamily = (string)$bodyTypo['font_family'];
+        $fontSize = max(8, (int)$bodyTypo['font_size'] - 1);
+        $fontKey = preg_replace('/[^a-z]/', '', strtolower($fontFamily));
+        $fontStack = $this->fontFamilyStack($fontFamily);
+        $lineStyle = ' style="font-family:' . $fontStack . ';font-size:' . $fontSize
+            . 'pt;font-weight:400;color:#475569;font-style:italic"';
+
+        return '<div class="cpb-cross-ref cpb-font-' . h($fontKey) . '"' . $edit
+            . $docAttr . ' data-cross-ref-key="' . h($key) . '"' . $lineStyle
+            . '>(Ref. ' . h($display) . ')</div>';
     }
 
     /**
@@ -1574,6 +1608,9 @@ final class ControlledPublishingBookRenderer
         }
         $colCount = count($headers);
         $edit = $mode === self::MODE_EDIT;
+        $tableStyleDef = $this->resolveStandardTableStyle();
+        $headerRowStyle = is_array($tableStyleDef['header_row'] ?? null) ? $tableStyleDef['header_row'] : array();
+        $bodyRowStyle = is_array($tableStyleDef['body_row'] ?? null) ? $tableStyleDef['body_row'] : array();
 
         $html = '<div class="cpb-table-block cpb-table-block--align-' . h($tableAlign) . '"'
             . ' data-table-align="' . h($tableAlign) . '"'
@@ -1636,7 +1673,28 @@ final class ControlledPublishingBookRenderer
             $headerFont = (string)($headerFontFamilies[$colIndex] ?? '');
             $headerSize = (int)($headerFontSizes[$colIndex] ?? 0);
             $headerColor = (string)($headerTextColors[$colIndex] ?? '');
-            $html .= '<th colspan="' . $colspan . '"' . $headerEdit . $this->tableCellVisualAttr($headerBg, $headerAlign, $headerFont, $headerSize, $headerColor) . ' data-col-index="' . $colIndex . '">';
+            $effectiveHeaderFont = $headerFont !== ''
+                ? $headerFont
+                : (string)($headerRowStyle['font_family'] ?? 'sans');
+            $effectiveHeaderSize = $headerSize > 0
+                ? $headerSize
+                : (int)($headerRowStyle['font_size'] ?? 10);
+            $effectiveHeaderColor = $headerColor !== ''
+                ? $headerColor
+                : (string)($headerRowStyle['color'] ?? '#0f172a');
+            $headerBold = $this->normalizeDecorationBool($headerRowStyle['font_bold'] ?? null, true);
+            $headerItalic = $this->normalizeDecorationBool($headerRowStyle['font_italic'] ?? null, false);
+            $headerUnderline = $this->normalizeDecorationBool($headerRowStyle['font_underline'] ?? null, false);
+            $html .= '<th colspan="' . $colspan . '"' . $headerEdit . $this->tableCellVisualAttr(
+                $headerBg,
+                $headerAlign,
+                $effectiveHeaderFont,
+                $effectiveHeaderSize,
+                $effectiveHeaderColor,
+                $headerBold,
+                $headerItalic,
+                $headerUnderline
+            ) . ' data-col-index="' . $colIndex . '">';
             $html .= '<span class="cpb-th-text">' . $this->renderTableCellInner((string)$header, $edit, $rows) . '</span>';
             if ($edit) {
                 $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
@@ -1660,11 +1718,32 @@ final class ControlledPublishingBookRenderer
                 $cellFont = (string)($cellFontFamilies[$rowIndex][$cellIndex] ?? '');
                 $cellSize = (int)($cellFontSizes[$rowIndex][$cellIndex] ?? 0);
                 $cellColor = (string)($cellTextColors[$rowIndex][$cellIndex] ?? '');
+                $effectiveCellFont = $cellFont !== ''
+                    ? $cellFont
+                    : (string)($bodyRowStyle['font_family'] ?? 'sans');
+                $effectiveCellSize = $cellSize > 0
+                    ? $cellSize
+                    : (int)($bodyRowStyle['font_size'] ?? 10);
+                $effectiveCellColor = $cellColor !== ''
+                    ? $cellColor
+                    : (string)($bodyRowStyle['color'] ?? '#0f172a');
+                $cellBold = $this->normalizeDecorationBool($bodyRowStyle['font_bold'] ?? null, false);
+                $cellItalic = $this->normalizeDecorationBool($bodyRowStyle['font_italic'] ?? null, false);
+                $cellUnderline = $this->normalizeDecorationBool($bodyRowStyle['font_underline'] ?? null, false);
                 $rawCell = (string)$cell;
                 $formulaAttr = (!$edit && str_starts_with($rawCell, '='))
                     ? ' data-formula="' . h($rawCell) . '" title="' . h($rawCell) . '"'
                     : '';
-                $html .= '<td colspan="' . $colspan . '"' . $cellEdit . $this->tableCellVisualAttr($bg, $align, $cellFont, $cellSize, $cellColor) . $formulaAttr . '>'
+                $html .= '<td colspan="' . $colspan . '"' . $cellEdit . $this->tableCellVisualAttr(
+                    $bg,
+                    $align,
+                    $effectiveCellFont,
+                    $effectiveCellSize,
+                    $effectiveCellColor,
+                    $cellBold,
+                    $cellItalic,
+                    $cellUnderline
+                ) . $formulaAttr . '>'
                     . $this->renderTableCellInner($rawCell, $edit, $rows) . '</td>';
                 $cellIndex += $colspan;
             }
@@ -2030,6 +2109,8 @@ final class ControlledPublishingBookRenderer
         if (str_contains($raw, '<')) {
             return ControlledPublishingHtmlSanitizer::sanitizeInline($raw);
         }
+        $raw = html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
         return h($raw);
     }
 

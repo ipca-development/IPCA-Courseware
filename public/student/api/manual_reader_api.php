@@ -4,7 +4,6 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAccessService.php';
-require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPaginationService.php';
 
 cw_require_login();
 
@@ -42,6 +41,37 @@ function mr_validate_book_key(string $bookKey): string
 
 /**
  * @param array<string,mixed>|null $user
+ */
+function mr_can_preview_drafts(?array $user, ControlledPublishingReaderAccessService $access): bool
+{
+    if (method_exists($access, 'canPreviewDraftManuals')) {
+        return $access->canPreviewDraftManuals($user);
+    }
+    if (!is_array($user)) {
+        return false;
+    }
+    $role = strtolower(trim((string)($user['role'] ?? '')));
+
+    return in_array($role, array('instructor', 'chief_instructor', 'admin'), true);
+}
+
+/**
+ * @return list<array<string,mixed>>
+ */
+function mr_list_library_books(
+    ControlledPublishingReaderService $reader,
+    ?int $userId,
+    bool $includeDraftPreview
+): array {
+    if (method_exists($reader, 'listActiveLibrary')) {
+        return $reader->listActiveLibrary($userId, $includeDraftPreview);
+    }
+
+    return $reader->listActiveReleasedLibrary($userId);
+}
+
+/**
+ * @param array<string,mixed>|null $user
  * @return array{version: array<string,mixed>, is_preview: bool, can_preview: bool, book_key: string}
  */
 function mr_reader_context(
@@ -51,13 +81,17 @@ function mr_reader_context(
     string $bookKey,
     array $input = array()
 ): array {
-    $canPreview = $access->canPreviewDraftManuals($user);
+    $canPreview = mr_can_preview_drafts($user, $access);
     $versionId = (int)($input['version_id'] ?? $_GET['version_id'] ?? 0);
-    $version = $reader->resolveReaderVersion(
-        $bookKey,
-        $versionId > 0 ? $versionId : null,
-        $canPreview
-    );
+    if (method_exists($reader, 'resolveReaderVersion')) {
+        $version = $reader->resolveReaderVersion(
+            $bookKey,
+            $versionId > 0 ? $versionId : null,
+            $canPreview
+        );
+    } else {
+        $version = $reader->requireReleasedVersion($bookKey);
+    }
     $lifecycle = (string)($version['lifecycle_status'] ?? '');
 
     return array(
@@ -81,7 +115,7 @@ try {
     }
 
     $reader = new ControlledPublishingReaderService($pdo);
-    $canPreviewDrafts = $access->canPreviewDraftManuals($user);
+    $canPreviewDrafts = mr_can_preview_drafts($user, $access);
     $action = strtolower(trim((string)($_GET['action'] ?? '')));
 
     switch ($action) {
@@ -89,7 +123,7 @@ try {
             mr_json(200, array(
                 'ok' => true,
                 'can_preview_draft_manuals' => $canPreviewDrafts,
-                'books' => $reader->listActiveLibrary($userId, $canPreviewDrafts),
+                'books' => mr_list_library_books($reader, $userId, $canPreviewDrafts),
             ));
 
         case 'nav':
@@ -106,24 +140,35 @@ try {
                 'is_preview' => $ctx['is_preview'],
                 'nav' => $reader->buildReaderNavTree($bookKey, $version),
                 'has_page_map' => $ctx['is_preview']
-                    || $reader->hasApprovedFrozenPageMapForVersion($version),
+                    || (method_exists($reader, 'hasApprovedFrozenPageMapForVersion')
+                        ? $reader->hasApprovedFrozenPageMapForVersion($version)
+                        : $reader->hasApprovedFrozenPageMap($bookKey)),
             ));
 
         case 'page_map':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
-            mr_json(200, $reader->loadReaderPageMap($ctx['version'], $ctx['can_preview']));
+            if (method_exists($reader, 'loadReaderPageMap')) {
+                mr_json(200, $reader->loadReaderPageMap($ctx['version'], $ctx['can_preview']));
+            }
+            mr_json(200, $reader->loadFrozenPageMap($bookKey));
 
         case 'page':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             $pageNumber = (int)($_GET['page_number'] ?? $_GET['page'] ?? 0);
-            mr_json(200, $reader->loadReaderPage($ctx['version'], $pageNumber, $ctx['can_preview']));
+            if (method_exists($reader, 'loadReaderPage')) {
+                mr_json(200, $reader->loadReaderPage($ctx['version'], $pageNumber, $ctx['can_preview']));
+            }
+            mr_json(200, $reader->loadFrozenPage($bookKey, $pageNumber));
 
         case 'toc_with_pages':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
-            mr_json(200, $reader->loadReaderTocWithPages($ctx['version'], $ctx['can_preview']));
+            if (method_exists($reader, 'loadReaderTocWithPages')) {
+                mr_json(200, $reader->loadReaderTocWithPages($ctx['version'], $ctx['can_preview']));
+            }
+            mr_json(200, $reader->loadTocWithPages($bookKey));
 
         case 'section':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
@@ -212,5 +257,6 @@ try {
 } catch (RuntimeException $e) {
     mr_json(400, array('ok' => false, 'error' => $e->getMessage()));
 } catch (Throwable $e) {
-    mr_json(500, array('ok' => false, 'error' => 'Server error'));
+    error_log('manual_reader_api: ' . $e->getMessage());
+    mr_json(500, array('ok' => false, 'error' => $e->getMessage()));
 }

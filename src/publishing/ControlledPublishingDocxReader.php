@@ -371,6 +371,20 @@ final class ControlledPublishingDocxReader
     }
 
     /**
+     * Plain text extracted from stored inline HTML (TOC labels, nav titles, etc.).
+     */
+    public static function plainTextFromHtml(string $html): string
+    {
+        $html = trim($html);
+        if ($html === '') {
+            return '';
+        }
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        return self::sanitizeImportedText($text);
+    }
+
+    /**
      * Remove Word field/bookmark artifacts and orphan numeric IDs from imported body text.
      */
     public static function sanitizeImportedText(string $text): string

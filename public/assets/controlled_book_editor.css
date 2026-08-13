@@ -1142,9 +1142,36 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-heading-row .cpb-heading,
-.cpb-paragraph-row .cpb-paragraph {
+.cpb-paragraph-row .cpb-paragraph-stack {
   flex: 1;
   min-width: 0;
+}
+
+.cpb-paragraph-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
+}
+
+.cpb-cross-ref {
+  margin: 0;
+  padding: 0;
+  line-height: 1.3;
+  user-select: none;
+}
+
+.cpb-paragraph ul,
+.cpb-paragraph ol,
+.cpb-heading ul,
+.cpb-heading ol {
+  margin: 0.4em 0 0.4em 1.4em;
+  padding-left: 0;
+}
+
+.cpb-table th.is-cell-selected,
+.cpb-table td.is-cell-selected {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
 }
 
 .cpb-heading {

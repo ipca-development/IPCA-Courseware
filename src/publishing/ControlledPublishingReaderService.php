@@ -76,25 +76,29 @@ final class ControlledPublishingReaderService
         $library = array();
 
         foreach ($books as $book) {
-            $bookKey = (string)($book['book_key'] ?? '');
-            $released = $this->resolveLatestReleasedVersion($bookKey);
-            if ($released !== null) {
-                $library[] = $this->buildLibraryEntry($book, $released, $userId, false);
-            }
+            try {
+                $bookKey = (string)($book['book_key'] ?? '');
+                $released = $this->resolveLatestReleasedVersion($bookKey);
+                if ($released !== null) {
+                    $library[] = $this->buildLibraryEntry($book, $released, $userId, false);
+                }
 
-            if (!$includeDraftPreview) {
-                continue;
-            }
+                if (!$includeDraftPreview) {
+                    continue;
+                }
 
-            $draft = $this->resolveLatestDraftVersion($bookKey);
-            if ($draft === null) {
-                continue;
-            }
-            if ($released !== null && (int)$draft['id'] === (int)$released['id']) {
-                continue;
-            }
+                $draft = $this->resolveLatestDraftVersion($bookKey);
+                if ($draft === null) {
+                    continue;
+                }
+                if ($released !== null && (int)$draft['id'] === (int)$released['id']) {
+                    continue;
+                }
 
-            $library[] = $this->buildLibraryEntry($book, $draft, $userId, true);
+                $library[] = $this->buildLibraryEntry($book, $draft, $userId, true);
+            } catch (Throwable $e) {
+                error_log('listActiveLibrary skipped book: ' . $e->getMessage());
+            }
         }
 
         return $library;
@@ -130,12 +134,26 @@ final class ControlledPublishingReaderService
             'logo_url' => $cover['logo_url'],
             'cover_fallback' => $cover['fallback'],
             'has_progress' => is_array($progress),
-            'has_page_map' => $isPreview
-                ? true
-                : $this->hasApprovedFrozenPageMapForVersion($version),
+            'has_page_map' => $isPreview ? true : $this->safeHasApprovedPageMap($version, $bookKey),
             'continue_section_id' => is_array($progress) ? (int)($progress['section_id'] ?? 0) : null,
             'continue_stable_anchor' => is_array($progress) ? (string)($progress['stable_anchor'] ?? '') : '',
         );
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     */
+    private function safeHasApprovedPageMap(array $version, string $bookKey): bool
+    {
+        try {
+            if (method_exists($this, 'hasApprovedFrozenPageMapForVersion')) {
+                return $this->hasApprovedFrozenPageMapForVersion($version);
+            }
+
+            return $this->hasApprovedFrozenPageMap($bookKey);
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     /**

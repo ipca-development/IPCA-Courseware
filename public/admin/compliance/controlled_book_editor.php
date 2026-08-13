@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingCrossRefAnnex.php';
 
 $user = compliance_require_access($pdo);
 $foundation = new ControlledPublishingFoundationService($pdo);
@@ -91,7 +92,8 @@ compliance_page_open(array(
 
 <div class="cpb-editor-root" id="cpbEditorRoot"
      data-version-id="<?= (int)$versionId ?>"
-     data-section-id="<?= (int)$sectionId ?>">
+     data-section-id="<?= (int)$sectionId ?>"
+     data-cross-ref-annex="<?= h(json_encode(ControlledPublishingCrossRefAnnex::catalog(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)) ?>">
   <div class="cpb-editor-shell">
     <aside class="cpb-tree-panel">
       <div class="cpb-tree-head">
@@ -136,6 +138,13 @@ compliance_page_open(array(
             <option value="custom" disabled>Custom</option>
           </select>
           <input type="text" id="cpbRegulatoryRef" class="cpb-tool-reg-ref" placeholder="MCCF key" title="MCCF regulatory reference (manual override)" hidden>
+          <select id="cpbCrossRefDoc" class="cpb-tool-select cpb-tool-select--cross-ref" title="Cross reference document" hidden>
+            <option value="">Cross ref doc…</option>
+          </select>
+          <select id="cpbCrossRefKey" class="cpb-tool-select cpb-tool-select--cross-ref" title="Cross reference entry" hidden disabled>
+            <option value="">Select reference…</option>
+          </select>
+          <button type="button" class="cpb-tool-btn" id="cpbCrossRefClear" title="Clear cross reference" hidden>✕ Ref</button>
           <select id="cpbFontSelect" class="cpb-tool-select" title="Font family">
             <option value="serif">Serif</option>
             <option value="sans">Sans</option>
@@ -157,6 +166,7 @@ compliance_page_open(array(
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-cmd="insertUnorderedList" title="Bullet list">•</button>
           <button type="button" class="cpb-tool-btn" data-cmd="insertOrderedList" title="Numbered list">1.</button>
+          <button type="button" class="cpb-tool-btn" data-cmd="removeList" title="Remove list formatting">☐</button>
         </div>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbOutdent" title="Decrease indent (Shift+Tab)">⇤</button>

@@ -306,6 +306,9 @@ struct ManualReaderAPIClient {
     }
 
     private func friendlyHTTPError(statusCode: Int, data: Data, url: URL?) -> String {
+        if let serverMessage = apiErrorMessage(from: data), !serverMessage.isEmpty {
+            return serverMessage
+        }
         if statusCode == 404 {
             let path = url?.path ?? "requested path"
             return "Endpoint not found (HTTP 404): \(path). If this persists after updating the app, contact IPCA support."
@@ -329,6 +332,14 @@ struct ManualReaderAPIClient {
             return "HTTP \(statusCode): \(String(text.prefix(200)))..."
         }
         return "HTTP \(statusCode): \(text)"
+    }
+
+    private func apiErrorMessage(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let message = (object["error"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return message?.isEmpty == false ? message : nil
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from data: Data, response: URLResponse) throws -> T {

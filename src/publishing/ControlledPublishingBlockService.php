@@ -612,7 +612,8 @@ final class ControlledPublishingBlockService
 
     private function sanitizeTableCellValue(string $cell): string
     {
-        $cell = trim($cell);
+        $cell = html_entity_decode(trim($cell), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $cell = ControlledPublishingDocxReader::sanitizeImportedText($cell);
         if ($cell === '' || str_starts_with($cell, '=')) {
             return $cell;
         }
@@ -838,6 +839,14 @@ final class ControlledPublishingBlockService
             $regulatoryRef = preg_replace('/\s+/', '', $regulatoryRef) ?? $regulatoryRef;
             if ($regulatoryRef !== '' && strlen($regulatoryRef) <= 128) {
                 $out['regulatory_ref'] = $regulatoryRef;
+            }
+        }
+        $crossRefDocument = trim((string)($payload['cross_ref_document'] ?? ''));
+        $crossRefKey = trim((string)($payload['cross_ref_key'] ?? ''));
+        if ($crossRefKey !== '' && strlen($crossRefKey) <= 128) {
+            $out['cross_ref_key'] = $crossRefKey;
+            if ($crossRefDocument !== '' && strlen($crossRefDocument) <= 64) {
+                $out['cross_ref_document'] = $crossRefDocument;
             }
         }
         return $out;

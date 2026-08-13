@@ -25,6 +25,10 @@
   var redoBtn = document.getElementById('cpbRedo');
   var paragraphStyleSelect = document.getElementById('cpbParagraphStyleSelect');
   var regulatoryRefInput = document.getElementById('cpbRegulatoryRef');
+  var crossRefDocSelect = document.getElementById('cpbCrossRefDoc');
+  var crossRefKeySelect = document.getElementById('cpbCrossRefKey');
+  var crossRefClearBtn = document.getElementById('cpbCrossRefClear');
+  var crossRefAnnex = {};
   var fontSelect = document.getElementById('cpbFontSelect');
   var fontSizeSelect = document.getElementById('cpbFontSizeSelect');
   var openStyleEditorBtn = document.getElementById('cpbOpenStyleEditor');
@@ -141,7 +145,15 @@
     part0Structured: false,
     part0Page: null,
     part0SaveTimer: null,
+    selectedTableCells: [],
+    tableCellUndoLock: false,
   };
+
+  try {
+    crossRefAnnex = JSON.parse(root.getAttribute('data-cross-ref-annex') || '{}') || {};
+  } catch (err) {
+    crossRefAnnex = {};
+  }
 
   var INDENT_STEP_PX = 24;
   var INDENT_MAX_LEVEL = 8;
@@ -627,7 +639,14 @@
 
   function doUndo() {
     var active = document.activeElement;
-    if (active && active.isContentEditable && document.queryCommandSupported('undo')) {
+    var inTableCell = active && active.closest && active.closest('.cpb-table th, .cpb-table td');
+    if (inTableCell && state.undoStack.length > 0) {
+      state.redoStack.push(captureUndoSnapshot());
+      restoreUndoSnapshot(state.undoStack.pop());
+      setStatus('Undone', 'saved');
+      return;
+    }
+    if (active && active.isContentEditable && !inTableCell && document.queryCommandSupported('undo')) {
       document.execCommand('undo');
       var blockEl = active.closest('.cpb-block');
       if (blockEl) scheduleSave(blockEl);
@@ -641,7 +660,14 @@
 
   function doRedo() {
     var active = document.activeElement;
-    if (active && active.isContentEditable && document.queryCommandSupported('redo')) {
+    var inTableCell = active && active.closest && active.closest('.cpb-table th, .cpb-table td');
+    if (inTableCell && state.redoStack.length > 0) {
+      state.undoStack.push(captureUndoSnapshot());
+      restoreUndoSnapshot(state.redoStack.pop());
+      setStatus('Redone', 'saved');
+      return;
+    }
+    if (active && active.isContentEditable && !inTableCell && document.queryCommandSupported('redo')) {
       document.execCommand('redo');
       var blockEl = active.closest('.cpb-block');
       if (blockEl) scheduleSave(blockEl);
@@ -775,11 +801,14 @@
     canvasEl.addEventListener('pointerdown', function (e) {
       var tableCell = e.target.closest('.cpb-table th, .cpb-table td');
       if (tableCell && tableCell.isContentEditable && canvasEl.contains(tableCell)) {
+        selectTableCell(tableCell, e.shiftKey);
         state.focusedTableCell = tableCell;
         var tableBlock = tableCell.closest('.cpb-block');
         if (tableBlock) {
           state.lastStyleTarget = { block: tableBlock, el: tableCell, type: 'table-cell' };
         }
+      } else if (!e.target.closest('.cpb-table')) {
+        clearTableCellSelection();
       }
       requestAnimationFrame(function () {
         saveSelectionRange();
@@ -804,7 +833,9 @@
       if (action === 'delete-table') {
         if (!confirm('Delete this entire table?')) return;
         var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
-        apiPost('delete_block', { version_id: state.versionId, block_id: blockId }).then(function (res) {
+        flushAllPendingSaves().then(function () {
+          return apiPost('delete_block', { version_id: state.versionId, block_id: blockId });
+        }).then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Delete failed');
           clearPendingForBlock(blockId);
           clearStyleTargetForBlock(blockEl);
@@ -986,6 +1017,10 @@
   function wireCanvas() {
     initCanvasEvents();
 
+    canvasEl.querySelectorAll('.cpb-paragraph-row').forEach(function (row) {
+      ensureParagraphStack(row);
+    });
+
     canvasEl.querySelectorAll('.cpb-block').forEach(function (blockEl) {
       blockEl.querySelectorAll('[contenteditable="true"]').forEach(function (field) {
         if (field.getAttribute('data-input-wired') === '1') return;
@@ -1023,7 +1058,9 @@
         } else if (action === 'delete') {
           if (!confirm('Delete this block?')) return;
           pushUndo();
-          apiPost('delete_block', { version_id: state.versionId, block_id: blockId }).then(function (res) {
+          flushAllPendingSaves().then(function () {
+            return apiPost('delete_block', { version_id: state.versionId, block_id: blockId });
+          }).then(function (res) {
             if (!res.ok) throw new Error(res.error || 'Delete failed');
             clearPendingForBlock(blockId);
             clearStyleTargetForBlock(blockEl);
@@ -1108,6 +1145,212 @@
     canvasEl.querySelectorAll('.cpb-block').forEach(function (blockEl) {
       flushSave(blockEl);
     });
+  }
+
+  function flushAllPendingSaves() {
+    clearTimeout(state.saveTimer);
+    var promises = [];
+    Object.keys(state.pending).forEach(function (id) {
+      var pendingEl = state.pending[id];
+      if (isConnectedEl(pendingEl)) {
+        var result = flushSave(pendingEl);
+        if (result && typeof result.then === 'function') {
+          promises.push(result);
+        }
+      }
+    });
+    state.pending = {};
+    return promises.length ? Promise.all(promises) : Promise.resolve();
+  }
+
+  function syncIndentLevelFromElement(el) {
+    if (!el) return;
+    var level = parseInt(el.getAttribute('data-indent-level') || '0', 10) || 0;
+    var margin = parseInt(String(el.style.marginLeft || '0').replace('px', ''), 10) || 0;
+    if (margin > 0) {
+      level = Math.max(level, Math.round(margin / INDENT_STEP_PX));
+    }
+    var blockquotes = 0;
+    var node = el;
+    while (node && node !== canvasEl) {
+      if (node.tagName === 'BLOCKQUOTE') blockquotes++;
+      node = node.parentElement;
+    }
+    level = Math.max(level, blockquotes);
+    level = Math.max(0, Math.min(INDENT_MAX_LEVEL, level));
+    el.setAttribute('data-indent-level', String(level));
+    if (level > 0) {
+      el.style.marginLeft = (level * INDENT_STEP_PX) + 'px';
+    } else {
+      el.style.marginLeft = '';
+    }
+    return level;
+  }
+
+  function formatCrossRefDisplay(documentKey, refKey) {
+    refKey = String(refKey || '').trim();
+    documentKey = String(documentKey || '').trim();
+    if (!refKey) return '';
+    if (/^(NCO|FCL|CAMO|SPO|CAT|ORO)\./i.test(refKey)) {
+      return 'Part ' + refKey;
+    }
+    if (documentKey) return documentKey + ' ' + refKey;
+    return refKey;
+  }
+
+  function initCrossRefAnnexSelects() {
+    if (!crossRefDocSelect) return;
+    crossRefDocSelect.innerHTML = '<option value="">Cross ref doc…</option>';
+    Object.keys(crossRefAnnex).forEach(function (docKey) {
+      var opt = document.createElement('option');
+      opt.value = docKey;
+      opt.textContent = docKey;
+      crossRefDocSelect.appendChild(opt);
+    });
+  }
+
+  function populateCrossRefKeySelect(documentKey) {
+    if (!crossRefKeySelect) return;
+    crossRefKeySelect.innerHTML = '<option value="">Select reference…</option>';
+    var entries = crossRefAnnex[documentKey] || [];
+    entries.forEach(function (entry) {
+      var opt = document.createElement('option');
+      opt.value = entry.key;
+      opt.textContent = entry.label || entry.key;
+      crossRefKeySelect.appendChild(opt);
+    });
+    crossRefKeySelect.disabled = entries.length === 0;
+  }
+
+  function ensureParagraphStack(row) {
+    if (!row) return null;
+    var stack = row.querySelector('.cpb-paragraph-stack');
+    if (stack) return stack;
+    var paragraph = row.querySelector('.cpb-paragraph');
+    if (!paragraph) return null;
+    stack = document.createElement('div');
+    stack.className = 'cpb-paragraph-stack';
+    paragraph.parentNode.insertBefore(stack, paragraph);
+    stack.appendChild(paragraph);
+    return stack;
+  }
+
+  function updateCrossRefLine(row, documentKey, refKey) {
+    if (!row) return;
+    var stack = ensureParagraphStack(row);
+    if (!stack) return;
+    var existing = stack.querySelector('.cpb-cross-ref');
+    refKey = String(refKey || '').trim();
+    if (!refKey) {
+      if (existing) existing.remove();
+      return;
+    }
+    var display = formatCrossRefDisplay(documentKey, refKey);
+    if (!existing) {
+      existing = document.createElement('div');
+      existing.className = 'cpb-cross-ref';
+      existing.setAttribute('contenteditable', 'false');
+      stack.appendChild(existing);
+    }
+    if (documentKey) {
+      existing.setAttribute('data-cross-ref-document', documentKey);
+    } else {
+      existing.removeAttribute('data-cross-ref-document');
+    }
+    existing.setAttribute('data-cross-ref-key', refKey);
+    existing.textContent = '(Ref. ' + display + ')';
+  }
+
+  function readCrossRefFromRow(row) {
+    if (!row) return { document: '', key: '' };
+    var line = row.querySelector('.cpb-cross-ref');
+    if (!line) return { document: '', key: '' };
+    return {
+      document: line.getAttribute('data-cross-ref-document') || '',
+      key: line.getAttribute('data-cross-ref-key') || '',
+    };
+  }
+
+  function updateCrossRefFieldVisibility(styleKey, el) {
+    var show = styleKey === 'title'
+      || styleKey === 'subtitle_1'
+      || styleKey === 'subtitle_2'
+      || styleKey === 'subtitle_3'
+      || styleKey === 'subtitle_4'
+      || styleKey === 'body';
+    if (crossRefDocSelect) crossRefDocSelect.hidden = !show;
+    if (crossRefKeySelect) crossRefKeySelect.hidden = !show;
+    if (crossRefClearBtn) crossRefClearBtn.hidden = !show;
+    if (!show || !el) return;
+    var row = el.closest('.cpb-paragraph-row');
+    var crossRef = readCrossRefFromRow(row);
+    if (crossRefDocSelect) crossRefDocSelect.value = crossRef.document || '';
+    populateCrossRefKeySelect(crossRef.document || '');
+    if (crossRefKeySelect) crossRefKeySelect.value = crossRef.key || '';
+  }
+
+  function applyCrossRef(documentKey, refKey) {
+    var target = getActiveStyleTarget();
+    if (!target || target.type !== 'paragraph') return;
+    pushUndo();
+    var row = target.el.closest('.cpb-paragraph-row');
+    updateCrossRefLine(row, documentKey, refKey);
+    scheduleSave(target.block);
+    flushSave(target.block);
+  }
+
+  function clearTableCellSelection() {
+    canvasEl.querySelectorAll('.cpb-table th.is-cell-selected, .cpb-table td.is-cell-selected').forEach(function (cell) {
+      cell.classList.remove('is-cell-selected');
+    });
+    state.selectedTableCells = [];
+  }
+
+  function addTableCellToSelection(cell) {
+    if (!cell || state.selectedTableCells.indexOf(cell) >= 0) return;
+    cell.classList.add('is-cell-selected');
+    state.selectedTableCells.push(cell);
+  }
+
+  function selectTableCell(cell, extend) {
+    if (!cell) return;
+    if (!extend) {
+      clearTableCellSelection();
+      addTableCellToSelection(cell);
+      return;
+    }
+    var anchor = state.focusedTableCell;
+    if (!anchor || !anchor.closest('table') || anchor.closest('table') !== cell.closest('table')) {
+      clearTableCellSelection();
+      addTableCellToSelection(cell);
+      return;
+    }
+    clearTableCellSelection();
+    var table = cell.closest('table');
+    var cells = Array.prototype.slice.call(table.querySelectorAll('th, td'));
+    var start = cells.indexOf(anchor);
+    var end = cells.indexOf(cell);
+    if (start < 0 || end < 0) {
+      addTableCellToSelection(cell);
+      return;
+    }
+    if (start > end) {
+      var tmp = start;
+      start = end;
+      end = tmp;
+    }
+    for (var i = start; i <= end; i++) {
+      addTableCellToSelection(cells[i]);
+    }
+  }
+
+  function getTableCellsForStyle(target) {
+    if (!target || target.type !== 'table-cell') return [];
+    var selected = state.selectedTableCells.filter(function (cell) {
+      return target.block && target.block.contains(cell);
+    });
+    if (selected.length > 1) return selected;
+    return target.el ? [target.el] : [];
   }
 
   function scheduleSave(blockEl) {
@@ -2706,6 +2949,7 @@
     else if (blockType === 'paragraph') el = blockEl.querySelector('.cpb-paragraph');
     else if (blockType === 'list') el = blockEl.querySelector('.cpb-list');
     if (!el) return {};
+    syncIndentLevelFromElement(el);
     var styleKey = canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
     var fields = {
       paragraph_style: styleKey,
@@ -2732,6 +2976,13 @@
     }
     if (styleKey === 'regulatory_reference') {
       out.regulatory_ref = el.getAttribute('data-regulatory-ref') || '';
+    }
+    if (blockType === 'paragraph') {
+      var crossRef = readCrossRefFromRow(blockEl.querySelector('.cpb-paragraph-row'));
+      if (crossRef.key) {
+        out.cross_ref_key = crossRef.key;
+        if (crossRef.document) out.cross_ref_document = crossRef.document;
+      }
     }
     return out;
   }
@@ -2973,6 +3224,12 @@
     blockEl.querySelectorAll('.cpb-table th, .cpb-table td').forEach(function (cell) {
       if (cell.getAttribute('data-cell-focus-wired') === '1') return;
       cell.setAttribute('data-cell-focus-wired', '1');
+      cell.addEventListener('beforeinput', function () {
+        if (state.tableCellUndoLock) return;
+        pushUndo();
+        state.tableCellUndoLock = true;
+        setTimeout(function () { state.tableCellUndoLock = false; }, 0);
+      });
       cell.addEventListener('focus', function () {
         state.focusedTableCell = cell;
         rememberStyleTarget();
@@ -3000,6 +3257,7 @@
         if (titleRow) {
           titleRow.classList.toggle('is-empty', cell.textContent.trim() === '');
         }
+        scheduleSave(blockEl);
       });
     });
   }
@@ -3049,11 +3307,19 @@
 
   function extractCellHtml(cell) {
     if (!cell) return '';
+    var html = '';
     if (cell.tagName === 'TH') {
       var textEl = cell.querySelector('.cpb-th-text');
-      return stripEditorChromeFromHtml(textEl ? textEl.innerHTML : cell.innerHTML);
+      html = stripEditorChromeFromHtml(textEl ? textEl.innerHTML : cell.innerHTML);
+    } else {
+      html = stripEditorChromeFromHtml(cell.innerHTML);
     }
-    return stripEditorChromeFromHtml(cell.innerHTML);
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    if (!tmp.querySelector('a, span, b, strong, i, em, u, br, p, ul, ol, li, font')) {
+      return tmp.textContent;
+    }
+    return html;
   }
 
   function applyTableBlockAlign(blockEl, align) {
@@ -4050,6 +4316,9 @@
       if (textColorInput) textColorInput.value = cellEffective.text_color;
       updateParagraphStyleSelectForElement(target.el);
       if (regulatoryRefInput) regulatoryRefInput.hidden = true;
+      if (crossRefDocSelect) crossRefDocSelect.hidden = true;
+      if (crossRefKeySelect) crossRefKeySelect.hidden = true;
+      if (crossRefClearBtn) crossRefClearBtn.hidden = true;
       return;
     }
     if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
@@ -4061,6 +4330,13 @@
       if (fontSizeSelect) fontSizeSelect.value = String(effective.font_size);
       if (textColorInput) textColorInput.value = effective.text_color;
       updateRegulatoryRefFieldVisibility(ps, target.el, blockId);
+      if (target.type === 'paragraph') {
+        updateCrossRefFieldVisibility(ps, target.el);
+      } else {
+        if (crossRefDocSelect) crossRefDocSelect.hidden = true;
+        if (crossRefKeySelect) crossRefKeySelect.hidden = true;
+        if (crossRefClearBtn) crossRefClearBtn.hidden = true;
+      }
       return;
     }
     if (target.type === 'callout-title' || target.type === 'callout-text') {
@@ -4070,6 +4346,9 @@
       if (fontSizeSelect) fontSizeSelect.value = String(calloutEffective.font_size);
       if (textColorInput) textColorInput.value = calloutEffective.text_color;
       if (regulatoryRefInput) regulatoryRefInput.hidden = true;
+      if (crossRefDocSelect) crossRefDocSelect.hidden = true;
+      if (crossRefKeySelect) crossRefKeySelect.hidden = true;
+      if (crossRefClearBtn) crossRefClearBtn.hidden = true;
       return;
     }
   }
@@ -4189,13 +4468,10 @@
     if (!target || target.type === 'table-cell') return;
     if (target.type !== 'heading' && target.type !== 'paragraph' && target.type !== 'list') return;
     pushUndo();
-    if (target.type === 'heading') {
-      var level = parseInt(target.el.getAttribute('data-indent-level') || '0', 10) || 0;
-      applyIndentToElement(target.el, level + delta);
-    } else {
-      target.el.focus();
-      document.execCommand(delta > 0 ? 'indent' : 'outdent', false, null);
-    }
+    syncIndentLevelFromElement(target.el);
+    var level = parseInt(target.el.getAttribute('data-indent-level') || '0', 10) || 0;
+    var newLevel = Math.max(0, Math.min(INDENT_MAX_LEVEL, level + delta));
+    applyIndentToElement(target.el, newLevel);
     scheduleSave(target.block);
     flushSave(target.block);
   }
@@ -4426,8 +4702,11 @@
       restoreSelectionRange();
       var applyWhole = !hasTextSelectionInCanvas() || selectionCoversElementText(target.el);
       if (target.type === 'table-cell') {
+        var tableCells = getTableCellsForStyle(target);
         if (applyWhole) {
-          applyTypographyToTableCell(target.el, typo);
+          tableCells.forEach(function (cell) {
+            applyTypographyToTableCell(cell, typo);
+          });
         } else {
           clearInlineTypographyInSelection(target.el);
           restoreSelectionRange();
@@ -4482,6 +4761,9 @@
     updateParagraphStyleSelectForElement(target.el);
     var blockId = parseInt(target.block.getAttribute('data-block-id') || '0', 10);
     updateRegulatoryRefFieldVisibility(styleKey, target.el, blockId);
+    if (target.type === 'paragraph') {
+      updateCrossRefFieldVisibility(styleKey, target.el);
+    }
     if (styleKey === 'regulatory_reference') {
       target.el.setAttribute('data-regulatory-ref', '');
       if (regulatoryRefInput) regulatoryRefInput.value = '';
@@ -4507,8 +4789,10 @@
     if (!target) return;
     pushUndo();
     if (target.type === 'table-cell') {
-      applyFontToTableCell(target.el, font);
-      updateParagraphStyleSelectForElement(target.el);
+      getTableCellsForStyle(target).forEach(function (cell) {
+        applyFontToTableCell(cell, font);
+        updateParagraphStyleSelectForElement(cell);
+      });
     } else if (isBlockTypographyTarget(target)) {
       var stack = FONT_STACKS[font];
       applyRichTextStyle(target, { fontFamily: stack || '' }, function () {
@@ -4545,8 +4829,10 @@
     if (!target) return;
     pushUndo();
     if (target.type === 'table-cell') {
-      applySizeToTableCell(target.el, size);
-      updateParagraphStyleSelectForElement(target.el);
+      getTableCellsForStyle(target).forEach(function (cell) {
+        applySizeToTableCell(cell, size);
+        updateParagraphStyleSelectForElement(cell);
+      });
     } else if (isBlockTypographyTarget(target)) {
       applyRichTextStyle(target, { fontSize: size + 'pt' }, function () {
         applyFontSizeToElement(target.el, size, true);
@@ -4624,6 +4910,13 @@
       }
       setStatus('Added', 'saved');
       applyNumberingState(res);
+      if (blockType === 'table') {
+        var createdTable = anchor ? anchor.nextElementSibling : (body ? body.querySelector('.cpb-block:last-child') : null);
+        if (createdTable && createdTable.classList.contains('cpb-block--table')) {
+          refreshContentTableTypographyFromBookStyles();
+          flushSave(createdTable);
+        }
+      }
       if (blockType === 'paragraph' || blockType === 'heading') {
         return recomputeSectionNumbers().catch(showError).then(function () { return res; });
       }
@@ -5527,7 +5820,33 @@
     return null;
   }
 
+  function removeListFormatting() {
+    var el = focusFormatTarget();
+    if (!el) return;
+    var list = el.closest('ul, ol');
+    if (!list) return;
+    pushUndo();
+    var parent = list.parentNode;
+    var items = list.querySelectorAll(':scope > li');
+    var replacement = document.createDocumentFragment();
+    items.forEach(function (li) {
+      var block = document.createElement('div');
+      block.innerHTML = li.innerHTML;
+      replacement.appendChild(block);
+    });
+    parent.replaceChild(replacement, list);
+    var blockEl = el.closest('.cpb-block');
+    if (blockEl) {
+      scheduleSave(blockEl);
+      flushSave(blockEl);
+    }
+  }
+
   function execFormat(cmd, value) {
+    if (cmd === 'removeList') {
+      removeListFormatting();
+      return;
+    }
     focusFormatTarget();
     document.execCommand(cmd, false, value || null);
     var sel = window.getSelection();
@@ -5659,8 +5978,10 @@
       var tableTarget = resolveTableCellForStyle();
       if (tableTarget) {
         pushUndo();
-        applyTableCellTextColor(tableTarget.el, color);
-        updateParagraphStyleSelectForElement(tableTarget.el);
+        getTableCellsForStyle(tableTarget).forEach(function (cell) {
+          applyTableCellTextColor(cell, color);
+          updateParagraphStyleSelectForElement(cell);
+        });
         scheduleSave(tableTarget.block);
         flushSave(tableTarget.block);
         return;
@@ -6098,7 +6419,34 @@
     });
   }
 
+  if (crossRefDocSelect) {
+    crossRefDocSelect.addEventListener('focus', rememberStyleTarget);
+    crossRefDocSelect.addEventListener('change', function () {
+      populateCrossRefKeySelect(crossRefDocSelect.value || '');
+      if (crossRefKeySelect) crossRefKeySelect.value = '';
+    });
+  }
+
+  if (crossRefKeySelect) {
+    crossRefKeySelect.addEventListener('focus', rememberStyleTarget);
+    crossRefKeySelect.addEventListener('change', function () {
+      if (!crossRefDocSelect || !crossRefDocSelect.value) return;
+      applyCrossRef(crossRefDocSelect.value, crossRefKeySelect.value || '');
+    });
+  }
+
+  if (crossRefClearBtn) {
+    crossRefClearBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      applyCrossRef('', '');
+      if (crossRefDocSelect) crossRefDocSelect.value = '';
+      populateCrossRefKeySelect('');
+      if (crossRefKeySelect) crossRefKeySelect.value = '';
+    });
+  }
+
   wireTreeToggleAll();
+  initCrossRefAnnexSelects();
 
   loadCalloutPresets()
     .then(function () { return loadSection(initialSectionId || 0); })

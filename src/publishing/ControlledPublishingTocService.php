@@ -443,16 +443,21 @@ final class ControlledPublishingTocService
     private function entryText(string $blockType, array $payload): string
     {
         if ($blockType === 'heading') {
-            return trim((string)($payload['text'] ?? ''));
+            $text = html_entity_decode(trim((string)($payload['text'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+            return ControlledPublishingDocxReader::sanitizeImportedText($text);
         }
         if ($blockType === 'paragraph') {
-            $html = (string)($payload['html'] ?? '');
-            $text = trim(strip_tags($html));
-            return $text !== '' ? $text : '';
+            return ControlledPublishingDocxReader::plainTextFromHtml((string)($payload['html'] ?? ''));
         }
         if ($blockType === 'list') {
             $items = is_array($payload['items'] ?? null) ? $payload['items'] : array();
-            return isset($items[0]) ? trim((string)$items[0]) : '';
+            if (!isset($items[0])) {
+                return '';
+            }
+            $text = html_entity_decode(trim((string)$items[0]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+            return ControlledPublishingDocxReader::sanitizeImportedText($text);
         }
         return '';
     }
