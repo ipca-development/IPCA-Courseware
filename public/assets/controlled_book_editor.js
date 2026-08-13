@@ -4088,7 +4088,7 @@
     setStatus('Row added', 'saved');
   }
 
-  function resolveSelectedBodyCell(blockEl, tbody) {
+  function resolveSelectedTableCell(blockEl) {
     var candidates = [];
     if (state.focusedTableCell) candidates.push(state.focusedTableCell);
     if (state.lastStyleTarget && state.lastStyleTarget.type === 'table-cell') {
@@ -4099,7 +4099,7 @@
     });
     for (var i = 0; i < candidates.length; i++) {
       var cell = candidates[i];
-      if (cell && blockEl.contains(cell) && tbody.contains(cell)) return cell;
+      if (cell && blockEl.contains(cell) && cell.closest('.cpb-table')) return cell;
     }
     return null;
   }
@@ -4107,13 +4107,39 @@
   function tableDelRow(blockEl) {
     var tbody = tableBody(blockEl);
     if (!tbody) return false;
+    var selectedCell = resolveSelectedTableCell(blockEl);
+    var titleRow = selectedCell ? selectedCell.closest('tr[data-title-row]') : null;
+    if (titleRow) {
+      var titleText = titleRow.textContent.replace(/\s+/g, ' ').trim();
+      if (titleText && !confirm('Delete this table title row?')) {
+        return false;
+      }
+      titleRow.remove();
+      var titleToggle = blockEl.querySelector('[data-table-action="toggle-title"]');
+      if (titleToggle) titleToggle.textContent = '+ Title row';
+      clearTableCellSelection();
+      var fallbackCell = blockEl.querySelector('.cpb-table-header-row th')
+        || tbody.querySelector('td');
+      if (fallbackCell) {
+        addTableCellToSelection(fallbackCell);
+        state.focusedTableCell = fallbackCell;
+        state.lastStyleTarget = { block: blockEl, el: fallbackCell, type: 'table-cell' };
+        fallbackCell.focus();
+      } else {
+        state.focusedTableCell = null;
+      }
+      setStatus('Title row deleted', 'saved');
+      return true;
+    }
+
     var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
     if (rows.length <= 1) {
       setStatus('Table must keep at least one row', 'error');
       return false;
     }
-    var selectedCell = resolveSelectedBodyCell(blockEl, tbody);
-    var target = selectedCell ? selectedCell.closest('tr') : null;
+    var target = selectedCell && tbody.contains(selectedCell)
+      ? selectedCell.closest('tr')
+      : null;
     if (!target) {
       setStatus('Click a row cell first', 'error');
       return false;
@@ -4216,6 +4242,18 @@
     if (existing) {
       existing.remove();
       if (toggleBtn) toggleBtn.textContent = '+ Title row';
+      clearTableCellSelection();
+      var fallbackCell = blockEl.querySelector('.cpb-table-header-row th')
+        || blockEl.querySelector('tbody[data-table-part="body"] td');
+      if (fallbackCell) {
+        addTableCellToSelection(fallbackCell);
+        state.focusedTableCell = fallbackCell;
+        state.lastStyleTarget = { block: blockEl, el: fallbackCell, type: 'table-cell' };
+        fallbackCell.focus();
+      } else {
+        state.focusedTableCell = null;
+      }
+      setStatus('Title row deleted', 'saved');
       return;
     }
     var cols = tableColCount(blockEl);
@@ -4238,6 +4276,10 @@
     thead.insertBefore(tr, tableHeaderRow(blockEl));
     if (toggleBtn) toggleBtn.textContent = 'Remove title row';
     wireTableCellFocus(blockEl);
+    clearTableCellSelection();
+    addTableCellToSelection(td);
+    state.focusedTableCell = td;
+    state.lastStyleTarget = { block: blockEl, el: td, type: 'table-cell' };
     td.focus();
   }
 
