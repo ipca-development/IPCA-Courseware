@@ -801,7 +801,9 @@
     canvasEl.addEventListener('pointerdown', function (e) {
       var tableCell = e.target.closest('.cpb-table th, .cpb-table td');
       if (tableCell && tableCell.isContentEditable && canvasEl.contains(tableCell)) {
-        selectTableCell(tableCell, e.shiftKey);
+        var toggleCell = e.metaKey || e.ctrlKey;
+        if (toggleCell) e.preventDefault();
+        selectTableCell(tableCell, e.shiftKey, toggleCell);
         state.focusedTableCell = tableCell;
         var tableBlock = tableCell.closest('.cpb-block');
         if (tableBlock) {
@@ -867,7 +869,13 @@
           setStatus('Click a table cell first', 'error');
           return;
         }
-        applyTableCellBg(blockEl, state.focusedTableCell, '');
+        getTableCellsForStyle({
+          block: blockEl,
+          el: state.focusedTableCell,
+          type: 'table-cell',
+        }).forEach(function (cell) {
+          applyTableCellBg(blockEl, cell, '');
+        });
       } else if (action === 'copy-cells') copyTableCells(blockEl);
       else if (action === 'paste-cells') pasteTableCells(blockEl);
       else if (action === 'formula-sum') insertTableFormula(blockEl, 'SUM');
@@ -893,13 +901,30 @@
           setStatus('Click a table cell first', 'error');
           return;
         }
-        applyColorToTableCell(state.focusedTableCell, input.value);
+        var colorTarget = {
+          block: blockEl,
+          el: state.focusedTableCell,
+          type: 'table-cell',
+        };
+        var colorCells = getTableCellsForStyle(colorTarget);
+        colorCells.forEach(function (cell) {
+          if (colorCells.length > 1) applyTableCellTextColor(cell, input.value);
+          else applyColorToTableCell(cell, input.value);
+        });
         if (textColorInput) textColorInput.value = input.value;
         updateParagraphStyleSelectForElement(state.focusedTableCell);
       } else if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
         setStatus('Click a table cell first', 'error');
         return;
-      } else applyTableCellBg(blockEl, state.focusedTableCell, input.value);
+      } else {
+        getTableCellsForStyle({
+          block: blockEl,
+          el: state.focusedTableCell,
+          type: 'table-cell',
+        }).forEach(function (cell) {
+          applyTableCellBg(blockEl, cell, input.value);
+        });
+      }
       scheduleSave(blockEl);
       flushSave(blockEl);
     });
@@ -1322,8 +1347,27 @@
     state.selectedTableCells.push(cell);
   }
 
-  function selectTableCell(cell, extend) {
+  function toggleTableCellInSelection(cell) {
     if (!cell) return;
+    var index = state.selectedTableCells.indexOf(cell);
+    if (index >= 0) {
+      cell.classList.remove('is-cell-selected');
+      state.selectedTableCells.splice(index, 1);
+      return;
+    }
+    addTableCellToSelection(cell);
+  }
+
+  function selectTableCell(cell, extend, toggle) {
+    if (!cell) return;
+    if (toggle) {
+      var selectedInOtherTable = state.selectedTableCells.some(function (selectedCell) {
+        return selectedCell.closest('table') !== cell.closest('table');
+      });
+      if (selectedInOtherTable) clearTableCellSelection();
+      toggleTableCellInSelection(cell);
+      return;
+    }
     if (!extend) {
       clearTableCellSelection();
       addTableCellToSelection(cell);
@@ -4758,10 +4802,16 @@
       var applyWhole = !hasTextSelectionInCanvas() || selectionCoversElementText(target.el);
       if (target.type === 'table-cell') {
         var tableCells = getTableCellsForStyle(target);
+        if (tableCells.length > 1) applyWhole = true;
         if (applyWhole) {
           tableCells.forEach(function (cell) {
             applyTypographyToTableCell(cell, typo);
           });
+          if (tableCells.length > 1) {
+            applyFormatStateToTableCells(tableCells, 'bold', typo.font_bold);
+            applyFormatStateToTableCells(tableCells, 'italic', typo.font_italic);
+            applyFormatStateToTableCells(tableCells, 'underline', typo.font_underline);
+          }
         } else {
           clearInlineTypographyInSelection(target.el);
           restoreSelectionRange();
@@ -4844,8 +4894,14 @@
     if (!target) return;
     pushUndo();
     if (target.type === 'table-cell') {
-      getTableCellsForStyle(target).forEach(function (cell) {
-        applyFontToTableCell(cell, font);
+      var fontCells = getTableCellsForStyle(target);
+      fontCells.forEach(function (cell) {
+        if (fontCells.length > 1) {
+          clearInlineTypographyInElement(cell);
+          applyStyleToTableCell(cell, { font: font });
+        } else {
+          applyFontToTableCell(cell, font);
+        }
         updateParagraphStyleSelectForElement(cell);
       });
     } else if (isBlockTypographyTarget(target)) {
@@ -4884,8 +4940,14 @@
     if (!target) return;
     pushUndo();
     if (target.type === 'table-cell') {
-      getTableCellsForStyle(target).forEach(function (cell) {
-        applySizeToTableCell(cell, size);
+      var sizeCells = getTableCellsForStyle(target);
+      sizeCells.forEach(function (cell) {
+        if (sizeCells.length > 1) {
+          clearInlineTypographyInElement(cell);
+          applyStyleToTableCell(cell, { size: size });
+        } else {
+          applySizeToTableCell(cell, size);
+        }
         updateParagraphStyleSelectForElement(cell);
       });
     } else if (isBlockTypographyTarget(target)) {
@@ -4911,7 +4973,9 @@
     if (!target) return;
     pushUndo();
     if (target.type === 'table-cell') {
-      applyStyleToTableCell(target.el, { align: align });
+      getTableCellsForStyle(target).forEach(function (cell) {
+        applyStyleToTableCell(cell, { align: align });
+      });
     } else if (target.type === 'heading' || target.type === 'paragraph' || target.type === 'list') {
       ALIGN_CLASSES.forEach(function (cls) { target.el.classList.remove(cls); });
       target.el.classList.add('cpb-align-' + align);
@@ -5897,11 +5961,59 @@
     }
   }
 
+  function selectTableCellText(cell) {
+    if (!cell) return false;
+    var contentEl = cell.tagName === 'TH'
+      ? (cell.querySelector('.cpb-th-text') || cell)
+      : cell;
+    var sel = window.getSelection();
+    if (!sel) return false;
+    var range = document.createRange();
+    range.selectNodeContents(contentEl);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  }
+
+  function applyFormatStateToTableCells(cells, cmd, shouldEnable) {
+    cells.forEach(function (cell) {
+      if (!selectTableCellText(cell)) return;
+      if (document.queryCommandState(cmd) !== shouldEnable) {
+        document.execCommand(cmd, false, null);
+      }
+    });
+  }
+
+  function execFormatForSelectedTableCells(cmd) {
+    if (cmd !== 'bold' && cmd !== 'italic' && cmd !== 'underline') return false;
+    var target = resolveTableCellForStyle();
+    if (!target) return false;
+    var cells = getTableCellsForStyle(target);
+    if (cells.length < 2) return false;
+
+    pushUndo();
+    var allActive = cells.every(function (cell) {
+      if (!selectTableCellText(cell)) return false;
+      return document.queryCommandState(cmd);
+    });
+    applyFormatStateToTableCells(cells, cmd, !allActive);
+
+    var sel = window.getSelection();
+    if (sel) sel.removeAllRanges();
+    state.savedSelectionRange = null;
+    state.focusedTableCell = target.el;
+    state.lastStyleTarget = target;
+    target.el.focus();
+    scheduleSave(target.block);
+    return true;
+  }
+
   function execFormat(cmd, value) {
     if (cmd === 'removeList') {
       removeListFormatting();
       return;
     }
+    if (execFormatForSelectedTableCells(cmd)) return;
     focusFormatTarget();
     document.execCommand(cmd, false, value || null);
     var sel = window.getSelection();
