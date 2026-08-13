@@ -1062,8 +1062,8 @@
           flushSave(blockEl);
         });
         if (field.classList.contains('cpb-list')) {
-          field.addEventListener('beforeinput', function (e) {
-            handleListBeforeInput(e, field, blockEl);
+          field.addEventListener('keydown', function (e) {
+            handleListKeyDown(e, field, blockEl);
           });
         }
       });
@@ -3154,18 +3154,45 @@
     return item && item.parentElement === list ? item : null;
   }
 
-  function handleListBeforeInput(e, list, blockEl) {
-    // Native contenteditable behavior correctly handles non-empty item splits
-    // and insertLineBreak (Shift+Enter). Only bridge an empty item to the
-    // editor's separate paragraph-block model.
-    if (e.inputType !== 'insertParagraph' || e.isComposing) return;
+  function handleListKeyDown(e, list, blockEl) {
+    if (e.key !== 'Enter' || e.isComposing) return;
     var item = activeDirectListItem(list);
-    if (!item || item.textContent.replace(/\u00a0/g, ' ').trim() !== '') return;
-    var remainingItems = list.querySelectorAll(':scope > li').length - 1;
-    if (remainingItems < 1) return;
+    if (!item) return;
 
+    if (e.shiftKey) {
+      e.preventDefault();
+      var inserted = document.execCommand('insertLineBreak', false, null);
+      if (!inserted) {
+        document.execCommand('insertHTML', false, '<br>');
+      }
+      scheduleSave(blockEl);
+      return;
+    }
+
+    if (item.textContent.replace(/\u00a0/g, ' ').trim() !== '') {
+      // Leave non-empty item splitting and number increments to contenteditable.
+      return;
+    }
+    var remainingItems = list.querySelectorAll(':scope > li').length - 1;
     e.preventDefault();
     pushUndo();
+    if (remainingItems < 1) {
+      var emptyListBlockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+      createBlock('paragraph', { html: '' }, blockEl).then(function () {
+        return apiPost('delete_block', {
+          version_id: state.versionId,
+          block_id: emptyListBlockId,
+        });
+      }).then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Could not exit empty list');
+        clearPendingForBlock(emptyListBlockId);
+        clearStyleTargetForBlock(blockEl);
+        blockEl.remove();
+        setStatus('Exited list', 'saved');
+      }).catch(showError);
+      return;
+    }
+
     item.remove();
     scheduleSave(blockEl);
     var saveResult = flushSave(blockEl);
