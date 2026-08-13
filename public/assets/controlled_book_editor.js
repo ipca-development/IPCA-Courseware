@@ -789,7 +789,7 @@
       var cell = e.target.closest('.cpb-table th, .cpb-table td');
       if (cell && cell.isContentEditable) {
         state.focusedTableCell = cell;
-      } else if (e.target.closest('.cpb-callout-title, .cpb-callout-text, .cpb-paragraph, .cpb-heading, .cpb-list')) {
+      } else if (e.target.closest('.cpb-callout-title, .cpb-callout-text, .cpb-paragraph, .cpb-heading, .cpb-list, .cpb-list-continuation')) {
         state.focusedTableCell = null;
       }
       requestAnimationFrame(function () {
@@ -1058,7 +1058,8 @@
         field.setAttribute('data-input-wired', '1');
         if (field.classList.contains('cpb-paragraph')
           || field.classList.contains('cpb-heading')
-          || field.classList.contains('cpb-list')) {
+          || field.classList.contains('cpb-list')
+          || field.classList.contains('cpb-list-continuation')) {
           refreshBlockTypographyFromBookStyles(field);
         }
         syncSectionNumberTypography(field);
@@ -2986,7 +2987,9 @@
     var el = null;
     if (blockType === 'heading') el = blockEl.querySelector('.cpb-heading');
     else if (blockType === 'paragraph') el = blockEl.querySelector('.cpb-paragraph');
-    else if (blockType === 'list') el = blockEl.querySelector('.cpb-list');
+    else if (blockType === 'list') {
+      el = blockEl.querySelector('.cpb-list') || blockEl.querySelector('.cpb-list-continuation');
+    }
     if (!el) return {};
     el.style.marginLeft = '';
     el.setAttribute('data-indent-level', '0');
@@ -3156,21 +3159,50 @@
     return item && item.parentElement === list ? item : null;
   }
 
-  function insertListSoftBreak(item) {
-    var inserted = document.execCommand('insertHTML', false, '<br>');
-    if (inserted) return true;
+  function focusStartOfElement(el) {
     var sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return false;
-    var range = sel.getRangeAt(0);
-    if (!item.contains(range.commonAncestorContainer)) return false;
-    range.deleteContents();
-    var br = document.createElement('br');
-    range.insertNode(br);
-    range.setStartAfter(br);
+    if (!sel) return;
+    var range = document.createRange();
+    range.selectNodeContents(el);
     range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
-    return true;
+  }
+
+  function exitListWithinBlock(list, blockEl, item, moveTrailingContent) {
+    var continuation = blockEl.querySelector('.cpb-list-continuation');
+    if (!continuation) {
+      continuation = document.createElement('div');
+      continuation.className = 'cpb-list-continuation';
+      continuation.contentEditable = 'true';
+      continuation.setAttribute('data-field', 'continuation_html');
+      continuation.setAttribute('spellcheck', 'true');
+      list.insertAdjacentElement('afterend', continuation);
+    }
+
+    if (moveTrailingContent) {
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        var cursorRange = sel.getRangeAt(0);
+        if (item.contains(cursorRange.startContainer)) {
+          var trailingRange = document.createRange();
+          trailingRange.selectNodeContents(item);
+          trailingRange.setStart(cursorRange.startContainer, cursorRange.startOffset);
+          var trailing = trailingRange.extractContents();
+          continuation.appendChild(trailing);
+        }
+      }
+    }
+
+    if (item.textContent.replace(/\u00a0/g, ' ').trim() === '') {
+      item.remove();
+    }
+    if (!continuation.hasChildNodes()) continuation.appendChild(document.createElement('br'));
+    wireCanvas();
+    continuation.focus();
+    focusStartOfElement(continuation);
+    scheduleSave(blockEl);
+    flushSave(blockEl);
   }
 
   function handleListKeyDown(e, list, blockEl) {
@@ -3180,7 +3212,8 @@
 
     if (e.shiftKey) {
       e.preventDefault();
-      if (insertListSoftBreak(item)) scheduleSave(blockEl);
+      pushUndo();
+      exitListWithinBlock(list, blockEl, item, true);
       return;
     }
 
@@ -3188,32 +3221,9 @@
       // Leave non-empty item splitting and number increments to contenteditable.
       return;
     }
-    var remainingItems = list.querySelectorAll(':scope > li').length - 1;
     e.preventDefault();
     pushUndo();
-    if (remainingItems < 1) {
-      var emptyListBlockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
-      createBlock('paragraph', { html: '' }, blockEl).then(function () {
-        return apiPost('delete_block', {
-          version_id: state.versionId,
-          block_id: emptyListBlockId,
-        });
-      }).then(function (res) {
-        if (!res.ok) throw new Error(res.error || 'Could not exit empty list');
-        clearPendingForBlock(emptyListBlockId);
-        clearStyleTargetForBlock(blockEl);
-        blockEl.remove();
-        setStatus('Exited list', 'saved');
-      }).catch(showError);
-      return;
-    }
-
-    item.remove();
-    scheduleSave(blockEl);
-    var saveResult = flushSave(blockEl);
-    Promise.resolve(saveResult).then(function () {
-      return createBlock('paragraph', { html: '' }, blockEl);
-    }).catch(showError);
+    exitListWithinBlock(list, blockEl, item, false);
   }
 
   function stripLeadingSectionNumberText(text) {
@@ -3245,10 +3255,14 @@
       var ordered = list && list.tagName === 'OL';
       var items = normalizeListItemsFromElement(list);
       var itemIndentLevels = normalizeListIndentLevelsFromElement(list);
+      var continuation = blockEl.querySelector('.cpb-list-continuation');
       return Object.assign({
         ordered: ordered,
         items: items,
         item_indent_levels: itemIndentLevels,
+        continuation_html: continuation
+          ? stripEditorChromeFromHtml(continuation.innerHTML)
+          : '',
       }, extractStyleFields(blockEl, 'list'));
     }
     if (blockType === 'table') {
@@ -4502,6 +4516,7 @@
     var heading = block.querySelector('.cpb-heading');
     var paragraph = block.querySelector('.cpb-paragraph');
     var list = block.querySelector('.cpb-list');
+    var listContinuation = block.querySelector('.cpb-list-continuation');
     if (heading && (heading.contains(node) || node === heading || (focused && focused.closest('.cpb-heading')))) {
       return { block: block, el: heading, type: 'heading' };
     }
@@ -4510,6 +4525,10 @@
     }
     if (list && (list.contains(node) || node === list || (focused && focused.closest('.cpb-list')))) {
       return { block: block, el: list, type: 'list' };
+    }
+    if (listContinuation && (listContinuation.contains(node) || node === listContinuation
+      || (focused && focused.closest('.cpb-list-continuation')))) {
+      return { block: block, el: listContinuation, type: 'paragraph' };
     }
     return null;
   }

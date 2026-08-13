@@ -1534,15 +1534,20 @@ final class ControlledPublishingBookRenderer
         $itemIndentLevels = is_array($payload['item_indent_levels'] ?? null)
             ? $payload['item_indent_levels']
             : array();
+        $continuationHtml = ControlledPublishingHtmlSanitizer::sanitizeInline(
+            (string)($payload['continuation_html'] ?? '')
+        );
         $tag = $ordered ? 'ol' : 'ul';
         $edit = $mode === self::MODE_EDIT
             ? ' contenteditable="true" data-field="items" spellcheck="true"'
             : '';
         $style = $this->styleAttr($payload);
-        $html = '<' . $tag . ' class="cpb-list' . $this->styleClass($payload) . '"' . $style . $edit . '>';
-        if ($items === array() && $mode === self::MODE_EDIT) {
-            $html .= '<li data-placeholder="1">List item</li>';
-        } else {
+        $html = '';
+        if ($items !== array() || $continuationHtml === '') {
+            $html .= '<' . $tag . ' class="cpb-list' . $this->styleClass($payload) . '"' . $style . $edit . '>';
+            if ($items === array() && $mode === self::MODE_EDIT) {
+                $html .= '<li data-placeholder="1">List item</li>';
+            }
             foreach ($items as $index => $item) {
                 $indentLevel = max(0, min(8, (int)($itemIndentLevels[$index] ?? 0)));
                 $indentAttr = $indentLevel > 0
@@ -1551,8 +1556,15 @@ final class ControlledPublishingBookRenderer
                 $itemHtml = ControlledPublishingHtmlSanitizer::sanitizeInline((string)$item);
                 $html .= '<li' . $indentAttr . '>' . $itemHtml . '</li>';
             }
+            $html .= '</' . $tag . '>';
         }
-        $html .= '</' . $tag . '>';
+        if ($continuationHtml !== '') {
+            $continuationEdit = $mode === self::MODE_EDIT
+                ? ' contenteditable="true" data-field="continuation_html" spellcheck="true"'
+                : '';
+            $html .= '<div class="cpb-list-continuation' . $this->styleClass($payload) . '"'
+                . $style . $continuationEdit . '>' . $continuationHtml . '</div>';
+        }
         return $html;
     }
 

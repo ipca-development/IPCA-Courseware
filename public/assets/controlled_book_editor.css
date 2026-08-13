@@ -1368,6 +1368,11 @@ body.cpb-browser-fullscreen .cpb-workspace {
   padding-left: calc(1.4em + 24px);
 }
 
+.cpb-list-continuation {
+  margin: 0.4em 0;
+  min-height: 1.35em;
+}
+
 .cpb-line-indent {
   display: block;
 }

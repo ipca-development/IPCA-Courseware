@@ -391,6 +391,9 @@ final class ControlledPublishingBlockService
     private function normalizeListPayload(array $payload, bool $strict): array
     {
         $ordered = !empty($payload['ordered']);
+        $continuationHtml = ControlledPublishingHtmlSanitizer::sanitizeInline(
+            (string)($payload['continuation_html'] ?? '')
+        );
         $items = array();
         $itemIndentLevels = array();
         $rawIndentLevels = is_array($payload['item_indent_levels'] ?? null)
@@ -405,10 +408,10 @@ final class ControlledPublishingBlockService
                 }
             }
         }
-        if ($strict && $items === array()) {
+        if ($strict && $items === array() && $continuationHtml === '') {
             throw new RuntimeException('List must contain at least one item.');
         }
-        if ($items === array()) {
+        if ($items === array() && $continuationHtml === '') {
             $items = array('List item');
             $itemIndentLevels = array(0);
         }
@@ -417,6 +420,7 @@ final class ControlledPublishingBlockService
                 'ordered' => $ordered,
                 'items' => $items,
                 'item_indent_levels' => $itemIndentLevels,
+                'continuation_html' => $continuationHtml,
             ),
             $this->normalizeStyleFields($payload)
         );

@@ -173,10 +173,14 @@ final class StructuredDocumentPayload
             $items[] = (string)$item;
             $itemIndentLevels[] = max(0, min(8, (int)($rawIndentLevels[$index] ?? 0)));
         }
+        $continuationHtml = (string)($payload['continuation_html'] ?? '');
         return array_merge($out, self::normalizeTextPayload($payload, false), array(
             'ordered' => !empty($payload['ordered']),
-            'items' => $items !== array() ? $items : array('List item'),
-            'item_indent_levels' => $items !== array() ? $itemIndentLevels : array(0),
+            'items' => $items !== array() || $continuationHtml !== '' ? $items : array('List item'),
+            'item_indent_levels' => $items !== array() || $continuationHtml !== ''
+                ? $itemIndentLevels
+                : array(0),
+            'continuation_html' => $continuationHtml,
         ));
     }
 
