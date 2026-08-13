@@ -588,7 +588,7 @@ final class FlightRecordDerivationService
         $statement = $this->pdo->prepare(
             'SELECT COALESCE(a.starting_hobbs, d.starting_hobbs) AS starting_hobbs,
                     COALESCE(a.starting_tacho, d.starting_tacho) AS starting_tacho,
-                    d.fuel_onboard,
+                    COALESCE(a.fuel_onboard, d.fuel_onboard) AS fuel_onboard,
                     COALESCE(a.ending_hobbs, c.ending_hobbs) AS ending_hobbs,
                     COALESCE(a.ending_tacho, c.ending_tacho) AS ending_tacho,
                     COALESCE(a.fuel_remaining, c.fuel_remaining) AS fuel_remaining,

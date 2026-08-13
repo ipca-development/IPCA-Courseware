@@ -538,6 +538,17 @@ struct CVRWorkflowArchiveRecord: Identifiable, Codable, Equatable {
     var voidedAt: Date? = nil
 }
 
+struct CVRReservationContinuationCandidate: Identifiable, Equatable {
+    var id: String { archiveID }
+    var archiveID: String
+    var reservationUUID: String
+    var schedulerRecordID: String?
+    var aircraftRegistration: String
+    var departureAirport: String
+    var missionCode: String
+    var completedLegCount: Int
+}
+
 struct CVRRecorderVerificationRecord: Identifiable, Codable, Equatable {
     var id: String
     var dispatchID: String
@@ -712,6 +723,7 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
     var arrivalTime: String?
     var startingHobbs: Double?
     var startingTacho: Double?
+    var fuelOnboard: String?
     var endingHobbs: Double?
     var endingTacho: Double?
     var fuelRemaining: String?
@@ -748,6 +760,7 @@ struct CVRFlightLogEntry: Identifiable, Codable, Equatable {
         case arrivalTime = "arrival_time"
         case startingHobbs = "starting_hobbs"
         case startingTacho = "starting_tacho"
+        case fuelOnboard = "fuel_onboard"
         case endingHobbs = "ending_hobbs"
         case endingTacho = "ending_tacho"
         case fuelRemaining = "fuel_remaining"
@@ -1112,6 +1125,7 @@ final class CVRFlightLogStore: ObservableObject {
         crewNames: [String],
         startingHobbs: Double?,
         startingTacho: Double?,
+        fuelOnboard: String,
         endingHobbs: Double?,
         endingTacho: Double?,
         fuelRemaining: String,
@@ -1128,12 +1142,24 @@ final class CVRFlightLogStore: ObservableObject {
             lastError = "Ending Hobbs and Tacho must be valid and cannot be lower than their starting values."
             return false
         }
+        let departureFuel = fuelOnboard.trimmingCharacters(in: .whitespacesAndNewlines)
+        let numericDepartureFuel = departureFuel.components(
+            separatedBy: CharacterSet(charactersIn: "0123456789.-").inverted
+        ).joined()
+        guard let departureFuelValue = Double(numericDepartureFuel), departureFuelValue >= 0 else {
+            lastError = "Fuel at departure must be a valid non-negative quantity."
+            return false
+        }
         let fuel = fuelRemaining.trimmingCharacters(in: .whitespacesAndNewlines)
         let numericFuel = fuel.components(
             separatedBy: CharacterSet(charactersIn: "0123456789.-").inverted
         ).joined()
         guard let fuelValue = Double(numericFuel), fuelValue >= 0 else {
             lastError = "Fuel remaining must be a valid non-negative quantity."
+            return false
+        }
+        guard fuelValue <= departureFuelValue + 0.05 else {
+            lastError = "Fuel remaining cannot exceed fuel at departure."
             return false
         }
         guard let baseURL = settings.normalizedServerURL,
@@ -1163,6 +1189,7 @@ final class CVRFlightLogStore: ObservableObject {
             "crew_names": crew,
             "starting_hobbs": startingHobbs,
             "starting_tacho": startingTacho,
+            "fuel_onboard": departureFuelValue,
             "ending_hobbs": endingHobbs,
             "ending_tacho": endingTacho,
             "fuel_remaining": fuelValue
@@ -1183,6 +1210,7 @@ final class CVRFlightLogStore: ObservableObject {
             adjustedEntry.crewNames = crew
             adjustedEntry.startingHobbs = startingHobbs
             adjustedEntry.startingTacho = startingTacho
+            adjustedEntry.fuelOnboard = String(departureFuelValue)
             adjustedEntry.endingHobbs = endingHobbs
             adjustedEntry.endingTacho = endingTacho
             adjustedEntry.fuelRemaining = String(fuelValue)

@@ -84,6 +84,7 @@ final class CvrFlightLogService
                 ) AS closure_on_block_utc,
                 CAST(COALESCE(adjustment.starting_hobbs, d.starting_hobbs) AS DECIMAL(12,2)) AS starting_hobbs,
                 CAST(COALESCE(adjustment.starting_tacho, d.starting_tacho) AS DECIMAL(12,2)) AS starting_tacho,
+                COALESCE(adjustment.fuel_onboard, d.fuel_onboard) AS fuel_onboard,
                 CAST(COALESCE(adjustment.ending_hobbs, closure.ending_hobbs) AS DECIMAL(12,2)) AS ending_hobbs,
                 CAST(COALESCE(adjustment.ending_tacho, closure.ending_tacho) AS DECIMAL(12,2)) AS ending_tacho,
                 COALESCE(adjustment.fuel_remaining, closure.fuel_remaining) AS fuel_remaining,
@@ -261,6 +262,7 @@ final class CvrFlightLogService
                 'arrival_time' => $arrivalTime,
                 'starting_hobbs' => $row['starting_hobbs'] !== null ? (float)$row['starting_hobbs'] : null,
                 'starting_tacho' => $row['starting_tacho'] !== null ? (float)$row['starting_tacho'] : null,
+                'fuel_onboard' => $row['fuel_onboard'] !== null ? (string)$row['fuel_onboard'] : null,
                 'ending_hobbs' => $row['ending_hobbs'] !== null ? (float)$row['ending_hobbs'] : null,
                 'ending_tacho' => $row['ending_tacho'] !== null ? (float)$row['ending_tacho'] : null,
                 'fuel_remaining' => $row['fuel_remaining'] !== null ? (string)$row['fuel_remaining'] : null,
@@ -381,6 +383,7 @@ final class CvrFlightLogService
         $startingTacho = isset($payload['starting_tacho']) && is_numeric($payload['starting_tacho'])
             ? (float)$payload['starting_tacho']
             : null;
+        $fuelOnboard = trim((string)($payload['fuel_onboard'] ?? ''));
         $fuel = trim((string)($payload['fuel_remaining'] ?? ''));
         if ($startingHobbs === null || $startingHobbs < 0) {
             throw new RuntimeException('Starting Hobbs must be a valid non-negative value.');
@@ -394,8 +397,14 @@ final class CvrFlightLogService
         if ($endingTacho === null || $endingTacho < $startingTacho) {
             throw new RuntimeException('Ending Tacho cannot be lower than Starting Tacho.');
         }
+        if ($fuelOnboard === '' || !is_numeric($fuelOnboard) || (float)$fuelOnboard < 0) {
+            throw new RuntimeException('Fuel at departure must be a valid non-negative quantity.');
+        }
         if ($fuel === '' || !is_numeric($fuel) || (float)$fuel < 0) {
             throw new RuntimeException('Fuel remaining must be a valid non-negative quantity.');
+        }
+        if ((float)$fuel > (float)$fuelOnboard + 0.05) {
+            throw new RuntimeException('Fuel remaining cannot exceed fuel at departure.');
         }
 
         $adjustmentUuid = AuditEventService::uuid();
@@ -403,8 +412,8 @@ final class CvrFlightLogService
             'INSERT INTO ipca_cvr_flight_log_adjustments
              (adjustment_uuid, organization_id, device_id, workflow_flight_record_uuid, dispatch_uuid,
               departure_airport, arrival_airport, crew_json, starting_hobbs, starting_tacho,
-              ending_hobbs, ending_tacho, fuel_remaining)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+              fuel_onboard, ending_hobbs, ending_tacho, fuel_remaining)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute(array(
             $adjustmentUuid,
             $organizationId,
@@ -416,6 +425,7 @@ final class CvrFlightLogService
             AuditEventService::jsonEncode($crew),
             $startingHobbs,
             $startingTacho,
+            $fuelOnboard,
             $endingHobbs,
             $endingTacho,
             $fuel,
@@ -433,6 +443,7 @@ final class CvrFlightLogService
                 'crew_names' => $crew,
                 'starting_hobbs' => $startingHobbs,
                 'starting_tacho' => $startingTacho,
+                'fuel_onboard' => $fuelOnboard,
                 'ending_hobbs' => $endingHobbs,
                 'ending_tacho' => $endingTacho,
                 'fuel_remaining' => $fuel,

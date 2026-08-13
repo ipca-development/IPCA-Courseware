@@ -482,8 +482,9 @@ final class CvrOperationalSessionLegReviewService
             $discrepancies[] = 'Verified leg landings differ from the Check-In total.';
         }
 
-        $expectedFuelStart = is_numeric($dispatch['fuel_onboard'] ?? null)
-            ? round((float)$dispatch['fuel_onboard'], 1)
+        $expectedFuelStartValue = $adjustment['fuel_onboard'] ?? $dispatch['fuel_onboard'] ?? null;
+        $expectedFuelStart = is_numeric($expectedFuelStartValue)
+            ? round((float)$expectedFuelStartValue, 1)
             : null;
         $expectedFuelEnd = $this->nullableFloat(
             $adjustment['fuel_remaining'] ?? $closure['fuel_remaining'] ?? null

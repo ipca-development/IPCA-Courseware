@@ -1606,7 +1606,7 @@ final class FlightScheduleService
                 d.workflow_flight_record_uuid,
                 CAST(d.starting_hobbs AS DECIMAL(12,2)) AS starting_hobbs,
                 CAST(d.starting_tacho AS DECIMAL(12,2)) AS starting_tacho,
-                d.fuel_onboard,
+                COALESCE(adj.fuel_onboard, d.fuel_onboard) AS fuel_onboard,
                 CAST(COALESCE(adj.ending_hobbs, fc.ending_hobbs) AS DECIMAL(12,2)) AS ending_hobbs,
                 CAST(COALESCE(adj.ending_tacho, fc.ending_tacho) AS DECIMAL(12,2)) AS ending_tacho,
                 COALESCE(adj.fuel_remaining, fc.fuel_remaining) AS fuel_remaining,

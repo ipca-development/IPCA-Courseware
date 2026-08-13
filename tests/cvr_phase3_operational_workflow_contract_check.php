@@ -76,6 +76,13 @@ require_contains($store, 'cancelUnusedPlannedLegsAndEndSession', 'cancel unused 
 require_contains($store, 'convertTransientStopToEngineShutdown', 'convert mistaken transient stop', $failures);
 require_contains($store, 'clearFalseContinuityOnActiveLeg', 'clear synthesized continuity off block', $failures);
 require_contains($store, 'hasOpenPlannedLegs', 'preserve unused legs after engine shutdown', $failures);
+require_contains($models, 'CVRReservationContinuationCandidate', 'completed reservation continuation model', $failures);
+require_contains($store, 'latestContinuableReservation', 'find completed reservation for another leg', $failures);
+require_contains($store, 'func continueReservation(', 'append next leg under same reservation', $failures);
+require_contains($store, 'session.carryoverCrew = archive.dispatch.crew', 'continued reservation preserves crew', $failures);
+require_contains($views, 'CONTINUE SAME RESERVATION', 'continued reservation sheet', $failures);
+require_contains($views, 'ADD NEXT LEG', 'continued reservation action', $failures);
+require_contains($views, 'normal Engine Start', 'continued leg requires engine start', $failures);
 require_contains($views, 'ENGINE WAS SHUT DOWN', 'schedule recovery for mistaken transient', $failures);
 require_contains($views, 'CANCEL REMAINING LEGS', 'schedule cancel unused legs', $failures);
 require_contains($views, 'canCancelLeftoverPlannedLegs', 'cancel leftover legs without requiring continuity', $failures);

@@ -2552,6 +2552,122 @@ final class CVRWorkflowStore: ObservableObject {
         }
     }
 
+    var latestContinuableReservation: CVRReservationContinuationCandidate? {
+        guard state.activeDispatch == nil, state.activeFlightRecord == nil,
+              remainingOpenPlannedLegs.isEmpty else { return nil }
+        guard let latest = archives.max(by: { $0.archivedAt < $1.archivedAt }),
+              latest.flightRecord.checkInMode == .engineShutdown,
+              latest.flightRecord.endingHobbs != nil,
+              latest.flightRecord.endingTacho != nil,
+              !(latest.flightRecord.fuelRemaining ?? "").isEmpty,
+              let reservationUUID = continuationReservationUUID(for: latest) else {
+            return nil
+        }
+        let completedLegCount = archives.filter {
+            continuationReservationUUID(for: $0)?.lowercased() == reservationUUID.lowercased()
+        }.count
+        let departure = CVROperationalIdentityLocal.normalizeAirport(
+            latest.flightRecord.verifiedDestinationAirport
+                ?? latest.dispatch.plannedDestinationAirport
+        )
+        return CVRReservationContinuationCandidate(
+            archiveID: latest.id,
+            reservationUUID: reservationUUID,
+            schedulerRecordID: latest.dispatch.schedulerRecordID,
+            aircraftRegistration: latest.dispatch.tailNumber,
+            departureAirport: departure,
+            missionCode: latest.dispatch.missionCode,
+            completedLegCount: max(1, completedLegCount)
+        )
+    }
+
+    @discardableResult
+    func continueReservation(
+        _ candidate: CVRReservationContinuationCandidate,
+        departureAirport: String,
+        destinationAirport: String,
+        selectedAircraft: CockpitAircraft?,
+        cvrUnitID: String,
+        beaconID: String,
+        isAudioRecording: Bool,
+        canonicalWriteEnabled: Bool,
+        operationalSessionModelEnabled: Bool
+    ) -> Bool {
+        guard state.activeDispatch == nil, state.activeFlightRecord == nil, !isAudioRecording else {
+            lastError = "Finish the active recording and flight before continuing this reservation."
+            return false
+        }
+        guard let selectedAircraft,
+              Self.normalizedTail(selectedAircraft.registration)
+                == Self.normalizedTail(candidate.aircraftRegistration) else {
+            lastError = "This reservation belongs to a different aircraft."
+            return false
+        }
+        guard let archive = archives.first(where: { $0.id == candidate.archiveID }),
+              let reservationUUID = continuationReservationUUID(for: archive),
+              reservationUUID.lowercased() == candidate.reservationUUID.lowercased() else {
+            lastError = "The completed reservation is no longer available. Refresh the Log and try again."
+            return false
+        }
+        let departure = CVROperationalIdentityLocal.normalizeAirport(departureAirport)
+        let destination = CVROperationalIdentityLocal.normalizeAirport(destinationAirport)
+        guard !departure.isEmpty, !destination.isEmpty else {
+            lastError = "Enter both departure and destination airports."
+            return false
+        }
+        let now = Date()
+        let planned = CVRPlannedLegRecord(
+            id: UUID().uuidString.lowercased(),
+            reservationUUID: reservationUUID.lowercased(),
+            legUUID: UUID().uuidString.lowercased(),
+            sequenceNumber: candidate.completedLegCount + 1,
+            departureAirport: departure,
+            destinationAirport: destination,
+            missionCode: candidate.missionCode,
+            tailNumber: selectedAircraft.registration,
+            schedulerRecordID: candidate.schedulerRecordID,
+            plannedStartAt: now,
+            plannedEndAt: now.addingTimeInterval(2 * 3600),
+            status: "planned"
+        )
+        guard mutate({
+            var session = CVROperationalSessionContext.empty
+            session.reservationUUID = reservationUUID.lowercased()
+            session.plannedLegs = [planned]
+            session.carryoverHobbs = archive.flightRecord.endingHobbs
+            session.carryoverTacho = archive.flightRecord.endingTacho
+            session.carryoverFuel = archive.flightRecord.fuelRemaining
+            session.carryoverOilPercentage = archive.flightRecord.endingOilPercentage
+            session.carryoverOilQuantity = archive.flightRecord.endingOilQuantity
+            session.carryoverOilUnit = archive.flightRecord.endingOilUnit
+            session.carryoverCrew = archive.dispatch.crew
+            $0.operationalSession = session
+        }) else {
+            lastError = "The continued reservation could not be saved on this CVR Unit."
+            return false
+        }
+        openDispatchFromPlannedLeg(
+            planned,
+            selectedAircraft: selectedAircraft,
+            cvrUnitID: cvrUnitID,
+            beaconID: beaconID,
+            isAudioRecording: false,
+            canonicalWriteEnabled: canonicalWriteEnabled,
+            operationalSessionModelEnabled: operationalSessionModelEnabled
+        )
+        return state.activeDispatch != nil
+    }
+
+    private func continuationReservationUUID(for archive: CVRWorkflowArchiveRecord) -> String? {
+        let value = archive.dispatch.reservationUUID
+            ?? archive.dispatch.operationalIdentity?.reservationUUID
+            ?? archive.operationalSession?.reservationUUID
+        guard let normalized = value.flatMap(CVROperationalIdentityLocal.normalizeUUID) else {
+            return nil
+        }
+        return normalized
+    }
+
     var hasQueuedScheduleDutyReplacement: Bool {
         state.uploadComponents.contains { $0.componentType == "schedule_duty_sync" }
     }

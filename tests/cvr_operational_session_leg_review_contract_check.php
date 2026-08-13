@@ -62,9 +62,11 @@ $checks = [
         && str_contains($service, "'evidence_discrepancies' => \$evidenceDiscrepancies"),
     'leg review uses effective Log adjustments and operation event fallback' =>
         str_contains($splitService, 'ipca_cvr_flight_log_adjustments')
+        && str_contains($splitService, "\$adjustment['fuel_onboard'] ?? \$dispatch['fuel_onboard']")
         && str_contains($splitService, 'manual_takeoff_adjustment')
         && str_contains($splitService, 'manual_landing_adjustment')
         && str_contains($service, 'latestFlightLogAdjustment')
+        && str_contains($service, "\$adjustment['fuel_onboard'] ?? \$dispatch['fuel_onboard']")
         && str_contains($service, 'operationEventCounts')
         && str_contains($views, 'takeoffEvents')
         && str_contains($views, '!response.review.proposedLegs.isEmpty'),

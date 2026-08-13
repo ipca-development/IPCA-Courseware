@@ -163,6 +163,7 @@ final class CvrAdminLegCorrectionService
                     $crew,
                     $startingHobbs,
                     $startingTacho,
+                    $fuelOnboard,
                     $endingHobbs,
                     $endingTacho,
                     $fuelRemaining
@@ -384,6 +385,7 @@ final class CvrAdminLegCorrectionService
                     array(),
                     $startingHobbs,
                     $startingTacho,
+                    $fuelOnboard,
                     $endingHobbs,
                     $endingTacho,
                     $fuelRemaining
@@ -580,6 +582,7 @@ final class CvrAdminLegCorrectionService
         array $crew,
         ?float $startingHobbs,
         ?float $startingTacho,
+        string $fuelOnboard,
         ?float $endingHobbs,
         ?float $endingTacho,
         string $fuelRemaining
@@ -632,11 +635,15 @@ final class CvrAdminLegCorrectionService
         $endTacho = $endingTacho
             ?? (isset($latest['ending_tacho']) && is_numeric($latest['ending_tacho']) ? (float)$latest['ending_tacho'] : null)
             ?? (isset($closure['ending_tacho']) && is_numeric($closure['ending_tacho']) ? (float)$closure['ending_tacho'] : null);
+        $fuelStart = $fuelOnboard !== ''
+            ? $fuelOnboard
+            : trim((string)($latest['fuel_onboard'] ?? $dispatch['fuel_onboard'] ?? ''));
         $fuel = $fuelRemaining !== ''
             ? $fuelRemaining
             : trim((string)($latest['fuel_remaining'] ?? $closure['fuel_remaining'] ?? ''));
 
-        if ($startHobbs === null || $startTacho === null || $endHobbs === null || $endTacho === null || $fuel === '') {
+        if ($startHobbs === null || $startTacho === null || $endHobbs === null || $endTacho === null
+            || $fuelStart === '' || $fuel === '') {
             return;
         }
 
@@ -669,8 +676,8 @@ final class CvrAdminLegCorrectionService
                 'INSERT INTO ipca_cvr_flight_log_adjustments
                  (adjustment_uuid, organization_id, device_id, workflow_flight_record_uuid, dispatch_uuid,
                   departure_airport, arrival_airport, crew_json, starting_hobbs, starting_tacho,
-                  ending_hobbs, ending_tacho, fuel_remaining, reason)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                  fuel_onboard, ending_hobbs, ending_tacho, fuel_remaining, reason)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute(array(
                 AuditEventService::uuid(),
                 $organizationId,
@@ -682,6 +689,7 @@ final class CvrAdminLegCorrectionService
                 AuditEventService::jsonEncode(array_values($crewNames)),
                 $startHobbs,
                 $startTacho,
+                $fuelStart,
                 $endHobbs,
                 $endTacho,
                 $fuel,
@@ -694,8 +702,8 @@ final class CvrAdminLegCorrectionService
                     'INSERT INTO ipca_cvr_flight_log_adjustments
                      (adjustment_uuid, organization_id, device_id, workflow_flight_record_uuid, dispatch_uuid,
                       departure_airport, arrival_airport, crew_json, starting_hobbs, starting_tacho,
-                      ending_hobbs, ending_tacho, fuel_remaining)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                      fuel_onboard, ending_hobbs, ending_tacho, fuel_remaining)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 )->execute(array(
                     AuditEventService::uuid(),
                     $organizationId,
@@ -707,6 +715,7 @@ final class CvrAdminLegCorrectionService
                     AuditEventService::jsonEncode(array_values($crewNames)),
                     $startHobbs,
                     $startTacho,
+                    $fuelStart,
                     $endHobbs,
                     $endTacho,
                     $fuel,

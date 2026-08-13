@@ -1508,6 +1508,7 @@ private struct ScheduledFlightsView: View {
     @State private var showLocalDispatchSheet = false
     @State private var showEngineWasShutdownConfirm = false
     @State private var showCancelRemainingLegsConfirm = false
+    @State private var continuationCandidate: CVRReservationContinuationCandidate?
 
     var body: some View {
         GeometryReader { proxy in
@@ -1540,6 +1541,9 @@ private struct ScheduledFlightsView: View {
                                 iconName: "point.3.connected.trianglepath.dotted",
                                 color: CVROperationalPalette.warning
                             )
+                        }
+                        if let candidate = workflow.latestContinuableReservation {
+                            continuationCard(candidate)
                         }
                         ForEach(daySections, id: \.title) { section in
                             reservationSection(section.title, groups: section.groups, metrics: metrics)
@@ -1623,6 +1627,13 @@ private struct ScheduledFlightsView: View {
                 .environmentObject(beacon)
                 .environmentObject(missionCatalog)
                 .environmentObject(uploadManager)
+        }
+        .sheet(item: $continuationCandidate) { candidate in
+            ContinueReservationSheet(candidate: candidate)
+                .environmentObject(workflow)
+                .environmentObject(settings)
+                .environmentObject(beacon)
+                .environmentObject(audio)
         }
     }
 
@@ -1731,6 +1742,36 @@ private struct ScheduledFlightsView: View {
                 }
             }
         }
+    }
+
+    private func continuationCard(_ candidate: CVRReservationContinuationCandidate) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("CONTINUE RESERVATION", systemImage: "point.3.connected.trianglepath.dotted")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
+            Text("The previous leg ended with an Engine Shutdown. Add another leg under the same reservation; the next flight will require a normal Engine Start.")
+                .font(.caption)
+                .foregroundStyle(CVROperationalPalette.textSecondary)
+            HStack {
+                Text(candidate.departureAirport.isEmpty ? "SELECT DEPARTURE" : candidate.departureAirport)
+                    .font(.subheadline.weight(.bold))
+                Image(systemName: "arrow.right")
+                Text(settings.selectedAircraft?.homeAirport.nilIfEmpty ?? "SELECT DESTINATION")
+                    .font(.subheadline.weight(.bold))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            CVROperationalActionButton(
+                title: "ADD NEXT LEG",
+                subtitle: "Keep crew, aircraft and reservation linkage",
+                color: CVROperationalPalette.secondaryBlue
+            ) {
+                continuationCandidate = candidate
+            }
+        }
+        .padding(14)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(CVROperationalPalette.secondaryBlue.opacity(0.5), lineWidth: 1))
     }
 
     private func reservationCard(
@@ -2208,6 +2249,110 @@ private struct ScheduledFlightsView: View {
         let start = cvrReservationTime(leg.scheduledStartTime) ?? "TBD"
         let end = cvrReservationTime(leg.scheduledEndTime) ?? "TBD"
         return "\(start)–\(end)"
+    }
+}
+
+private struct ContinueReservationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var workflow: CVRWorkflowStore
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var beacon: AvionicsBeaconManager
+    @EnvironmentObject private var audio: AudioRecorderManager
+    let candidate: CVRReservationContinuationCandidate
+    @State private var departureAirport: String
+    @State private var destinationAirport = ""
+    @State private var localError = ""
+
+    init(candidate: CVRReservationContinuationCandidate) {
+        self.candidate = candidate
+        _departureAirport = State(initialValue: candidate.departureAirport)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                CVROperationalPalette.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 14) {
+                        CVROperationalWarningCard(
+                            title: "CONTINUE SAME RESERVATION",
+                            message: "This creates a new flight leg with a new Dispatch identity. Crew, aircraft and ending meter/fuel values carry forward. A normal Engine Start is required.",
+                            iconName: "point.3.connected.trianglepath.dotted",
+                            color: CVROperationalPalette.secondaryBlue
+                        )
+                        continuationField("DEPARTURE AIRPORT", text: $departureAirport)
+                        continuationField("DESTINATION AIRPORT", text: $destinationAirport)
+                        if !localError.isEmpty {
+                            CVROperationalWarningCard(
+                                title: "NEXT LEG NOT CREATED",
+                                message: localError,
+                                iconName: "exclamationmark.triangle.fill",
+                                color: CVROperationalPalette.critical
+                            )
+                        }
+                        CVROperationalActionButton(
+                            title: "CREATE NEXT LEG",
+                            subtitle: "Continue reservation · normal Engine Start",
+                            color: CVROperationalPalette.success
+                        ) {
+                            createNextLeg()
+                        }
+                    }
+                    .padding(18)
+                }
+            }
+            .navigationTitle("Continue Reservation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .onAppear {
+                if destinationAirport.isEmpty {
+                    destinationAirport = settings.selectedAircraft?.homeAirport ?? ""
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func continuationField(_ title: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(CVROperationalPalette.secondaryBlue)
+            TextField(title, text: text)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .font(.title3.weight(.bold).monospaced())
+                .foregroundStyle(.white)
+                .padding(12)
+                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(CVROperationalPalette.cardBorder, lineWidth: 1))
+        }
+        .padding(14)
+        .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func createNextLeg() {
+        localError = ""
+        if workflow.continueReservation(
+            candidate,
+            departureAirport: departureAirport,
+            destinationAirport: destinationAirport,
+            selectedAircraft: settings.selectedAircraft,
+            cvrUnitID: settings.cvrUnitIdentifier,
+            beaconID: beacon.expectedBeaconIdentityHex,
+            isAudioRecording: audio.isRecording,
+            canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled,
+            operationalSessionModelEnabled: settings.operationalSessionModelEnabled
+        ) {
+            dismiss()
+        } else {
+            localError = workflow.lastError.nilIfEmpty ?? "The next leg could not be created."
+        }
     }
 }
 
@@ -7064,6 +7209,9 @@ struct FlightLogView: View {
         }
         merged.startingHobbs = merged.startingHobbs ?? existing.startingHobbs ?? candidate.startingHobbs
         merged.startingTacho = merged.startingTacho ?? existing.startingTacho ?? candidate.startingTacho
+        if (merged.fuelOnboard ?? "").isEmpty {
+            merged.fuelOnboard = existing.fuelOnboard ?? candidate.fuelOnboard
+        }
         merged.endingHobbs = merged.endingHobbs ?? existing.endingHobbs ?? candidate.endingHobbs
         merged.endingTacho = merged.endingTacho ?? existing.endingTacho ?? candidate.endingTacho
         merged.totalHobbsTime = merged.totalHobbsTime ?? existing.totalHobbsTime ?? candidate.totalHobbsTime
@@ -7248,6 +7396,7 @@ struct FlightLogView: View {
             arrivalTime: calculatedArrival.map { ISO8601DateFormatter().string(from: $0) },
             startingHobbs: dispatch.startingHobbs,
             startingTacho: dispatch.startingTacho,
+            fuelOnboard: dispatch.fuelOnboard,
             endingHobbs: flightRecord.endingHobbs,
             endingTacho: flightRecord.endingTacho,
             fuelRemaining: flightRecord.fuelRemaining,
@@ -7391,6 +7540,7 @@ private struct FlightLogAdjustmentView: View {
     @State private var startingTacho: String
     @State private var endingHobbs: String
     @State private var endingTacho: String
+    @State private var fuelOnboard: String
     @State private var fuelRemaining: String
     @State private var saveError = ""
 
@@ -7403,6 +7553,7 @@ private struct FlightLogAdjustmentView: View {
         _startingTacho = State(initialValue: entry.startingTacho.map { String(format: "%.1f", $0) } ?? "")
         _endingHobbs = State(initialValue: entry.endingHobbs.map { String(format: "%.1f", $0) } ?? "")
         _endingTacho = State(initialValue: entry.endingTacho.map { String(format: "%.1f", $0) } ?? "")
+        _fuelOnboard = State(initialValue: entry.fuelOnboard ?? "")
         _fuelRemaining = State(initialValue: entry.fuelRemaining ?? "")
     }
 
@@ -7465,6 +7616,11 @@ private struct FlightLogAdjustmentView: View {
                             baseline: nil
                         )
                         adjustmentField(
+                            "FUEL AT DEPARTURE",
+                            value: $fuelOnboard,
+                            baseline: nil
+                        )
+                        adjustmentField(
                             "FUEL REMAINING",
                             value: $fuelRemaining,
                             baseline: nil
@@ -7494,6 +7650,7 @@ private struct FlightLogAdjustmentView: View {
                                 crewNames: crewNames.split(separator: ",").map(String.init),
                                 startingHobbs: Double(startingHobbs),
                                 startingTacho: Double(startingTacho),
+                                fuelOnboard: fuelOnboard,
                                 endingHobbs: Double(endingHobbs),
                                 endingTacho: Double(endingTacho),
                                 fuelRemaining: fuelRemaining,
@@ -7540,11 +7697,20 @@ private struct FlightLogAdjustmentView: View {
               endTacho >= startTacho else {
             return "Ending Hobbs and Tacho must be valid and cannot be lower than their starting values."
         }
+        let numericDepartureFuel = fuelOnboard.components(
+            separatedBy: CharacterSet(charactersIn: "0123456789.-").inverted
+        ).joined()
+        guard let departureFuel = Double(numericDepartureFuel), departureFuel >= 0 else {
+            return "Fuel at departure must be a valid non-negative quantity."
+        }
         let numericFuel = fuelRemaining.components(
             separatedBy: CharacterSet(charactersIn: "0123456789.-").inverted
         ).joined()
         guard let fuel = Double(numericFuel), fuel >= 0 else {
             return "Fuel remaining must be a valid non-negative quantity."
+        }
+        guard fuel <= departureFuel + 0.05 else {
+            return "Fuel remaining cannot exceed fuel at departure."
         }
         return nil
     }

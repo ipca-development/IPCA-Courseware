@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS ipca_cvr_flight_log_adjustments (
   crew_json                   JSON NOT NULL,
   starting_hobbs              DECIMAL(12,4) NULL,
   starting_tacho              DECIMAL(12,4) NULL,
+  fuel_onboard                VARCHAR(64) NULL,
   ending_hobbs                DECIMAL(12,4) NOT NULL,
   ending_tacho                DECIMAL(12,4) NOT NULL,
   fuel_remaining              VARCHAR(64) NOT NULL,

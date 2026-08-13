@@ -335,7 +335,8 @@ final class CvrAdminLegSplitService
             $crew = array();
         }
         $verifiedOps = $this->closureOperationCounts($closure, $flightUuid);
-        $fuelStart = $this->fuelNumber($dispatch['fuel_onboard'] ?? null);
+        $effectiveFuelOnboard = $adjustment['fuel_onboard'] ?? $dispatch['fuel_onboard'] ?? null;
+        $fuelStart = $this->fuelNumber($effectiveFuelOnboard);
         $effectiveFuelRemaining = $adjustment['fuel_remaining'] ?? $closure['fuel_remaining'] ?? null;
         $fuelEnd = $this->fuelNumber($effectiveFuelRemaining);
 
@@ -353,7 +354,7 @@ final class CvrAdminLegSplitService
             'ending_hobbs' => $endingHobbs,
             'starting_tacho' => $startingTacho,
             'ending_tacho' => $endingTacho,
-            'fuel_onboard' => trim((string)($dispatch['fuel_onboard'] ?? '')),
+            'fuel_onboard' => trim((string)$effectiveFuelOnboard),
             'fuel_remaining' => trim((string)$effectiveFuelRemaining),
             'fuel_start' => $fuelStart,
             'fuel_end' => $fuelEnd,

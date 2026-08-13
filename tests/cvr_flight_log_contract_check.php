@@ -20,6 +20,7 @@ $recordingStore = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Services
 $derivation = file_get_contents($root . '/src/FlightRecordDerivationService.php') ?: '';
 $debrief = file_get_contents($root . '/src/FlightDebriefService.php') ?: '';
 $startingMeterMigration = file_get_contents($root . '/scripts/sql/2026_08_01_cvr_flight_log_starting_meter_adjustments.sql') ?: '';
+$departureFuelMigration = file_get_contents($root . '/scripts/sql/2026_08_13_cvr_flight_log_departure_fuel_adjustments.sql') ?: '';
 $adminCorrection = file_get_contents($root . '/src/CvrAdminLegCorrectionService.php') ?: '';
 $contentView = file_get_contents($root . '/ipca-cvr-unit/IPCACVRUnit/Views/ContentView.swift') ?: '';
 
@@ -171,6 +172,14 @@ $checks = array(
         && str_contains($views, '"STARTING TACHO"')
         && str_contains($derivation, 'COALESCE(a.starting_hobbs, d.starting_hobbs)')
         && str_contains($debrief, 'COALESCE(fla.starting_hobbs, d.starting_hobbs)'),
+    'incorrect departure fuel can be corrected append-only and re-derived' =>
+        str_contains($departureFuelMigration, "COLUMN_NAME = 'fuel_onboard'")
+        && str_contains($service, 'COALESCE(adjustment.fuel_onboard, d.fuel_onboard)')
+        && str_contains($service, "'fuel_onboard' => \$fuelOnboard")
+        && str_contains($models, '"fuel_onboard": departureFuelValue')
+        && str_contains($views, '"FUEL AT DEPARTURE"')
+        && str_contains($derivation, 'COALESCE(a.fuel_onboard, d.fuel_onboard)')
+        && str_contains($adminCorrection, 'fuel_onboard, ending_hobbs'),
     'flight log exposes server upload transcript progress and operation counts' =>
         str_contains($service, "'server_upload_status'")
         && str_contains($service, "'server_upload_progress'")
