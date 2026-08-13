@@ -1633,12 +1633,112 @@ ol.cpb-list > li[data-indent-level="8"] {
 }
 
 .cpb-table-tools {
+  display: none;
+  position: absolute;
+  z-index: 30;
+  width: min(520px, calc(100% - 16px));
+  max-height: min(440px, calc(100vh - 32px));
+  overflow: auto;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(15, 39, 68, 0.2);
+  color: #0f172a;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.cpb-table-tools.is-open {
+  display: flex;
+}
+
+.cpb-table-tools__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.cpb-table-tools__header strong {
+  display: block;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #16233c;
+}
+
+.cpb-table-tools__selection {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.cpb-table-tools__close {
+  all: unset;
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: #64748b;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cpb-table-tools__close:hover {
+  background: #e2e8f0;
+  color: #16233c;
+}
+
+.cpb-table-tools__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+}
+
+.cpb-table-tools__group {
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.cpb-table-tools__group:nth-child(even) {
+  border-right: 0;
+}
+
+.cpb-table-tools__controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 5px;
   align-items: center;
-  margin-top: 8px;
-  padding: 6px 0 8px;
+  margin-top: 6px;
+}
+
+.cpb-table-tools__danger {
+  grid-column: 1 / -1;
+  padding: 8px 12px;
+  background: #fffafa;
+}
+
+.cpb-table-tools__color-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .cpb-table-style-sep {
@@ -1667,6 +1767,13 @@ ol.cpb-list > li[data-indent-level="8"] {
   background: #fff;
   cursor: pointer;
   vertical-align: middle;
+}
+
+.cpb-table-tools button:disabled,
+.cpb-table-tools input:disabled {
+  opacity: 0.38 !important;
+  cursor: not-allowed !important;
+  pointer-events: none;
 }
 
 .cmp-page .cpb-editor-root .cpb-table-tools button.cpb-mini-btn.is-active {

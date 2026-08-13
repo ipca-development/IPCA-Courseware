@@ -125,6 +125,8 @@
     canvasZoom: 100,
     lastStyleTarget: null,
     activeOrderedList: null,
+    activeTableToolsBlock: null,
+    activeTableToolsAnchor: null,
     savedSelectionRange: null,
     isCoverSection: false,
     coverPage: null,
@@ -848,6 +850,8 @@
 
     canvasEl.addEventListener('pointerdown', function (e) {
       var tableCell = e.target.closest('.cpb-table th, .cpb-table td');
+      var tableTools = e.target.closest('.cpb-table-tools');
+      var clickedTableBlock = e.target.closest('.cpb-block--table');
       if (tableCell && tableCell.isContentEditable && canvasEl.contains(tableCell)) {
         var toggleCell = e.metaKey || e.ctrlKey;
         if (toggleCell) e.preventDefault();
@@ -857,14 +861,38 @@
         if (tableBlock) {
           state.lastStyleTarget = { block: tableBlock, el: tableCell, type: 'table-cell' };
         }
-      } else if (!e.target.closest('.cpb-table, .cpb-table-tools')) {
+      } else if (!tableTools && !e.target.closest('.cpb-table')) {
         clearTableCellSelection();
       }
       requestAnimationFrame(function () {
         saveSelectionRange();
         rememberStyleTarget();
+        if (tableCell && clickedTableBlock) {
+          openTableTools(clickedTableBlock, tableCell);
+        } else if (!tableTools && clickedTableBlock) {
+          openTableTools(clickedTableBlock, clickedTableBlock.querySelector('.cpb-table-wrap'));
+        } else if (!tableTools && !clickedTableBlock) {
+          closeTableTools();
+        }
       });
     }, true);
+
+    document.addEventListener('pointerdown', function (e) {
+      var activeBlock = state.activeTableToolsBlock;
+      if (!activeBlock || !isConnectedEl(activeBlock)) return;
+      if (!activeBlock.contains(e.target)) closeTableTools();
+    }, true);
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' || !state.activeTableToolsBlock) return;
+      e.preventDefault();
+      closeTableTools();
+    });
+
+    window.addEventListener('resize', function () {
+      if (!state.activeTableToolsBlock) return;
+      positionTableTools(state.activeTableToolsBlock, state.activeTableToolsAnchor);
+    });
 
     canvasEl.addEventListener('mouseup', function () {
       saveSelectionRange();
@@ -874,6 +902,12 @@
     canvasEl.addEventListener('keyup', rememberStyleTarget);
 
     canvasEl.addEventListener('click', function (e) {
+      var closeToolsBtn = e.target.closest('[data-table-tools-close]');
+      if (closeToolsBtn) {
+        e.preventDefault();
+        closeTableTools();
+        return;
+      }
       var btn = e.target.closest('button[data-table-action]');
       if (!btn || !state.editable) return;
       e.preventDefault();
@@ -889,6 +923,7 @@
           if (!res.ok) throw new Error(res.error || 'Delete failed');
           clearPendingForBlock(blockId);
           clearStyleTargetForBlock(blockEl);
+          if (state.activeTableToolsBlock === blockEl) closeTableTools();
           blockEl.remove();
           setStatus('Table deleted', 'saved');
           return recomputeSectionNumbers();
@@ -933,6 +968,8 @@
         applyTableBlockAlign(blockEl, action.replace('table-align-', ''));
       }
       wireTableResize(blockEl);
+      syncTableToolsContext(blockEl);
+      positionTableTools(blockEl, state.activeTableToolsAnchor);
       scheduleSave(blockEl);
       flushSave(blockEl);
     });
@@ -3484,6 +3521,133 @@
     }
   }
 
+  function closeTableTools() {
+    var activeBlock = state.activeTableToolsBlock;
+    if (activeBlock && isConnectedEl(activeBlock)) {
+      var activeTools = activeBlock.querySelector('.cpb-table-tools');
+      if (activeTools) {
+        activeTools.classList.remove('is-open');
+        activeTools.setAttribute('aria-hidden', 'true');
+        activeTools.style.left = '';
+        activeTools.style.top = '';
+      }
+    }
+    state.activeTableToolsBlock = null;
+    state.activeTableToolsAnchor = null;
+  }
+
+  function openTableTools(blockEl, anchorEl) {
+    if (!state.editable || !blockEl || !isConnectedEl(blockEl)) return;
+    var tools = blockEl.querySelector('.cpb-table-tools');
+    if (!tools) return;
+    if (state.activeTableToolsBlock && state.activeTableToolsBlock !== blockEl) {
+      closeTableTools();
+    }
+    state.activeTableToolsBlock = blockEl;
+    state.activeTableToolsAnchor = anchorEl && blockEl.contains(anchorEl)
+      ? anchorEl
+      : blockEl.querySelector('.cpb-table-wrap');
+    tools.classList.add('is-open');
+    tools.setAttribute('aria-hidden', 'false');
+    syncTableToolsContext(blockEl);
+    positionTableTools(blockEl, state.activeTableToolsAnchor);
+  }
+
+  function setTableToolDisabled(blockEl, actions, disabled) {
+    actions.forEach(function (action) {
+      var control = blockEl.querySelector('[data-table-action="' + action + '"]');
+      if (control) control.disabled = !!disabled;
+    });
+  }
+
+  function syncTableToolsContext(blockEl) {
+    if (!blockEl || !isConnectedEl(blockEl)) return;
+    var tools = blockEl.querySelector('.cpb-table-tools');
+    if (!tools) return;
+    var selected = state.selectedTableCells.filter(function (cell) {
+      return blockEl.contains(cell);
+    });
+    var selectedCell = resolveSelectedTableCell(blockEl);
+    var selectionLabel = tools.querySelector('.cpb-table-tools__selection');
+    if (selectionLabel) {
+      if (selected.length > 1) {
+        selectionLabel.textContent = selected.length + ' cells selected';
+      } else if (selectedCell) {
+        var row = selectedCell.closest('tr');
+        var rowIndex = row && row.parentElement
+          ? Array.prototype.indexOf.call(row.parentElement.children, row) + 1
+          : 0;
+        var cellIndex = selectedCell.cellIndex + 1;
+        selectionLabel.textContent = 'Row ' + rowIndex + ', cell ' + cellIndex;
+      } else {
+        selectionLabel.textContent = 'Table selected';
+      }
+    }
+
+    var selectedRow = selectedCell ? selectedCell.closest('tr') : null;
+    var body = tableBody(blockEl);
+    var isBodyRow = !!(selectedRow && body && body.contains(selectedRow));
+    var bodyRows = body ? Array.prototype.slice.call(body.rows) : [];
+    var bodyRowIndex = isBodyRow ? bodyRows.indexOf(selectedRow) : -1;
+    setTableToolDisabled(blockEl, ['move-row-up'], !isBodyRow || bodyRowIndex <= 0);
+    setTableToolDisabled(
+      blockEl,
+      ['move-row-down'],
+      !isBodyRow || bodyRowIndex < 0 || bodyRowIndex >= bodyRows.length - 1
+    );
+    var canDeleteSelectedRow = !!selectedRow
+      && (!isBodyRow || bodyRows.length > 1);
+    setTableToolDisabled(blockEl, ['del-row'], !canDeleteSelectedRow);
+    setTableToolDisabled(blockEl, ['del-col'], tableColCount(blockEl) <= 1);
+
+    var selectedCount = selected.length > 1 ? selected.length : (selectedCell ? 1 : 0);
+    var isTitleCell = !!(selectedCell && selectedCell.closest('[data-title-row]'));
+    var nextCell = selectedCell ? selectedCell.nextElementSibling : null;
+    setTableToolDisabled(
+      blockEl,
+      ['merge-cells-right'],
+      selectedCount !== 1 || isTitleCell || !nextCell
+    );
+    var colspan = selectedCell
+      ? Math.max(1, parseInt(selectedCell.getAttribute('colspan') || '1', 10) || 1)
+      : 1;
+    setTableToolDisabled(blockEl, ['unmerge-cells'], !selectedCell || colspan <= 1);
+    setTableToolDisabled(
+      blockEl,
+      ['cell-bg', 'cell-bg-clear', 'cell-text-color', 'copy-cells', 'paste-cells'],
+      selectedCount === 0
+    );
+    setTableToolDisabled(
+      blockEl,
+      ['formula-sum', 'formula-avg', 'formula-custom'],
+      !selectedCell || !isBodyRow
+    );
+  }
+
+  function positionTableTools(blockEl, anchorEl) {
+    if (!blockEl || state.activeTableToolsBlock !== blockEl) return;
+    var tools = blockEl.querySelector('.cpb-table-tools');
+    if (!tools || !tools.classList.contains('is-open')) return;
+    var anchor = anchorEl && isConnectedEl(anchorEl)
+      ? anchorEl
+      : blockEl.querySelector('.cpb-table-wrap');
+    if (!anchor) return;
+    var zoomScale = Math.max(0.1, state.canvasZoom / 100);
+    var blockRect = blockEl.getBoundingClientRect();
+    var anchorRect = anchor.getBoundingClientRect();
+    var toolsWidth = tools.offsetWidth;
+    var toolsHeight = tools.offsetHeight;
+    var maxLeft = Math.max(0, blockEl.clientWidth - toolsWidth);
+    var left = (anchorRect.left - blockRect.left) / zoomScale;
+    left = Math.max(0, Math.min(maxLeft, left));
+    var top = (anchorRect.bottom - blockRect.top) / zoomScale + 8;
+    if (anchorRect.bottom + (toolsHeight * zoomScale) + 16 > window.innerHeight) {
+      top = (anchorRect.top - blockRect.top) / zoomScale - toolsHeight - 8;
+    }
+    tools.style.left = Math.round(left) + 'px';
+    tools.style.top = Math.round(Math.max(0, top)) + 'px';
+  }
+
   function syncTableStyleControls(blockEl) {
     var wrap = tableWrap(blockEl);
     if (!wrap) return;
@@ -3535,6 +3699,7 @@
         if (textColorControl) {
           textColorControl.value = extractCellTextColor(cell) || '#0f172a';
         }
+        openTableTools(blockEl, cell);
       });
       cell.addEventListener('input', function () {
         var titleRow = cell.closest('[data-title-row]');

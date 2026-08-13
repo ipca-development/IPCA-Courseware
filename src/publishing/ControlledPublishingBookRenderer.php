@@ -1848,50 +1848,57 @@ final class ControlledPublishingBookRenderer
         $html .= '</tbody></table></div>';
 
         if ($edit) {
-            $html .= '<div class="cpb-table-tools" contenteditable="false">'
-                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="delete-table" title="Delete table">Delete table</button>'
-                . '<span class="cpb-table-style-sep"></span>'
-                . '<span class="cpb-table-style-label">Align</span>'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'left' ? ' is-active' : '') . '" data-table-action="table-align-left" title="Align table left">L</button>'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'center' ? ' is-active' : '') . '" data-table-action="table-align-center" title="Align table center">C</button>'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'right' ? ' is-active' : '') . '" data-table-action="table-align-right" title="Align table right">R</button>'
-                . '<span class="cpb-table-style-sep"></span>'
-                . '<span class="cpb-table-style-label">Rows</span>'
+            $html .= '<div class="cpb-table-tools" contenteditable="false" role="dialog" aria-label="Table tools" aria-hidden="true">';
+            $html .= '<div class="cpb-table-tools__header">'
+                . '<div><strong>Table tools</strong><span class="cpb-table-tools__selection">Table selected</span></div>'
+                . '<button type="button" class="cpb-table-tools__close" data-table-tools-close aria-label="Close table tools">×</button>'
+                . '</div>';
+            $html .= '<div class="cpb-table-tools__body">';
+            $html .= '<section class="cpb-table-tools__group" aria-label="Table">'
+                . '<span class="cpb-table-style-label">Table</span>'
+                . '<div class="cpb-table-tools__controls">'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'left' ? ' is-active' : '') . '" data-table-action="table-align-left" title="Align table left">Left</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'center' ? ' is-active' : '') . '" data-table-action="table-align-center" title="Align table center">Center</button>'
+                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'right' ? ' is-active' : '') . '" data-table-action="table-align-right" title="Align table right">Right</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="toggle-title">'
+                . ($hasTitleRow ? 'Remove title' : '+ Title')
+                . '</button>'
+                . '</div></section>';
+            $html .= '<section class="cpb-table-tools__group" aria-label="Rows and columns">'
+                . '<span class="cpb-table-style-label">Rows &amp; columns</span>'
+                . '<div class="cpb-table-tools__controls">'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="move-row-up" title="Move selected row up">↑ Row</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="move-row-down" title="Move selected row down">↓ Row</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-row" title="Add row at bottom">+ Row</button>'
                 . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="del-row" title="Delete selected row">Delete row</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="add-col" title="Add column at right">+ Column</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="del-col" title="Remove rightmost column">− Column</button>'
-                . '<span class="cpb-table-style-sep"></span>'
+                . '</div></section>';
+            $html .= '<section class="cpb-table-tools__group" aria-label="Cells">'
                 . '<span class="cpb-table-style-label">Cells</span>'
+                . '<div class="cpb-table-tools__controls">'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="merge-cells-right" title="Merge with cell to the right">Merge →</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="unmerge-cells" title="Split merged cell into columns">Unmerge</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="toggle-title">'
-                . ($hasTitleRow ? 'Remove title row' : '+ Title row')
-                . '</button>'
-                . '<span class="cpb-table-style-sep"></span>'
-                . '<span class="cpb-table-style-label">Border</span>'
+                . '<label class="cpb-table-tools__color-label">Fill <input type="color" class="cpb-table-color" data-table-action="cell-bg" value="#ffffff" title="Cell background"></label>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-bg-clear" title="Clear cell fill">Clear fill</button>'
+                . '<label class="cpb-table-tools__color-label">Text <input type="color" class="cpb-table-color" data-table-action="cell-text-color" value="#0f172a" title="Text color"></label>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="copy-cells" title="Copy column or selection">Copy</button>'
+                . '<button type="button" class="cpb-mini-btn" data-table-action="paste-cells" title="Paste TSV column or grid">Paste</button>'
+                . '</div></section>';
+            $html .= '<section class="cpb-table-tools__group" aria-label="Border and calculations">'
+                . '<span class="cpb-table-style-label">Border &amp; calculations</span>'
+                . '<div class="cpb-table-tools__controls">'
                 . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'thin' ? ' is-active' : '') . '" data-table-action="border-thin" title="Thin border">─</button>'
                 . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'medium' ? ' is-active' : '') . '" data-table-action="border-medium" title="Medium border">━</button>'
                 . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'thick' ? ' is-active' : '') . '" data-table-action="border-thick" title="Thick border">▬</button>'
                 . '<input type="color" class="cpb-table-color" data-table-action="border-color" value="' . h($borderColor) . '" title="Border color">'
-                . '<span class="cpb-table-style-sep"></span>'
-                . '<span class="cpb-table-style-label">Cell fill</span>'
-                . '<input type="color" class="cpb-table-color" data-table-action="cell-bg" value="#ffffff" title="Cell background (select a cell first)">'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-bg-clear" title="Clear cell fill">Clear</button>'
-                . '<span class="cpb-table-style-sep"></span>'
-                . '<span class="cpb-table-style-label">Text</span>'
-                . '<input type="color" class="cpb-table-color" data-table-action="cell-text-color" value="#0f172a" title="Text color (select a cell first)">'
-                . '<span class="cpb-table-style-sep"></span>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="copy-cells" title="Copy column or selection">Copy</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="paste-cells" title="Paste TSV column or grid">Paste</button>'
-                . '<span class="cpb-table-style-sep"></span>'
-                . '<span class="cpb-table-style-label">Calc</span>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="formula-sum" title="Insert SUM formula">SUM</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="formula-avg" title="Insert AVG formula">AVG</button>'
                 . '<button type="button" class="cpb-mini-btn" data-table-action="formula-custom" title="Insert custom formula">fx</button>'
-                . '</div>';
+                . '</div></section>';
+            $html .= '<div class="cpb-table-tools__danger">'
+                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="delete-table" title="Delete table">Delete table</button>'
+                . '</div></div></div>';
         }
         $html .= '</div>';
         return $html;
