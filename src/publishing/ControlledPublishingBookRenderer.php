@@ -1548,7 +1548,8 @@ final class ControlledPublishingBookRenderer
                 $indentAttr = $indentLevel > 0
                     ? ' data-indent-level="' . $indentLevel . '"'
                     : '';
-                $html .= '<li' . $indentAttr . '>' . h((string)$item) . '</li>';
+                $itemHtml = ControlledPublishingHtmlSanitizer::sanitizeInline((string)$item);
+                $html .= '<li' . $indentAttr . '>' . $itemHtml . '</li>';
             }
         }
         $html .= '</' . $tag . '>';

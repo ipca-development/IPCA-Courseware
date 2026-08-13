@@ -1059,11 +1059,13 @@
           scheduleSave(blockEl);
         });
         field.addEventListener('blur', function () {
-          if (field.classList.contains('cpb-list')) {
-            repairListDomStructure(field);
-          }
           flushSave(blockEl);
         });
+        if (field.classList.contains('cpb-list')) {
+          field.addEventListener('beforeinput', function (e) {
+            handleListBeforeInput(e, field, blockEl);
+          });
+        }
       });
     });
 
@@ -1407,7 +1409,7 @@
     var blockType = blockEl.getAttribute('data-block-type') || '';
     var payload = extractPayload(blockEl, blockType);
     setStatus('Saving…', 'saving');
-    apiPost('update_block', { version_id: state.versionId, block_id: blockId, payload: payload }).then(function (res) {
+    return apiPost('update_block', { version_id: state.versionId, block_id: blockId, payload: payload }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Save failed');
       applyNumberingState(res);
       if (res.cross_ref_annex) {
@@ -3118,35 +3120,13 @@
     return tmp.innerHTML;
   }
 
-  function splitMergedListItemText(text) {
-    text = String(text || '').replace(/\u00a0/g, ' ').trim();
-    if (!text) return [];
-    var lines = text.split(/\n+/).map(function (line) { return line.trim(); }).filter(Boolean);
-    if (lines.length > 1) return lines;
-    if (/[•·▪‣]\s/.test(text)) {
-      return text.split(/\s*[•·▪‣]\s+/).map(function (part) { return part.trim(); }).filter(Boolean);
-    }
-    if (/\.\s+(?=[A-Z0-9(])/.test(text) && text.length > 120) {
-      return text.split(/\.\s+(?=[A-Z0-9(])/).map(function (part, idx, arr) {
-        var chunk = part.trim();
-        if (!chunk) return '';
-        if (idx < arr.length - 1 && !/[.!?]$/.test(chunk)) chunk += '.';
-        return chunk;
-      }).filter(Boolean);
-    }
-    return [text];
-  }
-
   function normalizeListItemsFromElement(list) {
     var items = [];
     if (!list) return items;
     var lis = list.querySelectorAll(':scope > li');
-    if (lis.length === 1) {
-      return splitMergedListItemText(lis[0].textContent);
-    }
     lis.forEach(function (li) {
-      var t = li.textContent.replace(/\u00a0/g, ' ').trim();
-      if (t) items.push(t);
+      var text = li.textContent.replace(/\u00a0/g, ' ').trim();
+      if (text) items.push(stripEditorChromeFromHtml(li.innerHTML));
     });
     return items;
   }
@@ -3165,16 +3145,33 @@
     return levels;
   }
 
-  function repairListDomStructure(list) {
-    if (!list || (list.tagName !== 'UL' && list.tagName !== 'OL')) return false;
-    var items = normalizeListItemsFromElement(list);
-    if (items.length <= 1) return false;
-    var lis = list.querySelectorAll('li');
-    if (lis.length !== 1) return false;
-    list.innerHTML = items.map(function (item) {
-      return '<li>' + item.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</li>';
-    }).join('');
-    return true;
+  function activeDirectListItem(list) {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    var node = sel.getRangeAt(0).startContainer;
+    var el = node.nodeType === 1 ? node : node.parentElement;
+    var item = el && el.closest ? el.closest('li') : null;
+    return item && item.parentElement === list ? item : null;
+  }
+
+  function handleListBeforeInput(e, list, blockEl) {
+    // Native contenteditable behavior correctly handles non-empty item splits
+    // and insertLineBreak (Shift+Enter). Only bridge an empty item to the
+    // editor's separate paragraph-block model.
+    if (e.inputType !== 'insertParagraph' || e.isComposing) return;
+    var item = activeDirectListItem(list);
+    if (!item || item.textContent.replace(/\u00a0/g, ' ').trim() !== '') return;
+    var remainingItems = list.querySelectorAll(':scope > li').length - 1;
+    if (remainingItems < 1) return;
+
+    e.preventDefault();
+    pushUndo();
+    item.remove();
+    scheduleSave(blockEl);
+    var saveResult = flushSave(blockEl);
+    Promise.resolve(saveResult).then(function () {
+      return createBlock('paragraph', { html: '' }, blockEl);
+    }).catch(showError);
   }
 
   function stripLeadingSectionNumberText(text) {
@@ -3203,7 +3200,6 @@
     }
     if (blockType === 'list') {
       var list = blockEl.querySelector('.cpb-list');
-      repairListDomStructure(list);
       var ordered = list && list.tagName === 'OL';
       var items = normalizeListItemsFromElement(list);
       var itemIndentLevels = normalizeListIndentLevelsFromElement(list);

@@ -398,9 +398,9 @@ final class ControlledPublishingBlockService
             : array();
         if (is_array($payload['items'] ?? null)) {
             foreach ($payload['items'] as $index => $item) {
-                $t = trim((string)$item);
-                if ($t !== '') {
-                    $items[] = $t;
+                $html = ControlledPublishingHtmlSanitizer::sanitizeInline((string)$item);
+                if (trim(strip_tags($html)) !== '') {
+                    $items[] = $html;
                     $itemIndentLevels[] = max(0, min(8, (int)($rawIndentLevels[$index] ?? 0)));
                 }
             }
