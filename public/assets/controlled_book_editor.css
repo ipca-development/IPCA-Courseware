@@ -1365,7 +1365,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-list {
   margin: 0.4em 0;
-  padding-left: 1.4em;
+  padding-left: calc(1.4em + 24px);
 }
 
 .cpb-line-indent {
