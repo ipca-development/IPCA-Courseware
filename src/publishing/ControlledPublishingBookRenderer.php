@@ -1789,7 +1789,8 @@ final class ControlledPublishingBookRenderer
                 ) . ' data-col-index="' . $colIndex . '">';
                 $html .= '<span class="cpb-th-text">' . $this->renderTableCellInner((string)$header, $edit, $rows) . '</span>';
                 if ($edit) {
-                    $html .= '<span class="cpb-col-resize" data-col-index="' . $colIndex . '" title="Resize column"></span>';
+                    $resizeColIndex = $colIndex + $colspan - 1;
+                    $html .= '<span class="cpb-col-resize" data-col-index="' . $resizeColIndex . '" title="Resize column"></span>';
                 }
                 $html .= '</th>';
                 $colIndex += $colspan;

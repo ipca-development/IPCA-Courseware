@@ -1491,7 +1491,7 @@ ol.cpb-list > li[data-indent-level="8"] {
 
 .cpb-table-wrap > .cpb-table,
 .cpb-table-wrap .cpb-table {
-  width: 100% !important;
+  width: auto;
   max-width: 100%;
   min-width: 0;
   border-collapse: separate;
@@ -1504,10 +1504,6 @@ ol.cpb-list > li[data-indent-level="8"] {
 
 .cpb-table-wrap col {
   min-width: 0;
-}
-
-.cpb-table-wrap > .cpb-table[data-field="table"] col[style*="px"] {
-  width: auto !important;
 }
 
 .cpb-table th,
@@ -1568,6 +1564,10 @@ ol.cpb-list > li[data-indent-level="8"] {
 .cpb-table thead tr.cpb-table-header-row th {
   position: relative;
   background: #f1f5f9;
+}
+
+.cpb-table tbody tr:first-child td:has(> .cpb-col-resize) {
+  position: relative;
 }
 
 .cpb-table thead tr.cpb-table-title-row td {

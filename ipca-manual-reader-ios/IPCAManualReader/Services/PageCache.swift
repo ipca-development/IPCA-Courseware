@@ -154,7 +154,12 @@ final class ManualDownloadManager: ObservableObject {
         do {
             let versionID = book.versionId > 0 ? book.versionId : nil
             let isPreview = book.isDraftPreview
-            async let packageTask = client.downloadManualPackage(
+            async let pageMapTask = client.fetchPageMap(
+                bookKey: book.bookKey,
+                versionId: versionID,
+                isPreview: isPreview
+            )
+            async let tocTask = client.fetchToc(
                 bookKey: book.bookKey,
                 versionId: versionID,
                 isPreview: isPreview
@@ -180,17 +185,44 @@ final class ManualDownloadManager: ObservableObject {
                 path: "assets/manual_reader.css",
                 client: client
             )
-            let response = try await packageTask
-            statuses[book.id] = .downloading(0.9)
+            let (pageMap, tableOfContents) = try await (pageMapTask, tocTask)
+            let pageNumbers = pageMap.pages
+                .map(\.pageNumber)
+                .sorted()
+            var downloadedPages: [FrozenPageResponse] = []
+            downloadedPages.reserveCapacity(pageNumbers.count)
+
+            var batchStart = 0
+            while batchStart < pageNumbers.count {
+                try Task.checkCancellation()
+                let batchEnd = min(batchStart + 8, pageNumbers.count)
+                let batchNumbers = Array(pageNumbers[batchStart..<batchEnd])
+                let batch = try await downloadBatchWithRetry(
+                    book: book,
+                    pageNumbers: batchNumbers,
+                    client: client
+                )
+                downloadedPages.append(contentsOf: batch.pages)
+                batchStart = batchEnd
+                statuses[book.id] = .downloading(
+                    Double(batchStart) / Double(max(pageNumbers.count, 1))
+                )
+            }
+            guard downloadedPages.count == pageNumbers.count else {
+                throw ManualReaderAPIError.badResponse(
+                    "The server returned an incomplete manual download."
+                )
+            }
+
             let (editorCSS, readerCSS) = await (editorCSSTask, readerCSSTask)
 
             let package = OfflineManualPackage(
                 bookID: book.id,
                 versionID: book.versionId,
                 downloadedAt: Date(),
-                pageMap: response.pageMap,
-                tableOfContents: response.tableOfContents,
-                pages: response.pages,
+                pageMap: pageMap,
+                tableOfContents: tableOfContents,
+                pages: downloadedPages,
                 coverImageData: coverData,
                 editorCSS: editorCSS,
                 readerCSS: readerCSS
@@ -228,6 +260,29 @@ final class ManualDownloadManager: ObservableObject {
         }
         guard let currentPage else { return nil }
         return min(1, max(0, Double(currentPage) / Double(package.pageMap.pages.count)))
+    }
+
+    private func downloadBatchWithRetry(
+        book: LibraryBook,
+        pageNumbers: [Int],
+        client: ManualReaderAPIClient
+    ) async throws -> ManualPageBatchResponse {
+        for attempt in 0..<3 {
+            do {
+                return try await client.downloadManualPages(
+                    bookKey: book.bookKey,
+                    pageNumbers: pageNumbers,
+                    versionId: book.versionId > 0 ? book.versionId : nil,
+                    isPreview: book.isDraftPreview
+                )
+            } catch {
+                if attempt == 2 {
+                    throw error
+                }
+                try await Task.sleep(for: .milliseconds(600 * (attempt + 1)))
+            }
+        }
+        throw CancellationError()
     }
 
     private func downloadTextAsset(

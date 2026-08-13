@@ -153,32 +153,38 @@ try {
             }
             mr_json(200, $reader->loadFrozenPageMap($bookKey));
 
-        case 'download_package':
+        case 'download_pages':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
-            $version = $ctx['version'];
-            if (!method_exists($reader, 'loadReaderPageMap')
-                || !method_exists($reader, 'loadReaderPage')
-                || !method_exists($reader, 'loadReaderTocWithPages')) {
+            if (!method_exists($reader, 'loadReaderPage')) {
                 throw new RuntimeException('Offline manual downloads require an updated reader service.');
             }
-            $pageMap = $reader->loadReaderPageMap($version, $ctx['can_preview']);
-            $toc = $reader->loadReaderTocWithPages($version, $ctx['can_preview']);
-            $pages = array();
-            foreach ((array)($pageMap['pages'] ?? array()) as $pageMeta) {
-                $pageNumber = (int)($pageMeta['page_number'] ?? 0);
-                if ($pageNumber <= 0) {
-                    continue;
+            $rawPageNumbers = explode(',', (string)($_GET['page_numbers'] ?? ''));
+            $pageNumbers = array();
+            foreach ($rawPageNumbers as $rawPageNumber) {
+                $pageNumber = (int)trim($rawPageNumber);
+                if ($pageNumber > 0 && !in_array($pageNumber, $pageNumbers, true)) {
+                    $pageNumbers[] = $pageNumber;
                 }
-                $pages[] = $reader->loadReaderPage($version, $pageNumber, $ctx['can_preview']);
+            }
+            if ($pageNumbers === array()) {
+                throw new RuntimeException('page_numbers required.');
+            }
+            if (count($pageNumbers) > 12) {
+                throw new RuntimeException('A maximum of 12 pages may be downloaded per request.');
+            }
+            $pages = array();
+            foreach ($pageNumbers as $pageNumber) {
+                $pages[] = $reader->loadReaderPage(
+                    $ctx['version'],
+                    $pageNumber,
+                    $ctx['can_preview']
+                );
             }
             mr_json(200, array(
                 'ok' => true,
                 'book_key' => $bookKey,
-                'version_id' => (int)$version['id'],
-                'is_preview' => $ctx['is_preview'],
-                'page_map' => $pageMap,
-                'table_of_contents' => $toc,
+                'version_id' => (int)$ctx['version']['id'],
                 'pages' => $pages,
             ));
 

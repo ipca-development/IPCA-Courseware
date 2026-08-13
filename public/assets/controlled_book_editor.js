@@ -932,6 +932,7 @@
       else if (action === 'table-align-left' || action === 'table-align-center' || action === 'table-align-right') {
         applyTableBlockAlign(blockEl, action.replace('table-align-', ''));
       }
+      wireTableResize(blockEl);
       scheduleSave(blockEl);
       flushSave(blockEl);
     });
@@ -1007,13 +1008,25 @@
       if (!table) return;
       var cols = table.querySelectorAll('colgroup col');
       var col = cols[colIndex];
+      if (!col) return;
+      var nextCol = cols[colIndex + 1] || null;
       var startX = e.clientX;
       var startW = colWidthPx(col);
+      var startNextW = nextCol ? colWidthPx(nextCol) : 0;
+      var zoomScale = Math.max(0.1, state.canvasZoom / 100);
       var hint = ensureResizeHint();
 
       function onMove(ev) {
-        var w = clampColWidth(blockEl, colIndex, startW + (ev.clientX - startX));
-        if (col) col.style.width = w + 'px';
+        var desired = startW + ((ev.clientX - startX) / zoomScale);
+        var w;
+        if (nextCol) {
+          var pairWidth = startW + startNextW;
+          w = Math.max(60, Math.min(pairWidth - 60, desired));
+          nextCol.style.width = (pairWidth - w) + 'px';
+        } else {
+          w = clampColWidth(blockEl, colIndex, desired);
+        }
+        col.style.width = w + 'px';
         syncTableWidth(blockEl);
         hint.textContent = w + 'px';
         hint.style.display = 'block';
@@ -3167,7 +3180,7 @@
   function stripEditorChromeFromHtml(html) {
     var tmp = document.createElement('div');
     tmp.innerHTML = html || '';
-    tmp.querySelectorAll('.cpb-section-number, .cpb-regulatory-ref').forEach(function (el) {
+    tmp.querySelectorAll('.cpb-section-number, .cpb-regulatory-ref, .cpb-col-resize').forEach(function (el) {
       el.remove();
     });
     return tmp.innerHTML;
@@ -4571,6 +4584,27 @@
   }
 
   function wireTableResize(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return;
+    table.querySelectorAll('tbody .cpb-col-resize').forEach(function (handle) {
+      handle.remove();
+    });
+    if (!tableHeaderRow(blockEl)) {
+      var firstBodyRow = table.querySelector('tbody[data-table-part="body"] tr');
+      var colIndex = 0;
+      if (firstBodyRow) {
+        Array.prototype.slice.call(firstBodyRow.children).forEach(function (cell) {
+          var colspan = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
+          var handle = document.createElement('span');
+          handle.className = 'cpb-col-resize';
+          handle.setAttribute('data-col-index', String(colIndex + colspan - 1));
+          handle.setAttribute('title', 'Resize column');
+          handle.setAttribute('contenteditable', 'false');
+          cell.appendChild(handle);
+          colIndex += colspan;
+        });
+      }
+    }
     fitTableToPage(blockEl);
   }
 

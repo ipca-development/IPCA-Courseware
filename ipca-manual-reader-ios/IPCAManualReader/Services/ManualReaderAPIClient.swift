@@ -210,20 +210,22 @@ struct ManualReaderAPIClient {
         )
     }
 
-    func downloadManualPackage(
+    func downloadManualPages(
         bookKey: String,
+        pageNumbers: [Int],
         versionId: Int? = nil,
         isPreview: Bool = false
-    ) async throws -> ManualDownloadPackageResponse {
+    ) async throws -> ManualPageBatchResponse {
         try await get(
             "student/api/manual_reader_api.php",
             query: readerQuery(
                 bookKey: bookKey,
                 versionId: versionId,
                 isPreview: isPreview,
-                action: "download_package"
+                action: "download_pages",
+                extra: [("page_numbers", pageNumbers.map(String.init).joined(separator: ","))]
             ),
-            timeoutInterval: 180
+            timeoutInterval: 90
         )
     }
 

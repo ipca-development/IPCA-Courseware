@@ -171,26 +171,10 @@ struct FrozenPageResponse: Codable {
     }
 }
 
-struct ManualDownloadPackageResponse: Codable {
+struct ManualPageBatchResponse: Codable {
     var ok: Bool
-    var bookKey: String?
-    var versionId: Int?
-    var isPreview: Bool?
-    var pageMap: PageMapResponse
-    var tableOfContents: TocResponse
     var pages: [FrozenPageResponse]
     var error: String?
-
-    enum CodingKeys: String, CodingKey {
-        case ok
-        case bookKey = "book_key"
-        case versionId = "version_id"
-        case isPreview = "is_preview"
-        case pageMap = "page_map"
-        case tableOfContents = "table_of_contents"
-        case pages
-        case error
-    }
 }
 
 struct TocResponse: Codable {
