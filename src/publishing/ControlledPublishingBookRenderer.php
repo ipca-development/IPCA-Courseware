@@ -1697,7 +1697,7 @@ final class ControlledPublishingBookRenderer
         if (!in_array($tableStyleKind, array('standard', 'text'), true)) {
             $tableStyleKind = 'standard';
         }
-        $colCount = count($headers);
+        $colCount = count($colWidths);
         $edit = $mode === self::MODE_EDIT;
         $tableStyleDef = $this->resolveStandardTableStyle();
         $headerRowStyle = is_array($tableStyleDef['header_row'] ?? null) ? $tableStyleDef['header_row'] : array();

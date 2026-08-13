@@ -1031,6 +1031,7 @@
       if (!cell || !cell.isContentEditable) return;
       var blockEl = cell.closest('.cpb-block--table');
       if (!blockEl) return;
+      if (shouldUseNativeTableCellClipboard(cell)) return;
       var text = buildCopyText(blockEl, cell);
       if (!text) return;
       e.preventDefault();
@@ -1138,6 +1139,7 @@
       if (!cell || !cell.isContentEditable || !state.editable) return;
       var blockEl = cell.closest('.cpb-block--table');
       if (!blockEl) return;
+      if (shouldUseNativeTableCellClipboard(cell)) return;
       var text = (e.clipboardData && e.clipboardData.getData('text/plain')) || state.tableClipboard;
       if (!text || (text.indexOf('\t') < 0 && text.indexOf('\n') < 0)) return;
       e.preventDefault();
@@ -1230,6 +1232,7 @@
     });
 
     canvasEl.querySelectorAll('.cpb-block--table').forEach(function (blockEl) {
+      normalizeTableTitleRow(blockEl);
       wireTableResize(blockEl);
       wireTableCellFocus(blockEl);
       syncTableStyleControls(blockEl);
@@ -3988,6 +3991,7 @@
   }
 
   function extractTablePayload(blockEl) {
+    normalizeTableTitleRow(blockEl);
     var table = blockEl.querySelector('table');
     var wrap = tableWrap(blockEl);
     var titleCell = blockEl.querySelector('tr[data-title-row] td');
@@ -4120,7 +4124,78 @@
       }, 0);
     }
     var bodyRow = table.querySelector('tbody[data-table-part="body"] tr');
-    return bodyRow && bodyRow.cells.length ? bodyRow.cells.length : 2;
+    if (bodyRow && bodyRow.cells.length) {
+      return Array.prototype.reduce.call(bodyRow.cells, function (total, cell) {
+        return total + (parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
+      }, 0);
+    }
+    return 2;
+  }
+
+  function normalizeTableTitleRow(blockEl) {
+    var table = blockEl ? blockEl.querySelector('table') : null;
+    var thead = table ? table.querySelector('thead') : null;
+    if (!table || !thead) return null;
+    var titleRows = Array.prototype.slice.call(
+      thead.querySelectorAll('tr[data-title-row], tr.cpb-table-title-row')
+    );
+    if (!titleRows.length) return null;
+
+    var titleRow = titleRows.shift();
+    titleRows.forEach(function (duplicateRow) {
+      Array.prototype.slice.call(duplicateRow.cells).forEach(function (cell) {
+        if (!cell.textContent.trim()) return;
+        var target = titleRow.cells[0];
+        if (!target) {
+          target = document.createElement('td');
+          titleRow.appendChild(target);
+        }
+        setCellHtml(target, mergeCellHtml(extractCellHtml(target), extractCellHtml(cell)));
+      });
+      duplicateRow.remove();
+    });
+
+    var cells = Array.prototype.slice.call(titleRow.cells);
+    var titleCell = cells.shift();
+    if (!titleCell) {
+      titleCell = document.createElement('td');
+      titleRow.appendChild(titleCell);
+    } else if (titleCell.tagName !== 'TD') {
+      var replacement = document.createElement('td');
+      Array.prototype.slice.call(titleCell.attributes).forEach(function (attribute) {
+        replacement.setAttribute(attribute.name, attribute.value);
+      });
+      replacement.innerHTML = titleCell.innerHTML;
+      titleCell.replaceWith(replacement);
+      titleCell = replacement;
+    }
+    cells.forEach(function (extraCell) {
+      if (extraCell.textContent.trim()) {
+        setCellHtml(titleCell, mergeCellHtml(extractCellHtml(titleCell), extractCellHtml(extraCell)));
+      }
+      extraCell.remove();
+    });
+
+    titleRow.setAttribute('data-title-row', '1');
+    titleRow.classList.add('cpb-table-title-row');
+    titleRow.classList.toggle('is-empty', titleCell.textContent.trim() === '');
+    titleCell.colSpan = tableColCount(blockEl);
+    return titleCell;
+  }
+
+  function removeLogicalColumnFromRow(row, logicalIndex) {
+    if (!row || logicalIndex < 0) return;
+    var logicalStart = 0;
+    for (var index = 0; index < row.cells.length; index++) {
+      var cell = row.cells[index];
+      var span = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
+      if (logicalIndex < logicalStart + span) {
+        if (span > 1) cell.colSpan = span - 1;
+        else cell.remove();
+        return;
+      }
+      logicalStart += span;
+    }
   }
 
   function getTableCellCoords(blockEl, cell) {
@@ -4459,8 +4534,7 @@
     var tbody = tableBody(blockEl);
     if (!tbody) return;
     var tr = document.createElement('tr');
-    var head = tableHeaderRow(blockEl);
-    var colCount = head ? head.cells.length : tableColCount(blockEl);
+    var colCount = tableColCount(blockEl);
     for (var i = 0; i < colCount; i++) {
       tr.appendChild(createTableBodyCell());
     }
@@ -4589,11 +4663,6 @@
       colgroup.appendChild(col);
     }
 
-    var titleCell = blockEl.querySelector('tr[data-title-row] td');
-    if (titleCell) {
-      titleCell.colSpan = cols + 1;
-    }
-
     var headRow = tableHeaderRow(blockEl);
     if (headRow) {
       var th = document.createElement('th');
@@ -4611,6 +4680,7 @@
       tr.appendChild(td);
     });
 
+    normalizeTableTitleRow(blockEl);
     wireTableResize(blockEl);
     wireTableCellFocus(blockEl);
   }
@@ -4627,19 +4697,13 @@
       colgroup.children[colIndex].remove();
     }
 
-    var headRow = tableHeaderRow(blockEl);
-    if (headRow && headRow.cells[colIndex]) {
-      headRow.cells[colIndex].remove();
-    }
+    removeLogicalColumnFromRow(tableHeaderRow(blockEl), colIndex);
 
     table.querySelectorAll('tbody[data-table-part="body"] tr').forEach(function (tr) {
-      if (tr.cells[colIndex]) tr.cells[colIndex].remove();
+      removeLogicalColumnFromRow(tr, colIndex);
     });
 
-    var titleCell = blockEl.querySelector('tr[data-title-row] td');
-    if (titleCell) {
-      titleCell.colSpan = cols - 1;
-    }
+    normalizeTableTitleRow(blockEl);
   }
 
   function tableToggleTitle(blockEl) {
@@ -4684,6 +4748,7 @@
     td.style.setProperty('font-family', FONT_STACKS.serif, 'important');
     tr.appendChild(td);
     thead.insertBefore(tr, tableHeaderRow(blockEl));
+    normalizeTableTitleRow(blockEl);
     if (toggleBtn) toggleBtn.textContent = 'Remove title row';
     wireTableCellFocus(blockEl);
     clearTableCellSelection();
@@ -5063,6 +5128,37 @@
   function hasTextSelectionInCanvas() {
     var sel = window.getSelection();
     return !!(sel && sel.rangeCount > 0 && !sel.isCollapsed && selectionInCanvas());
+  }
+
+  function shouldUseNativeTableCellClipboard(cell) {
+    if (!cell) return false;
+    var selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      var range = selection.getRangeAt(0);
+      if (!selection.isCollapsed && (cell.contains(selection.anchorNode)
+        || cell.contains(selection.focusNode)
+        || cell.contains(range.commonAncestorContainer))) {
+        return true;
+      }
+    }
+
+    var blockEl = cell.closest('.cpb-block--table');
+    var selectedCells = state.selectedTableCells.filter(function (selectedCell) {
+      return blockEl && blockEl.contains(selectedCell);
+    });
+    if (selectedCells.length > 1) return false;
+
+    if (selection && selection.rangeCount > 0) {
+      var caretRange = selection.getRangeAt(0);
+      if (cell.contains(selection.anchorNode)
+        || cell.contains(selection.focusNode)
+        || cell.contains(caretRange.commonAncestorContainer)) {
+        return true;
+      }
+    }
+
+    var active = document.activeElement;
+    return active === cell || !!(active && cell.contains(active));
   }
 
   function selectionCoversElementText(el) {
