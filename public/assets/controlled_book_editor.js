@@ -809,7 +809,7 @@
         if (tableBlock) {
           state.lastStyleTarget = { block: tableBlock, el: tableCell, type: 'table-cell' };
         }
-      } else if (!e.target.closest('.cpb-table')) {
+      } else if (!e.target.closest('.cpb-table, .cpb-table-tools')) {
         clearTableCellSelection();
       }
       requestAnimationFrame(function () {
@@ -4077,21 +4077,43 @@
     }
     tbody.appendChild(tr);
     wireTableCellFocus(blockEl);
+    var firstCell = tr.querySelector('td, th');
+    if (firstCell) {
+      clearTableCellSelection();
+      addTableCellToSelection(firstCell);
+      state.focusedTableCell = firstCell;
+      state.lastStyleTarget = { block: blockEl, el: firstCell, type: 'table-cell' };
+      firstCell.focus();
+    }
     setStatus('Row added', 'saved');
+  }
+
+  function resolveSelectedBodyCell(blockEl, tbody) {
+    var candidates = [];
+    if (state.focusedTableCell) candidates.push(state.focusedTableCell);
+    if (state.lastStyleTarget && state.lastStyleTarget.type === 'table-cell') {
+      candidates.push(state.lastStyleTarget.el);
+    }
+    state.selectedTableCells.slice().reverse().forEach(function (cell) {
+      candidates.push(cell);
+    });
+    for (var i = 0; i < candidates.length; i++) {
+      var cell = candidates[i];
+      if (cell && blockEl.contains(cell) && tbody.contains(cell)) return cell;
+    }
+    return null;
   }
 
   function tableDelRow(blockEl) {
     var tbody = tableBody(blockEl);
     if (!tbody) return false;
-    var rows = tbody.querySelectorAll('tr');
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
     if (rows.length <= 1) {
       setStatus('Table must keep at least one row', 'error');
       return false;
     }
-    var target = null;
-    if (state.focusedTableCell && tbody.contains(state.focusedTableCell)) {
-      target = state.focusedTableCell.closest('tr');
-    }
+    var selectedCell = resolveSelectedBodyCell(blockEl, tbody);
+    var target = selectedCell ? selectedCell.closest('tr') : null;
     if (!target) {
       setStatus('Click a row cell first', 'error');
       return false;
@@ -4100,8 +4122,19 @@
     if (rowText && !confirm('Delete this entire table row?')) {
       return false;
     }
+    var rowIndex = rows.indexOf(target);
+    var nextRow = rows[rowIndex + 1] || rows[rowIndex - 1] || null;
+    var nextCell = nextRow ? nextRow.querySelector('td, th') : null;
     target.remove();
-    state.focusedTableCell = null;
+    clearTableCellSelection();
+    if (nextCell) {
+      addTableCellToSelection(nextCell);
+      state.focusedTableCell = nextCell;
+      state.lastStyleTarget = { block: blockEl, el: nextCell, type: 'table-cell' };
+      nextCell.focus();
+    } else {
+      state.focusedTableCell = null;
+    }
     setStatus('Row deleted', 'saved');
     return true;
   }
