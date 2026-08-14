@@ -12,6 +12,10 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ipca-authoritative-pagi
 const inputPath = path.join(directory, "input.json");
 const outputPath = path.join(directory, "output.json");
 const paragraph = "Controlled source content must remain in source order. ".repeat(18);
+const tocRows = Array.from({ length: 72 }, (_, index) =>
+  `<div class="cpb-toc-row" data-stable-anchor="toc-${index + 1}">`
+    + `<span>Section ${index + 1} — Controlled Operations</span><span>${index + 3}</span></div>`
+).join("");
 
 const source = {
   layout_profile: "IPCA_READER_CANONICAL_816x1056_v1",
@@ -31,7 +35,25 @@ const source = {
   header_template_html: '<header class="cpb-page-header"><strong>Fixture Manual</strong></header>',
   footer_template_html: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
   sections: [{
+    id: 2,
+    section_id: 2,
+    stable_anchor: "table-of-contents",
+    title: "Table of Contents",
+    section_key: "toc",
+    manual_part: 0,
+    part_title: "Front Matter",
+    flags: { force_page_break_before: true },
+    units: [{
+      unit_key: "toc-2-0",
+      block_id: 0,
+      stable_anchor: "table-of-contents",
+      block_type: "toc",
+      force_break_before: true,
+      html: `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`
+    }]
+  }, {
     id: 1,
+    section_id: 1,
     stable_anchor: "section-one",
     title: "Section One",
     section_key: "section-one",
@@ -83,6 +105,10 @@ const bookStyleCSS = `
   article, h2, p { margin: 0; }
   h2 { font-size: 24px; line-height: 1.2; margin-bottom: 12px; }
   p { margin-bottom: 14px; }
+  .cpb-toc-row {
+    display: flex; justify-content: space-between; gap: 16px;
+    min-height: 32px; padding: 6px 0; border-bottom: 1px solid #ddd;
+  }
 `;
 
 fs.writeFileSync(inputPath, JSON.stringify({ source, book_style_css: bookStyleCSS }));
@@ -97,6 +123,10 @@ try {
   const result = JSON.parse(fs.readFileSync(outputPath, "utf8"));
   assert.strictEqual(result.validation.is_valid, true, "final validation must pass");
   assert.ok(result.pages.length >= 2, "manual page break must create a later page");
+  assert.ok(
+    result.pages.filter((page) => page.section_id === 2).length >= 3,
+    "generated TOC rows must automatically paginate across physical pages"
+  );
   assert.deepStrictEqual(
     result.pages.map((page) => page.page_number),
     result.pages.map((_, index) => index + 1),

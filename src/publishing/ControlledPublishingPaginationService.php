@@ -484,92 +484,24 @@ final class ControlledPublishingPaginationService
      */
     private function unitsFromTocBody(string $bodyHtml, int $sectionId, array $flags): array
     {
-        $preamble = '';
-        $navInner = $bodyHtml;
-        if (preg_match('/^(.*?)<nav class="cpb-toc"[^>]*>(.*)<\/nav>/s', $bodyHtml, $parts) === 1) {
-            $preamble = trim($parts[1]);
-            $navInner = $parts[2];
-        }
-
-        if (preg_match_all('/<div class="cpb-toc-row[^"]*"[^>]*>.*?<\/div>/s', $navInner, $rows) < 1) {
-            if ($preamble !== '') {
-                return array(array(
-                    'unit_key' => 'toc' . $sectionId . '_0',
-                    'block_id' => 0,
-                    'block_type' => 'toc',
-                    'html' => $preamble,
-                    'splittable' => false,
-                    'atomic' => true,
-                    'force_break_before' => !empty($flags['force_page_break_before']),
-                    'is_heading' => false,
-                ));
-            }
-
+        if (trim($bodyHtml) === '') {
             return array();
         }
 
-        $navPrefix = '<nav class="cpb-toc" aria-label="Table of contents">';
-        if (preg_match('/<nav class="cpb-toc"[^>]*>/', $bodyHtml, $navOpen) === 1) {
-            $navPrefix = $navOpen[0];
-        }
-
-        $profile = ControlledPublishingReaderLayoutProfile::spec();
-        $bodyCapacity = (int)$profile['body_capacity_px'];
-        $units = array();
-        $idx = 0;
-        $batch = array();
-        $isFirstBatch = true;
-
-        $wrapNav = static function (array $rowBatch) use ($navPrefix): string {
-            return $navPrefix . implode('', $rowBatch) . '</nav>';
-        };
-
-        $flush = function () use (
-            &$units,
-            &$idx,
-            &$batch,
-            &$isFirstBatch,
-            $sectionId,
-            $flags,
-            $wrapNav,
-            $preamble
-        ): void {
-            if ($batch === array()) {
-                return;
-            }
-            $html = $wrapNav($batch);
-            if ($isFirstBatch && $preamble !== '') {
-                $html = $preamble . $html;
-                $isFirstBatch = false;
-            }
-            $units[] = array(
-                'unit_key' => 'toc' . $sectionId . '_' . $idx,
-                'block_id' => 0,
-                'block_type' => 'toc',
-                'html' => $html,
-                'splittable' => false,
-                'atomic' => true,
-                'force_break_before' => $idx === 0 && !empty($flags['force_page_break_before']),
-                'is_heading' => false,
-            );
-            $idx++;
-            $batch = array();
-        };
-
-        foreach ($rows[0] as $row) {
-            $trial = $wrapNav(array_merge($batch, array($row)));
-            $trialHeight = $this->estimateHtmlHeight($trial);
-            if ($isFirstBatch && $preamble !== '') {
-                $trialHeight += $this->estimateHtmlHeight($preamble);
-            }
-            if ($batch !== array() && $trialHeight > $bodyCapacity) {
-                $flush();
-            }
-            $batch[] = $row;
-        }
-        $flush();
-
-        return $units;
+        // Preserve the complete generated TOC DOM. ReaderPaginationCore performs
+        // exact browser measurement and splits it at real .cpb-toc-row
+        // boundaries; pre-batching with regex/height estimates can create
+        // malformed rows and overflow the fixed body frame.
+        return array(array(
+            'unit_key' => 'toc' . $sectionId . '_0',
+            'block_id' => 0,
+            'block_type' => 'toc',
+            'html' => $bodyHtml,
+            'splittable' => false,
+            'atomic' => false,
+            'force_break_before' => !empty($flags['force_page_break_before']),
+            'is_heading' => false,
+        ));
     }
 
     /**

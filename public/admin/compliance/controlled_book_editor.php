@@ -215,6 +215,7 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" id="cpbViewPaginated" title="Edit authoritative physical pages">Pages</button>
         </div>
         <div class="cpb-toolbar-group cpb-toolbar-group--pagination" id="cpbPaginationTools" hidden>
+          <button type="button" class="cpb-tool-btn" id="cpbInsertPageBreak" title="Insert a hard page break at the cursor">Page Break</button>
           <button type="button" class="cpb-tool-btn" id="cpbPaginationRegenerate">Regenerate</button>
           <button type="button" class="cpb-tool-btn" id="cpbPaginationApprove">Approve</button>
         </div>

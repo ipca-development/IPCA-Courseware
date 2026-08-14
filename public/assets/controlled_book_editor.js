@@ -51,6 +51,7 @@
   var paginationToolsEl = document.getElementById('cpbPaginationTools');
   var paginationRegenerateBtn = document.getElementById('cpbPaginationRegenerate');
   var paginationApproveBtn = document.getElementById('cpbPaginationApprove');
+  var pageBreakBtn = document.getElementById('cpbInsertPageBreak');
   var paginationStatusEl = document.getElementById('cpbPaginationStatus');
   var publicationCssEl = document.getElementById('cpbPublicationCss');
 
@@ -166,6 +167,9 @@
     manualBreaks: [],
     paginationCandidates: [],
     paginationStale: false,
+    paginationRegenerateTimer: null,
+    pendingPaginatedAnchor: '',
+    lastPaginatedRange: null,
   };
 
   var INDENT_MAX_LEVEL = 8;
@@ -435,17 +439,110 @@
     ) >= 0;
   }
 
+  function pieceIsSplitParagraph(piece, blockEl) {
+    if (!state.editable || !piece || !blockEl) return false;
+    if ((blockEl.getAttribute('data-block-type') || '') !== 'paragraph') return false;
+    var sourceLength = parseInt(piece.getAttribute('data-source-length') || '0', 10);
+    var rangeStart = parseInt(piece.getAttribute('data-source-range-start') || '0', 10);
+    var rangeEnd = parseInt(piece.getAttribute('data-source-range-end') || '0', 10);
+    return sourceLength > 0 && (rangeStart > 0 || rangeEnd < sourceLength);
+  }
+
+  function textBoundary(rootEl, offset) {
+    var walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT);
+    var remaining = Math.max(0, offset);
+    var node = walker.nextNode();
+    var last = rootEl;
+    while (node) {
+      var length = node.nodeValue.length;
+      if (remaining <= length) return { node: node, offset: remaining };
+      remaining -= length;
+      last = node;
+      node = walker.nextNode();
+    }
+    return {
+      node: last,
+      offset: last.nodeType === Node.TEXT_NODE ? last.nodeValue.length : last.childNodes.length,
+    };
+  }
+
+  function replaceTextRangeHtml(rootEl, start, end, replacementHtml) {
+    var startBoundary = textBoundary(rootEl, start);
+    var endBoundary = textBoundary(rootEl, end);
+    var range = document.createRange();
+    range.setStart(startBoundary.node, startBoundary.offset);
+    range.setEnd(endBoundary.node, endBoundary.offset);
+    range.deleteContents();
+    var template = document.createElement('template');
+    template.innerHTML = replacementHtml;
+    range.insertNode(template.content);
+  }
+
+  function flushPaginatedParagraphFragment(blockEl, piece, field) {
+    if (field.getAttribute('data-fragment-dirty') !== '1') return Promise.resolve();
+    field.removeAttribute('data-fragment-dirty');
+    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+    var page = piece.closest('.cpb-paginated-page');
+    var sectionId = parseInt(page ? (page.getAttribute('data-section-id') || '0') : '0', 10);
+    var rangeStart = parseInt(piece.getAttribute('data-source-range-start') || '0', 10);
+    var rangeEnd = parseInt(piece.getAttribute('data-source-range-end') || '0', 10);
+    if (!blockId || !sectionId || rangeEnd <= rangeStart) {
+      return Promise.reject(new Error('The paragraph fragment cannot be mapped to its source block.'));
+    }
+    setStatus('Saving paragraph…', 'saving');
+    return apiGet(
+      apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
+    ).then(function (response) {
+      if (!response.ok) throw new Error(response.error || 'Source paragraph load failed');
+      var holder = document.createElement('div');
+      holder.innerHTML = response.page_html || '';
+      var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
+      var sourceField = sourceBlock ? sourceBlock.querySelector('.cpb-paragraph') : null;
+      if (!sourceBlock || !sourceField) throw new Error('The complete source paragraph was not found.');
+      replaceTextRangeHtml(sourceField, rangeStart, rangeEnd, field.innerHTML);
+      return apiPost('update_block', {
+        version_id: state.versionId,
+        block_id: blockId,
+        payload: extractPayload(sourceBlock, 'paragraph'),
+      });
+    }).then(function (response) {
+      if (!response.ok) throw new Error(response.error || 'Paragraph save failed');
+      state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
+      setStatus('Saved', 'saved');
+      markPaginationChanged();
+    }).catch(function (error) {
+      field.setAttribute('data-fragment-dirty', '1');
+      showError(error);
+    });
+  }
+
   function markPaginationChanged() {
     if (state.viewMode !== 'paginated') return;
     state.paginationStale = true;
     setPaginationStatus('Saved · pages need regeneration', true);
+    clearTimeout(state.paginationRegenerateTimer);
+    state.paginationRegenerateTimer = setTimeout(function () {
+      var active = document.activeElement;
+      if (active && canvasEl.contains(active) && active.isContentEditable) {
+        markPaginationChanged();
+        return;
+      }
+      setPaginationStatus('Reflowing section pages…', false);
+      regeneratePagination();
+    }, 1800);
   }
 
   function wirePaginatedFields() {
     canvasEl.querySelectorAll('.reader-semantic-piece').forEach(function (piece) {
       var blockEl = piece.matches('.cpb-block') ? piece : piece.querySelector('.cpb-block');
       if (!blockEl || piece.getAttribute('data-presentation-copy') === '1') return;
-      var editable = pieceIsWholeEditable(piece, blockEl);
+      if (blockEl.getAttribute('data-system-managed') === '1'
+        || (blockEl.getAttribute('data-block-type') || '') === 'toc') {
+        piece.classList.add('cpb-paginated-piece--automatic');
+        return;
+      }
+      var splitParagraph = pieceIsSplitParagraph(piece, blockEl);
+      var editable = pieceIsWholeEditable(piece, blockEl) || splitParagraph;
       piece.classList.toggle('cpb-paginated-piece--editable', editable);
       piece.classList.toggle('cpb-paginated-piece--source-editor', !editable);
       if (editable) {
@@ -454,10 +551,20 @@
           if (field.getAttribute('data-paginated-input-wired') === '1') return;
           field.setAttribute('data-paginated-input-wired', '1');
           field.addEventListener('input', function () {
-            scheduleSave(blockEl);
+            state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
+            if (splitParagraph) {
+              field.setAttribute('data-fragment-dirty', '1');
+              setStatus('Editing…', 'saving');
+            } else {
+              scheduleSave(blockEl);
+            }
           });
           field.addEventListener('blur', function () {
-            flushSave(blockEl);
+            if (splitParagraph) {
+              flushPaginatedParagraphFragment(blockEl, piece, field);
+            } else {
+              flushSave(blockEl);
+            }
           });
         });
       } else if (state.editable && blockEl.getAttribute('data-block-id')) {
@@ -554,8 +661,16 @@
     var panel = document.createElement('div');
     panel.className = 'cpb-pagination-panel';
     var title = document.createElement('strong');
-    title.textContent = 'Manual page breaks';
+    title.textContent = selectedSectionUsesAutomaticPages()
+      ? 'Automatic generated pages'
+      : 'Manual page breaks';
     panel.appendChild(title);
+    if (selectedSectionUsesAutomaticPages()) {
+      panel.appendChild(document.createTextNode(
+        ' · page flow is generated from the controlled outline and content length'
+      ));
+      return panel;
+    }
     if (!state.editable) {
       panel.appendChild(document.createTextNode(' · released revision'));
       return panel;
@@ -567,6 +682,7 @@
     var select = document.createElement('select');
     select.className = 'cpb-pagination-break-select';
     state.paginationCandidates.forEach(function (row) {
+      if (parseInt(row.section_id || '0', 10) !== state.sectionId) return;
       if (existing[row.stable_anchor]) return;
       var option = document.createElement('option');
       option.value = row.stable_anchor;
@@ -587,12 +703,14 @@
     panel.appendChild(select);
     panel.appendChild(insert);
     state.manualBreaks.forEach(function (row) {
+      if (parseInt(row.section_id || '0', 10) !== state.sectionId) return;
       var item = document.createElement('span');
       item.className = 'cpb-pagination-break-item';
       item.textContent = 'Before ' + (row.section_title || row.before_block_anchor);
       var moveSelect = document.createElement('select');
       moveSelect.setAttribute('aria-label', 'Move page break');
       state.paginationCandidates.forEach(function (candidate) {
+        if (parseInt(candidate.section_id || '0', 10) !== state.sectionId) return;
         if (existing[candidate.stable_anchor] && candidate.stable_anchor !== row.before_block_anchor) {
           return;
         }
@@ -631,17 +749,48 @@
     return panel;
   }
 
+  function selectedSectionUsesAutomaticPages() {
+    var selected = null;
+    function visit(nodes) {
+      (nodes || []).some(function (node) {
+        if (parseInt(node.id || '0', 10) === state.sectionId) {
+          selected = node;
+          return true;
+        }
+        return visit(node.children || []);
+      });
+      return !!selected;
+    }
+    visit(state.sectionsTree);
+    if (!selected) return false;
+    var key = String(selected.section_key || selected.key || '').toLowerCase();
+    return !!selected.is_generated
+      || ['cover', 'toc', 'lep', 'revision_system', 'amendment_list',
+        'distribution_list', 'abbreviations', 'definitions'].indexOf(key) >= 0;
+  }
+
   function renderPaginatedView(result) {
     state.paginatedResult = result;
     state.paginationStale = !(result.freshness && result.freshness.is_current);
     if (publicationCssEl) publicationCssEl.textContent = result.book_style_css || '';
+    if (pageBreakBtn) {
+      pageBreakBtn.disabled = !state.editable || selectedSectionUsesAutomaticPages();
+      pageBreakBtn.title = selectedSectionUsesAutomaticPages()
+        ? 'This generated section uses automatic page breaks'
+        : 'Insert a hard page break at the cursor';
+    }
     canvasEl.innerHTML = '';
     canvasEl.appendChild(paginationBreakControl());
-    var pages = Array.isArray(result.pages) ? result.pages : [];
+    var allPages = Array.isArray(result.pages) ? result.pages : [];
+    var pages = allPages.filter(function (page) {
+      return parseInt(page.section_id || '0', 10) === state.sectionId;
+    });
     if (!pages.length) {
       var empty = document.createElement('div');
       empty.className = 'cpb-pagination-empty';
-      empty.textContent = 'No authoritative pages have been generated. Click Regenerate.';
+      empty.textContent = allPages.length
+        ? 'This section has no generated pages yet. Click Regenerate.'
+        : 'No authoritative pages have been generated. Click Regenerate.';
       canvasEl.appendChild(empty);
     } else {
       var stack = document.createElement('div');
@@ -678,11 +827,21 @@
     markManualBreaksInPages();
     wirePaginatedFields();
     applyCanvasZoom(state.canvasZoom, false);
+    if (state.pendingPaginatedAnchor) {
+      var retained = canvasEl.querySelector(
+        '.cpb-block[data-stable-anchor="' + state.pendingPaginatedAnchor + '"]'
+      );
+      if (retained) retained.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      state.pendingPaginatedAnchor = '';
+    }
     var status = result.pagination && result.pagination.status
       ? result.pagination.status
       : 'not generated';
     setPaginationStatus(
-      pages.length + ' pages · ' + state.manualBreaks.length + ' manual breaks · '
+      pages.length + ' section pages of ' + allPages.length + ' total · '
+        + state.manualBreaks.filter(function (row) {
+          return parseInt(row.section_id || '0', 10) === state.sectionId;
+        }).length + ' manual breaks · '
         + (state.paginationStale ? 'Needs regeneration' : 'Current') + ' · ' + status,
       state.paginationStale
     );
@@ -719,6 +878,8 @@
   }
 
   function regeneratePagination() {
+    clearTimeout(state.paginationRegenerateTimer);
+    state.paginationRegenerateTimer = null;
     setPaginationStatus('Generating and validating authoritative pages…', false);
     return paginationRequest('/admin/api/controlled_book_page_map_api.php', {
       action: 'generate',
@@ -740,6 +901,161 @@
     return paginationRequest('/admin/api/controlled_book_page_break_api.php', payload)
       .then(regeneratePagination)
       .catch(showError);
+  }
+
+  function capturePaginatedSelection() {
+    if (state.viewMode !== 'paginated') return null;
+    var selection = window.getSelection();
+    if (!selection || selection.rangeCount < 1) return state.lastPaginatedRange;
+    var range = selection.getRangeAt(0);
+    var container = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    if (!container || !canvasEl.contains(container)) return state.lastPaginatedRange;
+    state.lastPaginatedRange = range.cloneRange();
+    return state.lastPaginatedRange;
+  }
+
+  function fragmentHtml(range) {
+    var holder = document.createElement('div');
+    holder.appendChild(range.cloneContents());
+    return holder.innerHTML;
+  }
+
+  function candidateAfterAnchor(anchor) {
+    var candidates = state.paginationCandidates.filter(function (row) {
+      return parseInt(row.section_id || '0', 10) === state.sectionId;
+    });
+    var index = candidates.findIndex(function (row) {
+      return row.stable_anchor === anchor;
+    });
+    return index >= 0 && index + 1 < candidates.length ? candidates[index + 1] : null;
+  }
+
+  function insertManualBreakBefore(anchor) {
+    if (!anchor) throw new Error('Select content where the new page should begin.');
+    return mutateManualBreak({
+      action: 'insert',
+      book_version_id: state.versionId,
+      before_block_anchor: anchor,
+    });
+  }
+
+  function submitParagraphPageBreak(block, leftPayload, rightPayload) {
+    setPaginationStatus('Splitting paragraph and inserting page break…', false);
+    return apiPost('split_block_page_break', {
+      version_id: state.versionId,
+      block_id: parseInt(block.getAttribute('data-block-id') || '0', 10),
+      left_payload: leftPayload,
+      right_payload: rightPayload,
+    }).then(function (response) {
+      if (!response.ok) throw new Error(response.error || 'Page break insertion failed');
+      state.pendingPaginatedAnchor = response.new_block
+        ? (response.new_block.stable_anchor || '')
+        : '';
+      return regeneratePagination();
+    });
+  }
+
+  function splitSourceParagraphAtOffset(block, piece, textOffset) {
+    var page = piece.closest('.cpb-paginated-page');
+    var sectionId = parseInt(page ? (page.getAttribute('data-section-id') || '0') : '0', 10);
+    var blockId = parseInt(block.getAttribute('data-block-id') || '0', 10);
+    return apiGet(
+      apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
+    ).then(function (response) {
+      if (!response.ok) throw new Error(response.error || 'Source paragraph load failed');
+      var holder = document.createElement('div');
+      holder.innerHTML = response.page_html || '';
+      var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
+      var sourceField = sourceBlock ? sourceBlock.querySelector('.cpb-paragraph') : null;
+      if (!sourceBlock || !sourceField) throw new Error('The complete source paragraph was not found.');
+      var boundary = textBoundary(sourceField, textOffset);
+      var before = document.createRange();
+      before.selectNodeContents(sourceField);
+      before.setEnd(boundary.node, boundary.offset);
+      var after = document.createRange();
+      after.selectNodeContents(sourceField);
+      after.setStart(boundary.node, boundary.offset);
+      var leftHtml = fragmentHtml(before);
+      var rightHtml = fragmentHtml(after);
+      if (!before.cloneContents().textContent.trim() || !after.cloneContents().textContent.trim()) {
+        throw new Error('Place the cursor between text to split this paragraph.');
+      }
+      var payload = extractPayload(sourceBlock, 'paragraph');
+      return submitParagraphPageBreak(
+        block,
+        Object.assign({}, payload, { html: leftHtml }),
+        Object.assign({}, payload, { html: rightHtml })
+      );
+    });
+  }
+
+  function insertPageBreakAtCursor() {
+    if (!state.editable || state.viewMode !== 'paginated') return;
+    var range = capturePaginatedSelection();
+    var node = range
+      ? (range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range.startContainer.parentElement)
+      : null;
+    var block = node && node.closest ? node.closest('.cpb-block') : null;
+    if (!block && state.lastStyleTarget && state.lastStyleTarget.block) {
+      block = state.lastStyleTarget.block;
+    }
+    if (!block) {
+      showError(new Error('Place the cursor in the section where the page break should be inserted.'));
+      return;
+    }
+    var stableAnchor = block.getAttribute('data-stable-anchor') || '';
+    var paragraph = block.querySelector('.cpb-paragraph[contenteditable="true"]');
+    if (!range || !paragraph || !paragraph.contains(range.startContainer)) {
+      insertManualBreakBefore(stableAnchor);
+      return;
+    }
+
+    var piece = block.closest('.reader-semantic-piece');
+    if (pieceIsSplitParagraph(piece, block)) {
+      var localPrefix = document.createRange();
+      localPrefix.selectNodeContents(paragraph);
+      localPrefix.setEnd(range.startContainer, range.startOffset);
+      var globalOffset = parseInt(piece.getAttribute('data-source-range-start') || '0', 10)
+        + localPrefix.toString().length;
+      splitSourceParagraphAtOffset(block, piece, globalOffset).catch(showError);
+      return;
+    }
+
+    var before = document.createRange();
+    before.selectNodeContents(paragraph);
+    before.setEnd(range.startContainer, range.startOffset);
+    var after = document.createRange();
+    after.selectNodeContents(paragraph);
+    after.setStart(range.startContainer, range.startOffset);
+    var leftHtml = fragmentHtml(before);
+    var rightHtml = fragmentHtml(after);
+    var leftText = before.cloneContents().textContent.trim();
+    var rightText = after.cloneContents().textContent.trim();
+
+    if (!leftText) {
+      insertManualBreakBefore(stableAnchor);
+      return;
+    }
+    if (!rightText) {
+      var next = candidateAfterAnchor(stableAnchor);
+      if (!next) {
+        showError(new Error('There is no following block in this section to start on a new page.'));
+        return;
+      }
+      insertManualBreakBefore(next.stable_anchor);
+      return;
+    }
+
+    var payload = extractPayload(block, 'paragraph');
+    submitParagraphPageBreak(
+      block,
+      Object.assign({}, payload, { html: leftHtml }),
+      Object.assign({}, payload, { html: rightHtml })
+    ).catch(showError);
   }
 
   function loadCalloutPresets() {
@@ -959,10 +1275,12 @@
         if (state.viewMode === 'paginated') {
           state.sectionId = node.id;
           renderTree(state.sectionsTree, state.sectionId);
-          var page = canvasEl.querySelector(
-            '.cpb-paginated-page[data-section-id="' + node.id + '"]'
-          );
-          if (page) page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          if (state.paginatedResult) {
+            renderPaginatedView(state.paginatedResult);
+            canvasEl.scrollTop = 0;
+          } else {
+            loadPaginatedView();
+          }
           return;
         }
         loadSection(node.id, node.scroll_section_ref || null);
@@ -7868,6 +8186,15 @@
   if (paginationApproveBtn) {
     paginationApproveBtn.addEventListener('click', approvePagination);
   }
+  if (pageBreakBtn) {
+    pageBreakBtn.addEventListener('mousedown', function (event) {
+      capturePaginatedSelection();
+      event.preventDefault();
+    });
+    pageBreakBtn.addEventListener('click', insertPageBreakAtCursor);
+  }
+  canvasEl.addEventListener('mouseup', capturePaginatedSelection);
+  canvasEl.addEventListener('keyup', capturePaginatedSelection);
 
   wireTreeToggleAll();
   initCrossRefAnnexSelects();

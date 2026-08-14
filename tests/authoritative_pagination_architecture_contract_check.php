@@ -6,13 +6,13 @@ $failures = array();
 
 $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
-        => '456840dd3aed463fb98be206a9bf27de47d942341968bba57d3ea46a80cfb24f',
+        => '32b2edd0a696ccb8759f61841e834f1dce035ce98608eed74eaf151b8e18ed45',
     'public/assets/controlled_book_editor.js'
-        => '8b82c9a76a007b266595d54a78c4f37e17b18f2dd29822b393fb068b87b256b5',
+        => 'd9ec0c8a85425839744f5cceacf3914296b575e0532b6dc39f5ea4259ed0d833',
     'public/assets/controlled_book_editor.css'
-        => '323af0d9b94337e0ce818a3601daef4bcec10add118b76e7e91ff3c70c03f8de',
+        => '698ab89364182e4d682db4ec568e9ae54d5ba32ad200d5ed9c4c9df23fa5cacf',
     'public/admin/api/controlled_book_editor_api.php'
-        => '22e5f6c90f2a63401b15d8f70942fa3ca2954c7767aaaf4d61477bdec0bac1e9',
+        => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'src/publishing/ControlledPublishingBlockService.php'
         => 'd63175aa9e0292b9137f27a38eeb913337e6af8ab5e6086cdf4207385474f265',
 );
@@ -42,12 +42,20 @@ $contracts = array(
         'assertEditableVersion',
         'invalidatePageMap',
     ),
-    'public/admin/compliance/controlled_book_page_preview.php' => array(
-        'Page Preview',
-        'Needs regeneration',
-        'Manual Page Break',
-        'stored_preview',
-        'Approve pagination',
+    'public/assets/controlled_book_editor.js' => array(
+        'allPages.filter(function (page)',
+        'selectedSectionUsesAutomaticPages',
+        "apiPost('split_block_page_break'",
+        'insertPageBreakAtCursor',
+    ),
+    'public/admin/api/controlled_book_editor_api.php' => array(
+        "case 'split_block_page_break':",
+        'cp_editor_handle_split_block_page_break',
+        'ControlledPublishingManualPageBreakService',
+    ),
+    'src/publishing/ControlledPublishingPaginationService.php' => array(
+        'exact browser measurement',
+        'real .cpb-toc-row',
     ),
     'src/publishing/ControlledPublishingFoundationService.php' => array(
         'assertAuthoritativePageMapReadyForRelease',

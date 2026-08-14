@@ -820,14 +820,23 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: block;
 }
 
+.cpb-manual-break-before {
+  position: relative;
+}
+
 .cpb-manual-break-before::before {
   content: "Manual Page Break";
-  display: block;
-  margin: 0 0 8px;
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  right: 0;
+  top: 0;
+  transform: translateY(-55%);
   padding: 3px 7px;
   border: 1px dashed #1e73be;
   background: #e8f2ff;
   color: #1e5f9e;
+  pointer-events: none;
   font: 600 10px/1.2 system-ui, sans-serif;
 }
 

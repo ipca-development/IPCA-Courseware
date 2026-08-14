@@ -22,6 +22,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStruc
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRichTextService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAnnexService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualPageBreakService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -52,6 +53,7 @@ $part0PageSvc = new ControlledPublishingPart0PageService($pdo, $blocks);
 $manualStructureSvc = new ControlledPublishingManualStructureService($pdo, $foundation, $sections, $blocks);
 $editorNavSvc = new ControlledPublishingEditorNavService($sections, $manualStructureSvc);
 $richTextSvc = new ControlledPublishingRichTextService($pdo);
+$manualPageBreakSvc = new ControlledPublishingManualPageBreakService($pdo);
 $annexSvc = new ControlledPublishingAnnexService($pdo, $foundation, $sections, $blocks, new ControlledPublishingDocxImportService(
     $pdo,
     $foundation,
@@ -182,6 +184,9 @@ try {
             break;
         case 'update_block':
             cp_editor_handle_update_block($blocks, $renderer, $styleSvc, $foundation, $numberSvc, $annexSvc, $uid);
+            break;
+        case 'split_block_page_break':
+            cp_editor_handle_split_block_page_break($pdo, $blocks, $manualPageBreakSvc, $uid);
             break;
         case 'delete_block':
             cp_editor_handle_delete_block($blocks, $uid);
@@ -2542,6 +2547,69 @@ function cp_editor_handle_update_block(
     }
 
     cp_editor_json(200, $response);
+}
+
+function cp_editor_handle_split_block_page_break(
+    PDO $pdo,
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingManualPageBreakService $manualPageBreaks,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    $blockId = (int)($in['block_id'] ?? 0);
+    $leftPayload = is_array($in['left_payload'] ?? null) ? $in['left_payload'] : array();
+    $rightPayload = is_array($in['right_payload'] ?? null) ? $in['right_payload'] : array();
+    $block = $blocks->getBlock($blockId);
+    if ($versionId <= 0 || $blockId <= 0 || $block === null) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'A valid paragraph block is required.'));
+    }
+    if ((int)$block['book_version_id'] !== $versionId || (string)$block['block_type'] !== 'paragraph') {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Only a paragraph in this version can be split.'));
+    }
+    if (trim(strip_tags((string)($leftPayload['html'] ?? ''))) === ''
+        || trim(strip_tags((string)($rightPayload['html'] ?? ''))) === '') {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Both sides of the page break must contain text.'));
+    }
+
+    $startedTransaction = !$pdo->inTransaction();
+    if ($startedTransaction) {
+        $pdo->beginTransaction();
+    }
+    try {
+        $blocks->updateBlock($blockId, $leftPayload, $uid);
+        $newBlockId = $blocks->createBlock(
+            $versionId,
+            (int)$block['section_id'],
+            'paragraph',
+            $rightPayload,
+            $uid,
+            $blockId
+        );
+        $newBlock = $blocks->getBlock($newBlockId);
+        if ($newBlock === null || trim((string)($newBlock['stable_anchor'] ?? '')) === '') {
+            throw new RuntimeException('The second paragraph could not be created.');
+        }
+        $manualPageBreaks->insertBefore(
+            $versionId,
+            (string)$newBlock['stable_anchor'],
+            $uid
+        );
+        if ($startedTransaction) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($startedTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    cp_editor_json(200, array(
+        'ok' => true,
+        'left_block' => $blocks->getBlock($blockId),
+        'new_block' => $newBlock,
+    ));
 }
 
 /**

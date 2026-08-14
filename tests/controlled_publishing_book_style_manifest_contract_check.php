@@ -13,10 +13,10 @@ $assert = static function (bool $condition, string $message) use (&$failures): v
 };
 
 $protected = array(
-    'public/admin/compliance/controlled_book_editor.php' => '456840dd3aed463fb98be206a9bf27de47d942341968bba57d3ea46a80cfb24f',
-    'public/assets/controlled_book_editor.js' => '8b82c9a76a007b266595d54a78c4f37e17b18f2dd29822b393fb068b87b256b5',
-    'public/assets/controlled_book_editor.css' => '323af0d9b94337e0ce818a3601daef4bcec10add118b76e7e91ff3c70c03f8de',
-    'public/admin/api/controlled_book_editor_api.php' => '22e5f6c90f2a63401b15d8f70942fa3ca2954c7767aaaf4d61477bdec0bac1e9',
+    'public/admin/compliance/controlled_book_editor.php' => '32b2edd0a696ccb8759f61841e834f1dce035ce98608eed74eaf151b8e18ed45',
+    'public/assets/controlled_book_editor.js' => 'd9ec0c8a85425839744f5cceacf3914296b575e0532b6dc39f5ea4259ed0d833',
+    'public/assets/controlled_book_editor.css' => '698ab89364182e4d682db4ec568e9ae54d5ba32ad200d5ed9c4c9df23fa5cacf',
+    'public/admin/api/controlled_book_editor_api.php' => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'public/student/manual_reader.php' => '9c442cd5db0f9c87ca291708e6e5d9f835a64ca7478bd77fcce7576f14052525',
 );
 foreach ($protected as $relative => $expected) {
