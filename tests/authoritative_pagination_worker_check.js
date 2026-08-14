@@ -570,7 +570,7 @@ cases.push(["R. header/footer/page number appear on every LEP continuation page"
   assertHeaderFooter(result.pages);
 }]);
 
-cases.push(["S. following ordinary content cannot use leftover LEP continuation space", () => {
+cases.push(["S. following Part 0 content auto-paginates after LEP continuation", () => {
   const { execution, result } = runWorker(sourceWith([
     lepSection(3, 48),
     section(4, "revision_system", "0.2 Revision System", { is_part0: true }, [
@@ -583,12 +583,19 @@ cases.push(["S. following ordinary content cannot use leftover LEP continuation 
     ])
   ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
-  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
-  assert.strictEqual(result.error.before_block_anchor, "block-after-lep");
-  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  const followingPage = result.pages.find((page) =>
+    page.page_html.includes("Following ordinary Part 0 copy")
+  );
+  assert.ok(followingPage, "following Part 0 content must be emitted");
+  assert.ok(
+    !followingPage.page_html.includes("Part 48"),
+    "following Part 0 content must not absorb LEP continuation space"
+  );
+  assertHeaderFooter(result.pages);
 }]);
 
-cases.push(["T. Part 0 content outside LEP still requires Manual Page Breaks", () => {
+cases.push(["T. editable Part 0 content auto-paginates without Manual Page Breaks", () => {
   const { execution, result } = runWorker(sourceWith([
     section(4, "revision_system", "0.2 Revision System", { is_part0: true }, [
       unit(
@@ -600,21 +607,23 @@ cases.push(["T. Part 0 content outside LEP still requires Manual Page Breaks", (
       unit(
         "block-two",
         "paragraph",
-        '<article data-block-id="52" data-stable-anchor="block-two"><p class="tall-block">0.2 Revision system body still requires a Manual Page Break.</p></article>',
+        '<article data-block-id="52" data-stable-anchor="block-two"><p class="tall-block">0.2 Revision system body continues automatically.</p></article>',
         { block_id: 52 }
       )
     ])
   ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
-  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
-  assert.strictEqual(result.error.before_block_anchor, "block-two");
-  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
-  assert.ok(String(result.error.before_block_title || "").includes("0.2 Revision system"));
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.ok(result.pages.length >= 2, "overflowing editable Part 0 content must continue");
+  assert.ok(result.pages.some((page) =>
+    page.page_html.includes("0.2 Revision system body continues automatically.")
+  ));
+  assertHeaderFooter(result.pages);
 }]);
 
 cases.push(["U. MANUAL_BREAK_REQUIRED title uses a clean heading, not concatenated labels", () => {
   const { execution, result } = runWorker(sourceWith([
-    section(4, "outline", "0. OUTLINE", { is_part0: true }, [
+    section(4, "section-one", "Section One", {}, [
       unit(
         "lead-in",
         "paragraph",
@@ -718,7 +727,7 @@ cases.push(["Y. generated Part 0 items appear exactly once and in order", () => 
   }
 }]);
 
-cases.push(["Z. following author-editable content returns to manual-break authority", () => {
+cases.push(["Z. explicit author authority cannot require a break inside Part 0", () => {
   const { execution, result } = runWorker(sourceWith([
     generatedPart0Section(5, "amendment_list", "0.3 Amendment List", amendmentHtml(40)),
     section(6, "revision_system", "0.2 Revision System", {
@@ -735,9 +744,36 @@ cases.push(["Z. following author-editable content returns to manual-break author
     ], { pagination_authority: "author", allow_author_blocks: true })
   ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
-  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
-  assert.strictEqual(result.error.before_block_anchor, "author-after-generated");
-  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.ok(result.pages.some((page) =>
+    page.page_html.includes("Author-editable Part 0 copy after generated content.")
+  ));
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["ZA. oversized editable Part 0 paragraphs split automatically", () => {
+  const longText = Array.from(
+    { length: 900 },
+    (_, index) => `controlled revision statement ${index + 1}`
+  ).join(" ");
+  const { execution, result } = runWorker(sourceWith([
+    section(6, "revision_system", "0.2 Revision System", {
+      is_part0: true,
+      pagination_authority: "author",
+      allow_author_blocks: true
+    }, [
+      unit(
+        "long-part0-paragraph",
+        "paragraph",
+        `<article data-block-id="72" data-stable-anchor="long-part0-paragraph"><p>${longText}</p></article>`,
+        { block_id: 72, pagination_authority: "author" }
+      )
+    ], { pagination_authority: "author", allow_author_blocks: true })
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.ok(result.pages.length >= 2, "oversized Part 0 paragraph must split across pages");
+  assertHeaderFooter(result.pages);
 }]);
 
 cases.push(["AA. LEP row measurement uses contentFrame width, not page width", () => {

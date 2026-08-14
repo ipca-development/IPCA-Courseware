@@ -264,14 +264,21 @@ final class ControlledPublishingPaginationService
     }
 
     /**
-     * Generated/system-owned content cannot receive Manual Page Breaks.
-     * Author-editable content stays on manual_segments_v1.
+     * Part 0 and generated/system-owned content cannot receive Manual Page Breaks.
+     * Part 0 editability does not change its automatic pagination authority.
      *
      * @param array<string,mixed> $section
      * @param array<string,mixed> $hints
      */
     private function paginationAuthority(array $section, array $hints = array()): string
     {
+        $key = strtolower(trim((string)($section['section_key'] ?? '')));
+        $isPart0 = !empty($hints['is_part0'])
+            || !empty($section['is_part0'])
+            || in_array($key, self::PART0_SECTION_KEYS, true);
+        if ($isPart0) {
+            return 'generated';
+        }
         $declared = strtolower(trim((string)($hints['pagination_authority'] ?? $section['pagination_authority'] ?? '')));
         if ($declared === 'generated' || $declared === 'author') {
             return $declared;
@@ -279,7 +286,6 @@ final class ControlledPublishingPaginationService
         if (!empty($hints['is_system_managed'])) {
             return 'generated';
         }
-        $key = strtolower(trim((string)($section['section_key'] ?? '')));
         if (in_array($key, array('toc', 'lep'), true)) {
             return 'generated';
         }

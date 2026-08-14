@@ -82,6 +82,7 @@ $contracts = array(
         'humanTitleForFragment',
         'pagination_authority',
         'paginationAuthority',
+        'if (isPart0) return "generated"',
         'isGeneratedFragment',
     ),
     'public/admin/api/controlled_book_editor_api.php' => array(
@@ -95,6 +96,8 @@ $contracts = array(
         'unitsFromLepBody',
         'real .cpb-lep-part-row',
         'paginationAuthority',
+        'Part 0 editability does not change its automatic pagination authority',
+        'PART0_SECTION_KEYS',
         "'pagination_authority' => 'generated'",
         '$this->reader->loadReaderPaginateSource($resolvedVersion)',
         'ControlledPublishingPublicationFilter',

@@ -436,6 +436,14 @@
   }
 
   function resolvePaginationAuthority(section, unit, root) {
+    const isPart0 = Boolean(
+      section
+      && (
+        section.is_part0
+        || (section.flags && section.flags.is_part0)
+      )
+    );
+    if (isPart0) return "generated";
     if (root && (
       (root.matches && root.matches("[data-system-managed='1']"))
       || String(root.getAttribute && root.getAttribute("data-system-managed") || "") === "1"
@@ -1818,16 +1826,21 @@
 
       if (isGeneratedFragment(sourceFragment) && !isTableFragment(sourceFragment)) {
         if (!hasSourceContent(current)) {
-          throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+          if (!sourceFragment.splittable) {
+            throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+          }
+        } else {
+          finish();
+          startContinuation(sourceFragment, "generated");
+          trial = pageWith(current.section, current.pieces.concat([whole]), {});
+          if (measurePage(trial).fits) {
+            current.pieces.push(whole);
+            continue;
+          }
+          if (!sourceFragment.splittable) {
+            throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+          }
         }
-        finish();
-        startContinuation(sourceFragment, "generated");
-        trial = pageWith(current.section, current.pieces.concat([whole]), {});
-        if (measurePage(trial).fits) {
-          current.pieces.push(whole);
-          continue;
-        }
-        throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
       }
 
       if (isTableFragment(sourceFragment)) {

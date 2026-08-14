@@ -12,9 +12,9 @@ Each persisted manual-break segment is one intended authoritative page.
 
 - If the segment fits the Book Style body: emit exactly one page.
 - If multiple ordinary **author-editable** blocks exceed the body: return first-class `MANUAL_BREAK_REQUIRED`. Do not persist a partial page map. Do not insert the break.
-- `pagination_authority` is `generated` or `author`. It is derived from the publishing model (`is_generated`, `is_system_managed`, `allow_author_blocks`, and per-block `is_system_managed`), not from section titles.
+- `pagination_authority` is `generated` or `author`. Part 0 always has generated/automatic pagination authority, including author-editable sections such as 0.2 Revision System. Outside Part 0, authority is derived from the publishing model (`is_generated`, `is_system_managed`, `allow_author_blocks`, and per-block `is_system_managed`), not from section titles.
 - Generated/system-owned/non-editable content auto-paginates: fill the body, continue in source order on the next page, repeat the controlled header/footer/page number, and never return `MANUAL_BREAK_REQUIRED`. Continuation pages are not persisted as Manual Page Breaks.
-- `MANUAL_BREAK_REQUIRED` is valid only where the author can insert a Manual Page Break.
+- `MANUAL_BREAK_REQUIRED` is valid only for author-controlled content outside Part 0 where the author can insert a Manual Page Break.
 - Long-table row presentation and a single oversized author block that cannot fit an empty page may still continue. Generated and table continuation leftover space must not absorb following author-editable blocks.
 - Generated TOC/LEP/table rows are measured as content fragments inside the authoritative body frame. They must not inherit page width, page height, header/footer geometry, or publication sheet min-height. Measurement width equals the contentFrame width.
 - Every semantic source block appears exactly once, in source order, except presentation-only repeated table headers.
