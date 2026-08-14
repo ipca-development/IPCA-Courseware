@@ -416,6 +416,10 @@
     return (element.getBoundingClientRect().bottom - sheet.getBoundingClientRect().top) / printScale();
   }
 
+  function printX(element, sheet) {
+    return (element.getBoundingClientRect().left - sheet.getBoundingClientRect().left) / printScale();
+  }
+
   function capturePrintCaret() {
     var selection = window.getSelection();
     if (!selection || selection.rangeCount < 1) return null;
@@ -467,6 +471,7 @@
     var pageStart = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap);
     var target = pageStart + PRINT_PAGE.height + PRINT_PAGE.gap + PRINT_PAGE.contentTop;
     var current = printY(block, sheet);
+    var gridGap = parseFloat(window.getComputedStyle(body).rowGap || '0') || 0;
     var spacer = document.createElement('div');
     spacer.className = manualBreak
       ? 'cpb-flow-page-break cpb-flow-page-break--manual'
@@ -474,7 +479,7 @@
     spacer.setAttribute('data-auto-page-break', '1');
     spacer.setAttribute('data-editor-only', '1');
     spacer.setAttribute('contenteditable', 'false');
-    spacer.style.height = Math.max(1, target - current) + 'px';
+    spacer.style.height = Math.max(1, target - current - gridGap) + 'px';
     if (manualBreak) {
       var label = document.createElement('span');
       label.textContent = 'Manual Page Break';
@@ -592,6 +597,25 @@
       }
       layer.appendChild(page);
     }
+    sheet.querySelectorAll('.cpb-block--changed').forEach(function (block) {
+      var blockTop = printY(block, sheet);
+      var blockBottom = printBottom(block, sheet);
+      var markerLeft = printX(block, sheet);
+      for (var pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+        var pageStart = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap);
+        var bodyTop = pageStart + PRINT_PAGE.contentTop;
+        var bodyBottom = bodyTop + PRINT_PAGE.contentHeight;
+        var segmentTop = Math.max(blockTop, bodyTop);
+        var segmentBottom = Math.min(blockBottom, bodyBottom);
+        if (segmentBottom <= segmentTop + 1) continue;
+        var marker = document.createElement('span');
+        marker.className = 'cpb-print-change-marker';
+        marker.style.left = markerLeft + 'px';
+        marker.style.top = (segmentTop - pageStart) + 'px';
+        marker.style.height = (segmentBottom - segmentTop) + 'px';
+        layer.children[pageIndex].appendChild(marker);
+      }
+    });
     sheet.insertBefore(layer, sheet.firstChild);
   }
 
@@ -623,7 +647,11 @@
         var contentTop = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap) + PRINT_PAGE.contentTop;
         var contentBottom = contentTop + PRINT_PAGE.contentHeight;
         var anchor = block.getAttribute('data-stable-anchor') || '';
-        if (manualAnchors[anchor] && top > contentTop + 1) {
+        var previousBreak = block.previousElementSibling;
+        var hasManualSpacer = previousBreak
+          && previousBreak.classList.contains('cpb-flow-page-break--manual')
+          && previousBreak.getAttribute('data-auto-page-break') === '1';
+        if (manualAnchors[anchor] && top > contentTop + 1 && !hasManualSpacer) {
           automaticBreakBefore(body, block, sheet, pageIndex, true);
           inserted = true;
           break;

@@ -14,8 +14,8 @@ $assert = static function (bool $condition, string $message) use (&$failures): v
 
 $protected = array(
     'public/admin/compliance/controlled_book_editor.php' => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
-    'public/assets/controlled_book_editor.js' => '871c2a0e99bb737e629577e01dac6ecbf5e99bcbfe514c6d6473c0f162790d8b',
-    'public/assets/controlled_book_editor.css' => 'b7b33fa46ca3be5c51e76fab612c418c7734fc8358d79f6cdcc5e3cfeb14f28d',
+    'public/assets/controlled_book_editor.js' => '0cf06b08b89e523ecf1ef25d78ffce343ad4afcaba9e3830c1c6e208e3181f00',
+    'public/assets/controlled_book_editor.css' => '91c2906b16403ac8568ca75ab8f1df59a053d9a1e97cd9b7a7f2b3f8d07f9391',
     'public/admin/api/controlled_book_editor_api.php' => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'public/student/manual_reader.php' => '9c442cd5db0f9c87ca291708e6e5d9f835a64ca7478bd77fcce7576f14052525',
 );

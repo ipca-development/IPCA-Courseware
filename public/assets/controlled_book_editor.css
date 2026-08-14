@@ -1027,6 +1027,20 @@ body.cpb-browser-fullscreen .cpb-workspace {
   min-height: 0;
 }
 
+.cpb-print-layout .cpb-change-marker {
+  display: none;
+}
+
+.cpb-print-change-marker {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  width: 4px;
+  background: #000;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 .cpb-flow-page-break {
   display: block;
   position: relative;
