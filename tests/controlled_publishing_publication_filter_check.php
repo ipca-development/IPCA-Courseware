@@ -60,6 +60,22 @@ assert_true(str_contains($parsed['footer'], 'Copyright – EuroPilot Center'), '
 assert_true(str_contains($parsed['footer'], 'Page: 4'), 'page number must remain', $failures);
 assert_true(!str_contains($parsed['footer'], 'Drop image'), 'dropzone must not sit in the footer', $failures);
 
+$lepSheet = '<div class="cpb-sheet cpb-sheet--lep" style="width:816px;min-height:1056px">'
+    . '<header class="cpb-page-header"><span>EuroPilot Center</span></header>'
+    . '<div class="cpb-lep"><div class="cpb-lep-heading">0.1.1 Effective Parts</div>'
+    . '<table class="cpb-lep-table"><tbody><tr class="cpb-lep-part-row"><td>Part 1</td></tr></tbody></table>'
+    . '</div>'
+    . '<footer class="cpb-page-footer">Copyright</footer>'
+    . '</div>';
+$lepParsed = ControlledPublishingPublicationFilter::parseSheet($lepSheet);
+assert_true(!str_contains($lepParsed['body'], 'cpb-sheet'), 'LEP pagination body must not keep the page shell', $failures);
+assert_true(!str_contains($lepParsed['body'], 'cpb-page-header'), 'LEP pagination body must not include header', $failures);
+assert_true(!str_contains($lepParsed['body'], 'cpb-page-footer'), 'LEP pagination body must not include footer', $failures);
+assert_true(!str_contains($lepParsed['body'], 'min-height:1056px'), 'LEP pagination body must not inherit page min-height', $failures);
+assert_true(str_contains($lepParsed['body'], 'cpb-lep'), 'LEP inner content must remain', $failures);
+assert_true(str_contains($lepParsed['body'], 'Part 1'), 'LEP row content must remain', $failures);
+assert_true(str_contains($lepParsed['header'], 'EuroPilot Center'), 'LEP header template must remain', $failures);
+
 $emptyImage = '<div class="cpb-image cpb-image--empty" data-field="image"><span>Image missing — upload or drop a file</span></div>';
 $emptyFiltered = ControlledPublishingPublicationFilter::filterHtml($emptyImage);
 assert_true(!str_contains($emptyFiltered, 'Image missing'), 'empty image affordance is editor chrome', $failures);

@@ -126,7 +126,60 @@ final class ControlledPublishingPublicationFilter
         if ($footer instanceof DOMElement) {
             $body = str_replace(trim((string)$doc->saveHTML($footer)), '', $body);
         }
-        return trim($body);
+        return self::unwrapPageShell(trim($body));
+    }
+
+    /**
+     * Pagination units must be content fragments inside the body frame.
+     * Do not keep page-shell width/min-height/header/footer geometry.
+     */
+    private static function unwrapPageShell(string $html): string
+    {
+        $html = trim($html);
+        if ($html === '') {
+            return '';
+        }
+        [$doc, $root] = self::loadFragment($html);
+        if ($root === null) {
+            return $html;
+        }
+        $sheet = self::firstByClass($root, 'cpb-sheet');
+        if (!($sheet instanceof DOMElement)) {
+            return $html;
+        }
+        foreach (array(
+            self::firstTagClass($sheet, 'header', 'cpb-page-header'),
+            self::firstTagClass($sheet, 'footer', 'cpb-page-footer'),
+        ) as $chrome) {
+            if ($chrome instanceof DOMElement && $chrome->parentNode !== null) {
+                $chrome->parentNode->removeChild($chrome);
+            }
+        }
+        $preferred = self::directChildByClass($sheet, 'cpb-sheet-body')
+            ?: self::directChildByClass($sheet, 'cpb-lep')
+            ?: self::directChildByClass($sheet, 'cpb-part0')
+            ?: self::directChildByClass($sheet, 'cpb-toc');
+        $children = array();
+        foreach ($sheet->childNodes as $child) {
+            if ($child instanceof DOMElement) {
+                $children[] = $child;
+            }
+        }
+        $extracted = $preferred ?: (count($children) === 1 ? $children[0] : null);
+        if ($extracted instanceof DOMElement) {
+            return trim((string)$doc->saveHTML($extracted));
+        }
+        return trim(self::innerHTML($sheet));
+    }
+
+    private static function directChildByClass(DOMElement $parent, string $className): ?DOMElement
+    {
+        foreach ($parent->childNodes as $child) {
+            if ($child instanceof DOMElement && in_array($className, self::classTokens($child), true)) {
+                return $child;
+            }
+        }
+        return null;
     }
 
     private static function stripChrome(DOMNode $root): void

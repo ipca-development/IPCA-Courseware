@@ -168,6 +168,68 @@
     return root;
   }
 
+  function isNestedPageShell(node) {
+    return Boolean(
+      node
+      && node.classList
+      && node.classList.contains("cpb-sheet")
+      && !node.classList.contains("reader-canonical-page")
+    );
+  }
+
+  function neutralizePageGeometry(node) {
+    if (!node || !node.style || !isNestedPageShell(node)) return node;
+    node.style.setProperty("width", "100%", "important");
+    node.style.setProperty("max-width", "100%", "important");
+    node.style.setProperty("min-width", "0", "important");
+    node.style.setProperty("height", "auto", "important");
+    node.style.setProperty("min-height", "0", "important");
+    node.style.setProperty("padding", "0", "important");
+    node.style.setProperty("margin", "0", "important");
+    node.style.setProperty("position", "static", "important");
+    node.style.setProperty("inset", "auto", "important");
+    node.style.setProperty("overflow", "visible", "important");
+    node.classList.remove("cpb-sheet");
+    return node;
+  }
+
+  function neutralizeNestedPageShells(root) {
+    if (!root || !root.querySelectorAll) return root;
+    const shells = [];
+    if (isNestedPageShell(root)) shells.push(root);
+    root.querySelectorAll(".cpb-sheet").forEach((node) => {
+      if (isNestedPageShell(node)) shells.push(node);
+    });
+    shells.forEach(neutralizePageGeometry);
+    return root;
+  }
+
+  function extractPageShell(root) {
+    if (!root || root.nodeType !== Node.ELEMENT_NODE) return root;
+    const clone = root.cloneNode(true);
+    clone.querySelectorAll(
+      "header.cpb-page-header, footer.cpb-page-footer, "
+      + ".reader-page-header-region, .reader-page-footer-region"
+    ).forEach((node) => node.remove());
+    const sheet = isNestedPageShell(clone)
+      ? clone
+      : clone.querySelector(".cpb-sheet:not(.reader-canonical-page)");
+    if (!sheet) {
+      neutralizeNestedPageShells(clone);
+      return clone;
+    }
+    const preferred = sheet.querySelector(":scope > .cpb-sheet-body")
+      || sheet.querySelector(":scope > .cpb-lep")
+      || sheet.querySelector(":scope > .cpb-part0")
+      || sheet.querySelector(":scope > .cpb-toc")
+      || sheet.querySelector(":scope > nav.cpb-toc");
+    const children = Array.from(sheet.children);
+    const extracted = preferred || (children.length === 1 ? children[0] : null);
+    const content = extracted || sheet;
+    neutralizeNestedPageShells(content);
+    return content;
+  }
+
   function rootFromHTML(html) {
     const holder = document.createElement("div");
     holder.innerHTML = String(html || "");
@@ -669,14 +731,19 @@
     return output;
   }
 
+  function contentRootFromHTML(html) {
+    return extractPageShell(rootFromHTML(html));
+  }
+
   function normalizeUnit(section, unit, unitIndex) {
-    const root = rootFromHTML(unit.html);
+    const parsed = rootFromHTML(unit.html);
+    if (!parsed) return [];
+    const isCover = String(unit.block_type || "").toLowerCase() === "cover"
+      || String(section && section.content_mode || "") === "cover";
+    const root = isCover ? parsed : extractPageShell(parsed);
     if (
-      !root
-      || (
-        !canonicalText([root.textContent])
-        && !root.querySelector("img,svg,canvas,video")
-      )
+      !canonicalText([root.textContent])
+      && !root.querySelector("img,svg,canvas,video")
     ) {
       return [];
     }
@@ -698,7 +765,7 @@
       if (items) return normalizeGeneratedRepeatable(section, unit, root, forceBreakBefore, items);
       if (type === "list") return normalizeList(section, unit, root, forceBreakBefore);
       if (type === "table") return normalizeTable(section, unit, root, forceBreakBefore);
-      return [fragment(section, unit, "root", type === "unknown" ? "generated" : type, String(unit.html || ""), root.textContent, {
+      return [fragment(section, unit, "root", type === "unknown" ? "generated" : type, root.outerHTML, root.textContent, {
         anchor: root.getAttribute("data-stable-anchor") || section.stable_anchor,
         atomic: true,
         splittable: type === "paragraph",
@@ -725,7 +792,7 @@
     const supported = [
       "heading", "paragraph", "note", "warning", "caution", "figure", "toc", "lep", "shell", "generated"
     ].includes(type);
-    return [fragment(section, unit, "root", type, String(unit.html || ""), root.textContent, {
+    return [fragment(section, unit, "root", type, root.outerHTML, root.textContent, {
       anchor,
       atomic: ["heading", "note", "warning", "caution", "figure", "toc", "lep", "shell", "generated"].includes(type),
       splittable: ["paragraph", "note", "warning", "caution"].includes(type),
@@ -761,7 +828,7 @@
         return;
       }
       (Array.isArray(section.units) ? section.units : []).forEach((unit, index) => {
-        sourceText.push(rootFromHTML(unit.html).textContent);
+        sourceText.push(contentRootFromHTML(unit.html).textContent);
         fragments.push(...normalizeUnit(section, unit, index));
       });
     });
@@ -837,7 +904,7 @@
   }
 
   function pieceMarkup(value) {
-    const root = rootFromHTML(value.html).cloneNode(true);
+    const root = contentRootFromHTML(value.html).cloneNode(true);
     if (!root || root.nodeType !== Node.ELEMENT_NODE) {
       return `<div class="reader-semantic-piece" style="align-self:start" `
         + `data-block-id="${value.fragment.blockId || ""}" `
@@ -881,7 +948,7 @@
   }
 
   function tableGroupMarkup(values) {
-    const firstRoot = rootFromHTML(values[0].html);
+    const firstRoot = contentRootFromHTML(values[0].html);
     const firstTable = firstRoot.matches("table") ? firstRoot : firstRoot.querySelector("table");
     if (!firstTable) return values.map(pieceMarkup).join("");
     const table = firstTable.cloneNode(true);
@@ -889,7 +956,7 @@
     let header = null;
     const body = document.createElement("tbody");
     values.forEach((value) => {
-      const sourceRoot = rootFromHTML(value.html);
+      const sourceRoot = contentRootFromHTML(value.html);
       const sourceTable = sourceRoot.matches("table")
         ? sourceRoot
         : sourceRoot.querySelector("table");
@@ -934,12 +1001,12 @@
   }
 
   function tocGroupMarkup(values) {
-    const root = rootFromHTML(values[0].html).cloneNode(true);
+    const root = contentRootFromHTML(values[0].html).cloneNode(true);
     let nav = root.matches(".cpb-toc") ? root : root.querySelector(".cpb-toc");
     if (!nav) return values.map(pieceMarkup).join("");
     nav.querySelectorAll(".cpb-toc-row").forEach((row) => row.remove());
     values.forEach((value) => {
-      const sourceRoot = rootFromHTML(value.html);
+      const sourceRoot = contentRootFromHTML(value.html);
       sourceRoot.querySelectorAll(".cpb-toc-row").forEach((row) => {
         const clone = row.cloneNode(true);
         annotateCoverage(clone, value);
@@ -954,7 +1021,7 @@
 
   function lepGroupMarkup(values) {
     if (!values.length) return "";
-    const root = rootFromHTML(values[0].html).cloneNode(true);
+    const root = contentRootFromHTML(values[0].html).cloneNode(true);
     const table = root.matches("table")
       ? root
       : root.querySelector("table.cpb-lep-table, [data-lep-parts-table], table");
@@ -966,7 +1033,7 @@
     }
     tbody.replaceChildren();
     values.forEach((value) => {
-      const sourceRoot = rootFromHTML(value.html);
+      const sourceRoot = contentRootFromHTML(value.html);
       lepRowNodes(sourceRoot).forEach((row) => {
         const clone = row.cloneNode(true);
         annotateCoverage(clone, value);
@@ -984,13 +1051,13 @@
     if (!values.length) return "";
     const selector = String(values[0].fragment.generatedItemSelector || "");
     if (!selector) return values.map(pieceMarkup).join("");
-    const root = rootFromHTML(values[0].html).cloneNode(true);
+    const root = contentRootFromHTML(values[0].html).cloneNode(true);
     const existing = Array.from(root.querySelectorAll(selector));
     if (!existing.length) return values.map(pieceMarkup).join("");
     const parent = existing[0].parentNode;
     existing.forEach((node) => node.remove());
     values.forEach((value) => {
-      const sourceRoot = rootFromHTML(value.html);
+      const sourceRoot = contentRootFromHTML(value.html);
       sourceRoot.querySelectorAll(selector).forEach((node) => {
         const clone = node.cloneNode(true);
         annotateCoverage(clone, value);

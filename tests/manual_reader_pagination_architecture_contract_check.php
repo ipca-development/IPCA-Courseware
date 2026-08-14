@@ -160,6 +160,7 @@ require_markers(
         'document.fonts.ready',
         'tableHeaderHTML',
         'function canonicalRect(rect)',
+        'extractPageShell',
         'reader-canonical-page',
         'transform:scale(var(--reader-page-scale))',
         'body.scrollHeight * scale',

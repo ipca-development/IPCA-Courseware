@@ -71,6 +71,8 @@ $contracts = array(
         'reader-page-footer-region',
         'justify-content:flex-end',
         'stripPublicationChrome',
+        'extractPageShell',
+        'contentRootFromHTML',
         'HEADER_BODY_INTERSECT',
         'BODY_STARTS_ABOVE_CONTENT_FRAME',
         'overflow:hidden',
@@ -104,6 +106,8 @@ $contracts = array(
         'cpb-image--empty',
         'filterHtml',
         'parseSheet',
+        'unwrapPageShell',
+        'content fragments',
     ),
     'src/publishing/ControlledPublishingFoundationService.php' => array(
         'assertAuthoritativePageMapReadyForRelease',

@@ -27,7 +27,7 @@ const bookStyleCSS = `
     display: flex; justify-content: space-between; align-items: center;
     width: 100%; height: 100%; border: 1px solid #aaa; padding: 8px;
   }
-  .cpb-sheet { padding: 48px 56px 64px; min-height: 1056px; }
+  .cpb-sheet { width: 816px; padding: 48px 56px 64px; min-height: 1056px; }
   .cpb-page-header { margin-bottom: 20px; }
   .cpb-page-footer { margin-top: 24px; }
   .cpb-dropzone {
@@ -144,6 +144,61 @@ function assertHeaderFooter(pages) {
   });
 }
 
+function pageBodyHtml(page) {
+  const match = String(page.page_html || "").match(
+    /<main class="reader-page-body[\s\S]*?<\/main>/
+  );
+  return match ? match[0] : "";
+}
+
+function publicationSheet(inner, sheetClass) {
+  return `<div class="cpb-sheet ${sheetClass || ""}" data-section-id="3" `
+    + `style="width:816px;min-height:1056px;height:1056px;padding:48px 56px 64px">`
+    + '<header class="cpb-page-header"><span>SHEET_HEADER_CHROME</span></header>'
+    + inner
+    + '<footer class="cpb-page-footer"><span>SHEET_FOOTER_CHROME</span></footer>'
+    + "</div>";
+}
+
+function assertContentFragmentGeometry(pages, fragmentNeedle) {
+  assert.ok(pages.length > 0, "expected generated pages");
+  pages.forEach((page) => {
+    const content = page.metrics && page.metrics.content_frame;
+    assert.ok(content, "content_frame missing");
+    const blocks = (page.metrics.block_measurements || []).filter((block) =>
+      String(block.source_fragment_id || "").includes(fragmentNeedle)
+    );
+    assert.ok(blocks.length > 0, `no measured blocks matching ${fragmentNeedle}`);
+    blocks.forEach((block) => {
+      assert.ok(
+        block.frame.width <= content.width + 0.75,
+        `${block.source_fragment_id} width ${block.frame.width} exceeds contentFrame ${content.width}`
+      );
+      assert.ok(
+        block.frame.width + 0.75 < layout.page_width_px,
+        `${block.source_fragment_id} measured at page width ${block.frame.width}`
+      );
+      assert.ok(
+        block.frame.height <= content.height + 0.75,
+        `${block.source_fragment_id} height ${block.frame.height} exceeds contentFrame ${content.height}`
+      );
+      assert.ok(
+        block.frame.height + 0.75 < layout.page_height_px,
+        `${block.source_fragment_id} inherited page height ${block.frame.height}`
+      );
+    });
+    const bodyHtml = pageBodyHtml(page);
+    assert.ok(!/min-height:\s*1056px/i.test(bodyHtml), "full-page min-height leaked into body");
+    assert.ok(!/height:\s*1056px/i.test(bodyHtml), "full-page height leaked into body");
+    assert.ok(!bodyHtml.includes("SHEET_HEADER_CHROME"), "page-shell header leaked into body");
+    assert.ok(!bodyHtml.includes("SHEET_FOOTER_CHROME"), "page-shell footer leaked into body");
+    assert.ok(
+      !/<div class="cpb-sheet[\s"]/.test(bodyHtml),
+      "page-shell wrapper leaked into body fragments"
+    );
+  });
+}
+
 function sourceCoverage(result) {
   return result.pages.flatMap((page) =>
     page.coverage.filter((item) => item.presentation_copy !== true)
@@ -156,7 +211,8 @@ function lepHtml(rowCount) {
       + `<td>Part ${index + 1}</td><td>${index + 3}</td>`
       + `<td>2026-01-01</td><td>Rev ${index + 1}</td></tr>`
   ).join("");
-  return '<div class="cpb-lep">'
+  return publicationSheet(
+    '<div class="cpb-lep">'
     + '<div class="cpb-lep-heading">PART 0 – Manual Administration</div>'
     + '<div class="cpb-lep-heading">0. OUTLINE</div>'
     + '<div class="cpb-lep-heading">0.1 List of effective Parts</div>'
@@ -164,7 +220,9 @@ function lepHtml(rowCount) {
     + '<div class="cpb-lep-cert-wrap"><div class="cpb-lep-cert-text">Certification statement.</div></div>'
     + '<table class="cpb-lep-table cpb-table" data-lep-parts-table="1">'
     + '<thead><tr class="cpb-table-header-row"><th>Part</th><th>Pages</th><th>Date</th><th>Revision</th></tr></thead>'
-    + `<tbody>${rows}</tbody></table></div>`;
+    + `<tbody>${rows}</tbody></table></div>`,
+    "cpb-sheet--lep"
+  );
 }
 
 function lepSection(id, rowCount) {
@@ -182,12 +240,15 @@ function amendmentHtml(rowCount) {
     `<tr class="cpb-part0-amend-row" data-part0-row="${index}">`
       + `<td>Amd ${index + 1}</td><td>2026-01-01</td><td>Change ${index + 1}</td></tr>`
   ).join("");
-  return '<div class="cpb-part0 cpb-lep">'
+  return publicationSheet(
+    '<div class="cpb-part0 cpb-lep">'
     + '<div class="cpb-part0-heading">0.3 Amendment List</div>'
     + '<div class="cpb-part0-body">'
     + '<table class="cpb-table cpb-part0-table" data-part0-table="amendment_list">'
     + '<thead><tr><th>No</th><th>Date</th><th>Change</th></tr></thead>'
-    + `<tbody>${rows}</tbody></table></div></div>`;
+    + `<tbody>${rows}</tbody></table></div></div>`,
+    "cpb-sheet--part0"
+  );
 }
 
 function generatedPart0Section(id, key, title, html) {
@@ -304,12 +365,15 @@ cases.push(["G. generated TOC continues automatically", () => {
   ).join("");
   const { execution, result } = runWorker(sourceWith([
     section(2, "toc", "Table of Contents", {}, [
-      unit("toc-2-0", "toc", `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`, { block_id: 20 })
+      unit("toc-2-0", "toc", publicationSheet(
+        `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`
+      ), { block_id: 20 })
     ])
   ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
   assert.ok(result.pages.length >= 3, "TOC must continue across physical pages");
   assertHeaderFooter(result.pages);
+  assertContentFragmentGeometry(result.pages, "/toc-row-");
 }]);
 
 cases.push(["H/I. long table row-paginates with presentation-only headers", () => {
@@ -332,6 +396,7 @@ cases.push(["H/I. long table row-paginates with presentation-only headers", () =
     item.source_fragment_id.endsWith("/block-table/table-header") && item.presentation_copy === true
   ), "continued tables must repeat the header as a presentation-only copy");
   assertHeaderFooter(result.pages);
+  assertContentFragmentGeometry(result.pages, "block-table");
 }]);
 
 cases.push(["long table continuation does not absorb following ordinary blocks", () => {
@@ -457,6 +522,7 @@ cases.push(["O. generated LEP fits one page", () => {
   assert.ok(result.pages[0].page_html.includes("0.1 List of effective Parts"));
   assert.ok(result.pages[0].page_html.includes("Part 3"));
   assertHeaderFooter(result.pages);
+  assertContentFragmentGeometry(result.pages, "/lep-row-");
 }]);
 
 cases.push(["P. generated LEP spans multiple pages automatically", () => {
@@ -468,6 +534,7 @@ cases.push(["P. generated LEP spans multiple pages automatically", () => {
     String(page.metrics && page.metrics.break_reason || "") === "lep_continuation"
   ), "LEP continuation pages must not persist as manual breaks");
   assertHeaderFooter(result.pages);
+  assertContentFragmentGeometry(result.pages, "/lep-row-");
 }]);
 
 cases.push(["Q. every LEP row/item appears exactly once", () => {
@@ -596,7 +663,9 @@ cases.push(["W. no MANUAL_BREAK_REQUIRED for generated Part 0 blocks", () => {
       is_generated: true,
       allow_author_blocks: false
     }, [
-      unit("toc-2-0", "toc", `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`, {
+      unit("toc-2-0", "toc", publicationSheet(
+        `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`
+      ), {
         block_id: 20,
         pagination_authority: "generated"
       })
@@ -669,6 +738,100 @@ cases.push(["Z. following author-editable content returns to manual-break author
   assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
   assert.strictEqual(result.error.before_block_anchor, "author-after-generated");
   assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
+}]);
+
+cases.push(["AA. LEP row measurement uses contentFrame width, not page width", () => {
+  const { execution, result } = runWorker(sourceWith([lepSection(3, 3)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  const content = result.pages[0].metrics.content_frame;
+  const block = result.pages[0].metrics.block_measurements.find((item) =>
+    String(item.source_fragment_id || "").includes("/lep-row-0")
+  );
+  assert.ok(block, "lep-row-0 must be measured");
+  assert.ok(block.frame.width <= content.width + 0.75);
+  assert.ok(block.frame.width + 0.75 < layout.page_width_px);
+  assert.ok(content.width < layout.page_width_px - 100);
+}]);
+
+cases.push(["AB. LEP row height reflects only row content", () => {
+  const { execution, result } = runWorker(sourceWith([lepSection(3, 3)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  const content = result.pages[0].metrics.content_frame;
+  const block = result.pages[0].metrics.block_measurements.find((item) =>
+    String(item.source_fragment_id || "").includes("/lep-row-0")
+  );
+  assert.ok(block, "lep-row-0 must be measured");
+  assert.ok(block.frame.height < layout.page_height_px - 200, "LEP row must not use page height");
+  assert.ok(block.frame.height <= content.height + 0.75);
+  assert.ok(block.frame.height !== layout.page_height_px);
+}]);
+
+cases.push(["AC. a normal LEP row fits inside a fresh body frame", () => {
+  const { execution, result } = runWorker(sourceWith([lepSection(3, 1)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.strictEqual(result.pages.length, 1);
+  assert.ok(result.pages[0].metrics.validation_passed);
+  assertContentFragmentGeometry(result.pages, "/lep-row-");
+}]);
+
+cases.push(["AD. no LEP row inherits full-page min-height/height", () => {
+  const { execution, result } = runWorker(sourceWith([lepSection(3, 8)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  result.pages.forEach((page) => {
+    const bodyHtml = pageBodyHtml(page);
+    assert.ok(!/min-height:\s*1056px/i.test(bodyHtml));
+    assert.ok(!/height:\s*1056px/i.test(bodyHtml));
+    (page.metrics.block_measurements || []).forEach((block) => {
+      if (!String(block.source_fragment_id || "").includes("/lep-row-")) return;
+      assert.ok(block.frame.height + 0.75 < layout.page_height_px);
+    });
+  });
+}]);
+
+cases.push(["AE. generated TOC rows use the same content-fragment measurement model", () => {
+  const tocRows = Array.from({ length: 8 }, (_, index) =>
+    `<div class="cpb-toc-row" data-stable-anchor="toc-${index + 1}">`
+      + `<span>Section ${index + 1}</span><span>${index + 3}</span></div>`
+  ).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(2, "toc", "Table of Contents", {
+      pagination_authority: "generated",
+      is_generated: true,
+      allow_author_blocks: false
+    }, [
+      unit("toc-2-0", "toc", publicationSheet(
+        `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`
+      ), { block_id: 20, pagination_authority: "generated" })
+    ], { pagination_authority: "generated" })
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.ok(result.pages.length >= 1);
+  assertContentFragmentGeometry(result.pages, "/toc-row-");
+}]);
+
+cases.push(["AF. long-table rows remain correct under the content-fragment model", () => {
+  const tableRows = Array.from({ length: 18 }, (_, index) =>
+    `<tr><td>Row ${index + 1}</td><td>Controlled table row content</td></tr>`
+  ).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-table", "table",
+        publicationSheet(
+          `<article class="cpb-block" data-block-id="7" data-block-type="table" data-stable-anchor="block-table"><table class="cpb-table"><thead><tr><th>Item</th><th>Description</th></tr></thead><tbody>${tableRows}</tbody></table></article>`
+        ),
+        { block_id: 7 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.ok(result.pages.length >= 2, "long table must continue");
+  const rows = sourceCoverage(result).filter((item) => item.source_fragment_id.includes("/block-table/table-row-"));
+  assert.strictEqual(rows.length, 18, "each table row must appear exactly once");
+  assertContentFragmentGeometry(result.pages, "block-table");
 }]);
 
 let failed = 0;

@@ -123,6 +123,11 @@ async function main() {
             padding:0!important;margin:0!important;zoom:1;max-width:none;
             min-height:0;box-shadow:none;border-radius:0
           }
+          .reader-page-body .cpb-sheet:not(.reader-canonical-page){
+            width:100%!important;max-width:100%!important;min-width:0!important;
+            height:auto!important;min-height:0!important;padding:0!important;
+            margin:0!important;box-shadow:none!important;position:static!important
+          }
           .reader-page-header-region,
           .reader-page-footer-region,
           .reader-page-body:not(.reader-page-cover){overflow:hidden}
