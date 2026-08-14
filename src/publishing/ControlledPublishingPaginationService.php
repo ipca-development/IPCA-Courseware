@@ -526,8 +526,8 @@ final class ControlledPublishingPaginationService
      */
     public function generateFrozenPageMap(string $bookKey, ?array $version = null): array
     {
-        $source = $this->buildPaginateSource($bookKey, $version);
         $resolvedVersion = $version ?? $this->reader->requireReleasedVersion($bookKey);
+        $source = $this->reader->loadReaderPaginateSource($resolvedVersion);
         $result = (new ControlledPublishingAuthoritativePaginationService($this->reader))
             ->generate($source, $resolvedVersion);
         $this->lastGeneration = $result['generation'];

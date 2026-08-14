@@ -84,6 +84,7 @@ $contracts = array(
     'src/publishing/ControlledPublishingPaginationService.php' => array(
         'exact browser measurement',
         'real .cpb-toc-row',
+        '$this->reader->loadReaderPaginateSource($resolvedVersion)',
     ),
     'src/publishing/ControlledPublishingFoundationService.php' => array(
         'assertAuthoritativePageMapReadyForRelease',
