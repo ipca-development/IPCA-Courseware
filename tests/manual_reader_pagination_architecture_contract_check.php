@@ -8,7 +8,7 @@ $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
         => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
     'public/assets/controlled_book_editor.js'
-        => '6f76a6bf25f5852a175ff402d46807aa9d8512ee9bc55e170aa34d70636c8d20',
+        => 'd25c09e8c5fc7abf7ef9fdf0147159955698391f8219caa30423f69a4d5cf4c3',
     'public/assets/controlled_book_editor.css'
         => '2dbc860e42137df5c1cc7ebcf21409c962e411e99300dc46db989a9dc07cc2e2',
     'public/admin/api/controlled_book_editor_api.php'

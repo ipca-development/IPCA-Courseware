@@ -1171,7 +1171,7 @@ final class ControlledPublishingReaderService
      * @param array<string,mixed> $version
      * @return array{is_current:bool,mismatches:list<string>}
      */
-    public function authoritativePageMapFreshness(array $version): array
+    public function authoritativePageMapFreshness(array $version, ?array $source = null): array
     {
         $versionId = (int)($version['id'] ?? 0);
         $profile = ControlledPublishingReaderLayoutProfile::profileKey();
@@ -1182,7 +1182,7 @@ final class ControlledPublishingReaderService
         if ($generation === array()) {
             return array('is_current' => false, 'mismatches' => array('not_generated'));
         }
-        $source = $this->loadReaderPaginateSource($version);
+        $source ??= $this->loadReaderPaginateSource($version);
         $expected = (new ControlledPublishingAuthoritativePaginationService($this))
             ->fingerprint($source, $version);
         $mismatches = array();

@@ -164,6 +164,7 @@
     paginationStale: false,
     paginationGenerating: false,
     paginationGenerationAttempted: false,
+    paginationContextLoaded: false,
     paginationRegenerateTimer: null,
     pendingPaginatedAnchor: '',
     lastPaginatedRange: null,
@@ -698,6 +699,7 @@
 
   function markPaginationChanged() {
     state.paginationStale = true;
+    state.paginationContextLoaded = false;
     clearTimeout(state.paginationRegenerateTimer);
     state.paginationRegenerateTimer = setTimeout(function () {
       var active = document.activeElement;
@@ -870,7 +872,9 @@
   function renderPaginatedView(result) {
     state.paginatedResult = result;
     state.paginationStale = !(result.freshness && result.freshness.is_current);
-    if (publicationCssEl) publicationCssEl.textContent = result.book_style_css || '';
+    if (publicationCssEl && typeof result.book_style_css === 'string') {
+      publicationCssEl.textContent = result.book_style_css;
+    }
     if (pageBreakBtn) {
       pageBreakBtn.disabled = !state.editable || selectedSectionUsesAutomaticPages();
       pageBreakBtn.title = selectedSectionUsesAutomaticPages()
@@ -944,7 +948,9 @@
   function loadPaginatedView() {
     setStatus('Loading pages…', 'saving');
     var pageURL = '/admin/api/controlled_book_page_map_api.php?action=stored_preview&book_version_id='
-      + state.versionId + '&section_id=' + state.sectionId;
+      + state.versionId + '&section_id=' + state.sectionId
+      + '&include_style=' + (state.paginationContextLoaded ? '0' : '1')
+      + '&check_freshness=' + (state.paginationContextLoaded ? '0' : '1');
     var breakURL = '/admin/api/controlled_book_page_break_api.php?action=list&book_version_id='
       + state.versionId + '&section_id=' + state.sectionId;
     return Promise.all([
@@ -954,6 +960,7 @@
       state.manualBreaks = responses[1].breaks || [];
       state.paginationCandidates = responses[1].candidates || [];
       var result = responses[0].result || {};
+      state.paginationContextLoaded = true;
       if (!state.paginationGenerating && !state.paginationGenerationAttempted && state.editable
         && (
           !Array.isArray(result.pages)

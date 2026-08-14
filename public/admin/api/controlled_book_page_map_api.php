@@ -89,15 +89,23 @@ try {
                 throw new RuntimeException('Manual version not found.');
             }
             $layoutProfile = ControlledPublishingReaderLayoutProfile::profileKey();
+            $includeStyle = !isset($in['include_style']) || (int)$in['include_style'] === 1;
+            $checkFreshness = !isset($in['check_freshness']) || (int)$in['check_freshness'] === 1;
             $approval = $store->getApprovalState($versionId, $layoutProfile);
             $pages = $store->loadStoredPages(
                 $versionId,
                 $layoutProfile,
                 $sectionId > 0 ? $sectionId : null
             );
-            $freshness = $reader->authoritativePageMapFreshness($version);
-            $paginateSource = $reader->loadReaderPaginateSource($version);
-            $publicationPackage = $reader->paginationPublicationPackage($version, $paginateSource);
+            $paginateSource = ($includeStyle || $checkFreshness)
+                ? $reader->loadReaderPaginateSource($version)
+                : null;
+            $freshness = $checkFreshness
+                ? $reader->authoritativePageMapFreshness($version, $paginateSource)
+                : array('is_current' => true, 'mismatches' => array());
+            $publicationPackage = $includeStyle && is_array($paginateSource)
+                ? $reader->paginationPublicationPackage($version, $paginateSource)
+                : null;
             cp_pm_json(200, array(
                 'ok' => true,
                 'result' => array(
@@ -107,8 +115,12 @@ try {
                     'lifecycle_status' => (string)($version['lifecycle_status'] ?? ''),
                     'pagination' => $approval,
                     'freshness' => $freshness,
-                    'book_style_css' => (string)($publicationPackage['css']['content'] ?? ''),
-                    'book_style_css_hash' => (string)($publicationPackage['css']['hash'] ?? ''),
+                    'book_style_css' => is_array($publicationPackage)
+                        ? (string)($publicationPackage['css']['content'] ?? '')
+                        : null,
+                    'book_style_css_hash' => is_array($publicationPackage)
+                        ? (string)($publicationPackage['css']['hash'] ?? '')
+                        : null,
                     'page_count' => $store->pageCount($versionId, $layoutProfile),
                     'returned_page_count' => count($pages),
                     'section_id' => $sectionId > 0 ? $sectionId : null,
