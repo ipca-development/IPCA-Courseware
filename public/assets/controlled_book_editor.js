@@ -170,6 +170,7 @@
     paginationRegenerateTimer: null,
     pendingPaginatedAnchor: '',
     lastPaginatedRange: null,
+    sectionPageIndex: 0,
   };
 
   var INDENT_MAX_LEVEL = 8;
@@ -769,6 +770,39 @@
         'distribution_list', 'abbreviations', 'definitions'].indexOf(key) >= 0;
   }
 
+  function paginationPageNavigation(sectionPages, allPageCount) {
+    var navigation = document.createElement('div');
+    navigation.className = 'cpb-pagination-page-navigation';
+    var previous = document.createElement('button');
+    previous.type = 'button';
+    previous.textContent = 'Previous page';
+    previous.disabled = state.sectionPageIndex <= 0;
+    previous.addEventListener('click', function () {
+      state.sectionPageIndex = Math.max(0, state.sectionPageIndex - 1);
+      renderPaginatedView(state.paginatedResult);
+      canvasEl.scrollTop = 0;
+    });
+    var current = document.createElement('strong');
+    var page = sectionPages[state.sectionPageIndex] || null;
+    current.textContent = page
+      ? 'Page ' + page.page_number + ' · ' + (state.sectionPageIndex + 1)
+        + ' of ' + sectionPages.length + ' in this section · ' + allPageCount + ' total'
+      : 'No page in this section';
+    var next = document.createElement('button');
+    next.type = 'button';
+    next.textContent = 'Next page';
+    next.disabled = state.sectionPageIndex >= sectionPages.length - 1;
+    next.addEventListener('click', function () {
+      state.sectionPageIndex = Math.min(sectionPages.length - 1, state.sectionPageIndex + 1);
+      renderPaginatedView(state.paginatedResult);
+      canvasEl.scrollTop = 0;
+    });
+    navigation.appendChild(previous);
+    navigation.appendChild(current);
+    navigation.appendChild(next);
+    return navigation;
+  }
+
   function renderPaginatedView(result) {
     state.paginatedResult = result;
     state.paginationStale = !(result.freshness && result.freshness.is_current);
@@ -779,12 +813,25 @@
         ? 'This generated section uses automatic page breaks'
         : 'Insert a hard page break at the cursor';
     }
-    canvasEl.innerHTML = '';
-    canvasEl.appendChild(paginationBreakControl());
     var allPages = Array.isArray(result.pages) ? result.pages : [];
-    var pages = allPages.filter(function (page) {
+    var sectionPages = allPages.filter(function (page) {
       return parseInt(page.section_id || '0', 10) === state.sectionId;
     });
+    if (state.pendingPaginatedAnchor) {
+      var anchorNeedle = 'data-stable-anchor="' + state.pendingPaginatedAnchor + '"';
+      var retainedPageIndex = sectionPages.findIndex(function (page) {
+        return String(page.page_html || '').indexOf(anchorNeedle) >= 0;
+      });
+      if (retainedPageIndex >= 0) state.sectionPageIndex = retainedPageIndex;
+    }
+    state.sectionPageIndex = Math.max(
+      0,
+      Math.min(state.sectionPageIndex, Math.max(0, sectionPages.length - 1))
+    );
+    var pages = sectionPages.length ? [sectionPages[state.sectionPageIndex]] : [];
+    canvasEl.innerHTML = '';
+    canvasEl.appendChild(paginationBreakControl());
+    canvasEl.appendChild(paginationPageNavigation(sectionPages, allPages.length));
     if (!pages.length) {
       var empty = document.createElement('div');
       empty.className = 'cpb-pagination-empty';
@@ -838,7 +885,7 @@
       ? result.pagination.status
       : 'not generated';
     setPaginationStatus(
-      pages.length + ' section pages of ' + allPages.length + ' total · '
+      sectionPages.length + ' section pages of ' + allPages.length + ' total · '
         + state.manualBreaks.filter(function (row) {
           return parseInt(row.section_id || '0', 10) === state.sectionId;
         }).length + ' manual breaks · '
@@ -1274,6 +1321,7 @@
       link.addEventListener('click', function () {
         if (state.viewMode === 'paginated') {
           state.sectionId = node.id;
+          state.sectionPageIndex = 0;
           renderTree(state.sectionsTree, state.sectionId);
           if (state.paginatedResult) {
             renderPaginatedView(state.paginatedResult);
