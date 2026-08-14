@@ -34,6 +34,28 @@ if (!function_exists('aue_role_label')) {
     }
 }
 
+if (!function_exists('aue_account_role_options')) {
+    /** @return array<string,string> */
+    function aue_account_role_options(): array
+    {
+        return array(
+            'admin' => 'Admin',
+            'supervisor' => 'Instructor',
+            'student' => 'Student',
+            'chief_instructor' => 'Chief Instructor',
+        );
+    }
+}
+
+if (!function_exists('aue_normalize_account_role')) {
+    function aue_normalize_account_role(string $role): string
+    {
+        $role = strtolower(trim($role));
+
+        return $role === 'instructor' ? 'supervisor' : $role;
+    }
+}
+
 if (!function_exists('aue_status_label')) {
     function aue_status_label(string $status): string
     {
@@ -905,12 +927,12 @@ if (!function_exists('aue_update_account_tab')) {
         $firstName = trim((string)($_POST['first_name'] ?? ''));
         $lastName = trim((string)($_POST['last_name'] ?? ''));
         $email = trim((string)($_POST['email'] ?? ''));
-        $role = trim((string)($_POST['role'] ?? ''));
+        $role = aue_normalize_account_role((string)($_POST['role'] ?? ''));
         $status = trim((string)($_POST['status'] ?? ''));
         $validUntil = aue_normalize_date((string)($_POST['account_valid_until'] ?? ''));
         $mustChange = isset($_POST['must_change_password']) ? 1 : 0;
 
-        $allowedRoles = array('admin', 'student', 'supervisor', 'instructor', 'chief_instructor');
+        $allowedRoles = array_keys(aue_account_role_options());
         $allowedStatuses = array('pending_activation', 'active', 'locked', 'retired');
 
         if ($firstName === '' || $lastName === '' || $email === '') {

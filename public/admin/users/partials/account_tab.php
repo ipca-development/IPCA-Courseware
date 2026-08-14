@@ -207,9 +207,14 @@ $isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pe
             <div class="ue-field">
                 <label for="role">Role</label>
                 <select class="app-select ue-select" id="role" name="role">
-                    <option value="admin"<?php echo (string)($user['role'] ?? '') === 'admin' ? ' selected' : ''; ?>>Admin</option>
-                    <option value="supervisor"<?php echo (string)($user['role'] ?? '') === 'supervisor' ? ' selected' : ''; ?>>Instructor</option>
-                    <option value="student"<?php echo (string)($user['role'] ?? '') === 'student' ? ' selected' : ''; ?>>Student</option>
+                    <?php
+                    $currentRole = aue_normalize_account_role((string)($user['role'] ?? ''));
+                    foreach (aue_account_role_options() as $roleValue => $roleLabel):
+                    ?>
+                        <option value="<?php echo h($roleValue); ?>"<?php echo $currentRole === $roleValue ? ' selected' : ''; ?>>
+                            <?php echo h($roleLabel); ?>
+                        </option>
+                    <?php endforeach; ?>
                 </select>
             </div>
 

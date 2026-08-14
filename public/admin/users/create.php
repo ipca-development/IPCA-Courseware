@@ -33,13 +33,7 @@ function auc_post_bool(string $key): int
 
 function auc_allowed_roles(): array
 {
-    return array(
-        'admin' => 'Admin',
-        'supervisor' => 'Instructor',
-        'student' => 'Student',
-        'instructor' => 'Instructor',
-        'chief_instructor' => 'Chief Instructor',
-    );
+    return aue_account_role_options();
 }
 
 function auc_allowed_statuses(): array
@@ -81,7 +75,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lastName = $form['last_name'];
         $email = $form['email'];
         $cellphone = $form['cellphone'];
-        $role = $form['role'];
+        $role = aue_normalize_account_role($form['role']);
+        $form['role'] = $role;
         $status = $form['status'];
         $accountValidUntil = aue_normalize_date($form['account_valid_until']);
         $mustChangePassword = $form['must_change_password'] === '1' ? 1 : 0;
