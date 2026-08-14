@@ -8,7 +8,7 @@ $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
         => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
     'public/assets/controlled_book_editor.js'
-        => '4ad14b906ded23989f2409e87dcd40eb2230accc7d910e696c4ffc530b97bd07',
+        => '6f76a6bf25f5852a175ff402d46807aa9d8512ee9bc55e170aa34d70636c8d20',
     'public/assets/controlled_book_editor.css'
         => '2dbc860e42137df5c1cc7ebcf21409c962e411e99300dc46db989a9dc07cc2e2',
     'public/admin/api/controlled_book_editor_api.php'
@@ -50,8 +50,21 @@ $contracts = array(
         'flushPaginatedCalloutFragment',
         'flushPaginatedListItem',
         'flushPaginatedTableRow',
+        "'&section_id=' + state.sectionId",
         "apiPost('split_block_page_break'",
         'insertPageBreakAtCursor',
+    ),
+    'public/admin/api/controlled_book_page_map_api.php' => array(
+        "'returned_page_count' => count(\$pages)",
+        "\$sectionId > 0 ? \$sectionId : null",
+    ),
+    'src/publishing/ControlledPublishingReaderPageMapStore.php' => array(
+        '?int $sectionId = null',
+        "' AND section_id = ?'",
+    ),
+    'src/publishing/ControlledPublishingManualPageBreakService.php' => array(
+        'listBlockCandidates(int $bookVersionId, ?int $sectionId = null)',
+        "' AND s.id = ?'",
     ),
     'ipca-manual-reader-ios/IPCAManualReader/Services/ReaderPaginationCore.js' => array(
         'atomic_keep_together',

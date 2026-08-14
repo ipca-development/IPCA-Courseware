@@ -26,6 +26,7 @@ try {
     $uid = (int)($user['id'] ?? 0);
     $input = cp_pb_input();
     $versionId = (int)($input['book_version_id'] ?? 0);
+    $sectionId = (int)($input['section_id'] ?? 0);
     if ($versionId <= 0) {
         throw new RuntimeException('Manual version is required.');
     }
@@ -37,7 +38,10 @@ try {
             cp_pb_json(200, array(
                 'ok' => true,
                 'breaks' => $service->listForVersion($versionId),
-                'candidates' => $service->listBlockCandidates($versionId),
+                'candidates' => $service->listBlockCandidates(
+                    $versionId,
+                    $sectionId > 0 ? $sectionId : null
+                ),
                 'identity' => $service->identity($versionId),
             ));
 

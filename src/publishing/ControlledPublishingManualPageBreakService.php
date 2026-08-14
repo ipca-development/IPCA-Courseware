@@ -54,8 +54,11 @@ final class ControlledPublishingManualPageBreakService
     /**
      * @return list<array<string,mixed>>
      */
-    public function listBlockCandidates(int $bookVersionId): array
+    public function listBlockCandidates(int $bookVersionId, ?int $sectionId = null): array
     {
+        $sectionFilter = $sectionId !== null && $sectionId > 0
+            ? ' AND s.id = ?'
+            : '';
         $stmt = $this->pdo->prepare(
             'SELECT b.id AS block_id, b.stable_anchor, b.block_type, b.sort_order,
                     s.id AS section_id, s.title AS section_title,
@@ -64,10 +67,16 @@ final class ControlledPublishingManualPageBreakService
                INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
               WHERE s.book_version_id = ?
                 AND b.stable_anchor IS NOT NULL
-                AND b.stable_anchor <> \'\'
+                AND b.stable_anchor <> \'\''
+              . $sectionFilter .
+             '
               ORDER BY s.sort_order ASC, b.sort_order ASC, b.id ASC'
         );
-        $stmt->execute(array($bookVersionId));
+        $params = array($bookVersionId);
+        if ($sectionFilter !== '') {
+            $params[] = $sectionId;
+        }
+        $stmt->execute($params);
 
         return array_map(static fn(array $row): array => array(
             'block_id' => (int)$row['block_id'],

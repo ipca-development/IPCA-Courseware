@@ -944,9 +944,9 @@
   function loadPaginatedView() {
     setStatus('Loading pages…', 'saving');
     var pageURL = '/admin/api/controlled_book_page_map_api.php?action=stored_preview&book_version_id='
-      + state.versionId;
+      + state.versionId + '&section_id=' + state.sectionId;
     var breakURL = '/admin/api/controlled_book_page_break_api.php?action=list&book_version_id='
-      + state.versionId;
+      + state.versionId + '&section_id=' + state.sectionId;
     return Promise.all([
       paginationRequest(pageURL),
       paginationRequest(breakURL),

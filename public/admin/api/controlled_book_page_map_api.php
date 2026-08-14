@@ -83,13 +83,18 @@ try {
 
         case 'stored_preview':
             $versionId = (int)($in['book_version_id'] ?? 0);
+            $sectionId = (int)($in['section_id'] ?? 0);
             $version = $reader->resolveVersionById($versionId);
             if ($version === null) {
                 throw new RuntimeException('Manual version not found.');
             }
             $layoutProfile = ControlledPublishingReaderLayoutProfile::profileKey();
             $approval = $store->getApprovalState($versionId, $layoutProfile);
-            $pages = $store->loadStoredPages($versionId, $layoutProfile);
+            $pages = $store->loadStoredPages(
+                $versionId,
+                $layoutProfile,
+                $sectionId > 0 ? $sectionId : null
+            );
             $freshness = $reader->authoritativePageMapFreshness($version);
             $paginateSource = $reader->loadReaderPaginateSource($version);
             $publicationPackage = $reader->paginationPublicationPackage($version, $paginateSource);
@@ -104,7 +109,9 @@ try {
                     'freshness' => $freshness,
                     'book_style_css' => (string)($publicationPackage['css']['content'] ?? ''),
                     'book_style_css_hash' => (string)($publicationPackage['css']['hash'] ?? ''),
-                    'page_count' => count($pages),
+                    'page_count' => $store->pageCount($versionId, $layoutProfile),
+                    'returned_page_count' => count($pages),
+                    'section_id' => $sectionId > 0 ? $sectionId : null,
                     'pages' => array_map(static fn(array $page): array => array(
                         'page_number' => (int)$page['page_number'],
                         'section_id' => isset($page['section_id']) ? (int)$page['section_id'] : null,

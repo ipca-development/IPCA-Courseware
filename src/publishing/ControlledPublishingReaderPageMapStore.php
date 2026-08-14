@@ -290,17 +290,30 @@ final class ControlledPublishingReaderPageMapStore
      *
      * @return list<array<string,mixed>>
      */
-    public function loadStoredPages(int $bookVersionId, string $layoutProfile): array
+    public function loadStoredPages(
+        int $bookVersionId,
+        string $layoutProfile,
+        ?int $sectionId = null
+    ): array
     {
+        $sectionFilter = $sectionId !== null && $sectionId > 0
+            ? ' AND section_id = ?'
+            : '';
         $stmt = $this->pdo->prepare(
             'SELECT page_number, section_id, stable_anchor, page_type,
                     is_cover, is_section_start, is_major_section_start,
                     page_html, thumbnail_html, metadata_json
                FROM ipca_publishing_reader_page_maps
-              WHERE book_version_id = ? AND layout_profile = ?
+              WHERE book_version_id = ? AND layout_profile = ?'
+              . $sectionFilter .
+             '
               ORDER BY page_number ASC'
         );
-        $stmt->execute(array($bookVersionId, $layoutProfile));
+        $params = array($bookVersionId, $layoutProfile);
+        if ($sectionFilter !== '') {
+            $params[] = $sectionId;
+        }
+        $stmt->execute($params);
 
         return array_map(static function (array $row): array {
             $metadata = json_decode((string)($row['metadata_json'] ?? '{}'), true);
