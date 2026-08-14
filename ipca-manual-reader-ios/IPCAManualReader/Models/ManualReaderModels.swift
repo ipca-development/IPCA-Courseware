@@ -278,10 +278,270 @@ struct SearchResult: Codable, Identifiable, Hashable {
     }
 }
 
+// MARK: - Immutable publication package
+
+enum ReaderPublicationContract {
+    static let cssGeneratorVersion = "book-style-css-v2"
+}
+
+enum JSONValue: Codable, Equatable {
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([String: JSONValue].self) { self = .object(value) }
+        else { self = .array(try container.decode([JSONValue].self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+}
+
+struct PublicationPackageResponse: Codable {
+    let ok: Bool
+    let bookKey: String
+    let versionID: Int
+    let versionLabel: String
+    let lifecycleStatus: String
+    let isPreview: Bool
+    let publicationPackage: PublicationPackage
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case bookKey = "book_key"
+        case versionID = "version_id"
+        case versionLabel = "version_label"
+        case lifecycleStatus = "lifecycle_status"
+        case isPreview = "is_preview"
+        case publicationPackage = "publication_package"
+        case error
+    }
+}
+
+struct PublicationPackage: Codable {
+    let manifestVersion: String
+    let manifestHash: String
+    let manifest: BookStyleManifest
+    let css: PublicationCSS
+    let templates: PublicationTemplates
+    let assets: [PublicationAsset]
+
+    enum CodingKeys: String, CodingKey {
+        case manifestVersion = "manifest_version"
+        case manifestHash = "manifest_hash"
+        case manifest
+        case css
+        case templates
+        case assets
+    }
+
+    var canonicalManifestJSON: Data {
+        (try? JSONEncoder.canonical.encode(manifest)) ?? Data()
+    }
+}
+
+struct PublicationCSS: Codable {
+    let filename: String
+    let mediaType: String
+    let hashAlgorithm: String
+    let hash: String
+    let content: String
+
+    enum CodingKeys: String, CodingKey {
+        case filename
+        case mediaType = "media_type"
+        case hashAlgorithm = "hash_algorithm"
+        case hash
+        case content
+    }
+}
+
+struct PublicationAsset: Codable {
+    let descriptor: String
+    let descriptorHash: String
+    let kind: String
+    let url: String?
+    let contentHash: String?
+    let hashAlgorithm: String
+    let fontFamily: String?
+    let fontStack: String?
+
+    enum CodingKeys: String, CodingKey {
+        case descriptor
+        case descriptorHash = "descriptor_hash"
+        case kind
+        case url
+        case contentHash = "content_hash"
+        case hashAlgorithm = "hash_algorithm"
+        case fontFamily = "font_family"
+        case fontStack = "font_stack"
+    }
+}
+
+struct PublicationTemplates: Codable {
+    let main: PublicationTemplateScope
+    let annex: PublicationTemplateScope
+}
+
+struct PublicationTemplateScope: Codable {
+    let available: Bool
+    let config: JSONValue
+    let rendered: PublicationRenderedTemplate?
+}
+
+struct PublicationRenderedTemplate: Codable {
+    let sourceSectionID: Int
+    let headerHTML: String
+    let footerHTML: String
+    let headerHash: String
+    let footerHash: String
+    let templateHash: String
+
+    enum CodingKeys: String, CodingKey {
+        case sourceSectionID = "source_section_id"
+        case headerHTML = "header_html"
+        case footerHTML = "footer_html"
+        case headerHash = "header_hash"
+        case footerHash = "footer_hash"
+        case templateHash = "template_hash"
+    }
+}
+
+struct BookStyleManifest: Codable {
+    let schemaVersion: String
+    let book: PublicationBookIdentity
+    let styles: JSONValue
+    let pageBands: JSONValue
+    let layout: PublicationLayout
+    let layoutHash: String
+    let renderPipeline: PublicationRenderPipeline
+    let templateIdentity: JSONValue
+    let assetIdentity: [PublicationAssetIdentity]
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case book
+        case styles
+        case pageBands = "page_bands"
+        case layout
+        case layoutHash = "layout_hash"
+        case renderPipeline = "render_pipeline"
+        case templateIdentity = "template_identity"
+        case assetIdentity = "asset_identity"
+    }
+}
+
+struct PublicationBookIdentity: Codable {
+    let bookKey: String
+    let manualCode: String
+    let versionID: Int
+    let versionLabel: String
+
+    enum CodingKeys: String, CodingKey {
+        case bookKey = "book_key"
+        case manualCode = "manual_code"
+        case versionID = "version_id"
+        case versionLabel = "version_label"
+    }
+}
+
+struct PublicationLayout: Codable, Hashable {
+    let layoutProfile: String
+    let paperSize: String
+    let pageWidthPX: Double
+    let pageHeightPX: Double
+    let sheetPaddingTopPX: Double
+    let sheetPaddingBottomPX: Double
+    let sheetPaddingXPX: Double
+    let headerBandPX: Double
+    let footerBandPX: Double
+    let headerMarginBottomPX: Double
+    let footerMarginTopPX: Double
+    let bodyCapacityPX: Double
+    let fontFamily: String
+    let fontSizePT: Double
+    let lineHeight: Double
+    let lineHeightPX: Double
+    let charsPerLine: Int
+    let splitWordsPerChunk: Int
+
+    enum CodingKeys: String, CodingKey {
+        case layoutProfile = "layout_profile"
+        case paperSize = "paper_size"
+        case pageWidthPX = "page_width_px"
+        case pageHeightPX = "page_height_px"
+        case sheetPaddingTopPX = "sheet_padding_top_px"
+        case sheetPaddingBottomPX = "sheet_padding_bottom_px"
+        case sheetPaddingXPX = "sheet_padding_x_px"
+        case headerBandPX = "header_band_px"
+        case footerBandPX = "footer_band_px"
+        case headerMarginBottomPX = "header_margin_bottom_px"
+        case footerMarginTopPX = "footer_margin_top_px"
+        case bodyCapacityPX = "body_capacity_px"
+        case fontFamily = "font_family"
+        case fontSizePT = "font_size_pt"
+        case lineHeight = "line_height"
+        case lineHeightPX = "line_height_px"
+        case charsPerLine = "chars_per_line"
+        case splitWordsPerChunk = "split_words_per_chunk"
+    }
+}
+
+struct PublicationRenderPipeline: Codable {
+    let rendererVersion: String
+    let rendererSourceHash: String?
+    let templateVersion: String
+    let cssGeneratorVersion: String
+
+    enum CodingKeys: String, CodingKey {
+        case rendererVersion = "renderer_version"
+        case rendererSourceHash = "renderer_source_hash"
+        case templateVersion = "template_version"
+        case cssGeneratorVersion = "css_generator_version"
+    }
+}
+
+struct PublicationAssetIdentity: Codable {
+    let descriptor: String
+    let descriptorHash: String
+
+    enum CodingKeys: String, CodingKey {
+        case descriptor
+        case descriptorHash = "descriptor_hash"
+    }
+}
+
+private extension JSONEncoder {
+    static var canonical: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }
+}
+
 // MARK: - Reader settings
 
 enum ReaderTheme: String, CaseIterable, Identifiable, Codable {
-    case light
+    case original
     case sepia
     case dark
 
@@ -289,10 +549,15 @@ enum ReaderTheme: String, CaseIterable, Identifiable, Codable {
 
     var label: String {
         switch self {
-        case .light: "Light"
+        case .original: "Original"
         case .sepia: "Sepia"
         case .dark: "Dark"
         }
+    }
+
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        self = value == "light" ? .original : (ReaderTheme(rawValue: value) ?? .original)
     }
 }
 
@@ -344,7 +609,7 @@ enum ReaderFontSize: String, CaseIterable, Identifiable, Codable {
 }
 
 struct ReaderSettings: Codable, Equatable {
-    var theme: ReaderTheme = .light
+    var theme: ReaderTheme = .original
     var zoom: ReaderZoomMode = .fitWidth
     var showFilmstrip: Bool = true
     var fontSize: ReaderFontSize = .standard
@@ -360,7 +625,7 @@ struct ReaderSettings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        theme = try container.decodeIfPresent(ReaderTheme.self, forKey: .theme) ?? .light
+        theme = try container.decodeIfPresent(ReaderTheme.self, forKey: .theme) ?? .original
         zoom = try container.decodeIfPresent(ReaderZoomMode.self, forKey: .zoom) ?? .fitWidth
         showFilmstrip = try container.decodeIfPresent(Bool.self, forKey: .showFilmstrip) ?? true
         fontSize = try container.decodeIfPresent(ReaderFontSize.self, forKey: .fontSize) ?? .standard

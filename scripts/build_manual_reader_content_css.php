@@ -5,50 +5,78 @@ declare(strict_types=1);
  * Build the read-only controlled-content stylesheet used by native readers.
  *
  * The source stylesheet remains an immutable Admin Editor asset. This generator
- * copies only content-rendering rule ranges and rejects editor interaction
+ * selector-extracts content-rendering rules and rejects editor interaction
  * selectors. Native readers never load controlled_book_editor.css directly.
  */
 
 $root = dirname(__DIR__);
 $sourcePath = $root . '/public/assets/controlled_book_editor.css';
 $outputPath = $root . '/public/assets/manual_reader_content.css';
-$lines = file($sourcePath);
-if (!is_array($lines)) {
+$source = file_get_contents($sourcePath);
+if (!is_string($source)) {
     fwrite(STDERR, "Unable to read {$sourcePath}\n");
     exit(1);
 }
-
-$ranges = array(
-    array(654, 798),   // sheet and controlled header/footer
-    array(1032, 1075), // sheet metadata/body and block shell
-    array(1145, 1906), // headings, paragraphs, lists, tables, figures
-    array(2169, 2299), // controlled callouts and links
-    array(2603, 2877), // cover and generated TOC
-);
-
-$chunks = array();
-foreach ($ranges as [$start, $end]) {
-    $chunks[] = implode('', array_slice($lines, $start - 1, $end - $start + 1));
-}
-$candidate = implode("\n", $chunks);
+$source = (string)preg_replace('#/\*.*?\*/#s', '', $source);
 
 $forbidden = '/(?:editor|toolbar|dialog|overlay|picker|chrome|dropzone|resize|rotate|'
+    . 'workspace|fullscreen|modal|submit|import|upload|table-tools|empty-state|'
+    . 'textarea|style-input|level-check|token|add-|delete|remove|sign-btn|'
     . 'page-layout|change-marker|is-cell-selected|contenteditable|:hover|:focus|'
     . '\.cmp-page|control|button)/i';
+$publicationSelector = '/\.cpb-(?:sheet(?:\b|-)|page-(?:header|footer)|block(?:\b|--)|'
+    . 'heading|paragraph|cross-ref|section-number|regulatory-ref|font-|line-indent|list|'
+    . 'table|image|callout|cover|toc(?:\b|-(?:row|link|label|page|depth|dot|title))|'
+    . 'part0|lep|annex|amendment|distribution|abbreviations|definitions|highlights|revision)/i';
+$configurationOwnedSelector = '/(?:cpb-(?:heading|paragraph|list|toc|font-|callout|table|page-header|page-footer))/i';
+$configurationOwnedProperty = '/^(?:font(?:-family|-size|-weight|-style)?|color|text-decoration|'
+    . 'background(?:-color)?|border-color|margin-top|margin-bottom|--cpb-table-border-color)$/i';
 $rules = array();
-if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $candidate, $matches, PREG_SET_ORDER)) {
+if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $source, $matches, PREG_SET_ORDER)) {
     foreach ($matches as $match) {
         $selector = trim((string)$match[1]);
         $declarations = trim((string)$match[2]);
-        if ($selector === '' || $declarations === '' || preg_match($forbidden, $selector)) {
+        if (
+            $selector === ''
+            || $declarations === ''
+            || str_starts_with($selector, '@')
+            || preg_match($forbidden, $selector)
+        ) {
             continue;
         }
         if (!str_contains($selector, '.cpb-') && !str_contains($selector, '[data-')) {
             continue;
         }
+        if (!preg_match($publicationSelector, $selector)) {
+            continue;
+        }
+        if (preg_match($configurationOwnedSelector, $selector)) {
+            $kept = array();
+            foreach (explode(';', $declarations) as $declaration) {
+                $declaration = trim($declaration);
+                if ($declaration === '' || !str_contains($declaration, ':')) {
+                    continue;
+                }
+                [$property] = explode(':', $declaration, 2);
+                if (!preg_match($configurationOwnedProperty, trim($property))) {
+                    $kept[] = $declaration;
+                }
+            }
+            $declarations = implode(';', $kept);
+            if ($declarations === '') {
+                continue;
+            }
+        }
+        $formattedDeclarations = array_values(array_filter(
+            array_map('trim', explode(';', $declarations)),
+            static fn(string $declaration): bool => $declaration !== ''
+        ));
+        if ($formattedDeclarations === array()) {
+            continue;
+        }
         $rules[] = $selector . " {\n  "
-            . preg_replace('/\s*;\s*/', ";\n  ", $declarations)
-            . "\n}";
+            . implode(";\n  ", $formattedDeclarations)
+            . ";\n}";
     }
 }
 

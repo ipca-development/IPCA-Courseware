@@ -3,7 +3,7 @@ import Foundation
 
 enum ReaderPaginationVersion {
     static let normalizer = "reader-normalizer-v1"
-    static let engine = "semantic-paginator-v1"
+    static let engine = "semantic-paginator-v2"
     static let validator = "pagination-validator-v1"
     static let style = "reader-page-frame-v2"
 }
@@ -28,6 +28,8 @@ struct ReaderRect: Codable, Hashable {
 struct PageLayoutConfiguration: Codable, Hashable {
     let pageWidth: Double
     let pageHeight: Double
+    let canonicalPageWidth: Double
+    let canonicalPageHeight: Double
     let headerFrame: ReaderRect
     let contentFrame: ReaderRect
     let footerFrame: ReaderRect
@@ -44,34 +46,37 @@ struct PageLayoutConfiguration: Codable, Hashable {
     static func make(
         viewport: CGSize,
         isLandscape: Bool,
-        fontScale: Double
+        fontScale: Double,
+        publicationLayout: PublicationLayout,
+        manifestLayoutHash: String
     ) -> PageLayoutConfiguration {
         let safeWidth = max(320, Double(viewport.width))
         let safeHeight = max(320, Double(viewport.height))
-        let pageAspect = 816.0 / 1056.0
+        let canonicalWidth = max(1, publicationLayout.pageWidthPX)
+        let canonicalHeight = max(1, publicationLayout.pageHeightPX)
+        let pageAspect = canonicalWidth / canonicalHeight
         let spreadGutter = isLandscape ? 6.0 : 0.0
         let pageSlotWidth = (safeWidth - spreadGutter) / (isLandscape ? 2.0 : 1.0)
         let availableHeight = safeHeight
         let pageWidth = max(1, min(pageSlotWidth, availableHeight * pageAspect))
         let pageHeight = pageWidth / pageAspect
-        let scale = pageWidth / 816.0
+        let scale = pageWidth / canonicalWidth
 
-        let sideMargin = 56.0 * scale
-        let topMargin = 48.0 * scale
-        let bottomMargin = 20.0 * scale
-        let headerHeight = 84.0 * scale
-        let headerGap = 20.0 * scale
-        let footerGap = 20.0 * scale
-        let footerHeight = 32.0 * scale
+        let sideMargin = publicationLayout.sheetPaddingXPX * scale
+        let topMargin = publicationLayout.sheetPaddingTopPX * scale
+        let bottomMargin = publicationLayout.sheetPaddingBottomPX * scale
+        let headerHeight = publicationLayout.headerBandPX * scale
+        let headerGap = publicationLayout.headerMarginBottomPX * scale
+        let footerGap = publicationLayout.footerMarginTopPX * scale
+        let footerHeight = publicationLayout.footerBandPX * scale
         let contentY = topMargin + headerHeight + headerGap
-        let contentHeight = max(
-            1,
-            pageHeight - contentY - footerGap - footerHeight - bottomMargin
-        )
+        let contentHeight = max(1, publicationLayout.bodyCapacityPX * scale)
 
         return PageLayoutConfiguration(
             pageWidth: pageWidth,
             pageHeight: pageHeight,
+            canonicalPageWidth: canonicalWidth,
+            canonicalPageHeight: canonicalHeight,
             headerFrame: ReaderRect(
                 x: sideMargin,
                 y: topMargin,
@@ -98,7 +103,7 @@ struct PageLayoutConfiguration: Codable, Hashable {
             viewportHeight: safeHeight,
             mode: isLandscape ? .twoPageSpread : .singlePage,
             fontScale: max(0.75, min(1.5, fontScale)),
-            layoutVersion: ReaderPaginationVersion.style
+            layoutVersion: "\(ReaderPaginationVersion.style):\(manifestLayoutHash)"
         )
     }
 

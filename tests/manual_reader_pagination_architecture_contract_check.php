@@ -53,8 +53,34 @@ require_markers(
         'contentFrame',
         'footerFrame',
         'reader-normalizer-v1',
-        'semantic-paginator-v1',
+        'semantic-paginator-v2',
         'pagination-validator-v1',
+    ),
+    $failures
+);
+
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Models/ManualReaderModels.swift',
+    array(
+        'struct PublicationPackageResponse',
+        'struct PublicationPackage',
+        'struct BookStyleManifest',
+        'struct PublicationLayout',
+        'book-style-css-v2',
+        'case original',
+        'value == "light" ? .original',
+    ),
+    $failures
+);
+
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/PageCache.swift',
+    array(
+        'publicationManifestJSON',
+        'bookStyleCSS',
+        'downloadPublicationAssets',
+        'Publication asset hash verification failed',
+        'rewrittenPaginateSourceData',
     ),
     $failures
 );
@@ -91,6 +117,21 @@ require_markers(
     $failures
 );
 
+$paginationCore = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ReaderPaginationCore.js'
+);
+foreach (array(
+    'applyTypography',
+    'applyControlledBandTypography',
+    '[8, 9, 10, 11, 12, 14, 16, 18, 24]',
+    'layout.pageWidth / 816',
+    'layout.contentFrame.height * 0.82',
+) as $forbiddenMarker) {
+    if (str_contains($paginationCore, $forbiddenMarker)) {
+        $failures[] = "Native paginator retained approximated publication styling: {$forbiddenMarker}";
+    }
+}
+
 require_markers(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ReaderPaginationCore.js',
     array(
@@ -111,6 +152,12 @@ require_markers(
         'EXCESSIVE_WHITESPACE',
         'document.fonts.ready',
         'tableHeaderHTML',
+        'function canonicalRect(rect)',
+        'reader-canonical-page',
+        'transform:scale(var(--reader-page-scale))',
+        'body.scrollHeight * scale',
+        'bodyRect.height',
+        'region.style.setProperty("--reader-font-scale", "1")',
     ),
     $failures
 );

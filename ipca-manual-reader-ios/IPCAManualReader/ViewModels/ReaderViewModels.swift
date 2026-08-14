@@ -56,6 +56,7 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var pageHTMLByIndex: [Int: String] = [:]
     @Published private(set) var personalPages: [PersonalReaderPage] = []
     @Published private(set) var activeLayout: PageLayoutConfiguration?
+    @Published private(set) var publicationLayout: PublicationLayout?
     @Published private(set) var paginationValidation: PaginationValidationSummary?
     @Published var searchResults: [SearchResult] = []
     @Published var isSearching = false
@@ -105,6 +106,7 @@ final class ReaderViewModel: ObservableObject {
                 forceRefresh: false
             )
             offlinePackage = package
+            publicationLayout = package.publicationLayout
             pages = package.pageMap.pages.sorted { $0.pageNumber < $1.pageNumber }
             nav = package.tableOfContents.nav
             sectionPageIndex = package.tableOfContents.sectionPageIndex.reduce(into: [:]) { result, pair in
@@ -183,10 +185,16 @@ final class ReaderViewModel: ObservableObject {
     }
 
     func updateLayout(viewport: CGSize, isLandscape: Bool) async {
+        guard let publicationLayout,
+              let manifestLayoutHash = offlinePackage?.publicationPackage?.manifest.layoutHash else {
+            return
+        }
         let next = PageLayoutConfiguration.make(
             viewport: viewport,
             isLandscape: isLandscape,
-            fontScale: ManualReaderSessionStore.shared.settings.fontSize.scale
+            fontScale: ManualReaderSessionStore.shared.settings.fontSize.scale,
+            publicationLayout: publicationLayout,
+            manifestLayoutHash: manifestLayoutHash
         )
         guard next != activeLayout else { return }
         activeLayout = next
@@ -298,25 +306,33 @@ final class ReaderViewModel: ObservableObject {
 
         let rawHTML = personalPageHTMLByNumber[pageNumber]
             ?? offlinePackage?.page(number: pageNumber)?.pageHtml
-        guard let html = rawHTML else { return }
+        guard let html = rawHTML,
+              let package = offlinePackage,
+              let bookStyleCSS = package.bookStyleCSS,
+              let publicationLayout = package.publicationLayout else { return }
         pageHTMLByIndex[index] = client.pageHTMLDocument(
-            pageHtml: html,
+            pageHtml: package.rewritePublicationURLs(in: html),
             settings: settings,
-            embeddedContentCSS: offlinePackage?.contentCSS,
-            embeddedReaderCSS: offlinePackage?.readerCSS,
-            layout: personalPageHTMLByNumber[pageNumber] == nil ? nil : activeLayout
+            bookStyleCSS: bookStyleCSS,
+            readerCSS: "",
+            layout: personalPageHTMLByNumber[pageNumber] == nil ? nil : activeLayout,
+            publicationLayout: publicationLayout
         )
     }
 
     func reloadCurrentPageStyles() async {
-        if let activeLayout {
+        if let activeLayout,
+           let publicationLayout,
+           let manifestLayoutHash = offlinePackage?.publicationPackage?.manifest.layoutHash {
             self.activeLayout = PageLayoutConfiguration.make(
                 viewport: CGSize(
                     width: CGFloat(activeLayout.viewportWidth),
                     height: CGFloat(activeLayout.viewportHeight)
                 ),
                 isLandscape: activeLayout.mode == .twoPageSpread,
-                fontScale: ManualReaderSessionStore.shared.settings.fontSize.scale
+                fontScale: ManualReaderSessionStore.shared.settings.fontSize.scale,
+                publicationLayout: publicationLayout,
+                manifestLayoutHash: manifestLayoutHash
             )
             do {
                 try await repaginateFromSource(preservingCurrentPosition: true)
@@ -346,9 +362,8 @@ final class ReaderViewModel: ObservableObject {
             }
         }
         guard let package = offlinePackage,
-              let sourceData = package.paginateSourceData,
-              let contentCSS = package.contentCSS,
-              let readerCSS = package.readerCSS,
+              let sourceData = package.rewrittenPaginateSourceData(),
+              let bookStyleCSS = package.bookStyleCSS,
               let baseURL = ManualReaderSessionStore.shared.baseURL,
               let activeLayout else { return }
 
@@ -362,10 +377,9 @@ final class ReaderViewModel: ObservableObject {
         let sectionID = preservingCurrentPosition ? currentPage?.sectionId : nil
         let cacheIdentity = paginationCacheIdentity(
             sourceData: sourceData,
-            contentCSS: contentCSS,
-            readerCSS: readerCSS,
+            bookStyleCSS: bookStyleCSS,
             layout: activeLayout,
-            theme: ManualReaderSessionStore.shared.settings.theme,
+            publicationManifestHash: package.publicationPackage?.manifestHash ?? "",
             officialLayoutHash: package.pageMap.layoutHash ?? "",
             officialPageCount: package.pageMap.pageCount ?? package.pageMap.pages.count
         )
@@ -376,8 +390,8 @@ final class ReaderViewModel: ObservableObject {
             let officialPages = officialPageLookups(package: package)
             result = try await paginationEngine.paginate(
                 sourceData: sourceData,
-                contentCSS: contentCSS,
-                readerCSS: readerCSS,
+                bookStyleCSS: bookStyleCSS,
+                readerCSS: "",
                 layout: activeLayout,
                 baseURL: baseURL,
                 officialPageByAnchor: officialPages.byAnchor,
@@ -511,10 +525,9 @@ final class ReaderViewModel: ObservableObject {
 
     private func paginationCacheIdentity(
         sourceData: Data,
-        contentCSS: String,
-        readerCSS: String,
+        bookStyleCSS: String,
         layout: PageLayoutConfiguration,
-        theme: ReaderTheme,
+        publicationManifestHash: String,
         officialLayoutHash: String,
         officialPageCount: Int
     ) -> String {
@@ -525,17 +538,14 @@ final class ReaderViewModel: ObservableObject {
             book.id,
             String(book.versionId),
             sourceHash,
-            SHA256.hash(data: Data(contentCSS.utf8))
+            SHA256.hash(data: Data(bookStyleCSS.utf8))
                 .map { String(format: "%02x", $0) }
                 .joined(),
-            SHA256.hash(data: Data(readerCSS.utf8))
-                .map { String(format: "%02x", $0) }
-                .joined(),
+            publicationManifestHash,
             ReaderPaginationVersion.normalizer,
             ReaderPaginationVersion.engine,
             ReaderPaginationVersion.style,
             layout.cacheIdentity,
-            theme.rawValue,
             officialLayoutHash,
             String(officialPageCount)
         ].joined(separator: "|")

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 
 actor PageCache {
     static let shared = PageCache()
@@ -48,9 +49,88 @@ struct OfflineManualPackage: Codable {
     let readerCSS: String?
     let readerStyleVersion: String?
     let paginateSourceData: Data?
+    let publicationPackage: PublicationPackage?
+    let publicationManifestJSON: Data?
+    let publicationAssets: [OfflinePublicationAsset]?
 
     func page(number: Int) -> FrozenPageResponse? {
         pages.first { $0.pageNumber == number }
+    }
+
+    var hasCanonicalPublicationPackage: Bool {
+        guard let publicationPackage,
+              let publicationManifestJSON,
+              !publicationPackage.css.content.isEmpty,
+              publicationPackage.manifestVersion.hasPrefix("book-style-manifest-v1-"),
+              publicationPackage.manifest.renderPipeline.cssGeneratorVersion
+                == ReaderPublicationContract.cssGeneratorVersion,
+              sha256(publicationManifestJSON) == publicationPackage.manifestHash,
+              sha256(Data(publicationPackage.css.content.utf8)) == publicationPackage.css.hash else {
+            return false
+        }
+        let downloadedByURL = Dictionary(
+            uniqueKeysWithValues: (publicationAssets ?? []).map { ($0.sourceURL, $0) }
+        )
+        return publicationPackage.assets.compactMap { asset -> Bool? in
+            guard let url = asset.url else { return nil }
+            guard let local = downloadedByURL[url] else { return false }
+            if let expected = asset.contentHash, !expected.isEmpty {
+                return sha256(local.data) == expected.lowercased()
+            }
+            return true
+        }.allSatisfy { $0 }
+    }
+
+    var bookStyleCSS: String? {
+        hasCanonicalPublicationPackage ? publicationPackage?.css.content : nil
+    }
+
+    var publicationLayout: PublicationLayout? {
+        hasCanonicalPublicationPackage ? publicationPackage?.manifest.layout : nil
+    }
+
+    func rewritePublicationURLs(in html: String) -> String {
+        let replacements = (publicationAssets ?? []).flatMap { asset in
+            [asset.sourceURL, asset.resolvedURL].map { ($0, asset.dataURL) }
+        }.sorted { $0.0.count > $1.0.count }
+        return replacements.reduce(html) { result, replacement in
+            result.replacingOccurrences(of: replacement.0, with: replacement.1)
+            }
+    }
+
+    func rewrittenPaginateSourceData() -> Data? {
+        guard let paginateSourceData,
+              let object = try? JSONSerialization.jsonObject(with: paginateSourceData) else {
+            return nil
+        }
+        func rewrite(_ value: Any) -> Any {
+            if let string = value as? String { return rewritePublicationURLs(in: string) }
+            if let array = value as? [Any] { return array.map(rewrite) }
+            if let dictionary = value as? [String: Any] {
+                return dictionary.mapValues(rewrite)
+            }
+            return value
+        }
+        let rewritten = rewrite(object)
+        guard JSONSerialization.isValidJSONObject(rewritten) else { return nil }
+        return try? JSONSerialization.data(withJSONObject: rewritten, options: [.sortedKeys])
+    }
+
+    private func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+struct OfflinePublicationAsset: Codable {
+    let descriptor: String
+    let sourceURL: String
+    let resolvedURL: String
+    let mediaType: String
+    let contentHash: String?
+    let data: Data
+
+    var dataURL: String {
+        "data:\(mediaType);base64,\(data.base64EncodedString())"
     }
 }
 
@@ -196,7 +276,9 @@ final class ManualDownloadManager: ObservableObject {
             return nil
         }
         packages[book.id] = package
-        statuses[book.id] = .availableOffline(package.downloadedAt)
+        statuses[book.id] = package.hasCanonicalPublicationPackage
+            ? .availableOffline(package.downloadedAt)
+            : .notDownloaded
         return package
     }
 
@@ -204,7 +286,9 @@ final class ManualDownloadManager: ObservableObject {
         for book in books {
             if let package = await diskStore.load(bookID: book.id, versionID: book.versionId) {
                 packages[book.id] = package
-                statuses[book.id] = .availableOffline(package.downloadedAt)
+                statuses[book.id] = package.hasCanonicalPublicationPackage
+                    ? .availableOffline(package.downloadedAt)
+                    : .notDownloaded
             } else if statuses[book.id] == nil {
                 statuses[book.id] = .notDownloaded
             }
@@ -216,62 +300,10 @@ final class ManualDownloadManager: ObservableObject {
         client: ManualReaderAPIClient,
         forceRefresh: Bool = false
     ) async throws -> OfflineManualPackage {
-        if !forceRefresh, let existing = await package(for: book) {
-            var sourceData = existing.paginateSourceData
-            if sourceData == nil {
-                sourceData = try? await client.fetchPaginateSource(
-                   bookKey: book.bookKey,
-                   versionId: book.versionId > 0 ? book.versionId : nil,
-                   isPreview: book.isDraftPreview
-                )
-            }
-            var contentCSS = existing.contentCSS
-            if contentCSS == nil {
-                contentCSS = await downloadTextAsset(
-                    path: "assets/manual_reader_content.css",
-                    client: client
-                )
-                if contentCSS == nil {
-                    contentCSS = bundledTextAsset(name: "manual_reader_content", extension: "css")
-                }
-            }
-            var readerCSS = existing.readerCSS
-            let needsReaderStyleRefresh = existing.readerStyleVersion != ReaderPaginationVersion.style
-            var didRefreshReaderStyle = false
-            if readerCSS == nil || needsReaderStyleRefresh {
-                if let downloadedReaderCSS = await downloadTextAsset(
-                    path: "assets/manual_reader.css",
-                    client: client
-                ) {
-                    readerCSS = downloadedReaderCSS
-                    didRefreshReaderStyle = true
-                }
-            }
-            if sourceData != nil,
-               contentCSS != nil,
-               (
-                   existing.paginateSourceData == nil
-                       || existing.contentCSS == nil
-                       || didRefreshReaderStyle
-               ) {
-                let upgraded = OfflineManualPackage(
-                    bookID: existing.bookID,
-                    versionID: existing.versionID,
-                    downloadedAt: existing.downloadedAt,
-                    pageMap: existing.pageMap,
-                    tableOfContents: existing.tableOfContents,
-                    pages: existing.pages,
-                    coverImageData: existing.coverImageData,
-                    editorCSS: existing.editorCSS,
-                    contentCSS: contentCSS,
-                    readerCSS: readerCSS,
-                    readerStyleVersion: readerCSS == nil ? nil : ReaderPaginationVersion.style,
-                    paginateSourceData: sourceData
-                )
-                try? await diskStore.save(upgraded)
-                packages[book.id] = upgraded
-                return upgraded
-            }
+        if !forceRefresh,
+           let existing = await package(for: book),
+           existing.hasCanonicalPublicationPackage,
+           existing.paginateSourceData != nil {
             return existing
         }
 
@@ -289,7 +321,12 @@ final class ManualDownloadManager: ObservableObject {
                 versionId: versionID,
                 isPreview: isPreview
             )
-            async let paginateSourceTask: Data? = try? await client.fetchPaginateSource(
+            async let paginateSourceTask = client.fetchPaginateSource(
+                bookKey: book.bookKey,
+                versionId: versionID,
+                isPreview: isPreview
+            )
+            async let publicationPackageTask = client.fetchPublicationPackage(
                 bookKey: book.bookKey,
                 versionId: versionID,
                 isPreview: isPreview
@@ -307,18 +344,29 @@ final class ManualDownloadManager: ObservableObject {
                 coverData = result.0
             }
 
-            async let contentCSSTask = downloadTextAsset(
-                path: "assets/manual_reader_content.css",
-                client: client
-            )
-            async let readerCSSTask = downloadTextAsset(
-                path: "assets/manual_reader.css",
-                client: client
-            )
-            let (pageMap, tableOfContents, paginateSourceData) = try await (
+            let (pageMap, tableOfContents, paginateSourceData, publicationResponse) = try await (
                 pageMapTask,
                 tocTask,
-                paginateSourceTask
+                paginateSourceTask,
+                publicationPackageTask
+            )
+            guard publicationResponse.ok,
+                  publicationResponse.versionID == book.versionId else {
+                throw ManualReaderAPIError.badResponse(
+                    publicationResponse.error ?? "Publication package version mismatch."
+                )
+            }
+            let publicationPackage = publicationResponse.publicationPackage
+            let manifestJSON = publicationPackage.canonicalManifestJSON
+            guard sha256(manifestJSON) == publicationPackage.manifestHash else {
+                throw ManualReaderAPIError.badResponse("Publication manifest hash verification failed.")
+            }
+            guard sha256(Data(publicationPackage.css.content.utf8)) == publicationPackage.css.hash else {
+                throw ManualReaderAPIError.badResponse("Book-style CSS hash verification failed.")
+            }
+            let publicationAssets = try await downloadPublicationAssets(
+                publicationPackage.assets,
+                client: client
             )
             let pageNumbers = pageMap.pages
                 .map(\.pageNumber)
@@ -348,10 +396,6 @@ final class ManualDownloadManager: ObservableObject {
                 )
             }
 
-            let (downloadedContentCSS, readerCSS) = await (contentCSSTask, readerCSSTask)
-            let contentCSS = downloadedContentCSS
-                ?? bundledTextAsset(name: "manual_reader_content", extension: "css")
-
             let package = OfflineManualPackage(
                 bookID: book.id,
                 versionID: book.versionId,
@@ -361,10 +405,13 @@ final class ManualDownloadManager: ObservableObject {
                 pages: downloadedPages,
                 coverImageData: coverData,
                 editorCSS: nil,
-                contentCSS: contentCSS,
-                readerCSS: readerCSS,
-                readerStyleVersion: readerCSS == nil ? nil : ReaderPaginationVersion.style,
-                paginateSourceData: paginateSourceData
+                contentCSS: nil,
+                readerCSS: nil,
+                readerStyleVersion: ReaderPaginationVersion.style,
+                paginateSourceData: paginateSourceData,
+                publicationPackage: publicationPackage,
+                publicationManifestJSON: manifestJSON,
+                publicationAssets: publicationAssets
             )
             try await diskStore.save(package)
             packages[book.id] = package
@@ -424,23 +471,57 @@ final class ManualDownloadManager: ObservableObject {
         throw CancellationError()
     }
 
-    private func downloadTextAsset(
-        path: String,
+    private func downloadPublicationAssets(
+        _ assets: [PublicationAsset],
         client: ManualReaderAPIClient
-    ) async -> String? {
-        let url = client.baseURL.appending(path: path)
-        guard let result = try? await client.session.data(from: url),
-              let response = result.1 as? HTTPURLResponse,
-              (200...299).contains(response.statusCode) else {
-            return nil
+    ) async throws -> [OfflinePublicationAsset] {
+        var downloaded: [OfflinePublicationAsset] = []
+        for asset in assets.sorted(by: { $0.descriptor < $1.descriptor }) {
+            guard let sourceURL = asset.url else { continue }
+            guard let url = ManualReaderAPIClient.absoluteURL(from: sourceURL, baseURL: client.baseURL) else {
+                throw ManualReaderAPIError.badResponse("Invalid publication asset URL: \(sourceURL)")
+            }
+            let (data, response) = try await client.session.data(from: url)
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode) else {
+                throw ManualReaderAPIError.badResponse("Unable to download publication asset: \(sourceURL)")
+            }
+            if let expected = asset.contentHash,
+               !expected.isEmpty,
+               sha256(data) != expected.lowercased() {
+                throw ManualReaderAPIError.badResponse(
+                    "Publication asset hash verification failed: \(sourceURL)"
+                )
+            }
+            let mediaType = http.value(forHTTPHeaderField: "Content-Type")?
+                .split(separator: ";").first.map(String.init)
+                ?? mediaType(for: url.pathExtension)
+            downloaded.append(
+                OfflinePublicationAsset(
+                    descriptor: asset.descriptor,
+                    sourceURL: sourceURL,
+                    resolvedURL: url.absoluteString,
+                    mediaType: mediaType,
+                    contentHash: asset.contentHash,
+                    data: data
+                )
+            )
         }
-        return String(data: result.0, encoding: .utf8)
+        return downloaded
     }
 
-    private func bundledTextAsset(name: String, extension fileExtension: String) -> String? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: fileExtension) else {
-            return nil
+    private func mediaType(for pathExtension: String) -> String {
+        switch pathExtension.lowercased() {
+        case "png": "image/png"
+        case "jpg", "jpeg": "image/jpeg"
+        case "gif": "image/gif"
+        case "svg": "image/svg+xml"
+        case "webp": "image/webp"
+        default: "application/octet-stream"
         }
-        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    private func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

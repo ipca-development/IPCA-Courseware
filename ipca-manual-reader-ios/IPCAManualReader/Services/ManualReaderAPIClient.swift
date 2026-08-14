@@ -241,6 +241,23 @@ struct ManualReaderAPIClient {
         return try JSONSerialization.data(withJSONObject: source)
     }
 
+    func fetchPublicationPackage(
+        bookKey: String,
+        versionId: Int? = nil,
+        isPreview: Bool = false
+    ) async throws -> PublicationPackageResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: readerQuery(
+                bookKey: bookKey,
+                versionId: versionId,
+                isPreview: isPreview,
+                action: "publication_package"
+            ),
+            timeoutInterval: 90
+        )
+    }
+
     func downloadManualPages(
         bookKey: String,
         pageNumbers: [Int],
@@ -430,60 +447,20 @@ struct ManualReaderAPIClient {
 }
 
 extension ManualReaderAPIClient {
-    /// Wrap frozen page HTML with the same stylesheets as the web reader for pixel-identical layout.
+    /// Wrap canonical publication HTML without restyling its semantic DOM.
     func pageHTMLDocument(
         pageHtml: String,
         settings: ReaderSettings,
-        cssVersion: String = "",
-        embeddedContentCSS: String? = nil,
-        embeddedReaderCSS: String? = nil,
-        layout: PageLayoutConfiguration? = nil
+        bookStyleCSS: String,
+        readerCSS: String,
+        layout: PageLayoutConfiguration? = nil,
+        publicationLayout: PublicationLayout
     ) -> String {
-        let v = cssVersion.isEmpty ? String(Int(Date().timeIntervalSince1970)) : cssVersion
-        let contentCSS = baseURL.appending(path: "assets/manual_reader_content.css").absoluteString + "?v=\(v)"
-        let readerCSS = baseURL.appending(path: "assets/manual_reader.css").absoluteString + "?v=\(v)"
-        let stylesheetMarkup: String
-        if let embeddedContentCSS, let embeddedReaderCSS {
-            stylesheetMarkup = "<style>\(embeddedContentCSS)\n\(embeddedReaderCSS)</style>"
-        } else {
-            stylesheetMarkup = """
-              <link rel="stylesheet" href="\(contentCSS)">
-              <link rel="stylesheet" href="\(readerCSS)">
-            """
-        }
+        let safeBookStyleCSS = bookStyleCSS.replacingOccurrences(of: "</style", with: "<\\/style")
+        let safeReaderCSS = readerCSS.replacingOccurrences(of: "</style", with: "<\\/style")
         let theme = settings.theme.rawValue
-        let zoomClass: String = {
-            switch settings.zoom {
-            case .fitWidth: "is-fit-width"
-            case .fitPage: "is-fit-page"
-            case .percent75: "is-zoom-75"
-            case .percent100: "is-zoom-100"
-            case .percent125: "is-zoom-125"
-            }
-        }()
-        let fontScale = settings.fontSize.scale
-        let pageBackground: String
-        let pageText: String
-        switch settings.theme {
-        case .light:
-            pageBackground = "#ffffff"
-            pageText = "#0f172a"
-        case .sepia:
-            pageBackground = "#f4ecd8"
-            pageText = "#3d3428"
-        case .dark:
-            pageBackground = "#2c2c2e"
-            pageText = "#f5f5f7"
-        }
-        let pageWidth = layout?.pageWidth ?? Double(ManualPageLayout.width)
-        let pageHeight = layout?.pageHeight ?? Double(ManualPageLayout.height)
-        let scaledFontRules = layout == nil
-            ? [8, 9, 10, 11, 12, 14, 16, 18, 24].map { size in
-                let scaled = Double(size) * fontScale
-                return ".mr-ios-frame [data-font-size=\"\(size)\"] { font-size: \(scaled)pt !important; }"
-            }.joined(separator: "\n")
-            : ""
-        let frameFontRule = layout == nil ? "font-size: \(11 * fontScale)pt;" : ""
+        let pageWidth = layout?.pageWidth ?? publicationLayout.pageWidthPX
+        let pageHeight = layout?.pageHeight ?? publicationLayout.pageHeightPX
 
         return """
         <!DOCTYPE html>
@@ -491,7 +468,8 @@ extension ManualReaderAPIClient {
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-          \(stylesheetMarkup)
+          <style id="book-style-css">\(safeBookStyleCSS)</style>
+          <style id="reader-frame-css">\(safeReaderCSS)</style>
           <style>
             html, body, .mr-body, .mr-app, .mr-ios-shell, .mr-page-frame {
               margin: 0;
@@ -500,8 +478,6 @@ extension ManualReaderAPIClient {
               height: 100%;
               max-height: none;
               overflow: hidden;
-              background: \(pageBackground) !important;
-              color: \(pageText);
             }
             .mr-ios-shell { display: flex; align-items: flex-start; justify-content: center; }
             .mr-page-frame { display: block; flex: none; }
@@ -510,45 +486,19 @@ extension ManualReaderAPIClient {
               width: \(pageWidth)px;
               height: \(pageHeight)px;
               transform-origin: top center;
-              background: \(pageBackground);
             }
-            .mr-ios-frame .cpb-sheet { margin: 0 auto; box-shadow: none !important; \(frameFontRule) }
-            .reader-generated-page {
-              margin: 0 !important;
-              box-shadow: none !important;
-              background: \(pageBackground) !important;
-              color: \(pageText) !important;
-            }
-            .reader-page-header-region, .reader-page-body, .reader-page-footer-region { max-width: none !important; }
-            .reader-generated-page .reader-page-body,
-            .reader-generated-page .cpb-heading,
-            .reader-generated-page .cpb-section-title,
-            .reader-generated-page .cpb-paragraph,
-            .reader-generated-page .cpb-list,
-            .reader-generated-page .cpb-page-header-table td,
-            .reader-generated-page .cpb-page-footer-table td {
-              color: \(pageText) !important;
-            }
-            .reader-page-header-region > .cpb-page-header,
-            .reader-page-footer-region > .cpb-page-footer {
-              position: static !important;
-              inset: auto !important;
-              width: 100% !important;
-              height: 100% !important;
-              margin: 0 !important;
-              box-sizing: border-box !important;
-            }
-            .reader-page-footer-region {
-              display: flex;
-              align-items: flex-end;
-            }
-            \(scaledFontRules)
+            .mr-body[data-mr-theme="sepia"] .reader-generated-page,
+            .mr-body[data-mr-theme="sepia"] .cpb-sheet { background-color: #f4ecd8 !important; }
+            .mr-body[data-mr-theme="sepia"] .reader-generated-page * { color: #3d3428 !important; border-color: #8a7658 !important; }
+            .mr-body[data-mr-theme="dark"] .reader-generated-page,
+            .mr-body[data-mr-theme="dark"] .cpb-sheet { background-color: #2c2c2e !important; }
+            .mr-body[data-mr-theme="dark"] .reader-generated-page * { color: #f5f5f7 !important; border-color: #77777c !important; }
             .mr-app .cpb-block-chrome, .mr-app .cpb-dropzone, .mr-app .cpb-change-marker, .mr-app .cpb-page-layout-toggle { display: none !important; }
           </style>
         </head>
         <body class="mr-body" data-mr-theme="\(theme)">
           <div class="mr-app mr-ios-shell">
-            <div class="mr-page-frame \(zoomClass)">
+            <div class="mr-page-frame">
               <div class="mr-ios-frame mr-page-scale">
                 \(pageHtml)
               </div>

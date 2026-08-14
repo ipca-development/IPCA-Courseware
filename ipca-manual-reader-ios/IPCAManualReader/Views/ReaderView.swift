@@ -130,7 +130,7 @@ struct ReaderView: View {
 
     private var pageBackgroundColor: Color {
         switch session.settings.theme {
-        case .light:
+        case .original:
             return .white
         case .sepia:
             return Color(red: 0.957, green: 0.925, blue: 0.847)
@@ -143,18 +143,16 @@ struct ReaderView: View {
         session.settings.theme == .dark ? .dark : .light
     }
 
-    private func physicalBookReader(size: CGSize) -> some View {
+    private func physicalBookReader(size: CGSize) -> AnyView {
         let landscape = size.width > size.height
-        let layout = viewModel.activeLayout ?? PageLayoutConfiguration.make(
-            viewport: size,
-            isLandscape: landscape,
-            fontScale: session.settings.fontSize.scale
-        )
+        guard let layout = viewModel.activeLayout else {
+            return AnyView(ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity))
+        }
         let pageWidth = CGFloat(layout.pageWidth)
         let pageHeight = CGFloat(layout.pageHeight)
         let readerWidth = landscape ? pageWidth * 2 : pageWidth
 
-        return ZStack {
+        return AnyView(ZStack {
             if let baseURL = session.baseURL, !viewModel.pageHTMLByIndex.isEmpty {
                 BookPageCurlView(
                     pages: viewModel.pages,
@@ -187,7 +185,7 @@ struct ReaderView: View {
         .frame(width: readerWidth, height: pageHeight)
         .background(readerBackground)
         .shadow(color: .black.opacity(0.045), radius: 5, y: 1)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity))
     }
 
     private var pageDescription: String {

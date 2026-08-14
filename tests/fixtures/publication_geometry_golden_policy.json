@@ -1,0 +1,23 @@
+{
+  "policy_version": "publication-geometry-policy-v1",
+  "geometry_tolerance_px": 1.25,
+  "style_numeric_tolerance_px": 0.75,
+  "pixel": {
+    "per_channel_antialias_tolerance": 24,
+    "maximum_different_pixel_ratio": 0.02,
+    "maximum_mean_channel_delta": 1.5
+  },
+  "required_categories": [
+    "controlled_header_footer",
+    "logo_bounds",
+    "title_metadata_cells",
+    "paragraph_typography_margins",
+    "heading",
+    "ordered_list",
+    "unordered_list",
+    "note_callout",
+    "standard_table",
+    "figure_image_caption"
+  ],
+  "baseline": null
+}

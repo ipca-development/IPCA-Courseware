@@ -7,7 +7,7 @@
   }
 
   const NORMALIZER_VERSION = "reader-normalizer-v1";
-  const ENGINE_VERSION = "semantic-paginator-v1";
+  const ENGINE_VERSION = "semantic-paginator-v2";
   const VALIDATOR_VERSION = "pagination-validator-v1";
   const source = input.source;
   const layout = input.layout;
@@ -528,6 +528,20 @@
     };
   }
 
+  function pageScale() {
+    return layout.pageWidth / layout.canonicalPageWidth;
+  }
+
+  function canonicalRect(rect) {
+    const scale = pageScale();
+    return {
+      x: rect.x / scale,
+      y: rect.y / scale,
+      width: rect.width / scale,
+      height: rect.height / scale
+    };
+  }
+
   function frameStyle(rect) {
     return [
       `left:${rect.x}px`,
@@ -640,15 +654,14 @@
     const root = rootFromHTML(value.html);
     const sheet = root.matches(".cpb-sheet") ? root : root.querySelector(".cpb-sheet");
     if (!sheet) return pieceMarkup(value);
-    const scale = layout.pageWidth / 816;
     return `<div class="reader-semantic-piece reader-cover-scale" `
       + `data-source-fragment-id="${escapeHTML(value.fragment.id)}" `
       + `data-source-order="${value.fragment.sourceOrder}" `
       + `data-source-range-start="${value.rangeStart}" `
       + `data-source-range-end="${value.rangeEnd}" `
       + `data-presentation-copy="0" data-semantic-type="cover" `
-      + `style="position:absolute;left:0;top:0;width:816px;height:1056px;`
-      + `transform-origin:top left;transform:scale(${scale})">${value.html}</div>`;
+      + `style="position:absolute;inset:0;width:${layout.canonicalPageWidth}px;`
+      + `height:${layout.canonicalPageHeight}px">${value.html}</div>`;
   }
 
   function buildPageElement(page, pageNumber, total) {
@@ -666,172 +679,42 @@
     element.className = "reader-generated-page";
     element.setAttribute("data-reader-page", String(pageNumber));
     element.style.cssText = `position:relative;box-sizing:border-box;width:${layout.pageWidth}px;`
-      + `height:${layout.pageHeight}px;margin:0;padding:0;background:#fff;overflow:visible;`;
+      + `height:${layout.pageHeight}px;margin:0;padding:0;overflow:visible;`;
+    const canonicalPageStyle = `position:absolute;box-sizing:border-box;left:0;top:0;`
+      + `width:${layout.canonicalPageWidth}px;height:${layout.canonicalPageHeight}px;`
+      + `transform-origin:top left;transform:scale(var(--reader-page-scale));`;
     if (page.isCover) {
       element.innerHTML = `
-        <main class="reader-page-body reader-page-cover" data-blocks-root="1"
-          style="position:absolute;box-sizing:border-box;left:0;top:0;width:${layout.pageWidth}px;height:${layout.pageHeight}px;overflow:visible">
-          ${page.pieces.map(coverMarkup).join("")}
-        </main>
+        <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
+          <main class="reader-page-body reader-page-cover" data-blocks-root="1"
+            style="position:absolute;box-sizing:border-box;inset:0;width:${layout.canonicalPageWidth}px;height:${layout.canonicalPageHeight}px;overflow:visible">
+            ${page.pieces.map(coverMarkup).join("")}
+          </main>
+        </div>
       `;
-      applyTypography(element);
+      applyReaderScale(element);
       return element;
     }
+    const headerFrame = canonicalRect(layout.headerFrame);
+    const contentFrame = canonicalRect(layout.contentFrame);
+    const footerFrame = canonicalRect(layout.footerFrame);
     element.innerHTML = `
-      <div class="reader-page-header-region" style="position:absolute;box-sizing:border-box;${frameStyle(layout.headerFrame)}">${header}</div>
-      <main class="reader-page-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;${frameStyle(layout.contentFrame)};overflow:visible">${pagePiecesMarkup(page.pieces)}</main>
-      <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;${frameStyle(layout.footerFrame)}">${footer}</div>
+      <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
+        <div class="reader-page-header-region" style="position:absolute;box-sizing:border-box;${frameStyle(headerFrame)}">${header}</div>
+        <main class="reader-page-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;${frameStyle(contentFrame)};overflow:visible">${pagePiecesMarkup(page.pieces)}</main>
+        <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;${frameStyle(footerFrame)}">${footer}</div>
+      </div>
     `;
-    applyTypography(element);
+    applyReaderScale(element);
     return element;
   }
 
-  function applyTypography(root) {
-    const pageScale = layout.pageWidth / 816;
-    const bodyScale = pageScale * layout.fontScale;
-    root.style.setProperty("--reader-page-scale", String(pageScale));
-    const body = root.querySelector(".reader-page-body");
-    if (body && !body.classList.contains("reader-page-cover")) {
-      body.style.fontSize = `${11 * bodyScale}pt`;
-      body.style.lineHeight = "1.55";
-      [8, 9, 10, 11, 12, 14, 16, 18, 24].forEach((size) => {
-        body.querySelectorAll(`[data-font-size="${size}"]`).forEach((node) => {
-          node.style.setProperty("font-size", `${size * bodyScale}pt`, "important");
-        });
-      });
-      [
-        [".cpb-heading--l1", 18],
-        [".cpb-heading--l2", 14],
-        [".cpb-heading--l3", 12],
-        [".cpb-heading--l4", 11],
-        [".cpb-heading--l5,.cpb-heading--l6", 10],
-        [".cpb-font-manuallabel", 9],
-        [".cpb-font-manualtitle", 16],
-        [".cpb-font-sectiontitle", 14],
-        [".cpb-callout-title", 11],
-        [".cpb-callout-text", 10],
-        [".cpb-image figcaption", 9]
-      ].forEach(([selector, size]) => {
-        body.querySelectorAll(selector).forEach((node) => {
-          node.style.setProperty("font-size", `${size * bodyScale}pt`, "important");
-        });
-      });
-      body.querySelectorAll(".cpb-table th, .cpb-table td").forEach((cell) => {
-        cell.style.setProperty("padding", `${6 * pageScale}px ${8 * pageScale}px`, "important");
-      });
-      body.querySelectorAll(".cpb-list").forEach((list) => {
-        list.style.setProperty("padding-left", `calc(1.4em + ${24 * pageScale}px)`, "important");
-      });
-      body.querySelectorAll("[data-indent-level]").forEach((node) => {
-        const level = Math.max(0, Number(node.getAttribute("data-indent-level") || 0));
-        if (level > 0) {
-          node.style.setProperty("margin-left", `${24 * level * pageScale}px`, "important");
-        }
-      });
-      body.querySelectorAll(".cpb-callout").forEach((callout) => {
-        callout.style.setProperty("gap", `${12 * pageScale}px`, "important");
-        callout.style.setProperty(
-          "padding",
-          `${12 * pageScale}px ${14 * pageScale}px`,
-          "important"
-        );
-      });
-      body.querySelectorAll(".cpb-callout-icon").forEach((icon) => {
-        icon.style.setProperty("width", `${28 * pageScale}px`, "important");
-        icon.style.setProperty("height", `${28 * pageScale}px`, "important");
-        icon.style.setProperty("font-size", `${15 * pageScale}px`, "important");
-      });
-      body.querySelectorAll(":scope > .reader-semantic-piece").forEach((pieceNode) => {
-        const type = pieceNode.getAttribute("data-semantic-type") || "";
-        const styledNode = pieceNode.querySelector(
-          ".cpb-heading[style],.cpb-paragraph[style],.cpb-list[style]"
-        );
-        const hasTopMargin = styledNode && styledNode.style.marginTop !== "";
-        const hasBottomMargin = styledNode && styledNode.style.marginBottom !== "";
-        if (hasTopMargin) {
-          const top = Math.max(0, Number.parseFloat(styledNode.style.marginTop) || 0);
-          pieceNode.style.setProperty("margin-top", `${top * pageScale}px`, "important");
-          styledNode.style.setProperty("margin-top", "0", "important");
-        }
-        const bottom = hasBottomMargin
-          ? Math.max(0, Number.parseFloat(styledNode.style.marginBottom) || 0)
-          : (type === "heading" ? 5 : 6);
-        pieceNode.style.setProperty("margin-bottom", `${bottom * pageScale}px`, "important");
-        if (hasBottomMargin) {
-          styledNode.style.setProperty("margin-bottom", "0", "important");
-        }
-      });
-    }
-    (body || root).querySelectorAll("img").forEach((image) => {
-      image.removeAttribute("loading");
-      image.style.maxWidth = "100%";
-      image.style.height = "auto";
-      image.style.fontSize = "0";
-    });
-    (body || root).querySelectorAll(".cpb-toc-row, .cpb-toc-label, .cpb-toc-link").forEach((node) => {
-      node.style.minWidth = "0";
-      node.style.overflowWrap = "anywhere";
-    });
-    (body || root).querySelectorAll("figcaption").forEach((caption) => {
-      caption.style.maxWidth = "100%";
-      caption.style.overflowWrap = "anywhere";
-      caption.style.wordBreak = "break-word";
-    });
-    applyControlledBandTypography(
-      root.querySelector(".reader-page-header-region"),
-      layout.headerFrame,
-      pageScale
-    );
-    applyControlledBandTypography(
-      root.querySelector(".reader-page-footer-region"),
-      layout.footerFrame,
-      pageScale
-    );
-  }
-
-  function applyControlledBandTypography(region, frame, pageScale) {
-    if (!region) return;
-    region.style.overflow = "hidden";
-    const band = region.querySelector(".cpb-page-header,.cpb-page-footer");
-    if (!band) return;
-    band.style.setProperty("width", "100%", "important");
-    band.style.setProperty("height", "100%", "important");
-    band.style.setProperty("margin", "0", "important");
-    band.style.setProperty("overflow", "hidden", "important");
-    const table = band.querySelector("table");
-    if (table) {
-      table.style.setProperty("width", "100%", "important");
-      table.style.setProperty("height", "100%", "important");
-      table.style.setProperty("table-layout", "fixed", "important");
-    }
-    band.querySelectorAll("tr").forEach((row) => {
-      row.style.setProperty("height", "100%", "important");
-    });
-    band.querySelectorAll("td,th").forEach((cell) => {
-      const declaredSize = Number.parseFloat(cell.style.fontSize || "") || 10;
-      cell.style.setProperty("font-size", `${declaredSize * pageScale}pt`, "important");
-      cell.style.setProperty("line-height", "1.2", "important");
-      cell.style.setProperty(
-        "padding",
-        `${4 * pageScale}px ${8 * pageScale}px`,
-        "important"
-      );
-      cell.style.setProperty("min-height", "0", "important");
-      cell.style.setProperty("overflow", "hidden", "important");
-      cell.style.setProperty("vertical-align", "middle", "important");
-      cell.style.setProperty("overflow-wrap", "anywhere", "important");
-    });
-    band.querySelectorAll(".cpb-page-header-logo").forEach((image) => {
-      const maximumHeight = Math.max(1, frame.height - (8 * pageScale) - 2);
-      image.removeAttribute("loading");
-      image.style.setProperty("display", "block", "important");
-      image.style.setProperty("width", "auto", "important");
-      image.style.setProperty("height", "auto", "important");
-      image.style.setProperty("max-width", "100%", "important");
-      image.style.setProperty("max-height", `${maximumHeight}px`, "important");
-      image.style.setProperty("object-fit", "contain", "important");
-      image.style.setProperty("object-position", "center", "important");
-      image.style.setProperty("margin", "0 auto", "important");
+  function applyReaderScale(root) {
+    root.style.setProperty("--reader-page-scale", String(pageScale()));
+    const body = root.querySelector(".reader-page-body:not(.reader-page-cover)");
+    if (body) body.style.setProperty("--reader-font-scale", String(layout.fontScale));
+    root.querySelectorAll(".reader-page-header-region,.reader-page-footer-region").forEach((region) => {
+      region.style.setProperty("--reader-font-scale", "1");
     });
   }
 
@@ -850,14 +733,15 @@
         height: rect.height
       };
     };
-    const horizontalOverflow = body.scrollWidth - body.clientWidth;
-    const verticalOverflow = body.scrollHeight - body.clientHeight;
+    const scale = pageScale();
+    const horizontalOverflow = (body.scrollWidth - body.clientWidth) * scale;
+    const verticalOverflow = (body.scrollHeight - body.clientHeight) * scale;
     return {
       fits: horizontalOverflow <= 0.75 && verticalOverflow <= 0.75,
       horizontalOverflow,
       verticalOverflow,
-      bodyHeight: body.scrollHeight,
-      clientHeight: body.clientHeight,
+      bodyHeight: body.scrollHeight * scale,
+      clientHeight: body.clientHeight * scale,
       imageRect: relativeRect(body.querySelector("img")),
       figureRect: relativeRect(body.querySelector("figure")),
       headerRect: relativeRect(element.querySelector(".reader-page-header-region")),
@@ -867,6 +751,15 @@
   }
 
   function validateLayoutContract() {
+    const scale = pageScale();
+    if (
+      !Number.isFinite(scale)
+      || scale <= 0
+      || layout.canonicalPageWidth <= 0
+      || layout.canonicalPageHeight <= 0
+    ) {
+      throw new Error("Canonical page dimensions or presentation scale are invalid.");
+    }
     const frames = [layout.headerFrame, layout.contentFrame, layout.footerFrame];
     const valid = frames.every((frame) => frame
       && frame.x >= 0
@@ -881,6 +774,13 @@
     }
     if (layout.contentFrame.y + layout.contentFrame.height > layout.footerFrame.y + 0.01) {
       throw new Error("Content frame overlaps the footer frame.");
+    }
+    const canonicalFrames = frames.map(canonicalRect);
+    if (!canonicalFrames.every((frame) =>
+      frame.x + frame.width <= layout.canonicalPageWidth + 0.01
+      && frame.y + frame.height <= layout.canonicalPageHeight + 0.01
+    )) {
+      throw new Error("Canonical page frame lies outside the manifest page bounds.");
     }
   }
 
@@ -975,28 +875,39 @@
     return first;
   }
 
-  function scaledFigurePiece(fragmentValue) {
+  function scaledFigurePiece(fragmentValue, maximumImageHeight) {
+    const canonicalContent = canonicalRect(layout.contentFrame);
     const root = rootFromHTML(fragmentValue.html).cloneNode(true);
     root.querySelectorAll("figure").forEach((figure) => {
       figure.style.setProperty("width", "100%", "important");
       figure.style.setProperty("max-width", "100%", "important");
     });
-    root.querySelectorAll("figcaption").forEach((caption) => {
-      caption.style.setProperty(
-        "font-size",
-        `${7.5 * (layout.pageWidth / 816) * layout.fontScale}pt`,
-        "important"
-      );
-      caption.style.setProperty("line-height", "1.2", "important");
-    });
     root.querySelectorAll("img").forEach((image) => {
-      image.style.setProperty("max-width", `${layout.contentFrame.width}px`, "important");
-      image.style.setProperty("max-height", `${layout.contentFrame.height * 0.82}px`, "important");
+      image.style.setProperty("max-width", `${canonicalContent.width}px`, "important");
+      image.style.setProperty("max-height", `${maximumImageHeight}px`, "important");
       image.style.setProperty("width", "auto", "important");
       image.style.setProperty("height", "auto", "important");
       image.style.setProperty("object-fit", "contain", "important");
     });
     return piece(fragmentValue, root.outerHTML, 0, fragmentValue.textLength, false);
+  }
+
+  function bestScaledFigurePiece(fragmentValue, section) {
+    const canonicalContent = canonicalRect(layout.contentFrame);
+    let low = 1;
+    let high = Math.max(1, Math.floor(canonicalContent.height));
+    let best = null;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const candidate = scaledFigurePiece(fragmentValue, middle);
+      if (measurePage(pageWith(section, [candidate], {})).fits) {
+        best = candidate;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return best;
   }
 
   function paginate(normalized) {
@@ -1127,8 +1038,8 @@
       }
 
       if (sourceFragment.type === "figure") {
-        const scaled = scaledFigurePiece(sourceFragment);
-        if (measurePage(pageWith(current.section, [scaled], {})).fits) {
+        const scaled = bestScaledFigurePiece(sourceFragment, current.section);
+        if (scaled) {
           current.pieces.push(scaled);
           diagnostic(
             "OVERSIZED_IMAGE_SCALED",
@@ -1142,7 +1053,7 @@
       }
 
       const failedPiece = sourceFragment.type === "figure"
-        ? scaledFigurePiece(sourceFragment)
+        ? scaledFigurePiece(sourceFragment, 1)
         : whole;
       const failedMeasurement = measurePage(pageWith(current.section, [failedPiece], {}));
       const mediaDetail = sourceFragment.type === "figure"
@@ -1411,9 +1322,9 @@
     const last = blocks[blocks.length - 1];
     const lastRect = last?.getBoundingClientRect();
     const usedHeight = lastRect
-      ? Math.min(body.clientHeight, Math.max(0, lastRect.bottom - bodyRect.top))
+      ? Math.min(bodyRect.height, Math.max(0, lastRect.bottom - bodyRect.top))
       : 0;
-    const utilization = body.clientHeight > 0 ? usedHeight / body.clientHeight : 0;
+    const utilization = bodyRect.height > 0 ? usedHeight / bodyRect.height : 0;
     return {
       content_utilization: utilization,
       whitespace_ratio: Math.max(0, 1 - utilization),

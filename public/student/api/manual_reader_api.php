@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAccessService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleManifestService.php';
 
 cw_require_login();
 
@@ -156,11 +157,36 @@ try {
         case 'paginate_source':
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            $source = $reader->loadReaderPaginateSource($ctx['version']);
+            $publicationPackage = (new ControlledPublishingBookStyleManifestService($pdo))
+                ->buildPublicationPackage($ctx['version'], $source);
+            $source['book_style_manifest_version'] = $publicationPackage['manifest_version'];
+            $source['book_style_manifest_hash'] = $publicationPackage['manifest_hash'];
+            $source['book_style_css_hash'] = $publicationPackage['css']['hash'];
             mr_json(200, array(
                 'ok' => true,
                 'book_key' => $bookKey,
                 'version_id' => (int)$ctx['version']['id'],
-                'source' => $reader->loadReaderPaginateSource($ctx['version']),
+                'book_style_manifest_version' => $publicationPackage['manifest_version'],
+                'book_style_manifest_hash' => $publicationPackage['manifest_hash'],
+                'book_style_css_hash' => $publicationPackage['css']['hash'],
+                'source' => $source,
+            ));
+
+        case 'publication_package':
+            $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            $source = $reader->loadReaderPaginateSource($ctx['version']);
+            $publicationPackage = (new ControlledPublishingBookStyleManifestService($pdo))
+                ->buildPublicationPackage($ctx['version'], $source);
+            mr_json(200, array(
+                'ok' => true,
+                'book_key' => $bookKey,
+                'version_id' => (int)$ctx['version']['id'],
+                'version_label' => (string)($ctx['version']['version_label'] ?? ''),
+                'lifecycle_status' => (string)($ctx['version']['lifecycle_status'] ?? ''),
+                'is_preview' => $ctx['is_preview'],
+                'publication_package' => $publicationPackage,
             ));
 
         case 'download_pages':

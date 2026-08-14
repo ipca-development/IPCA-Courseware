@@ -38,7 +38,9 @@ private final class PaginationSelfTestRunner: ObservableObject {
                 let standardLayout = PageLayoutConfiguration.make(
                     viewport: viewport,
                     isLandscape: landscape,
-                    fontScale: ReaderFontSize.standard.scale
+                    fontScale: ReaderFontSize.standard.scale,
+                    publicationLayout: fixtureLayout,
+                    manifestLayoutHash: "self-test-layout"
                 )
                 let standard = try await paginate(source: source, layout: standardLayout)
                 try assertValid(standard, name: name)
@@ -53,7 +55,9 @@ private final class PaginationSelfTestRunner: ObservableObject {
                 let largeLayout = PageLayoutConfiguration.make(
                     viewport: viewport,
                     isLandscape: landscape,
-                    fontScale: ReaderFontSize.large.scale
+                    fontScale: ReaderFontSize.large.scale,
+                    publicationLayout: fixtureLayout,
+                    manifestLayoutHash: "self-test-layout"
                 )
                 let large = try await paginate(source: source, layout: largeLayout)
                 try assertValid(large, name: "\(name)-large")
@@ -101,7 +105,7 @@ private final class PaginationSelfTestRunner: ObservableObject {
     ) async throws -> PersonalPaginationResult {
         try await engine.paginate(
             sourceData: source,
-            contentCSS: fixtureCSS,
+            bookStyleCSS: fixtureCSS,
             readerCSS: "",
             layout: layout,
             baseURL: URL(string: "https://reader.invalid/")!,
@@ -117,6 +121,12 @@ private final class PaginationSelfTestRunner: ObservableObject {
         }
         guard !result.personalPages.isEmpty else {
             throw SelfTestError.failed("\(name): generated no reader pages.")
+        }
+        guard result.personalPages.allSatisfy({
+            $0.pageHTML.contains("reader-canonical-page")
+                && $0.pageHTML.contains("transform: scale(var(--reader-page-scale))")
+        }) else {
+            throw SelfTestError.failed("\(name): canonical presentation wrapper is missing.")
         }
         let failures = result.validation.diagnostics.filter { $0.severity == .failure }
         guard failures.isEmpty else {
@@ -135,6 +145,11 @@ private final class PaginationSelfTestRunner: ObservableObject {
             throw SelfTestError.failed("\(name): invalid deterministic page metrics.")
         }
         let contentPages = result.personalPages.filter { !$0.isCover }
+        guard contentPages.allSatisfy({
+            $0.pageHTML.contains("--reader-font-scale: 1")
+        }) else {
+            throw SelfTestError.failed("\(name): controlled page bands inherited reader font scale.")
+        }
         guard contentPages.allSatisfy({
             $0.startLocation?.officialLocation.officialPageNumber == 42
         }) else {
@@ -307,7 +322,12 @@ private final class PaginationSelfTestRunner: ObservableObject {
 
         /* Synthetic fixture supplements; production classes use the stylesheet above. */
         * { box-sizing: border-box; }
-        body { font-family: Georgia, serif; line-height: 1.45; }
+        .reader-page-body:not(.reader-page-cover) {
+          font-family: Georgia, serif;
+          font-size: calc(11pt * var(--reader-font-scale, 1));
+          line-height: 1.45;
+        }
+        .reader-page-header-region, .reader-page-footer-region { --reader-font-scale: 1; }
         .cpb-block { margin: 0 0 10px; }
         h2 { margin: 0 0 8px; font-size: 18pt; line-height: 1.2; }
         p { margin: 0 0 8px; }
@@ -320,6 +340,29 @@ private final class PaginationSelfTestRunner: ObservableObject {
         figcaption { margin-top: 6px; font-size: 9pt; }
         .cpb-page-header, .cpb-page-footer { width: 100%; height: 100%; }
         """
+    }
+
+    private var fixtureLayout: PublicationLayout {
+        PublicationLayout(
+            layoutProfile: "LETTER_READER_v1",
+            paperSize: "Letter",
+            pageWidthPX: 816,
+            pageHeightPX: 1056,
+            sheetPaddingTopPX: 48,
+            sheetPaddingBottomPX: 64,
+            sheetPaddingXPX: 56,
+            headerBandPX: 84,
+            footerBandPX: 72,
+            headerMarginBottomPX: 20,
+            footerMarginTopPX: 24,
+            bodyCapacityPX: 744,
+            fontFamily: "Georgia, 'Times New Roman', serif",
+            fontSizePT: 11,
+            lineHeight: 1.55,
+            lineHeightPX: 17,
+            charsPerLine: 92,
+            splitWordsPerChunk: 16
+        )
     }
 }
 

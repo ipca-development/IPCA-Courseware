@@ -30,7 +30,7 @@ final class HTMLPaginationEngine: NSObject, WKNavigationDelegate, WKScriptMessag
 
     func paginate(
         sourceData: Data,
-        contentCSS: String,
+        bookStyleCSS: String,
         readerCSS: String,
         layout: PageLayoutConfiguration,
         baseURL: URL,
@@ -81,7 +81,7 @@ final class HTMLPaginationEngine: NSObject, WKNavigationDelegate, WKScriptMessag
         let html = paginationDocument(
             sourceBase64: sourceBase64,
             layoutJSON: layoutJSON,
-            contentCSS: contentCSS,
+            bookStyleCSS: bookStyleCSS,
             readerCSS: readerCSS,
             engineSource: engineSource,
             officialPageByAnchor: officialPageByAnchor,
@@ -181,14 +181,14 @@ final class HTMLPaginationEngine: NSObject, WKNavigationDelegate, WKScriptMessag
     private func paginationDocument(
         sourceBase64: String,
         layoutJSON: String,
-        contentCSS: String,
+        bookStyleCSS: String,
         readerCSS: String,
         engineSource: String,
         officialPageByAnchor: [String: Int],
         officialPageBySection: [Int: Int],
         officialPageTotal: Int?
     ) -> String {
-        let safeContentCSS = contentCSS.replacingOccurrences(of: "</style", with: "<\\/style")
+        let safeBookStyleCSS = bookStyleCSS.replacingOccurrences(of: "</style", with: "<\\/style")
         let safeReaderCSS = readerCSS.replacingOccurrences(of: "</style", with: "<\\/style")
         let safeEngine = engineSource.replacingOccurrences(of: "</script", with: "<\\/script")
         let anchorJSON = jsonString(officialPageByAnchor)
@@ -202,33 +202,19 @@ final class HTMLPaginationEngine: NSObject, WKNavigationDelegate, WKScriptMessag
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
           <style>
-          \(safeContentCSS)
+          \(safeBookStyleCSS)
           \(safeReaderCSS)
           html, body {
             margin: 0;
             padding: 0;
             width: \(layoutJSONValue(layoutJSON, key: "pageWidth"))px;
             min-height: \(layoutJSONValue(layoutJSON, key: "pageHeight"))px;
-            background: #fff;
           }
           #pagination-measure-host {
             position: absolute;
             inset: 0 auto auto 0;
             visibility: hidden;
             pointer-events: none;
-          }
-          .reader-generated-page .cpb-sheet,
-          .reader-generated-page .cpb-block {
-            max-width: 100% !important;
-          }
-          .reader-generated-page .reader-page-header-region > .cpb-page-header,
-          .reader-generated-page .reader-page-footer-region > .cpb-page-footer {
-            position: static !important;
-            inset: auto !important;
-            width: 100% !important;
-            height: 100% !important;
-            margin: 0 !important;
-            box-sizing: border-box !important;
           }
           .reader-semantic-piece {
             break-inside: avoid;
