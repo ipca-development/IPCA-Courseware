@@ -98,6 +98,8 @@
       textLength: value.length,
       text: value,
       section,
+      blockId: Number(unit.block_id || 0),
+      blockType: String(unit.block_type || type),
       atomic: Boolean(options.atomic),
       splittable: Boolean(options.splittable),
       forceBreakBefore: Boolean(options.forceBreakBefore),
@@ -559,6 +561,9 @@
     const root = rootFromHTML(value.html).cloneNode(true);
     if (!root || root.nodeType !== Node.ELEMENT_NODE) {
       return `<div class="reader-semantic-piece" style="align-self:start" `
+        + `data-block-id="${value.fragment.blockId || ""}" `
+        + `data-block-type="${escapeHTML(value.fragment.blockType || "")}" `
+        + `data-stable-anchor="${escapeHTML(value.fragment.anchor || "")}" `
         + `data-source-fragment-id="${escapeHTML(value.fragment.id)}" `
         + `data-source-order="${value.fragment.sourceOrder}" `
         + `data-source-range-start="${value.rangeStart}" `
@@ -569,6 +574,7 @@
     }
     root.classList.add("reader-semantic-piece");
     root.style.setProperty("align-self", "start");
+    annotateSourceBinding(root, value.fragment);
     annotateCoverage(root, value);
     root.setAttribute("data-semantic-type", value.fragment.type);
     return root.outerHTML;
@@ -581,6 +587,18 @@
     node.setAttribute("data-source-range-end", String(value.rangeEnd));
     node.setAttribute("data-source-length", String(value.fragment.textLength));
     node.setAttribute("data-presentation-copy", value.presentationCopy ? "1" : "0");
+  }
+
+  function annotateSourceBinding(node, fragmentValue) {
+    if (fragmentValue.blockId > 0) {
+      node.setAttribute("data-block-id", String(fragmentValue.blockId));
+    }
+    if (fragmentValue.blockType && !node.getAttribute("data-block-type")) {
+      node.setAttribute("data-block-type", fragmentValue.blockType);
+    }
+    if (fragmentValue.anchor && !node.getAttribute("data-stable-anchor")) {
+      node.setAttribute("data-stable-anchor", fragmentValue.anchor);
+    }
   }
 
   function tableGroupMarkup(values) {
@@ -631,6 +649,7 @@
     const renderedRoot = rootFromHTML(renderedTable).cloneNode(true);
     renderedRoot.classList.add("reader-semantic-piece", "reader-table-group");
     renderedRoot.style.setProperty("align-self", "start");
+    annotateSourceBinding(renderedRoot, values[0].fragment);
     renderedRoot.setAttribute("data-semantic-type", "table");
     return renderedRoot.outerHTML;
   }
@@ -649,6 +668,7 @@
       });
     });
     root.classList.add("reader-semantic-piece", "reader-toc-group");
+    annotateSourceBinding(root, values[0].fragment);
     root.setAttribute("data-semantic-type", "toc");
     return root.outerHTML;
   }
@@ -1161,6 +1181,17 @@
       if (measurePage(trial).fits) {
         current.pieces.push(whole);
         continue;
+      }
+
+      if (sourceFragment.atomic && current.pieces.length) {
+        const freshPageTrial = pageWith(current.section, [whole], {});
+        if (measurePage(freshPageTrial).fits) {
+          current.decisions.push(`atomic ${sourceFragment.id} moved intact to next page`);
+          finish();
+          begin(sourceFragment, { breakReason: "atomic_keep_together" });
+          current.pieces.push(whole);
+          continue;
+        }
       }
 
       if (sourceFragment.splittable && sourceFragment.textLength > 0) {

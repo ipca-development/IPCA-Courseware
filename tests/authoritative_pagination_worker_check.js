@@ -16,6 +16,12 @@ const tocRows = Array.from({ length: 72 }, (_, index) =>
   `<div class="cpb-toc-row" data-stable-anchor="toc-${index + 1}">`
     + `<span>Section ${index + 1} — Controlled Operations</span><span>${index + 3}</span></div>`
 ).join("");
+const listItems = Array.from({ length: 16 }, (_, index) =>
+  `<li>Controlled list item ${index + 1} with semantic source coverage.</li>`
+).join("");
+const tableRows = Array.from({ length: 18 }, (_, index) =>
+  `<tr><td>Row ${index + 1}</td><td>Controlled table row content</td></tr>`
+).join("");
 
 const source = {
   layout_profile: "IPCA_READER_CANONICAL_816x1056_v1",
@@ -90,6 +96,27 @@ const source = {
         stable_anchor: "block-four",
         block_type: "paragraph",
         html: `<article data-block-id="4" data-stable-anchor="block-four"><p>${paragraph}</p></article>`
+      },
+      {
+        unit_key: "block-note",
+        block_id: 5,
+        stable_anchor: "block-note",
+        block_type: "callout",
+        html: '<article class="cpb-block" data-block-id="5" data-block-type="callout" data-stable-anchor="block-note"><aside class="cpb-callout cpb-callout--note"><strong class="cpb-callout-title">NOTE</strong><div class="cpb-callout-text">This complete note fits on a fresh physical page and must move there intact when the preceding page has insufficient room.</div></aside></article>'
+      },
+      {
+        unit_key: "block-list",
+        block_id: 6,
+        stable_anchor: "block-list",
+        block_type: "list",
+        html: `<article class="cpb-block" data-block-id="6" data-block-type="list" data-stable-anchor="block-list"><ol class="cpb-list">${listItems}</ol></article>`
+      },
+      {
+        unit_key: "block-table",
+        block_id: 7,
+        stable_anchor: "block-table",
+        block_type: "table",
+        html: `<article class="cpb-block" data-block-id="7" data-block-type="table" data-stable-anchor="block-table"><table class="cpb-table"><thead><tr><th>Item</th><th>Description</th></tr></thead><tbody>${tableRows}</tbody></table></article>`
       }
     ]
   }]
@@ -105,6 +132,12 @@ const bookStyleCSS = `
   article, h2, p { margin: 0; }
   h2 { font-size: 24px; line-height: 1.2; margin-bottom: 12px; }
   p { margin-bottom: 14px; }
+  .cpb-callout { border: 2px solid #0d9488; padding: 18px; margin: 16px 0; }
+  .cpb-callout-title { display: block; margin-bottom: 10px; }
+  .cpb-list { margin: 12px 0; }
+  .cpb-list > li { min-height: 42px; }
+  .cpb-table { width: 100%; border-collapse: collapse; }
+  .cpb-table th, .cpb-table td { height: 64px; border: 1px solid #333; padding: 8px; }
   .cpb-toc-row {
     display: flex; justify-content: space-between; gap: 16px;
     min-height: 32px; padding: 6px 0; border-bottom: 1px solid #ddd;
@@ -156,6 +189,28 @@ try {
       .map((item) => item.source_fragment_id)
   );
   assert.strictEqual(new Set(seen).size, seen.length, "source fragments must not duplicate");
+  const noteCoverage = result.pages.flatMap((page) => page.coverage)
+    .filter((item) => item.source_fragment_id.endsWith("/block-note/root"));
+  assert.strictEqual(noteCoverage.length, 1, "a NOTE that fits a fresh page must remain intact");
+  assert.strictEqual(noteCoverage[0].range_start, 0, "intact NOTE must begin at source offset zero");
+  assert.strictEqual(
+    noteCoverage[0].range_end,
+    noteCoverage[0].source_length,
+    "intact NOTE must cover its complete source range"
+  );
+  const listCoverage = result.pages.flatMap((page) => page.coverage)
+    .filter((item) => item.source_fragment_id.includes("/block-list/li-"));
+  assert.strictEqual(listCoverage.length, 16, "each list item must appear exactly once");
+  const tableRowsCoverage = result.pages.flatMap((page) => page.coverage)
+    .filter((item) => item.source_fragment_id.includes("/block-table/table-row-"));
+  assert.strictEqual(tableRowsCoverage.length, 18, "each table row must appear exactly once");
+  assert.ok(
+    result.pages.flatMap((page) => page.coverage).some((item) =>
+      item.source_fragment_id.endsWith("/block-table/table-header")
+        && item.presentation_copy === true
+    ),
+    "continued tables must repeat the header as a presentation-only copy"
+  );
   process.stdout.write(`AUTHORITATIVE_PAGINATION_WORKER_PASS pages=${result.pages.length}\n`);
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });

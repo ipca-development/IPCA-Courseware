@@ -8,9 +8,9 @@ $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
         => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
     'public/assets/controlled_book_editor.js'
-        => '0cf06b08b89e523ecf1ef25d78ffce343ad4afcaba9e3830c1c6e208e3181f00',
+        => '4ad14b906ded23989f2409e87dcd40eb2230accc7d910e696c4ffc530b97bd07',
     'public/assets/controlled_book_editor.css'
-        => '5ebb7237faa86d2958783290f8a1e67ba4c83b15284bb5e8038f4a90dd37a524',
+        => '2dbc860e42137df5c1cc7ebcf21409c962e411e99300dc46db989a9dc07cc2e2',
     'public/admin/api/controlled_book_editor_api.php'
         => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'src/publishing/ControlledPublishingBlockService.php'
@@ -43,15 +43,22 @@ $contracts = array(
         'invalidatePageMap',
     ),
     'public/assets/controlled_book_editor.js' => array(
-        'applyUnifiedPrintLayout',
-        'scheduleUnifiedPrintLayout',
-        'cpb-flow-page-break--automatic',
-        'range.getClientRects()',
-        'hasManualSpacer',
-        'target - current - gridGap',
-        'cpb-print-change-marker',
+        'renderPaginatedView',
+        'reader-generated-page',
+        'wirePaginatedFields',
+        'loadSourceBlockDom',
+        'flushPaginatedCalloutFragment',
+        'flushPaginatedListItem',
+        'flushPaginatedTableRow',
         "apiPost('split_block_page_break'",
         'insertPageBreakAtCursor',
+    ),
+    'ipca-manual-reader-ios/IPCAManualReader/Services/ReaderPaginationCore.js' => array(
+        'atomic_keep_together',
+        'reader-generated-page',
+        'reader-page-header-region',
+        'reader-page-body',
+        'reader-page-footer-region',
     ),
     'public/admin/api/controlled_book_editor_api.php' => array(
         "case 'split_block_page_break':",
@@ -105,6 +112,23 @@ foreach (array(
 ) as $removedControl) {
     if (str_contains($editorMarkup, $removedControl)) {
         $failures[] = 'Removed page-management control remains in the unified editor: ' . $removedControl;
+    }
+}
+
+$editorScript = (string)@file_get_contents($root . '/public/assets/controlled_book_editor.js');
+$editorStyle = (string)@file_get_contents($root . '/public/assets/controlled_book_editor.css');
+foreach (array(
+    'applyUnifiedPrintLayout',
+    'scheduleUnifiedPrintLayout',
+    'cpb-flow-page-break',
+    'cpb-print-furniture-layer',
+    'paginationPageNavigation',
+    'paginationBreakControl',
+    'openPaginatedBlockEditor',
+) as $removedSpacerMarker) {
+    if (str_contains($editorScript, $removedSpacerMarker)
+        || str_contains($editorStyle, $removedSpacerMarker)) {
+        $failures[] = 'Spacer pagination remains in the unified editor: ' . $removedSpacerMarker;
     }
 }
 
