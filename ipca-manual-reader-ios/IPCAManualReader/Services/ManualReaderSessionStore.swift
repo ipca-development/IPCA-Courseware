@@ -73,7 +73,9 @@ final class ManualReaderSessionStore: ObservableObject {
         pageNumber: Int,
         label: String,
         stableAnchor: String? = nil,
-        blockAnchor: String? = nil
+        blockAnchor: String? = nil,
+        officialLocation: OfficialDocumentLocation? = nil,
+        semanticLocation: SemanticReaderLocation? = nil
     ) {
         let bookmark = LocalBookmark(
             id: UUID(),
@@ -82,9 +84,18 @@ final class ManualReaderSessionStore: ObservableObject {
             label: label,
             createdAt: Date(),
             stableAnchor: stableAnchor,
-            blockAnchor: blockAnchor
+            blockAnchor: blockAnchor,
+            officialLocation: officialLocation,
+            semanticLocation: semanticLocation,
+            personalReaderPageNumber: pageNumber
         )
-        bookmarks.removeAll { $0.bookKey == bookKey && $0.pageNumber == pageNumber }
+        bookmarks.removeAll {
+            guard $0.bookKey == bookKey else { return false }
+            if let semanticLocation {
+                return $0.semanticLocation?.sourceFragmentID == semanticLocation.sourceFragmentID
+            }
+            return $0.pageNumber == pageNumber
+        }
         bookmarks.insert(bookmark, at: 0)
         persistBookmarks()
     }

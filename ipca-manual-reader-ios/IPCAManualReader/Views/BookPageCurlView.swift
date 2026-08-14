@@ -6,6 +6,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
     let htmlByIndex: [Int: String]
     let baseURL: URL
     let isLandscape: Bool
+    let pageSize: CGSize
     @Binding var currentIndex: Int
     let onTap: () -> Void
 
@@ -23,7 +24,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
         controller.dataSource = context.coordinator
         controller.delegate = context.coordinator
         controller.isDoubleSided = isLandscape
-        controller.view.backgroundColor = .clear
+        controller.view.backgroundColor = .white
 
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.didTap))
         tap.cancelsTouchesInView = false
@@ -70,7 +71,8 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     html: html,
                     baseURL: parent.baseURL,
                     isLandscape: parent.isLandscape,
-                    pageNumber: parent.pages[position].pageNumber
+                    pageNumber: parent.pages[position].pageNumber,
+                    pageSize: parent.pageSize
                 )
             }
         }
@@ -134,7 +136,8 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     html: html,
                     baseURL: parent.baseURL,
                     isLandscape: parent.isLandscape,
-                    pageNumber: parent.pages[position].pageNumber
+                    pageNumber: parent.pages[position].pageNumber,
+                    pageSize: parent.pageSize
                 )
             } else {
                 host = PageHostController(position: position)
@@ -205,17 +208,22 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         html: String? = nil,
         baseURL: URL? = nil,
         isLandscape: Bool = false,
-        pageNumber: Int = 0
+        pageNumber: Int = 0,
+        pageSize: CGSize = CGSize(
+            width: ManualPageLayout.width,
+            height: ManualPageLayout.height
+        )
     ) {
         self.position = position
-        super.init(rootView: AnyView(Color.clear))
-        view.backgroundColor = .clear
+        super.init(rootView: AnyView(Color.white))
+        view.backgroundColor = .white
         if let html, let baseURL {
             update(
                 html: html,
                 baseURL: baseURL,
                 isLandscape: isLandscape,
-                pageNumber: pageNumber
+                pageNumber: pageNumber,
+                pageSize: pageSize
             )
         }
     }
@@ -228,14 +236,16 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         html: String,
         baseURL: URL,
         isLandscape: Bool,
-        pageNumber: Int
+        pageNumber: Int,
+        pageSize: CGSize
     ) {
         rootView = AnyView(
             PhysicalManualPage(
                 html: html,
                 baseURL: baseURL,
                 isLandscape: isLandscape,
-                isLeftPage: pageNumber.isMultiple(of: 2)
+                isLeftPage: pageNumber.isMultiple(of: 2),
+                pageSize: pageSize
             )
         )
     }
@@ -246,6 +256,7 @@ private struct PhysicalManualPage: View {
     let baseURL: URL
     let isLandscape: Bool
     let isLeftPage: Bool
+    let pageSize: CGSize
 
     var body: some View {
         GeometryReader { proxy in
@@ -253,45 +264,38 @@ private struct PhysicalManualPage: View {
                 html: html,
                 baseURL: baseURL,
                 zoomMode: .fitPage,
-                containerSize: proxy.size
+                containerSize: proxy.size,
+                pageSize: pageSize
             )
             .background(Color.white)
             .overlay {
                 if isLandscape {
                     LinearGradient(
                         colors: isLeftPage
-                            ? [.clear, .black.opacity(0.025), .black.opacity(0.1)]
-                            : [.black.opacity(0.1), .black.opacity(0.025), .clear],
+                            ? [.clear, .black.opacity(0.035)]
+                            : [.black.opacity(0.035), .clear],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
-                    .frame(width: 28)
+                    .frame(width: 4)
                     .frame(maxWidth: .infinity, alignment: isLeftPage ? .trailing : .leading)
                     .allowsHitTesting(false)
                 }
             }
             .clipped()
         }
+        .background(Color.white)
     }
 }
 
 struct BookGutterView: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.11), .clear],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .frame(width: 54)
-
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.14), .clear],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-            .frame(width: 16)
-        }
+        LinearGradient(
+            colors: [.clear, .black.opacity(0.07), .clear],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(width: 8)
         .allowsHitTesting(false)
     }
 }

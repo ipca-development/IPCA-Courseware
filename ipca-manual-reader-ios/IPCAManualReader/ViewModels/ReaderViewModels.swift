@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import SwiftUI
 
 @MainActor
@@ -52,14 +53,18 @@ final class ReaderViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var currentPageHTML: String = ""
     @Published private(set) var pageHTMLByIndex: [Int: String] = [:]
+    @Published private(set) var personalPages: [PersonalReaderPage] = []
+    @Published private(set) var activeLayout: PageLayoutConfiguration?
+    @Published private(set) var paginationValidation: PaginationValidationSummary?
     @Published var searchResults: [SearchResult] = []
     @Published var isSearching = false
 
     private var progressTimer: Task<Void, Never>?
     private var offlinePackage: OfflineManualPackage?
     private var personalPageHTMLByNumber: [Int: String] = [:]
-    private var paginationFontSize: ReaderFontSize?
     private let paginationEngine = HTMLPaginationEngine()
+    private var paginationInProgress = false
+    private var pendingRepagination = false
 
     init(book: LibraryBook) {
         self.book = book
@@ -68,6 +73,19 @@ final class ReaderViewModel: ObservableObject {
     var currentPage: FrozenPageMeta? {
         guard pages.indices.contains(currentIndex) else { return nil }
         return pages[currentIndex]
+    }
+
+    var currentPersonalPage: PersonalReaderPage? {
+        guard personalPages.indices.contains(currentIndex) else { return nil }
+        return personalPages[currentIndex]
+    }
+
+    var currentSemanticLocation: SemanticReaderLocation? {
+        currentPersonalPage?.startLocation
+    }
+
+    var currentOfficialLocation: OfficialDocumentLocation? {
+        resolvedOfficialLocation()
     }
 
     var pageCount: Int { pages.count }
@@ -93,7 +111,9 @@ final class ReaderViewModel: ObservableObject {
                     result[id] = pair.value
                 }
             }
-            try? await repaginateFromSource(preservingCurrentPosition: false)
+            if activeLayout != nil {
+                try await repaginateFromSource(preservingCurrentPosition: false)
+            }
 
             var startIndex = 0
             if !isPreview,
@@ -144,6 +164,25 @@ final class ReaderViewModel: ObservableObject {
         pageHTMLByIndex[index]
     }
 
+    func updateLayout(viewport: CGSize, isLandscape: Bool) async {
+        let next = PageLayoutConfiguration.make(
+            viewport: viewport,
+            isLandscape: isLandscape,
+            fontScale: ManualReaderSessionStore.shared.settings.fontSize.scale
+        )
+        guard next != activeLayout else { return }
+        activeLayout = next
+        guard offlinePackage != nil else { return }
+        do {
+            try await repaginateFromSource(preservingCurrentPosition: true)
+            pageHTMLByIndex.removeAll()
+            preparePageHTML(around: currentIndex)
+            currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func search(query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -181,8 +220,14 @@ final class ReaderViewModel: ObservableObject {
     func toggleBookmark(label: String) {
         guard let page = currentPage else { return }
         let store = ManualReaderSessionStore.shared
-        let blockAnchor = rawHTMLForCurrentPage().flatMap(firstBlockAnchor)
+        let semanticLocation = currentSemanticLocation
+        let blockAnchor = semanticLocation?.semanticAnchor
+            ?? rawHTMLForCurrentPage().flatMap(firstBlockAnchor)
+        let officialLocation = resolvedOfficialLocation()
         if let existing = store.bookmarks(for: book.bookKey).first(where: {
+            if let sourceFragmentID = semanticLocation?.sourceFragmentID {
+                return $0.semanticLocation?.sourceFragmentID == sourceFragmentID
+            }
             if let blockAnchor, let existingBlockAnchor = $0.blockAnchor, !existingBlockAnchor.isEmpty {
                 return existingBlockAnchor == blockAnchor
             }
@@ -195,15 +240,22 @@ final class ReaderViewModel: ObservableObject {
                 pageNumber: page.pageNumber,
                 label: label,
                 stableAnchor: page.stableAnchor,
-                blockAnchor: blockAnchor
+                blockAnchor: blockAnchor,
+                officialLocation: officialLocation,
+                semanticLocation: semanticLocation
             )
         }
     }
 
     func isCurrentPageBookmarked() -> Bool {
         guard let page = currentPage else { return false }
-        let blockAnchor = rawHTMLForCurrentPage().flatMap(firstBlockAnchor)
+        let semanticLocation = currentSemanticLocation
+        let blockAnchor = semanticLocation?.semanticAnchor
+            ?? rawHTMLForCurrentPage().flatMap(firstBlockAnchor)
         return ManualReaderSessionStore.shared.bookmarks(for: book.bookKey).contains {
+            if let sourceFragmentID = semanticLocation?.sourceFragmentID {
+                return $0.semanticLocation?.sourceFragmentID == sourceFragmentID
+            }
             if let blockAnchor, let existingBlockAnchor = $0.blockAnchor, !existingBlockAnchor.isEmpty {
                 return existingBlockAnchor == blockAnchor
             }
@@ -232,14 +284,28 @@ final class ReaderViewModel: ObservableObject {
         pageHTMLByIndex[index] = client.pageHTMLDocument(
             pageHtml: html,
             settings: settings,
-            embeddedEditorCSS: offlinePackage?.editorCSS,
-            embeddedReaderCSS: offlinePackage?.readerCSS
+            embeddedContentCSS: offlinePackage?.contentCSS,
+            embeddedReaderCSS: offlinePackage?.readerCSS,
+            layout: personalPageHTMLByNumber[pageNumber] == nil ? nil : activeLayout
         )
     }
 
     func reloadCurrentPageStyles() async {
-        if paginationFontSize != ManualReaderSessionStore.shared.settings.fontSize {
-            try? await repaginateFromSource(preservingCurrentPosition: true)
+        if let activeLayout {
+            self.activeLayout = PageLayoutConfiguration.make(
+                viewport: CGSize(
+                    width: CGFloat(activeLayout.viewportWidth),
+                    height: CGFloat(activeLayout.viewportHeight)
+                ),
+                isLandscape: activeLayout.mode == .twoPageSpread,
+                fontScale: ManualReaderSessionStore.shared.settings.fontSize.scale
+            )
+            do {
+                try await repaginateFromSource(preservingCurrentPosition: true)
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
         }
         pageHTMLByIndex.removeAll()
         preparePageHTML(around: currentIndex)
@@ -247,38 +313,113 @@ final class ReaderViewModel: ObservableObject {
     }
 
     private func repaginateFromSource(preservingCurrentPosition: Bool) async throws {
+        if paginationInProgress {
+            pendingRepagination = true
+            return
+        }
+        paginationInProgress = true
+        defer {
+            paginationInProgress = false
+            if pendingRepagination {
+                pendingRepagination = false
+                Task { [weak self] in
+                    try? await self?.repaginateFromSource(preservingCurrentPosition: true)
+                }
+            }
+        }
         guard let package = offlinePackage,
               let sourceData = package.paginateSourceData,
-              let editorCSS = package.editorCSS,
+              let contentCSS = package.contentCSS,
               let readerCSS = package.readerCSS,
-              let baseURL = ManualReaderSessionStore.shared.baseURL else { return }
+              let baseURL = ManualReaderSessionStore.shared.baseURL,
+              let activeLayout else { return }
 
-        let currentRawHTML = preservingCurrentPosition && pages.indices.contains(currentIndex)
-            ? personalPageHTMLByNumber[pages[currentIndex].pageNumber]
-                ?? package.page(number: pages[currentIndex].pageNumber)?.pageHtml
+        let savedSemanticLocation = preservingCurrentPosition ? currentSemanticLocation : nil
+        let currentRawHTML = preservingCurrentPosition
+            ? rawHTMLForCurrentPage()
             : nil
-        let blockAnchor = currentRawHTML.flatMap(firstBlockAnchor)
+        let blockAnchor = savedSemanticLocation?.semanticAnchor
+            ?? currentRawHTML.flatMap(firstBlockAnchor)
         let sectionAnchor = preservingCurrentPosition ? currentPage?.stableAnchor : nil
         let sectionID = preservingCurrentPosition ? currentPage?.sectionId : nil
-        let fontSize = ManualReaderSessionStore.shared.settings.fontSize
-        let result = try await paginationEngine.paginate(
+        let cacheIdentity = paginationCacheIdentity(
             sourceData: sourceData,
-            editorCSS: editorCSS,
+            contentCSS: contentCSS,
             readerCSS: readerCSS,
-            fontScale: fontSize.scale,
-            baseURL: baseURL
+            layout: activeLayout,
+            theme: ManualReaderSessionStore.shared.settings.theme,
+            officialLayoutHash: package.pageMap.layoutHash ?? "",
+            officialPageCount: package.pageMap.pageCount ?? package.pageMap.pages.count
         )
+        let result: PersonalPaginationResult
+        if let cached = await PersonalPaginationCache.shared.load(identity: cacheIdentity) {
+            result = cached
+        } else {
+            let officialPages = officialPageLookups(package: package)
+            result = try await paginationEngine.paginate(
+                sourceData: sourceData,
+                contentCSS: contentCSS,
+                readerCSS: readerCSS,
+                layout: activeLayout,
+                baseURL: baseURL,
+                officialPageByAnchor: officialPages.byAnchor,
+                officialPageBySection: officialPages.bySection,
+                officialPageTotal: package.pageMap.pageCount ?? package.pageMap.pages.count
+            )
+            try? await PersonalPaginationCache.shared.save(result, identity: cacheIdentity)
+        }
         guard !result.pages.isEmpty else { return }
 
+        personalPages = result.personalPages
         pages = result.pages
         personalPageHTMLByNumber = result.pageHTMLByNumber
         sectionPageIndex = result.sectionPageIndex
-        paginationFontSize = fontSize
+        paginationValidation = result.validation
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--pagination-debug") {
+            print(
+                "PAGINATION configuration=\(activeLayout.cacheIdentity) "
+                    + "pages=\(result.personalPages.count) "
+                    + "fragments=\(result.validation.sourceFragmentCount) "
+                    + "valid=\(result.validation.isValid)"
+            )
+            result.validation.diagnostics.forEach { item in
+                print(
+                    "PAGINATION \(item.severity.rawValue.uppercased()) "
+                        + "page=\(item.pageNumber.map(String.init) ?? "-") "
+                        + "fragment=\(item.sourceFragmentID ?? "-") "
+                        + "code=\(item.code) \(item.message)"
+                )
+            }
+            result.personalPages.forEach { page in
+                print(
+                    "PAGINATION PAGE \(page.pageNumber) "
+                        + "utilization=\(String(format: "%.3f", page.metrics.contentUtilization)) "
+                        + "whitespace=\(String(format: "%.3f", page.metrics.whitespaceRatio)) "
+                        + "blocks=\(page.metrics.blockMeasurements.count) "
+                        + "anchor=\(page.startLocation?.semanticAnchor ?? "-")"
+                )
+            }
+        }
+#endif
 
         guard preservingCurrentPosition else { return }
-        if let blockAnchor,
+        if let savedSemanticLocation,
+           let match = result.personalPages.firstIndex(where: { page in
+               page.coverage.contains { coverage in
+                   coverage.sourceFragmentID == savedSemanticLocation.sourceFragmentID
+                       && coverage.presentationCopy == false
+                       && coverage.rangeStart <= savedSemanticLocation.characterOffset
+                       && coverage.rangeEnd >= savedSemanticLocation.characterOffset
+               }
+           }) {
+            currentIndex = match
+        } else if let blockAnchor,
            let match = pages.firstIndex(where: {
                result.pageHTMLByNumber[$0.pageNumber]?.contains("data-stable-anchor=\"\(blockAnchor)\"") == true
+                   || result.pageHTMLByNumber[$0.pageNumber]?.contains(
+                       "data-source-fragment-id=\"\(blockAnchor)\""
+                   ) == true
            }) {
             currentIndex = match
         } else if let sectionAnchor,
@@ -290,6 +431,72 @@ final class ReaderViewModel: ObservableObject {
         } else {
             currentIndex = min(currentIndex, pages.count - 1)
         }
+    }
+
+    private func officialPageLookups(
+        package: OfflineManualPackage
+    ) -> (byAnchor: [String: Int], bySection: [Int: Int]) {
+        var byAnchor: [String: Int] = [:]
+        var bySection: [Int: Int] = [:]
+        package.pageMap.pages.sorted { $0.pageNumber < $1.pageNumber }.forEach { page in
+            if let sectionID = page.sectionId {
+                bySection[sectionID] = bySection[sectionID] ?? page.pageNumber
+            }
+            if let anchor = page.stableAnchor, !anchor.isEmpty {
+                byAnchor[anchor] = byAnchor[anchor] ?? page.pageNumber
+            }
+        }
+        let pattern = #"data-stable-anchor\s*=\s*["']([^"']+)["']"#
+        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+            return (byAnchor, bySection)
+        }
+        package.pages.forEach { page in
+            guard let html = page.pageHtml else { return }
+            let range = NSRange(html.startIndex..<html.endIndex, in: html)
+            expression.matches(in: html, range: range).forEach { match in
+                guard match.numberOfRanges > 1,
+                      let anchorRange = Range(match.range(at: 1), in: html) else { return }
+                let anchor = String(html[anchorRange])
+                byAnchor[anchor] = byAnchor[anchor] ?? (page.pageNumber ?? 0)
+            }
+        }
+        byAnchor = byAnchor.filter { !$0.key.isEmpty && $0.value > 0 }
+        return (byAnchor, bySection)
+    }
+
+    private func paginationCacheIdentity(
+        sourceData: Data,
+        contentCSS: String,
+        readerCSS: String,
+        layout: PageLayoutConfiguration,
+        theme: ReaderTheme,
+        officialLayoutHash: String,
+        officialPageCount: Int
+    ) -> String {
+        let sourceHash = SHA256.hash(data: sourceData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let raw = [
+            book.id,
+            String(book.versionId),
+            sourceHash,
+            SHA256.hash(data: Data(contentCSS.utf8))
+                .map { String(format: "%02x", $0) }
+                .joined(),
+            SHA256.hash(data: Data(readerCSS.utf8))
+                .map { String(format: "%02x", $0) }
+                .joined(),
+            ReaderPaginationVersion.normalizer,
+            ReaderPaginationVersion.engine,
+            ReaderPaginationVersion.style,
+            layout.cacheIdentity,
+            theme.rawValue,
+            officialLayoutHash,
+            String(officialPageCount)
+        ].joined(separator: "|")
+        return SHA256.hash(data: Data(raw.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private func firstBlockAnchor(in html: String) -> String? {
@@ -309,6 +516,22 @@ final class ReaderViewModel: ObservableObject {
             ?? offlinePackage?.page(number: page.pageNumber)?.pageHtml
     }
 
+    private func resolvedOfficialLocation() -> OfficialDocumentLocation? {
+        guard let page = currentPage else { return nil }
+        let semanticOfficial = currentSemanticLocation?.officialLocation
+        let officialPage = offlinePackage?.pageMap.pages.first(where: { candidate in
+            if let anchor = semanticOfficial?.stableAnchor ?? page.stableAnchor, !anchor.isEmpty {
+                return candidate.stableAnchor == anchor
+            }
+            return candidate.sectionId == (semanticOfficial?.sectionID ?? page.sectionId)
+        })
+        return OfficialDocumentLocation(
+            sectionID: semanticOfficial?.sectionID ?? page.sectionId,
+            stableAnchor: semanticOfficial?.stableAnchor ?? page.stableAnchor,
+            officialPageNumber: semanticOfficial?.officialPageNumber ?? officialPage?.pageNumber
+        )
+    }
+
     private func scheduleProgressSave() {
         guard !book.isDraftPreview else { return }
         progressTimer?.cancel()
@@ -323,16 +546,12 @@ final class ReaderViewModel: ObservableObject {
               let client = ManualReaderSessionStore.shared.client,
               let page = currentPage,
               let sectionId = page.sectionId else { return }
-        let officialPageNumber = offlinePackage?.pageMap.pages.first(where: {
-            if let stableAnchor = page.stableAnchor, !stableAnchor.isEmpty {
-                return $0.stableAnchor == stableAnchor
-            }
-            return $0.sectionId == sectionId
-        })?.pageNumber ?? page.pageNumber
+        let officialLocation = resolvedOfficialLocation()
+        let officialPageNumber = officialLocation?.officialPageNumber ?? page.pageNumber
         _ = try? await client.saveProgress(
             bookKey: book.bookKey,
-            sectionId: sectionId,
-            stableAnchor: page.stableAnchor ?? "",
+            sectionId: officialLocation?.sectionID ?? sectionId,
+            stableAnchor: officialLocation?.stableAnchor ?? page.stableAnchor ?? "",
             pageNumber: officialPageNumber,
             versionId: book.versionId > 0 ? book.versionId : nil
         )

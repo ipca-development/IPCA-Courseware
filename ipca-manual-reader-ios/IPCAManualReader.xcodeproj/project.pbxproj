@@ -23,6 +23,10 @@
 		A1000000000000000000000F /* LoginFormViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* LoginFormViewController.swift */; };
 		A10000000000000000000010 /* BookPageCurlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* BookPageCurlView.swift */; };
 		A10000000000000000000011 /* HTMLPaginationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* HTMLPaginationEngine.swift */; };
+		A10000000000000000000012 /* ReaderPaginationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* ReaderPaginationModels.swift */; };
+		A10000000000000000000013 /* ReaderPaginationCore.js in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* ReaderPaginationCore.js */; };
+		A10000000000000000000014 /* PaginationSelfTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* PaginationSelfTestView.swift */; };
+		A10000000000000000000015 /* manual_reader_content.css in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* manual_reader_content.css */; };
 		A1000000000000000000000D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -43,6 +47,10 @@
 		A20000000000000000000011 /* LoginFormViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginFormViewController.swift; sourceTree = "<group>"; };
 		A20000000000000000000012 /* BookPageCurlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookPageCurlView.swift; sourceTree = "<group>"; };
 		A20000000000000000000013 /* HTMLPaginationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLPaginationEngine.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 /* ReaderPaginationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderPaginationModels.swift; sourceTree = "<group>"; };
+		A20000000000000000000015 /* ReaderPaginationCore.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = ReaderPaginationCore.js; sourceTree = "<group>"; };
+		A20000000000000000000016 /* PaginationSelfTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaginationSelfTestView.swift; sourceTree = "<group>"; };
+		A20000000000000000000017 /* manual_reader_content.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = ../public/assets/manual_reader_content.css; sourceTree = "<group>"; };
 		A2000000000000000000000D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000000000000000000000E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000000000000000000000F /* IPCAManualReader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IPCAManualReader.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -63,6 +71,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* IPCAManualReader */,
+				A20000000000000000000017 /* manual_reader_content.css */,
 				A40000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -94,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000002 /* ManualReaderModels.swift */,
+				A20000000000000000000014 /* ReaderPaginationModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -105,6 +115,7 @@
 				A20000000000000000000004 /* ManualReaderSessionStore.swift */,
 				A20000000000000000000005 /* PageCache.swift */,
 				A20000000000000000000013 /* HTMLPaginationEngine.swift */,
+				A20000000000000000000015 /* ReaderPaginationCore.js */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -135,6 +146,7 @@
 				A2000000000000000000000B /* ReaderView.swift */,
 				A20000000000000000000012 /* BookPageCurlView.swift */,
 				A20000000000000000000008 /* ManualPageWebView.swift */,
+				A20000000000000000000016 /* PaginationSelfTestView.swift */,
 				A20000000000000000000010 /* UIKitTextField.swift */,
 			);
 			path = Views;
@@ -199,6 +211,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000000000000000000000D /* Assets.xcassets in Resources */,
+				A10000000000000000000013 /* ReaderPaginationCore.js in Resources */,
+				A10000000000000000000015 /* manual_reader_content.css in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -225,6 +239,8 @@
 				A1000000000000000000000F /* LoginFormViewController.swift in Sources */,
 				A10000000000000000000010 /* BookPageCurlView.swift in Sources */,
 				A10000000000000000000011 /* HTMLPaginationEngine.swift in Sources */,
+				A10000000000000000000012 /* ReaderPaginationModels.swift in Sources */,
+				A10000000000000000000014 /* PaginationSelfTestView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

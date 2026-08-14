@@ -363,11 +363,15 @@ struct ReaderSettings: Codable, Equatable {
 struct LocalBookmark: Codable, Identifiable, Hashable {
     var id: UUID
     var bookKey: String
+    /// Legacy personal page snapshot retained for decoding existing bookmarks.
     var pageNumber: Int
     var label: String
     var createdAt: Date
     var stableAnchor: String?
     var blockAnchor: String?
+    var officialLocation: OfficialDocumentLocation?
+    var semanticLocation: SemanticReaderLocation?
+    var personalReaderPageNumber: Int?
 }
 
 // Official frozen page dimensions (matches ControlledPublishingReaderLayoutProfile)

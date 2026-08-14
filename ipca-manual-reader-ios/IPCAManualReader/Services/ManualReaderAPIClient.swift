@@ -435,18 +435,19 @@ extension ManualReaderAPIClient {
         pageHtml: String,
         settings: ReaderSettings,
         cssVersion: String = "",
-        embeddedEditorCSS: String? = nil,
-        embeddedReaderCSS: String? = nil
+        embeddedContentCSS: String? = nil,
+        embeddedReaderCSS: String? = nil,
+        layout: PageLayoutConfiguration? = nil
     ) -> String {
         let v = cssVersion.isEmpty ? String(Int(Date().timeIntervalSince1970)) : cssVersion
-        let editorCSS = baseURL.appending(path: "assets/controlled_book_editor.css").absoluteString + "?v=\(v)"
+        let contentCSS = baseURL.appending(path: "assets/manual_reader_content.css").absoluteString + "?v=\(v)"
         let readerCSS = baseURL.appending(path: "assets/manual_reader.css").absoluteString + "?v=\(v)"
         let stylesheetMarkup: String
-        if let embeddedEditorCSS, let embeddedReaderCSS {
-            stylesheetMarkup = "<style>\(embeddedEditorCSS)\n\(embeddedReaderCSS)</style>"
+        if let embeddedContentCSS, let embeddedReaderCSS {
+            stylesheetMarkup = "<style>\(embeddedContentCSS)\n\(embeddedReaderCSS)</style>"
         } else {
             stylesheetMarkup = """
-              <link rel="stylesheet" href="\(editorCSS)">
+              <link rel="stylesheet" href="\(contentCSS)">
               <link rel="stylesheet" href="\(readerCSS)">
             """
         }
@@ -461,10 +462,15 @@ extension ManualReaderAPIClient {
             }
         }()
         let fontScale = settings.fontSize.scale
-        let scaledFontRules = [8, 9, 10, 11, 12, 14, 16, 18, 24].map { size in
-            let scaled = Double(size) * fontScale
-            return ".mr-ios-frame [data-font-size=\"\(size)\"] { font-size: \(scaled)pt !important; }"
-        }.joined(separator: "\n")
+        let pageWidth = layout?.pageWidth ?? Double(ManualPageLayout.width)
+        let pageHeight = layout?.pageHeight ?? Double(ManualPageLayout.height)
+        let scaledFontRules = layout == nil
+            ? [8, 9, 10, 11, 12, 14, 16, 18, 24].map { size in
+                let scaled = Double(size) * fontScale
+                return ".mr-ios-frame [data-font-size=\"\(size)\"] { font-size: \(scaled)pt !important; }"
+            }.joined(separator: "\n")
+            : ""
+        let frameFontRule = layout == nil ? "font-size: \(11 * fontScale)pt;" : ""
 
         return """
         <!DOCTYPE html>
@@ -474,10 +480,40 @@ extension ManualReaderAPIClient {
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
           \(stylesheetMarkup)
           <style>
-            html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
-            .mr-ios-shell { width: 100%; height: 100%; display: flex; align-items: flex-start; justify-content: center; overflow: hidden; }
-            .mr-ios-frame { position: relative; width: \(Int(ManualPageLayout.width))px; height: \(Int(ManualPageLayout.height))px; transform-origin: top center; }
-            .mr-ios-frame .cpb-sheet { margin: 0 auto; box-shadow: none !important; font-size: \(11 * fontScale)pt; }
+            html, body, .mr-body, .mr-app, .mr-ios-shell, .mr-page-frame {
+              margin: 0;
+              padding: 0;
+              width: 100%;
+              height: 100%;
+              max-height: none;
+              overflow: hidden;
+              background: #fff !important;
+            }
+            .mr-ios-shell { display: flex; align-items: flex-start; justify-content: center; }
+            .mr-page-frame { display: block; flex: none; }
+            .mr-ios-frame {
+              position: relative;
+              width: \(pageWidth)px;
+              height: \(pageHeight)px;
+              transform-origin: top center;
+              background: #fff;
+            }
+            .mr-ios-frame .cpb-sheet { margin: 0 auto; box-shadow: none !important; \(frameFontRule) }
+            .reader-generated-page { margin: 0 !important; box-shadow: none !important; background: #fff !important; }
+            .reader-page-header-region, .reader-page-body, .reader-page-footer-region { max-width: none !important; }
+            .reader-page-header-region > .cpb-page-header,
+            .reader-page-footer-region > .cpb-page-footer {
+              position: static !important;
+              inset: auto !important;
+              width: 100% !important;
+              height: 100% !important;
+              margin: 0 !important;
+              box-sizing: border-box !important;
+            }
+            .reader-page-footer-region {
+              display: flex;
+              align-items: flex-end;
+            }
             \(scaledFontRules)
             .mr-app .cpb-block-chrome, .mr-app .cpb-dropzone, .mr-app .cpb-change-marker, .mr-app .cpb-page-layout-toggle { display: none !important; }
           </style>

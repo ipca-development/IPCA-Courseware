@@ -720,3 +720,79 @@
 .mr-measure-band {
   height: 36px;
 }
+
+/*
+ * Controlled page fidelity contract.
+ * Reader-owned snapshot layered over the generated controlled-content styles.
+ * Structural normalization must not reinterpret the publication design.
+ */
+.reader-generated-page {
+  color: #0f172a;
+  background: #fff;
+}
+
+.reader-generated-page .reader-page-header-region,
+.reader-generated-page .reader-page-footer-region {
+  overflow: hidden;
+}
+
+.reader-generated-page .reader-page-header-region > .cpb-page-header,
+.reader-generated-page .reader-page-footer-region > .cpb-page-footer {
+  position: static !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  overflow: hidden;
+  cursor: default;
+}
+
+.reader-generated-page .cpb-page-header-table,
+.reader-generated-page .cpb-page-footer-table {
+  width: 100%;
+  height: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.reader-generated-page .cpb-page-header-table tr,
+.reader-generated-page .cpb-page-footer-table tr {
+  height: 100%;
+}
+
+.reader-generated-page .cpb-page-header-table td,
+.reader-generated-page .cpb-page-footer-table td {
+  min-width: 0;
+  min-height: 0 !important;
+  overflow: hidden;
+  vertical-align: middle;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.reader-generated-page .cpb-page-header-cell--left {
+  width: 30%;
+}
+
+.reader-generated-page .cpb-page-header-cell--center {
+  width: 40%;
+}
+
+.reader-generated-page .cpb-page-header-cell--right {
+  width: 30%;
+}
+
+.reader-generated-page .cpb-page-header-logo {
+  display: block;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100% !important;
+  object-fit: contain;
+}
+
+.reader-generated-page .reader-page-body {
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.55;
+  color: #0f172a;
+}

@@ -19,6 +19,16 @@ struct ReaderView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let safeSize = CGSize(
+                width: max(
+                    1,
+                    proxy.size.width - proxy.safeAreaInsets.leading - proxy.safeAreaInsets.trailing
+                ),
+                height: max(
+                    1,
+                    proxy.size.height - proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom
+                )
+            )
             ZStack {
                 readerBackground.ignoresSafeArea()
 
@@ -38,7 +48,12 @@ struct ReaderView: View {
                         description: Text(error)
                     )
                 } else {
-                    physicalBookReader(size: proxy.size)
+                    physicalBookReader(size: safeSize)
+                        .frame(width: safeSize.width, height: safeSize.height)
+                        .offset(
+                            x: (proxy.safeAreaInsets.leading - proxy.safeAreaInsets.trailing) / 2,
+                            y: (proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom) / 2
+                        )
                 }
 
                 if showChrome && !viewModel.isLoading {
@@ -72,6 +87,14 @@ struct ReaderView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            .task(
+                id: "\(Int(safeSize.width))x\(Int(safeSize.height))-\(session.settings.fontSize.rawValue)"
+            ) {
+                await viewModel.updateLayout(
+                    viewport: safeSize,
+                    isLandscape: safeSize.width > safeSize.height
+                )
+            }
         }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
@@ -102,25 +125,18 @@ struct ReaderView: View {
     }
 
     private var readerBackground: some View {
-        Group {
-            switch session.settings.theme {
-            case .light: Color(red: 0.92, green: 0.92, blue: 0.94)
-            case .sepia: Color(red: 0.91, green: 0.87, blue: 0.81)
-            case .dark: Color(red: 0.11, green: 0.11, blue: 0.12)
-            }
-        }
+        Color.white
     }
 
     private func physicalBookReader(size: CGSize) -> some View {
         let landscape = size.width > size.height
-        let pageAspect = ManualPageLayout.width / ManualPageLayout.height
-        let availableWidth = max(1, size.width - (landscape ? 20 : 24))
-        let availableHeight = max(1, size.height - 20)
-        let pageWidth = min(
-            landscape ? availableWidth / 2 : availableWidth,
-            availableHeight * pageAspect
+        let layout = viewModel.activeLayout ?? PageLayoutConfiguration.make(
+            viewport: size,
+            isLandscape: landscape,
+            fontScale: session.settings.fontSize.scale
         )
-        let pageHeight = pageWidth / pageAspect
+        let pageWidth = CGFloat(layout.pageWidth)
+        let pageHeight = CGFloat(layout.pageHeight)
         let readerWidth = landscape ? pageWidth * 2 : pageWidth
 
         return ZStack {
@@ -130,6 +146,7 @@ struct ReaderView: View {
                     htmlByIndex: viewModel.pageHTMLByIndex,
                     baseURL: baseURL,
                     isLandscape: landscape,
+                    pageSize: CGSize(width: pageWidth, height: pageHeight),
                     currentIndex: $viewModel.currentIndex,
                     onTap: toggleControls
                 )
@@ -138,19 +155,32 @@ struct ReaderView: View {
                 if landscape {
                     BookGutterView()
                 }
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--pagination-debug") {
+                    PaginationDebugOverlay(
+                        layout: layout,
+                        metrics: viewModel.currentPersonalPage?.metrics,
+                        repeats: landscape ? 2 : 1
+                    )
+                }
+#endif
             } else {
                 ProgressView()
             }
         }
         .frame(width: readerWidth, height: pageHeight)
-        .background(Color.white)
-        .shadow(color: .black.opacity(landscape ? 0.12 : 0.16), radius: landscape ? 10 : 12, y: 3)
+        .background(readerBackground)
+        .shadow(color: .black.opacity(0.045), radius: 5, y: 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var pageDescription: String {
         guard let page = viewModel.currentPage else { return "" }
-        return "Page \(page.pageNumber) of \(viewModel.pageCount)"
+        let readerPage = "Reader page \(page.pageNumber) of \(viewModel.pageCount)"
+        if let officialPage = viewModel.currentOfficialLocation?.officialPageNumber {
+            return "\(readerPage) · Official page \(officialPage)"
+        }
+        return readerPage
     }
 
     private var contentsPopover: some View {
@@ -218,6 +248,63 @@ struct ReaderView: View {
         scheduleControlsAutoHide()
     }
 }
+
+#if DEBUG
+private struct PaginationDebugOverlay: View {
+    let layout: PageLayoutConfiguration
+    let metrics: ReaderPageMetrics?
+    let repeats: Int
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<repeats, id: \.self) { _ in
+                ZStack(alignment: .topLeading) {
+                    debugFrame(layout.headerFrame, color: .red, label: "HEADER")
+                    debugFrame(layout.contentFrame, color: .blue, label: "BODY")
+                    debugFrame(layout.footerFrame, color: .green, label: "FOOTER")
+                    ForEach(
+                        Array((metrics?.blockMeasurements ?? []).enumerated()),
+                        id: \.offset
+                    ) { index, block in
+                        debugFrame(
+                            ReaderRect(
+                                x: layout.contentFrame.x + block.frame.x,
+                                y: layout.contentFrame.y + block.frame.y,
+                                width: block.frame.width,
+                                height: block.frame.height
+                            ),
+                            color: .orange,
+                            label: "\(index) \(block.semanticType)"
+                        )
+                    }
+                }
+                .frame(
+                    width: CGFloat(layout.pageWidth),
+                    height: CGFloat(layout.pageHeight)
+                )
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func debugFrame(
+        _ frame: ReaderRect,
+        color: Color,
+        label: String
+    ) -> some View {
+        Rectangle()
+            .stroke(color, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            .overlay(alignment: .topLeading) {
+                Text(label)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(color)
+                    .padding(2)
+            }
+            .frame(width: CGFloat(frame.width), height: CGFloat(frame.height))
+            .offset(x: CGFloat(frame.x), y: CGFloat(frame.y))
+    }
+}
+#endif
 
 private struct ReaderControlsOverlay<SearchContent: View, ContentsContent: View, SettingsContent: View>: View {
     let pageDescription: String

@@ -42,12 +42,80 @@ struct OfflineManualPackage: Codable {
     let tableOfContents: TocResponse
     let pages: [FrozenPageResponse]
     let coverImageData: Data?
+    /// Legacy download field retained only so existing packages decode.
     let editorCSS: String?
+    let contentCSS: String?
     let readerCSS: String?
     let paginateSourceData: Data?
 
     func page(number: Int) -> FrozenPageResponse? {
         pages.first { $0.pageNumber == number }
+    }
+}
+
+struct PersonalPaginationSnapshot: Codable {
+    let cacheIdentity: String
+    let personalPages: [PersonalReaderPage]
+    let sectionPageIndex: [Int: Int]
+    let validation: PaginationValidationSummary
+    let normalizerVersion: String
+    let engineVersion: String
+    let layout: PageLayoutConfiguration
+
+    var result: PersonalPaginationResult {
+        PersonalPaginationResult(
+            personalPages: personalPages,
+            sectionPageIndex: sectionPageIndex,
+            validation: validation,
+            normalizerVersion: normalizerVersion,
+            engineVersion: engineVersion,
+            layout: layout
+        )
+    }
+}
+
+actor PersonalPaginationCache {
+    static let shared = PersonalPaginationCache()
+
+    private let fileManager = FileManager.default
+
+    private var rootURL: URL {
+        fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("IPCAManualReader", isDirectory: true)
+            .appendingPathComponent("PersonalPagination", isDirectory: true)
+    }
+
+    func load(identity: String) -> PersonalPaginationResult? {
+        let url = cacheURL(identity: identity)
+        guard let data = try? Data(contentsOf: url),
+              let snapshot = try? JSONDecoder().decode(PersonalPaginationSnapshot.self, from: data),
+              snapshot.cacheIdentity == identity,
+              snapshot.validation.isValid else {
+            return nil
+        }
+        return snapshot.result
+    }
+
+    func save(_ result: PersonalPaginationResult, identity: String) throws {
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let snapshot = PersonalPaginationSnapshot(
+            cacheIdentity: identity,
+            personalPages: result.personalPages,
+            sectionPageIndex: result.sectionPageIndex,
+            validation: result.validation,
+            normalizerVersion: result.normalizerVersion,
+            engineVersion: result.engineVersion,
+            layout: result.layout
+        )
+        let data = try JSONEncoder().encode(snapshot)
+        try data.write(to: cacheURL(identity: identity), options: .atomic)
+    }
+
+    private func cacheURL(identity: String) -> URL {
+        let safeName = identity.map { character in
+            character.isLetter || character.isNumber || character == "-" ? character : "_"
+        }
+        return rootURL.appendingPathComponent(String(safeName) + ".json")
     }
 }
 
@@ -148,12 +216,27 @@ final class ManualDownloadManager: ObservableObject {
         forceRefresh: Bool = false
     ) async throws -> OfflineManualPackage {
         if !forceRefresh, let existing = await package(for: book) {
-            if existing.paginateSourceData == nil,
-               let sourceData = try? await client.fetchPaginateSource(
+            var sourceData = existing.paginateSourceData
+            if sourceData == nil {
+                sourceData = try? await client.fetchPaginateSource(
                    bookKey: book.bookKey,
                    versionId: book.versionId > 0 ? book.versionId : nil,
                    isPreview: book.isDraftPreview
-               ) {
+                )
+            }
+            var contentCSS = existing.contentCSS
+            if contentCSS == nil {
+                contentCSS = await downloadTextAsset(
+                    path: "assets/manual_reader_content.css",
+                    client: client
+                )
+                if contentCSS == nil {
+                    contentCSS = bundledTextAsset(name: "manual_reader_content", extension: "css")
+                }
+            }
+            if sourceData != nil,
+               contentCSS != nil,
+               (existing.paginateSourceData == nil || existing.contentCSS == nil) {
                 let upgraded = OfflineManualPackage(
                     bookID: existing.bookID,
                     versionID: existing.versionID,
@@ -163,6 +246,7 @@ final class ManualDownloadManager: ObservableObject {
                     pages: existing.pages,
                     coverImageData: existing.coverImageData,
                     editorCSS: existing.editorCSS,
+                    contentCSS: contentCSS,
                     readerCSS: existing.readerCSS,
                     paginateSourceData: sourceData
                 )
@@ -205,8 +289,8 @@ final class ManualDownloadManager: ObservableObject {
                 coverData = result.0
             }
 
-            async let editorCSSTask = downloadTextAsset(
-                path: "assets/controlled_book_editor.css",
+            async let contentCSSTask = downloadTextAsset(
+                path: "assets/manual_reader_content.css",
                 client: client
             )
             async let readerCSSTask = downloadTextAsset(
@@ -246,7 +330,9 @@ final class ManualDownloadManager: ObservableObject {
                 )
             }
 
-            let (editorCSS, readerCSS) = await (editorCSSTask, readerCSSTask)
+            let (downloadedContentCSS, readerCSS) = await (contentCSSTask, readerCSSTask)
+            let contentCSS = downloadedContentCSS
+                ?? bundledTextAsset(name: "manual_reader_content", extension: "css")
 
             let package = OfflineManualPackage(
                 bookID: book.id,
@@ -256,7 +342,8 @@ final class ManualDownloadManager: ObservableObject {
                 tableOfContents: tableOfContents,
                 pages: downloadedPages,
                 coverImageData: coverData,
-                editorCSS: editorCSS,
+                editorCSS: nil,
+                contentCSS: contentCSS,
                 readerCSS: readerCSS,
                 paginateSourceData: paginateSourceData
             )
@@ -329,5 +416,12 @@ final class ManualDownloadManager: ObservableObject {
             return nil
         }
         return String(data: result.0, encoding: .utf8)
+    }
+
+    private func bundledTextAsset(name: String, extension fileExtension: String) -> String? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: fileExtension) else {
+            return nil
+        }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 }
