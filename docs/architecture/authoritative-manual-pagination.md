@@ -12,8 +12,9 @@ Each persisted manual-break segment is one intended authoritative page.
 
 - If the segment fits the Book Style body: emit exactly one page.
 - If multiple ordinary blocks exceed the body: return first-class `MANUAL_BREAK_REQUIRED`. Do not persist a partial page map. Do not insert the break.
-- Automatic continuation is allowed only for generated TOC, long-table row presentation, and a single oversized source block that cannot fit an empty page.
-- TOC and long-table continuation pages are scoped to that object. Following ordinary blocks must not flow onto them.
+- Automatic continuation is allowed only for generated TOC, generated LEP/List of Effective Pages or Parts, long-table row presentation, and a single oversized source block that cannot fit an empty page.
+- TOC, LEP, and long-table continuation pages are scoped to that object. Following ordinary blocks must not flow onto them.
+- Generated LEP remains one logical object: fill the body, continue rows/items in order on the next page, and repeat the controlled header/footer. Do not require or persist Manual Page Breaks inside LEP. Ordinary Part 0 content outside LEP stays author-controlled.
 - Every semantic source block appears exactly once, in source order, except presentation-only repeated table headers.
 - Released page maps remain immutable. Draft maps using the previous engine version are stale.
 

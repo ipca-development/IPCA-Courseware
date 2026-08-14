@@ -48,6 +48,11 @@ const bookStyleCSS = `
     display: flex; justify-content: space-between; gap: 16px;
     min-height: 32px; padding: 6px 0; border-bottom: 1px solid #ddd;
   }
+  .cpb-lep-heading { font-size: 18px; line-height: 1.2; margin: 4px 0; }
+  .cpb-lep-cert-text { margin: 8px 0; }
+  .cpb-lep-table { width: 100%; border-collapse: collapse; }
+  .cpb-lep-table th, .cpb-lep-table td { height: 42px; border: 1px solid #333; padding: 6px; }
+  .cpb-lep-part-row { min-height: 42px; }
 `;
 
 function section(id, key, title, flags, units, extra) {
@@ -139,6 +144,32 @@ function sourceCoverage(result) {
   return result.pages.flatMap((page) =>
     page.coverage.filter((item) => item.presentation_copy !== true)
   );
+}
+
+function lepHtml(rowCount) {
+  const rows = Array.from({ length: rowCount }, (_, index) =>
+    `<tr class="cpb-lep-part-row" data-stable-anchor="lep-part-${index + 1}">`
+      + `<td>Part ${index + 1}</td><td>${index + 3}</td>`
+      + `<td>2026-01-01</td><td>Rev ${index + 1}</td></tr>`
+  ).join("");
+  return '<div class="cpb-lep">'
+    + '<div class="cpb-lep-heading">PART 0 – Manual Administration</div>'
+    + '<div class="cpb-lep-heading">0. OUTLINE</div>'
+    + '<div class="cpb-lep-heading">0.1 List of effective Parts</div>'
+    + '<div class="cpb-lep-cert-wrap"><div class="cpb-lep-cert-text">Certification statement.</div></div>'
+    + '<table class="cpb-lep-table cpb-table" data-lep-parts-table="1">'
+    + '<thead><tr class="cpb-table-header-row"><th>Part</th><th>Pages</th><th>Date</th><th>Revision</th></tr></thead>'
+    + `<tbody>${rows}</tbody></table></div>`;
+}
+
+function lepSection(id, rowCount) {
+  return section(id, "lep", "List of Effective Parts", { is_part0: true }, [
+    unit("lep-generated", "lep", lepHtml(rowCount), { block_id: 30 })
+  ]);
+}
+
+function lepRowCoverage(result) {
+  return sourceCoverage(result).filter((item) => item.source_fragment_id.includes("/lep-row-"));
 }
 
 const cases = [];
@@ -377,6 +408,133 @@ cases.push(["N. manual page-break page starts at Book Style body top", () => {
   assert.ok(contentY >= headerBottom + layout.header_margin_bottom_px - 0.75);
   assert.ok(afterBreak.metrics.first_body_page_y + 0.75 >= contentY);
   assert.ok(/overflow:\s*hidden/i.test(afterBreak.page_html));
+}]);
+
+cases.push(["O. generated LEP fits one page", () => {
+  const { execution, result } = runWorker(sourceWith([lepSection(3, 3)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.strictEqual(result.pages.length, 1, "short LEP must stay on one page");
+  assert.strictEqual(lepRowCoverage(result).length, 3);
+  assert.ok(result.pages[0].page_html.includes("0.1 List of effective Parts"));
+  assert.ok(result.pages[0].page_html.includes("Part 3"));
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["P. generated LEP spans multiple pages automatically", () => {
+  const { execution, result } = runWorker(sourceWith([lepSection(3, 48)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.ok(result.pages.length >= 3, "LEP must continue across physical pages without Manual Page Breaks");
+  assert.ok(result.pages.slice(1).every((page) =>
+    String(page.metrics && page.metrics.break_reason || "") === "lep_continuation"
+  ), "LEP continuation pages must not persist as manual breaks");
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["Q. every LEP row/item appears exactly once", () => {
+  const rowCount = 48;
+  const { execution, result } = runWorker(sourceWith([lepSection(3, rowCount)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  const rows = lepRowCoverage(result);
+  assert.strictEqual(rows.length, rowCount, "each LEP row must appear exactly once");
+  assert.strictEqual(new Set(rows.map((item) => item.source_fragment_id)).size, rowCount);
+  const labels = result.pages.map((page) => page.page_html).join("\n");
+  for (let index = 1; index <= rowCount; index++) {
+    const matches = labels.match(new RegExp(`Part ${index}(?!\\d)`, "g")) || [];
+    assert.ok(matches.length >= 1, `missing LEP row Part ${index}`);
+    assert.strictEqual(matches.length, 1, `LEP row Part ${index} duplicated`);
+  }
+}]);
+
+cases.push(["R. header/footer/page number appear on every LEP continuation page", () => {
+  const { execution, result } = runWorker(sourceWith([lepSection(3, 48)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.ok(result.pages.length >= 2, "expected LEP continuation pages");
+  assert.deepStrictEqual(
+    result.pages.map((page) => page.page_number),
+    result.pages.map((_, index) => index + 1)
+  );
+  result.pages.forEach((page) => {
+    assert.ok(page.page_html.includes("reader-page-header-region"), "LEP page missing header");
+    assert.ok(page.page_html.includes("reader-page-footer-region"), "LEP page missing footer");
+    assert.ok(page.page_html.includes("cpb-page-number"), "LEP page missing page number");
+    assert.ok(page.page_html.includes("Controlled copy"), "LEP page missing controlled footer");
+  });
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["S. following ordinary content cannot use leftover LEP continuation space", () => {
+  const { execution, result } = runWorker(sourceWith([
+    lepSection(3, 48),
+    section(4, "revision_system", "0.2 Revision System", { is_part0: true }, [
+      unit(
+        "block-after-lep",
+        "paragraph",
+        '<article data-block-id="41" data-stable-anchor="block-after-lep"><p>Following ordinary Part 0 copy must not ride LEP continuation space.</p></article>',
+        { block_id: 41 }
+      )
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
+  assert.strictEqual(result.error.before_block_anchor, "block-after-lep");
+  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
+}]);
+
+cases.push(["T. Part 0 content outside LEP still requires Manual Page Breaks", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(4, "revision_system", "0.2 Revision System", { is_part0: true }, [
+      unit(
+        "block-one",
+        "paragraph",
+        '<article data-block-id="51" data-stable-anchor="block-one"><p class="tall-block">Ordinary Part 0 opening copy.</p></article>',
+        { block_id: 51 }
+      ),
+      unit(
+        "block-two",
+        "paragraph",
+        '<article data-block-id="52" data-stable-anchor="block-two"><p class="tall-block">0.2 Revision system body still requires a Manual Page Break.</p></article>',
+        { block_id: 52 }
+      )
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
+  assert.strictEqual(result.error.before_block_anchor, "block-two");
+  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
+  assert.ok(String(result.error.before_block_title || "").includes("0.2 Revision system"));
+}]);
+
+cases.push(["U. MANUAL_BREAK_REQUIRED title uses a clean heading, not concatenated labels", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(4, "outline", "0. OUTLINE", { is_part0: true }, [
+      unit(
+        "lead-in",
+        "paragraph",
+        '<article data-block-id="61" data-stable-anchor="lead-in"><p>Short lead-in before overflowing Part 0 headings.</p></article>',
+        { block_id: 61 }
+      ),
+      unit(
+        "outline-shell",
+        "paragraph",
+        '<article data-block-id="62" data-stable-anchor="outline-shell">'
+          + '<div class="cpb-lep-heading">PART 0 – Manual Administration</div>'
+          + '<div class="cpb-lep-heading">0. OUTLINE</div>'
+          + '<div class="cpb-lep-heading">0.1 List of effective Parts</div>'
+          + '<p class="tall-block">Ordinary overflowing Part 0 body.</p>'
+          + '<p class="tall-block">More overflowing Part 0 body.</p>'
+          + "</article>",
+        { block_id: 62 }
+      )
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
+  const title = String(result.error.before_block_title || "");
+  assert.ok(!/[A-Za-z]0\./.test(title), `concatenated structural title leaked: ${title}`);
+  assert.strictEqual(title, "0.1 List of effective Parts");
 }]);
 
 let failed = 0;

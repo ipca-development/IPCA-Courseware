@@ -67,6 +67,8 @@
     const declared = String(unit.block_type || "").toLowerCase();
     if (declared === "shell") return "shell";
     if (declared === "toc") return "toc";
+    if (declared === "lep") return "lep";
+    if (root.querySelector("table.cpb-lep-table, [data-lep-parts-table], tr.cpb-lep-part-row")) return "lep";
     if (declared === "heading" || root.matches("h1,h2,h3,h4") || root.querySelector("h1,h2,h3,h4")) return "heading";
     if (declared === "list" || root.matches("ol,ul") || root.querySelector("ol,ul")) return "list";
     if (declared === "table" || root.matches("table") || root.querySelector("table")) return "table";
@@ -363,6 +365,93 @@
     return output;
   }
 
+  function isGeneratedLep(section, unit, root) {
+    if (String(section && section.section_key || "").toLowerCase() === "lep") return true;
+    if (String(unit && unit.block_type || "").toLowerCase() === "lep") return true;
+    return Boolean(
+      root
+      && root.querySelector
+      && root.querySelector("table.cpb-lep-table, [data-lep-parts-table], tr.cpb-lep-part-row")
+    );
+  }
+
+  function lepRowNodes(root) {
+    if (!root || !root.querySelectorAll) return [];
+    const table = root.querySelector("table.cpb-lep-table, [data-lep-parts-table]")
+      || root.querySelector("table");
+    if (table) {
+      const named = Array.from(table.querySelectorAll("tbody > tr.cpb-lep-part-row"));
+      if (named.length) return named;
+      return Array.from(table.querySelectorAll("tbody > tr"));
+    }
+    return Array.from(root.querySelectorAll("tr.cpb-lep-part-row"));
+  }
+
+  function lepRowTableMarkup(row) {
+    const table = row.closest("table");
+    const clone = table ? table.cloneNode(false) : document.createElement("table");
+    if (table) {
+      Array.from(table.attributes || []).forEach((attr) => {
+        clone.setAttribute(attr.name, attr.value);
+      });
+    } else {
+      clone.className = "cpb-table cpb-lep-table";
+    }
+    const thead = table && table.querySelector("thead");
+    if (thead) clone.appendChild(thead.cloneNode(true));
+    const tbody = document.createElement("tbody");
+    tbody.appendChild(row.cloneNode(true));
+    clone.appendChild(tbody);
+    return clone.outerHTML;
+  }
+
+  function normalizeGeneratedLep(section, unit, root, forceBreakBefore) {
+    const rows = lepRowNodes(root);
+    if (!rows.length) {
+      return [fragment(section, unit, "root", "lep", root.outerHTML, root.textContent, {
+        anchor: root.getAttribute("data-stable-anchor") || section.stable_anchor,
+        atomic: true,
+        splittable: false,
+        forceBreakBefore
+      })];
+    }
+    const output = rows.map((row, index) => {
+      let html;
+      let text;
+      if (index === 0) {
+        const clone = root.cloneNode(true);
+        lepRowNodes(clone).slice(1).forEach((node) => node.remove());
+        html = clone.outerHTML;
+        text = clone.textContent;
+      } else {
+        html = lepRowTableMarkup(row);
+        text = row.textContent;
+      }
+      return fragment(section, unit, `lep-row-${index}`, "lepRow", html, text, {
+        anchor: row.getAttribute("data-stable-anchor")
+          || row.getAttribute("data-lep-part")
+          || root.getAttribute("data-stable-anchor")
+          || section.stable_anchor,
+        atomic: true,
+        splittable: false,
+        forceBreakBefore: forceBreakBefore && index === 0
+      });
+    });
+    const normalizedLepText = canonicalContent(output.map((item) => item.text));
+    const sourceLepText = canonicalContent([root.textContent]);
+    if (normalizedLepText !== sourceLepText) {
+      diagnostic(
+        "LEP_NORMALIZATION_CONTENT_MISMATCH",
+        "failure",
+        `LEP normalization text length ${normalizedLepText.length} `
+          + `did not match source length ${sourceLepText.length}.`,
+        output[0] || null,
+        null
+      );
+    }
+    return output;
+  }
+
   function normalizeLep(section, unit, root, forceBreakBefore) {
     const lep = root.matches(".cpb-lep") ? root : root.querySelector(".cpb-lep");
     if (!lep) return [];
@@ -475,6 +564,9 @@
       unit.force_break_before
       || unit.manual_page_break_before
     );
+    if (isGeneratedLep(section, unit, root)) {
+      return normalizeGeneratedLep(section, unit, root, forceBreakBefore);
+    }
     if (root.matches(".cpb-lep") || root.querySelector(".cpb-lep")) {
       return normalizeLep(section, unit, root, forceBreakBefore);
     }
@@ -492,11 +584,11 @@
       || (heading && heading.getAttribute("id"))
       || section.stable_anchor;
     const supported = [
-      "heading", "paragraph", "note", "warning", "caution", "figure", "toc", "shell"
+      "heading", "paragraph", "note", "warning", "caution", "figure", "toc", "lep", "shell"
     ].includes(type);
     return [fragment(section, unit, "root", type, String(unit.html || ""), root.textContent, {
       anchor,
-      atomic: ["heading", "note", "warning", "caution", "figure", "toc", "shell"].includes(type),
+      atomic: ["heading", "note", "warning", "caution", "figure", "toc", "lep", "shell"].includes(type),
       splittable: ["paragraph", "note", "warning", "caution"].includes(type),
       forceBreakBefore,
       headingLevel: heading ? Number(heading.tagName.substring(1)) : 0,
@@ -720,6 +812,34 @@
     return root.outerHTML;
   }
 
+  function lepGroupMarkup(values) {
+    if (!values.length) return "";
+    const root = rootFromHTML(values[0].html).cloneNode(true);
+    const table = root.matches("table")
+      ? root
+      : root.querySelector("table.cpb-lep-table, [data-lep-parts-table], table");
+    if (!table) return values.map(pieceMarkup).join("");
+    let tbody = table.querySelector("tbody");
+    if (!tbody) {
+      tbody = document.createElement("tbody");
+      table.appendChild(tbody);
+    }
+    tbody.replaceChildren();
+    values.forEach((value) => {
+      const sourceRoot = rootFromHTML(value.html);
+      lepRowNodes(sourceRoot).forEach((row) => {
+        const clone = row.cloneNode(true);
+        annotateCoverage(clone, value);
+        tbody.appendChild(clone);
+      });
+    });
+    root.classList.add("reader-semantic-piece", "reader-lep-group");
+    root.style.setProperty("align-self", "start");
+    annotateSourceBinding(root, values[0].fragment);
+    root.setAttribute("data-semantic-type", "lep");
+    return root.outerHTML;
+  }
+
   function pagePiecesMarkup(values) {
     const output = [];
     let index = 0;
@@ -732,6 +852,18 @@
           index++;
         }
         output.push(tocGroupMarkup(group));
+        continue;
+      }
+      if (value.fragment.type === "lepRow" || value.fragment.type === "lep") {
+        const group = [];
+        while (
+          index < values.length
+          && (values[index].fragment.type === "lepRow" || values[index].fragment.type === "lep")
+        ) {
+          group.push(values[index]);
+          index++;
+        }
+        output.push(lepGroupMarkup(group));
         continue;
       }
       if (!["tableHeader", "tableRow"].includes(value.fragment.type)) {
@@ -1205,11 +1337,36 @@
     return best;
   }
 
+  function headingTextFromHTML(html) {
+    if (!html) return "";
+    const root = rootFromHTML(html);
+    if (!root) return "";
+    const selector = "h1,h2,h3,h4,h5,.cpb-lep-heading,.cpb-part0-heading,.cpb-part0-title";
+    const headings = [];
+    if (root.matches && root.matches(selector)) headings.push(root);
+    if (root.querySelectorAll) headings.push(...Array.from(root.querySelectorAll(selector)));
+    if (!headings.length) return "";
+    const last = headings[headings.length - 1];
+    return String(last.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function looksConcatenatedStructuralTitle(text) {
+    const value = String(text || "");
+    return /[A-Za-z]0\./.test(value) || /[A-Za-z]PART\s/i.test(value) && /0\./.test(value.replace(/\s+/g, ""));
+  }
+
   function humanTitleForFragment(fragmentValue) {
+    const htmlTitle = headingTextFromHTML(fragmentValue && fragmentValue.html || "");
+    if (htmlTitle) return htmlTitle.slice(0, 180);
     const text = String(fragmentValue && fragmentValue.text || "").replace(/\s+/g, " ").trim();
-    if (text) return text.slice(0, 180);
-    const sectionTitle = String(fragmentValue && fragmentValue.section && fragmentValue.section.title || "").trim();
-    return sectionTitle || String(fragmentValue && fragmentValue.anchor || fragmentValue.id || "");
+    const sectionTitle = String(
+      fragmentValue && fragmentValue.section && fragmentValue.section.title || ""
+    ).trim();
+    const anchor = String(fragmentValue && fragmentValue.anchor || "").trim();
+    if (text && !looksConcatenatedStructuralTitle(text)) return text.slice(0, 180);
+    if (sectionTitle) return sectionTitle;
+    if (anchor) return anchor;
+    return text.slice(0, 180);
   }
 
   function manualBreakRequiredError(fragmentValue) {
@@ -1274,6 +1431,10 @@
       return fragmentValue.type === "toc" || fragmentValue.type === "tocRow";
     }
 
+    function isLepFragment(fragmentValue) {
+      return fragmentValue.type === "lep" || fragmentValue.type === "lepRow";
+    }
+
     function isTableFragment(fragmentValue) {
       return fragmentValue.type === "tableHeader"
         || fragmentValue.type === "tableRow"
@@ -1318,6 +1479,7 @@
       if (!continuation) return true;
       if (sourceBlockKey(fragmentValue) !== continuation.blockKey) return false;
       if (continuation.kind === "toc") return isTocFragment(fragmentValue);
+      if (continuation.kind === "lep") return isLepFragment(fragmentValue);
       if (continuation.kind === "table") return isTableFragment(fragmentValue);
       return continuation.kind === "oversized";
     }
@@ -1377,6 +1539,20 @@
         }
         finish();
         startContinuation(sourceFragment, "toc");
+        trial = pageWith(current.section, current.pieces.concat([whole]), {});
+        if (measurePage(trial).fits) {
+          current.pieces.push(whole);
+          continue;
+        }
+        throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+      }
+
+      if (isLepFragment(sourceFragment)) {
+        if (!hasSourceContent(current)) {
+          throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+        }
+        finish();
+        startContinuation(sourceFragment, "lep");
         trial = pageWith(current.section, current.pieces.concat([whole]), {});
         if (measurePage(trial).fits) {
           current.pieces.push(whole);

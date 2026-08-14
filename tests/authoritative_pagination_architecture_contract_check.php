@@ -74,6 +74,10 @@ $contracts = array(
         'HEADER_BODY_INTERSECT',
         'BODY_STARTS_ABOVE_CONTENT_FRAME',
         'overflow:hidden',
+        'isLepFragment',
+        'lep-row-',
+        'startContinuation(sourceFragment, "lep")',
+        'humanTitleForFragment',
     ),
     'public/admin/api/controlled_book_editor_api.php' => array(
         "case 'split_block_page_break':",
@@ -83,6 +87,8 @@ $contracts = array(
     'src/publishing/ControlledPublishingPaginationService.php' => array(
         'exact browser measurement',
         'real .cpb-toc-row',
+        'unitsFromLepBody',
+        'real .cpb-lep-part-row',
         '$this->reader->loadReaderPaginateSource($resolvedVersion)',
         'ControlledPublishingPublicationFilter',
     ),

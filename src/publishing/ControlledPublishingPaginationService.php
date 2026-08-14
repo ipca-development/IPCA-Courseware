@@ -34,7 +34,7 @@ final class ControlledPublishingPaginationService
     );
 
     /** @var list<string> */
-    private const ATOMIC_BLOCK_TYPES = array('table', 'image', 'callout', 'toc', 'list');
+    private const ATOMIC_BLOCK_TYPES = array('table', 'image', 'callout', 'toc', 'lep', 'list');
 
     /** @var list<string> */
     private const SPLITTABLE_BLOCK_TYPES = array('paragraph', 'heading');
@@ -377,6 +377,14 @@ final class ControlledPublishingPaginationService
             return $this->unitsFromTocBody($bodyHtml, $sectionId, $flags);
         }
 
+        if (
+            $sectionKey === 'lep'
+            || str_contains($bodyHtml, 'cpb-lep-table')
+            || str_contains($bodyHtml, 'data-lep-parts-table')
+        ) {
+            return $this->unitsFromLepBody($bodyHtml, $sectionId, $flags);
+        }
+
         $units = array();
         if (preg_match_all('/<article class="cpb-block[^"]*"[^>]*>.*?<\/article>/s', $bodyHtml, $matches) >= 1) {
             $idx = 0;
@@ -449,6 +457,32 @@ final class ControlledPublishingPaginationService
             'unit_key' => 'toc' . $sectionId . '_0',
             'block_id' => 0,
             'block_type' => 'toc',
+            'html' => $bodyHtml,
+            'splittable' => false,
+            'atomic' => false,
+            'force_break_before' => false,
+            'is_heading' => false,
+        ));
+    }
+
+    /**
+     * Preserve generated LEP as one logical object. ReaderPaginationCore
+     * measures it in-browser and continues at real .cpb-lep-part-row
+     * boundaries. Continuation pages are not persisted as Manual Page Breaks.
+     *
+     * @param array<string,mixed> $flags
+     * @return list<array<string,mixed>>
+     */
+    private function unitsFromLepBody(string $bodyHtml, int $sectionId, array $flags): array
+    {
+        if (trim($bodyHtml) === '') {
+            return array();
+        }
+
+        return array(array(
+            'unit_key' => 'lep' . $sectionId . '_0',
+            'block_id' => 0,
+            'block_type' => 'lep',
             'html' => $bodyHtml,
             'splittable' => false,
             'atomic' => false,
