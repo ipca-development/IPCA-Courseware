@@ -286,6 +286,45 @@ final class ControlledPublishingReaderPageMapStore
     }
 
     /**
+     * Admin/release view of every stored authoritative page, including HTML.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function loadStoredPages(int $bookVersionId, string $layoutProfile): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT page_number, section_id, stable_anchor, page_type,
+                    is_cover, is_section_start, is_major_section_start,
+                    page_html, thumbnail_html, metadata_json
+               FROM ipca_publishing_reader_page_maps
+              WHERE book_version_id = ? AND layout_profile = ?
+              ORDER BY page_number ASC'
+        );
+        $stmt->execute(array($bookVersionId, $layoutProfile));
+
+        return array_map(static function (array $row): array {
+            $metadata = json_decode((string)($row['metadata_json'] ?? '{}'), true);
+            if (!is_array($metadata)) {
+                $metadata = array();
+            }
+
+            return array(
+                'page_number' => (int)$row['page_number'],
+                'section_id' => $row['section_id'] !== null ? (int)$row['section_id'] : null,
+                'stable_anchor' => $row['stable_anchor'],
+                'page_type' => (string)$row['page_type'],
+                'is_cover' => (bool)$row['is_cover'],
+                'is_section_start' => (bool)$row['is_section_start'],
+                'is_major_section_start' => (bool)$row['is_major_section_start'],
+                'page_html' => (string)$row['page_html'],
+                'thumbnail_html' => $row['thumbnail_html'],
+                'section_title' => (string)($metadata['section_title'] ?? ''),
+                'metadata' => $metadata,
+            );
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array());
+    }
+
+    /**
      * @return array<int,int> section_id => first page number
      */
     public function sectionPageIndex(int $bookVersionId, string $layoutProfile): array
