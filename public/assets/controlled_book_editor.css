@@ -1022,7 +1022,8 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-print-page-footer {
-  top: 920px;
+  top: auto;
+  bottom: 64px;
   height: auto !important;
   min-height: 0;
 }

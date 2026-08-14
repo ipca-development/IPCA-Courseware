@@ -10,7 +10,7 @@ $protected = array(
     'public/assets/controlled_book_editor.js'
         => '0cf06b08b89e523ecf1ef25d78ffce343ad4afcaba9e3830c1c6e208e3181f00',
     'public/assets/controlled_book_editor.css'
-        => '91c2906b16403ac8568ca75ab8f1df59a053d9a1e97cd9b7a7f2b3f8d07f9391',
+        => '5ebb7237faa86d2958783290f8a1e67ba4c83b15284bb5e8038f4a90dd37a524',
     'public/admin/api/controlled_book_editor_api.php'
         => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'src/publishing/ControlledPublishingBlockService.php'
