@@ -33,6 +33,9 @@ $contracts = array(
         'ControlledPublishingPaginationValidationException',
         'CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH',
         'workerEnvironment',
+        'acquireGenerationLock',
+        'LOCK_EX | LOCK_NB',
+        'Authoritative pagination is already running for this manual version',
     ),
     'scripts/authoritative_manual_paginator.cjs' => array(
         'ReaderPaginationCore.js',

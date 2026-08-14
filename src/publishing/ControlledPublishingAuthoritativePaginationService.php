@@ -57,6 +57,22 @@ final class ControlledPublishingAuthoritativePaginationService
      */
     public function generate(array $source, array $version): array
     {
+        $generationLock = $this->acquireGenerationLock($version);
+        try {
+            return $this->generateLocked($source, $version);
+        } finally {
+            flock($generationLock, LOCK_UN);
+            fclose($generationLock);
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $source
+     * @param array<string,mixed> $version
+     * @return array{pages:list<array<string,mixed>>,generation:array<string,mixed>}
+     */
+    private function generateLocked(array $source, array $version): array
+    {
         $package = $this->reader->paginationPublicationPackage($version, $source);
         $css = (string)($package['css']['content'] ?? '');
         if ($css === '') {
@@ -174,6 +190,36 @@ final class ControlledPublishingAuthoritativePaginationService
             @unlink($inputPath);
             @unlink($outputPath);
         }
+    }
+
+    /**
+     * A full manual uses one Chromium process and can briefly consume hundreds
+     * of megabytes. Reject duplicate requests instead of letting abandoned
+     * browser requests exhaust PHP, Chromium, and server memory.
+     *
+     * @param array<string,mixed> $version
+     * @return resource
+     */
+    private function acquireGenerationLock(array $version)
+    {
+        $versionId = (int)($version['id'] ?? 0);
+        $identity = $versionId > 0
+            ? 'version-' . $versionId
+            : 'book-' . hash('sha256', (string)($version['book_key'] ?? 'unknown'));
+        $path = sys_get_temp_dir() . '/ipca-authoritative-pagination-' . $identity . '.lock';
+        $handle = @fopen($path, 'c');
+        if ($handle === false) {
+            throw new RuntimeException('Unable to allocate the authoritative pagination lock.');
+        }
+        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+            throw new RuntimeException(
+                'Authoritative pagination is already running for this manual version. '
+                . 'Wait for it to finish, then reload the stored preview.'
+            );
+        }
+
+        return $handle;
     }
 
     /**
