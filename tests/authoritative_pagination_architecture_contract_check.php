@@ -8,9 +8,9 @@ $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
         => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
     'public/assets/controlled_book_editor.js'
-        => '07b48b81446ebdcf21a6b4fdfb8c3fafea5140020771e6499559f14b8ec3eadb',
+        => '871c2a0e99bb737e629577e01dac6ecbf5e99bcbfe514c6d6473c0f162790d8b',
     'public/assets/controlled_book_editor.css'
-        => '73a166d532eb6e2d9a620d9d933c77add8d201c3854c858345585348020c5f2e',
+        => 'b7b33fa46ca3be5c51e76fab612c418c7734fc8358d79f6cdcc5e3cfeb14f28d',
     'public/admin/api/controlled_book_editor_api.php'
         => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'src/publishing/ControlledPublishingBlockService.php'
@@ -46,6 +46,7 @@ $contracts = array(
         'applyUnifiedPrintLayout',
         'scheduleUnifiedPrintLayout',
         'cpb-flow-page-break--automatic',
+        'range.getClientRects()',
         "apiPost('split_block_page_break'",
         'insertPageBreakAtCursor',
     ),

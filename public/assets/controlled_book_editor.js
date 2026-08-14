@@ -499,6 +499,16 @@
     body.insertBefore(spacer, block);
   }
 
+  function automaticBreakBeforeNested(target, sheet, targetContentTop) {
+    var spacer = document.createElement('div');
+    spacer.className = 'cpb-flow-page-break';
+    spacer.setAttribute('data-auto-page-break', '1');
+    spacer.setAttribute('data-editor-only', '1');
+    spacer.setAttribute('contenteditable', 'false');
+    spacer.style.height = Math.max(1, targetContentTop - printY(target, sheet)) + 'px';
+    target.parentNode.insertBefore(spacer, target);
+  }
+
   function paragraphBreak(field, sheet, pageIndex) {
     var textLength = field.textContent.length;
     if (textLength < 2) return false;
@@ -509,11 +519,16 @@
     var best = -1;
     while (low <= high) {
       var middle = Math.floor((low + high) / 2);
+      var before = textBoundary(field, Math.max(0, middle - 1));
       var boundary = textBoundary(field, middle);
       var range = document.createRange();
-      range.selectNodeContents(field);
+      range.setStart(before.node, before.offset);
       range.setEnd(boundary.node, boundary.offset);
-      var bottom = (range.getBoundingClientRect().bottom
+      var rects = Array.prototype.slice.call(range.getClientRects()).filter(function (rect) {
+        return rect.width > 0 || rect.height > 0;
+      });
+      var endRect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
+      var bottom = (endRect.bottom
         - sheet.getBoundingClientRect().top) / printScale();
       if (bottom <= pageBottom) {
         best = middle;
@@ -624,12 +639,46 @@
           break;
         }
         if (bottom <= contentBottom + 0.5) continue;
-        var flowingField = block.querySelector(
+        var flowingFields = Array.prototype.slice.call(block.querySelectorAll(
           '.cpb-paragraph[contenteditable="true"],'
           + '.cpb-list[contenteditable="true"],'
+          + '.cpb-list-continuation[contenteditable="true"],'
           + '.cpb-callout-text[contenteditable="true"]'
-        );
-        var paragraphPage = pageIndex + (flowingField
+        ));
+        var flowingField = null;
+        var laterField = null;
+        var laterFieldTarget = 0;
+        flowingFields.some(function (field) {
+          var fieldTop = printY(field, sheet);
+          var candidatePage = Math.max(0, Math.floor(
+            fieldTop / (PRINT_PAGE.height + PRINT_PAGE.gap)
+          ));
+          var candidateTop = candidatePage * (PRINT_PAGE.height + PRINT_PAGE.gap)
+            + PRINT_PAGE.contentTop;
+          var candidateBottom = candidatePage * (PRINT_PAGE.height + PRINT_PAGE.gap)
+            + PRINT_PAGE.contentTop + PRINT_PAGE.contentHeight;
+          if (fieldTop < candidateTop - 1) {
+            laterField = field;
+            laterFieldTarget = candidateTop;
+            return true;
+          }
+          if (fieldTop >= candidateBottom - 1) {
+            laterField = field;
+            laterFieldTarget = (candidatePage + 1) * (PRINT_PAGE.height + PRINT_PAGE.gap)
+              + PRINT_PAGE.contentTop;
+            return true;
+          }
+          if (printBottom(field, sheet) > candidateBottom + 0.5) {
+            flowingField = field;
+            return true;
+          }
+          return false;
+        });
+        var fieldPage = flowingField
+          ? Math.max(0, Math.floor(printY(flowingField, sheet)
+            / (PRINT_PAGE.height + PRINT_PAGE.gap)))
+          : pageIndex;
+        var paragraphPage = fieldPage + (flowingField
           ? flowingField.querySelectorAll('[data-auto-page-break="1"]').length
           : 0);
         var paragraphBottom = paragraphPage * (PRINT_PAGE.height + PRINT_PAGE.gap)
@@ -639,6 +688,12 @@
           inserted = true;
           break;
         }
+        if (!flowingField && laterField) {
+          automaticBreakBeforeNested(laterField, sheet, laterFieldTarget);
+          inserted = true;
+          break;
+        }
+        if (flowingFields.length) continue;
         if (top > contentTop + 1) {
           automaticBreakBefore(body, block, sheet, pageIndex, false);
           inserted = true;
@@ -2236,6 +2291,7 @@
         });
         field.addEventListener('input', function () {
           scheduleSave(blockEl);
+          scheduleUnifiedPrintLayout(300);
         });
         field.addEventListener('blur', function () {
           flushSave(blockEl);

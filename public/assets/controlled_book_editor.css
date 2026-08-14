@@ -987,7 +987,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-print-furniture-layer {
   position: absolute;
-  z-index: 1;
+  z-index: auto;
   inset: 0;
   width: 816px;
   pointer-events: none;
@@ -1007,11 +1007,13 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-print-page-header,
 .cpb-print-page-footer {
   position: absolute !important;
+  z-index: 4;
   left: 56px;
   width: 704px !important;
   height: 84px;
   margin: 0 !important;
   box-sizing: border-box !important;
+  background: #fff;
   cursor: default;
 }
 
@@ -1021,7 +1023,8 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-print-page-footer {
   top: 920px;
-  height: 72px;
+  height: auto !important;
+  min-height: 0;
 }
 
 .cpb-flow-page-break {
