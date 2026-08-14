@@ -31,12 +31,15 @@ $contracts = array(
         'page_map_hash',
         'header_footer_hash',
         'ControlledPublishingPaginationValidationException',
+        'CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH',
+        'workerEnvironment',
     ),
     'scripts/authoritative_manual_paginator.cjs' => array(
         'ReaderPaginationCore.js',
         'page.setContent',
         'validation failed',
         'authoritative_layout',
+        'CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH',
     ),
     'src/publishing/ControlledPublishingManualPageBreakService.php' => array(
         'before_block_anchor',

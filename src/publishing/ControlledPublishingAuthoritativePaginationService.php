@@ -220,7 +220,8 @@ final class ControlledPublishingAuthoritativePaginationService
                 2 => array('pipe', 'w'),
             ),
             $pipes,
-            $this->root
+            $this->root,
+            $this->workerEnvironment()
         );
         if (!is_resource($process)) {
             throw new RuntimeException('Unable to start authoritative pagination worker.');
@@ -259,6 +260,30 @@ final class ControlledPublishingAuthoritativePaginationService
                 . ($detail !== '' ? ': ' . mb_substr($detail, 0, 2000) : '.')
             );
         }
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private function workerEnvironment(): array
+    {
+        $env = getenv();
+        if (!is_array($env) || $env === array()) {
+            $env = array();
+            foreach ($_SERVER as $key => $value) {
+                if (is_string($key) && is_string($value) && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key) === 1) {
+                    $env[$key] = $value;
+                }
+            }
+        }
+        $configured = trim((string)(getenv('CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH') ?: ''));
+        $fallback = '/var/lib/ipca/pagination/playwright-browsers';
+        $browsers = $configured !== '' ? $configured : (is_dir($fallback) ? $fallback : '');
+        if ($browsers !== '') {
+            $env['CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH'] = $browsers;
+            $env['PLAYWRIGHT_BROWSERS_PATH'] = $browsers;
+        }
+        return $env;
     }
 
     /**

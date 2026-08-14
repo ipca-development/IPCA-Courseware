@@ -3,6 +3,14 @@
 
 const fs = require("fs");
 const path = require("path");
+
+(function configurePlaywrightBrowsersPath() {
+  const configured = String(process.env.CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH || "").trim();
+  if (configured) {
+    process.env.PLAYWRIGHT_BROWSERS_PATH = configured;
+  }
+})();
+
 const { chromium } = require("./garmin/node_modules/playwright");
 
 function argument(name) {
