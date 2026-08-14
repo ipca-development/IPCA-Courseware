@@ -38,7 +38,7 @@ const source = {
     footer_band_px: 72,
     body_capacity_px: 744
   },
-  header_template_html: '<header class="cpb-page-header"><strong>Fixture Manual</strong></header>',
+  header_template_html: '<header class="cpb-page-header"><div style="height:96px"><strong>Fixture Manual</strong></div></header>',
   footer_template_html: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
   sections: [{
     id: 2,
@@ -155,6 +155,15 @@ try {
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
   const result = JSON.parse(fs.readFileSync(outputPath, "utf8"));
   assert.strictEqual(result.validation.is_valid, true, "final validation must pass");
+  assert.ok(
+    result.authoritative_layout.headerFrame.height >= 96,
+    "Book Style header content must expand the authoritative header frame"
+  );
+  assert.strictEqual(
+    result.authoritative_layout.contentFrame.y,
+    48 + result.authoritative_layout.headerFrame.height + 20,
+    "body frame must begin after the measured header and configured margin"
+  );
   assert.ok(result.pages.length >= 2, "manual page break must create a later page");
   assert.ok(
     result.pages.filter((page) => page.section_id === 2).length >= 3,

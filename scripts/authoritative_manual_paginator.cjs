@@ -118,6 +118,82 @@ async function main() {
       </head><body><div id="pagination-measure-host"></div></body></html>`,
       { waitUntil: "domcontentloaded" }
     );
+    const measuredBands = await page.evaluate(async ({
+      headerTemplates,
+      footerTemplates,
+      width
+    }) => {
+      const templates = (kind) => kind === "header" ? headerTemplates : footerTemplates;
+      const measure = async (html, kind) => {
+        const region = document.createElement("div");
+        region.className = `reader-page-${kind}-measurement`;
+        region.style.cssText = `position:absolute;left:0;top:0;width:${width}px;`
+          + "height:auto;visibility:hidden;overflow:visible;";
+        region.innerHTML = html;
+        const root = region.firstElementChild;
+        if (root) {
+          root.style.setProperty("position", "static", "important");
+          root.style.setProperty("inset", "auto", "important");
+          root.style.setProperty("width", "100%", "important");
+          root.style.setProperty("height", "auto", "important");
+          root.style.setProperty("margin", "0", "important");
+          root.style.setProperty("box-sizing", "border-box", "important");
+        }
+        document.body.appendChild(region);
+        await Promise.all(Array.from(region.querySelectorAll("img")).map(async (image) => {
+          if (image.complete) return;
+          try {
+            await image.decode();
+          } catch (_) {
+            await new Promise((resolve) => {
+              image.addEventListener("load", resolve, { once: true });
+              image.addEventListener("error", resolve, { once: true });
+            });
+          }
+        }));
+        const height = Math.max(
+          root ? root.getBoundingClientRect().height : 0,
+          root ? root.scrollHeight : 0,
+          region.scrollHeight
+        );
+        region.remove();
+        return height;
+      };
+      const heights = async (kind) => Promise.all(
+        templates(kind).map((template) => measure(template, kind))
+      );
+      const [headerHeights, footerHeights] = await Promise.all([
+        heights("header"),
+        heights("footer")
+      ]);
+      return {
+        header: Math.max(0, ...headerHeights),
+        footer: Math.max(0, ...footerHeights)
+      };
+    }, {
+      headerTemplates: Array.from(new Set([
+        String(source.header_template_html || ""),
+        ...source.sections.map((section) => String(section?.header_template || ""))
+      ].filter(Boolean))),
+      footerTemplates: Array.from(new Set([
+        String(source.footer_template_html || ""),
+        ...source.sections.map((section) => String(section?.footer_template || ""))
+      ].filter(Boolean))),
+      width: pageWidth - side * 2
+    });
+    const resolvedHeaderHeight = Math.max(headerHeight, Math.ceil(measuredBands.header));
+    const resolvedFooterHeight = Math.max(footerHeight, Math.ceil(measuredBands.footer));
+    const resolvedContentY = top + resolvedHeaderHeight + headerGap;
+    const resolvedFooterY = pageHeight - bottom - resolvedFooterHeight;
+    const resolvedContentHeight = resolvedFooterY - footerGap - resolvedContentY;
+    if (resolvedContentHeight <= 0) {
+      fail("Book Style header/footer bands leave no positive page body.");
+    }
+    layout.headerFrame.height = resolvedHeaderHeight;
+    layout.contentFrame.y = resolvedContentY;
+    layout.contentFrame.height = resolvedContentHeight;
+    layout.footerFrame.y = resolvedFooterY;
+    layout.footerFrame.height = resolvedFooterHeight;
     await page.evaluate(({ sourceValue, layoutValue }) => {
       window.IPCAPaginationInput = {
         source: sourceValue,
