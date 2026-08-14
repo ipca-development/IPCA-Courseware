@@ -6,11 +6,11 @@ $failures = array();
 
 $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
-        => '32b2edd0a696ccb8759f61841e834f1dce035ce98608eed74eaf151b8e18ed45',
+        => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
     'public/assets/controlled_book_editor.js'
-        => '59b987de8f33b732356f76e13a7564c56262aaf14ee885eaf1eef1648d187365',
+        => '07b48b81446ebdcf21a6b4fdfb8c3fafea5140020771e6499559f14b8ec3eadb',
     'public/assets/controlled_book_editor.css'
-        => 'b564fd7623989d8804e972bf6e9bd6d51abfa015f4238c9bd28cef5c63170771',
+        => '73a166d532eb6e2d9a620d9d933c77add8d201c3854c858345585348020c5f2e',
     'public/admin/api/controlled_book_editor_api.php'
         => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'src/publishing/ControlledPublishingBlockService.php'
@@ -43,9 +43,9 @@ $contracts = array(
         'invalidatePageMap',
     ),
     'public/assets/controlled_book_editor.js' => array(
-        'allPages.filter(function (page)',
-        'selectedSectionUsesAutomaticPages',
-        'paginationPageNavigation',
+        'applyUnifiedPrintLayout',
+        'scheduleUnifiedPrintLayout',
+        'cpb-flow-page-break--automatic',
         "apiPost('split_block_page_break'",
         'insertPageBreakAtCursor',
     ),
@@ -87,6 +87,20 @@ foreach ($contracts as $relative => $markers) {
         if (!str_contains($contents, $marker)) {
             $failures[] = "Missing marker '{$marker}' in {$relative}";
         }
+    }
+}
+
+$editorMarkup = (string)@file_get_contents(
+    $root . '/public/admin/compliance/controlled_book_editor.php'
+);
+foreach (array(
+    'cpbViewPaginated',
+    'cpbPaginationRegenerate',
+    'cpbPaginationApprove',
+    'cpbPaginationStatus',
+) as $removedControl) {
+    if (str_contains($editorMarkup, $removedControl)) {
+        $failures[] = 'Removed page-management control remains in the unified editor: ' . $removedControl;
     }
 }
 

@@ -947,6 +947,133 @@ body.cpb-browser-fullscreen .cpb-workspace {
   --cpb-frame-border-width: 1px;
 }
 
+.cpb-sheet.cpb-print-layout {
+  position: relative;
+  box-sizing: border-box;
+  width: 816px;
+  max-width: none;
+  min-height: 1056px;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  box-shadow: none;
+}
+
+.cpb-print-layout > .cpb-print-template {
+  display: none !important;
+}
+
+.cpb-print-layout > .cpb-page-layout-toggle {
+  position: absolute;
+  z-index: 8;
+  top: 8px;
+  right: 62px;
+  margin: 0;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .94);
+}
+
+.cpb-print-layout > .cpb-sheet-body {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  width: 704px;
+  max-width: 704px;
+  margin: 0 56px;
+  padding: 152px 0 0;
+  box-sizing: border-box;
+}
+
+.cpb-print-furniture-layer {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 816px;
+  pointer-events: none;
+}
+
+.cpb-print-page {
+  position: absolute;
+  left: 0;
+  width: 816px;
+  height: 1056px;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #c8cdd4;
+  box-shadow: 0 5px 18px rgba(37, 43, 52, .22);
+}
+
+.cpb-print-page-header,
+.cpb-print-page-footer {
+  position: absolute !important;
+  left: 56px;
+  width: 704px !important;
+  height: 84px;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  cursor: default;
+}
+
+.cpb-print-page-header {
+  top: 48px;
+}
+
+.cpb-print-page-footer {
+  top: 920px;
+  height: 72px;
+}
+
+.cpb-flow-page-break {
+  display: block;
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 1px;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+span.cpb-flow-page-break {
+  display: block;
+}
+
+.cpb-flow-page-break--manual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #64748b;
+  font: 600 10px/1.2 system-ui, sans-serif;
+  pointer-events: auto;
+}
+
+.cpb-flow-page-break--manual::before,
+.cpb-flow-page-break--manual::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px dashed #94a3b8;
+}
+
+.cpb-flow-page-break--manual button {
+  padding: 2px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cpb-print-layout > .cpb-dropzone {
+  position: absolute;
+  z-index: 5;
+  right: 62px;
+  bottom: 76px;
+}
+
 .cpb-sheet-header {
   border-bottom: 2px solid #0f2744;
   padding-bottom: 18px;

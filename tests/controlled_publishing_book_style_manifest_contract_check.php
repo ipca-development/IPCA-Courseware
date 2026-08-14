@@ -13,9 +13,9 @@ $assert = static function (bool $condition, string $message) use (&$failures): v
 };
 
 $protected = array(
-    'public/admin/compliance/controlled_book_editor.php' => '32b2edd0a696ccb8759f61841e834f1dce035ce98608eed74eaf151b8e18ed45',
-    'public/assets/controlled_book_editor.js' => '59b987de8f33b732356f76e13a7564c56262aaf14ee885eaf1eef1648d187365',
-    'public/assets/controlled_book_editor.css' => 'b564fd7623989d8804e972bf6e9bd6d51abfa015f4238c9bd28cef5c63170771',
+    'public/admin/compliance/controlled_book_editor.php' => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
+    'public/assets/controlled_book_editor.js' => '07b48b81446ebdcf21a6b4fdfb8c3fafea5140020771e6499559f14b8ec3eadb',
+    'public/assets/controlled_book_editor.css' => '73a166d532eb6e2d9a620d9d933c77add8d201c3854c858345585348020c5f2e',
     'public/admin/api/controlled_book_editor_api.php' => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'public/student/manual_reader.php' => '9c442cd5db0f9c87ca291708e6e5d9f835a64ca7478bd77fcce7576f14052525',
 );

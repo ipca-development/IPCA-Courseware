@@ -2,7 +2,7 @@
 
 Canonical controlled-manual flow:
 
-`Admin Manual Editor (Edit | Pages) → Book Style → server browser pagination → approved frozen map → web/iOS`
+`Admin Manual Editor (continuous Print Layout) → Book Style → server browser pagination → approved frozen map → web/iOS`
 
 ## Runtime
 
@@ -23,11 +23,11 @@ the Editor's paginated Pages mode and manual breaks.
 
 ## Editorial workflow
 
-Open a controlled book version in the Editor and select **Pages**. Content is
-edited on the separated physical pages; split or compound blocks open as a
-complete source-block editor over the page to prevent partial-fragment data
-loss. Regenerate when Pages reports **Needs regeneration**, optionally insert
-breaks before stable blocks, then approve pagination.
+Open a controlled book version in the Editor and edit the continuous document
+directly in its stacked physical-page presentation. Automatic page breaks are
+editor-only layout artifacts. A cursor-based Page Break command persists a
+stable break before the following source block. Browser pagination is refreshed
+after edits and the validated server map is approved before release.
 
 Release is blocked unless the approved map matches current source, style,
 manifest, layout, header/footer, and manual-break hashes. Released maps cannot

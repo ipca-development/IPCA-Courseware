@@ -118,6 +118,20 @@ try {
                 ),
             ));
 
+        case 'section_index':
+            $versionId = (int)($in['book_version_id'] ?? 0);
+            $version = $reader->resolveVersionById($versionId);
+            if ($version === null) {
+                throw new RuntimeException('Manual version not found.');
+            }
+            $layoutProfile = ControlledPublishingReaderLayoutProfile::profileKey();
+            cp_pm_json(200, array(
+                'ok' => true,
+                'book_version_id' => $versionId,
+                'section_page_index' => $store->sectionPageIndex($versionId, $layoutProfile),
+                'page_count' => $store->pageCount($versionId, $layoutProfile),
+            ));
+
         case 'approve':
             $versionId = (int)($in['book_version_id'] ?? 0);
             $bookKey = strtoupper(trim((string)($in['book_key'] ?? $in['book'] ?? '')));

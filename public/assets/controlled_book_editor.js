@@ -171,12 +171,28 @@
     pendingPaginatedAnchor: '',
     lastPaginatedRange: null,
     sectionPageIndex: 0,
+    printLayoutTimer: null,
+    printPageCount: 1,
+    authoritativePageCount: 0,
+    sectionPageStarts: {},
   };
 
   var INDENT_MAX_LEVEL = 8;
   var ZOOM_MIN = 50;
   var ZOOM_MAX = 200;
   var ZOOM_STEP = 10;
+  var PRINT_PAGE = {
+    width: 816,
+    height: 1056,
+    gap: 28,
+    side: 56,
+    contentTop: 152,
+    contentHeight: 744,
+    headerTop: 48,
+    headerHeight: 84,
+    footerTop: 920,
+    footerHeight: 72,
+  };
 
   function colLetter(index) {
     var n = index + 1;
@@ -349,11 +365,13 @@
     if (newRoot && curRoot) {
       curRoot.innerHTML = newRoot.innerHTML;
       wireCanvas();
+      scheduleUnifiedPrintLayout(0);
       return;
     }
     canvasEl.innerHTML = pageHtml;
     wireCanvas();
     applyCanvasZoom(state.canvasZoom, false);
+    scheduleUnifiedPrintLayout(0);
   }
 
   function parseApiResponse(r) {
@@ -383,6 +401,288 @@
       body: JSON.stringify(Object.assign({ action: action }, payload || {})),
     }).then(function (r) {
       return parseApiResponse(r);
+    });
+  }
+
+  function printScale() {
+    return Math.max(0.01, state.canvasZoom / 100);
+  }
+
+  function printY(element, sheet) {
+    return (element.getBoundingClientRect().top - sheet.getBoundingClientRect().top) / printScale();
+  }
+
+  function printBottom(element, sheet) {
+    return (element.getBoundingClientRect().bottom - sheet.getBoundingClientRect().top) / printScale();
+  }
+
+  function capturePrintCaret() {
+    var selection = window.getSelection();
+    if (!selection || selection.rangeCount < 1) return null;
+    var range = selection.getRangeAt(0);
+    var node = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer
+      : range.startContainer.parentElement;
+    var field = node && node.closest ? node.closest('[contenteditable="true"]') : null;
+    var block = field ? field.closest('.cpb-block') : null;
+    if (!field || !block || !canvasEl.contains(field)) return null;
+    var prefix = document.createRange();
+    prefix.selectNodeContents(field);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    return {
+      blockId: block.getAttribute('data-block-id') || '',
+      field: field.getAttribute('data-field') || '',
+      className: field.classList.length ? field.classList[0] : '',
+      offset: prefix.toString().length,
+    };
+  }
+
+  function restorePrintCaret(caret) {
+    if (!caret || !caret.blockId) return;
+    var block = canvasEl.querySelector('.cpb-block[data-block-id="' + caret.blockId + '"]');
+    if (!block) return;
+    var field = caret.field
+      ? block.querySelector('[data-field="' + caret.field + '"]')
+      : null;
+    if (!field && caret.className) field = block.querySelector('.' + caret.className);
+    if (!field) return;
+    var boundary = textBoundary(field, caret.offset);
+    var range = document.createRange();
+    range.setStart(boundary.node, boundary.offset);
+    range.collapse(true);
+    var selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function removeAutomaticPrintBreaks(sheet) {
+    sheet.querySelectorAll('[data-auto-page-break="1"]').forEach(function (node) {
+      node.remove();
+    });
+    var furniture = sheet.querySelector('.cpb-print-furniture-layer');
+    if (furniture) furniture.remove();
+  }
+
+  function automaticBreakBefore(body, block, sheet, pageIndex, manualBreak) {
+    var pageStart = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap);
+    var target = pageStart + PRINT_PAGE.height + PRINT_PAGE.gap + PRINT_PAGE.contentTop;
+    var current = printY(block, sheet);
+    var spacer = document.createElement('div');
+    spacer.className = manualBreak
+      ? 'cpb-flow-page-break cpb-flow-page-break--manual'
+      : 'cpb-flow-page-break';
+    spacer.setAttribute('data-auto-page-break', '1');
+    spacer.setAttribute('data-editor-only', '1');
+    spacer.setAttribute('contenteditable', 'false');
+    spacer.style.height = Math.max(1, target - current) + 'px';
+    if (manualBreak) {
+      var label = document.createElement('span');
+      label.textContent = 'Manual Page Break';
+      spacer.appendChild(label);
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', function () {
+        var row = state.manualBreaks.find(function (item) {
+          return item.before_block_anchor === block.getAttribute('data-stable-anchor');
+        });
+        if (row) {
+          paginationRequest('/admin/api/controlled_book_page_break_api.php', {
+            action: 'remove',
+            book_version_id: state.versionId,
+            break_id: row.id,
+          }).then(loadUnifiedManualBreaks).catch(showError);
+        }
+      });
+      spacer.appendChild(remove);
+    }
+    body.insertBefore(spacer, block);
+  }
+
+  function paragraphBreak(field, sheet, pageIndex) {
+    var textLength = field.textContent.length;
+    if (textLength < 2) return false;
+    var pageBottom = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap)
+      + PRINT_PAGE.contentTop + PRINT_PAGE.contentHeight;
+    var low = 1;
+    var high = textLength - 1;
+    var best = -1;
+    while (low <= high) {
+      var middle = Math.floor((low + high) / 2);
+      var boundary = textBoundary(field, middle);
+      var range = document.createRange();
+      range.selectNodeContents(field);
+      range.setEnd(boundary.node, boundary.offset);
+      var bottom = (range.getBoundingClientRect().bottom
+        - sheet.getBoundingClientRect().top) / printScale();
+      if (bottom <= pageBottom) {
+        best = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    if (best <= 0 || best >= textLength) return false;
+    var text = field.textContent;
+    while (best > 1 && best < text.length && !/\s/.test(text.charAt(best))) best--;
+    if (best <= 0) return false;
+    var insertion = textBoundary(field, best);
+    var insertRange = document.createRange();
+    insertRange.setStart(insertion.node, insertion.offset);
+    insertRange.collapse(true);
+    var spacer = document.createElement('span');
+    spacer.className = 'cpb-flow-page-break cpb-flow-page-break--automatic';
+    spacer.setAttribute('data-auto-page-break', '1');
+    spacer.setAttribute('data-editor-only', '1');
+    spacer.setAttribute('contenteditable', 'false');
+    insertRange.insertNode(spacer);
+    var spacerTop = printY(spacer, sheet);
+    var nextContentTop = (pageIndex + 1) * (PRINT_PAGE.height + PRINT_PAGE.gap)
+      + PRINT_PAGE.contentTop;
+    spacer.style.height = Math.max(1, nextContentTop - spacerTop) + 'px';
+    return true;
+  }
+
+  function renderPrintFurniture(sheet, pageCount) {
+    var templateHeader = sheet.querySelector(':scope > .cpb-page-header');
+    var templateFooter = sheet.querySelector(':scope > .cpb-page-footer');
+    if (templateHeader) templateHeader.classList.add('cpb-print-template');
+    if (templateFooter) templateFooter.classList.add('cpb-print-template');
+    var layer = document.createElement('div');
+    layer.className = 'cpb-print-furniture-layer';
+    layer.setAttribute('contenteditable', 'false');
+    for (var index = 0; index < pageCount; index++) {
+      var page = document.createElement('div');
+      page.className = 'cpb-print-page';
+      page.style.top = (index * (PRINT_PAGE.height + PRINT_PAGE.gap)) + 'px';
+      var preview = document.createElement('div');
+      preview.innerHTML = previewHeaderHtml(
+        state.pageHeader,
+        state.pageFooter,
+        (parseInt(state.sectionPageStarts[state.sectionId] || '1', 10) + index),
+        Math.max(
+          state.authoritativePageCount,
+          parseInt(state.sectionPageStarts[state.sectionId] || '1', 10) + pageCount - 1
+        )
+      );
+      var header = preview.querySelector('.cpb-page-header');
+      var footer = preview.querySelector('.cpb-page-footer');
+      if (header) {
+        header.classList.add('cpb-print-page-header');
+        page.appendChild(header);
+      }
+      if (footer) {
+        footer.classList.add('cpb-print-page-footer');
+        page.appendChild(footer);
+      }
+      layer.appendChild(page);
+    }
+    sheet.insertBefore(layer, sheet.firstChild);
+  }
+
+  function applyUnifiedPrintLayout() {
+    var sheet = canvasEl.querySelector('.cpb-sheet');
+    var body = sheet ? sheet.querySelector('[data-blocks-root="1"]') : null;
+    if (!sheet || !body || state.isCoverSection) return;
+    var caret = capturePrintCaret();
+    removeAutomaticPrintBreaks(sheet);
+    sheet.classList.add('cpb-print-layout');
+    var blocks = Array.prototype.slice.call(body.querySelectorAll(':scope > .cpb-block'));
+    var manualAnchors = {};
+    state.manualBreaks.forEach(function (row) {
+      if (parseInt(row.section_id || '0', 10) === state.sectionId) {
+        manualAnchors[row.before_block_anchor] = true;
+      }
+    });
+    var inserted = true;
+    var attempts = 0;
+    while (inserted && attempts < 200) {
+      inserted = false;
+      attempts++;
+      blocks = Array.prototype.slice.call(body.querySelectorAll(':scope > .cpb-block'));
+      for (var index = 0; index < blocks.length; index++) {
+        var block = blocks[index];
+        var top = printY(block, sheet);
+        var bottom = printBottom(block, sheet);
+        var pageIndex = Math.max(0, Math.floor(top / (PRINT_PAGE.height + PRINT_PAGE.gap)));
+        var contentTop = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap) + PRINT_PAGE.contentTop;
+        var contentBottom = contentTop + PRINT_PAGE.contentHeight;
+        var anchor = block.getAttribute('data-stable-anchor') || '';
+        if (manualAnchors[anchor] && top > contentTop + 1) {
+          automaticBreakBefore(body, block, sheet, pageIndex, true);
+          inserted = true;
+          break;
+        }
+        var isHeading = (block.getAttribute('data-block-type') || '') === 'heading';
+        var nextBlock = blocks[index + 1] || null;
+        var nextMeaningfulBottom = nextBlock
+          ? printY(nextBlock, sheet) + Math.min(64, Math.max(1, printBottom(nextBlock, sheet) - printY(nextBlock, sheet)))
+          : 0;
+        if (isHeading && nextBlock && top > contentTop + 1 && nextMeaningfulBottom > contentBottom) {
+          automaticBreakBefore(body, block, sheet, pageIndex, false);
+          inserted = true;
+          break;
+        }
+        if (bottom <= contentBottom + 0.5) continue;
+        var flowingField = block.querySelector(
+          '.cpb-paragraph[contenteditable="true"],'
+          + '.cpb-list[contenteditable="true"],'
+          + '.cpb-callout-text[contenteditable="true"]'
+        );
+        var paragraphPage = pageIndex + (flowingField
+          ? flowingField.querySelectorAll('[data-auto-page-break="1"]').length
+          : 0);
+        var paragraphBottom = paragraphPage * (PRINT_PAGE.height + PRINT_PAGE.gap)
+          + PRINT_PAGE.contentTop + PRINT_PAGE.contentHeight;
+        if (flowingField && printBottom(block, sheet) > paragraphBottom
+          && top < contentBottom - 12 && paragraphBreak(flowingField, sheet, paragraphPage)) {
+          inserted = true;
+          break;
+        }
+        if (top > contentTop + 1) {
+          automaticBreakBefore(body, block, sheet, pageIndex, false);
+          inserted = true;
+          break;
+        }
+      }
+    }
+    var lastBlock = blocks.length ? blocks[blocks.length - 1] : null;
+    var lastBottom = lastBlock ? printBottom(lastBlock, sheet) : PRINT_PAGE.contentTop;
+    var pageCount = Math.max(
+      1,
+      Math.floor(lastBottom / (PRINT_PAGE.height + PRINT_PAGE.gap)) + 1
+    );
+    state.printPageCount = pageCount;
+    sheet.style.height = ((pageCount * PRINT_PAGE.height)
+      + ((pageCount - 1) * PRINT_PAGE.gap)) + 'px';
+    renderPrintFurniture(sheet, pageCount);
+    restorePrintCaret(caret);
+  }
+
+  function scheduleUnifiedPrintLayout(delay) {
+    clearTimeout(state.printLayoutTimer);
+    state.printLayoutTimer = setTimeout(function () {
+      window.requestAnimationFrame(function () {
+        applyUnifiedPrintLayout();
+      });
+    }, delay == null ? 450 : delay);
+  }
+
+  function loadUnifiedManualBreaks() {
+    return Promise.all([
+      paginationRequest(
+        '/admin/api/controlled_book_page_break_api.php?action=list&book_version_id=' + state.versionId
+      ),
+      paginationRequest(
+        '/admin/api/controlled_book_page_map_api.php?action=section_index&book_version_id=' + state.versionId
+      ),
+    ]).then(function (responses) {
+      state.manualBreaks = responses[0].breaks || [];
+      state.paginationCandidates = responses[0].candidates || [];
+      state.sectionPageStarts = responses[1].section_page_index || {};
+      state.authoritativePageCount = parseInt(responses[1].page_count || '0', 10) || 0;
+      scheduleUnifiedPrintLayout(0);
+      return responses[0];
     });
   }
 
@@ -518,9 +818,8 @@
   }
 
   function markPaginationChanged() {
-    if (state.viewMode !== 'paginated') return;
     state.paginationStale = true;
-    setPaginationStatus('Saved · pages need regeneration', true);
+    scheduleUnifiedPrintLayout(450);
     clearTimeout(state.paginationRegenerateTimer);
     state.paginationRegenerateTimer = setTimeout(function () {
       var active = document.activeElement;
@@ -528,9 +827,16 @@
         markPaginationChanged();
         return;
       }
-      setPaginationStatus('Reflowing section pages…', false);
-      regeneratePagination();
-    }, 1800);
+      paginationRequest('/admin/api/controlled_book_page_map_api.php', {
+        action: 'generate',
+        book_version_id: state.versionId,
+        book_key: (state.versionInfo.book_key || ''),
+      }).then(loadUnifiedManualBreaks).then(function () {
+        state.paginationStale = false;
+      }).catch(function () {
+        state.paginationStale = true;
+      });
+    }, 5000);
   }
 
   function wirePaginatedFields() {
@@ -944,14 +1250,15 @@
   }
 
   function mutateManualBreak(payload) {
-    setPaginationStatus('Saving page break…', false);
     return paginationRequest('/admin/api/controlled_book_page_break_api.php', payload)
-      .then(regeneratePagination)
+      .then(function () {
+        markPaginationChanged();
+        return loadUnifiedManualBreaks();
+      })
       .catch(showError);
   }
 
   function capturePaginatedSelection() {
-    if (state.viewMode !== 'paginated') return null;
     var selection = window.getSelection();
     if (!selection || selection.rangeCount < 1) return state.lastPaginatedRange;
     var range = selection.getRangeAt(0);
@@ -989,7 +1296,7 @@
   }
 
   function submitParagraphPageBreak(block, leftPayload, rightPayload) {
-    setPaginationStatus('Splitting paragraph and inserting page break…', false);
+    setStatus('Inserting page break…', 'saving');
     return apiPost('split_block_page_break', {
       version_id: state.versionId,
       block_id: parseInt(block.getAttribute('data-block-id') || '0', 10),
@@ -1000,7 +1307,8 @@
       state.pendingPaginatedAnchor = response.new_block
         ? (response.new_block.stable_anchor || '')
         : '';
-      return regeneratePagination();
+      markPaginationChanged();
+      return loadSection(state.sectionId);
     });
   }
 
@@ -1039,7 +1347,7 @@
   }
 
   function insertPageBreakAtCursor() {
-    if (!state.editable || state.viewMode !== 'paginated') return;
+    if (!state.editable) return;
     var range = capturePaginatedSelection();
     var node = range
       ? (range.startContainer.nodeType === Node.ELEMENT_NODE
@@ -1188,6 +1496,9 @@
         refreshAnnexAdminTypographyFromBookStyles();
       }
       applyCanvasZoom(state.canvasZoom, false);
+      Promise.resolve(document.fonts && document.fonts.ready ? document.fonts.ready : null)
+        .then(loadUnifiedManualBreaks)
+        .catch(showError);
       if (state.pendingScrollRef) {
         var target = canvasEl.querySelector('[data-canonical-section-ref="' + state.pendingScrollRef + '"]');
         if (target) {
@@ -1955,6 +2266,7 @@
             clearStyleTargetForBlock(blockEl);
             blockEl.remove();
             setStatus('Deleted', 'saved');
+            markPaginationChanged();
             return recomputeSectionNumbers();
           }).catch(showError);
         } else if (action === 'move-up' || action === 'move-down') {
@@ -1975,6 +2287,7 @@
               return recomputeSectionNumbers();
             }
             setStatus('Moved', 'saved');
+            markPaginationChanged();
           }).catch(showError);
         }
       });
@@ -3564,21 +3877,26 @@
     ];
   }
 
-  function resolveHeaderTokensPreview(template) {
+  function resolveHeaderTokensPreview(template, pageNumber, pageTotal) {
     var text = String(template || '');
     var ctx = state.headerPreviewTokens;
     if (ctx && typeof ctx === 'object' && Object.keys(ctx).length) {
       Object.keys(ctx).forEach(function (key) {
-        text = text.split('{' + key + '}').join(String(ctx[key] != null ? ctx[key] : ''));
+        var value = ctx[key];
+        if (key === 'page' && pageNumber != null) value = pageNumber;
+        if (key === 'page_total' && pageTotal != null) value = pageTotal;
+        text = text.split('{' + key + '}').join(String(value != null ? value : ''));
       });
+      if (pageNumber != null) text = text.split('{page}').join(String(pageNumber));
+      if (pageTotal != null) text = text.split('{page_total}').join(String(pageTotal));
       return text;
     }
 
     var v = state.versionInfo || {};
     var manualCode = v.manual_code || v.book_key || '';
     var map = {
-      '{page}': '—',
-      '{page_total}': '—',
+      '{page}': pageNumber != null ? String(pageNumber) : '—',
+      '{page_total}': pageTotal != null ? String(pageTotal) : '—',
       '{revision}': String(v.version_label || ''),
       '{date}': '—',
       '{manual_code}': String(manualCode),
@@ -3596,7 +3914,7 @@
     return text;
   }
 
-  function previewHeaderHtml(header, footer) {
+  function previewHeaderHtml(header, footer, pageNumber, pageTotal) {
     var h = header || defaultPageHeader();
     var f = footer || defaultPageFooter();
     var logoHeight = parseInt(h.logo_max_height, 10) || 40;
@@ -3605,11 +3923,11 @@
     var logo = h.logo_url
       ? '<img class="cpb-page-header-logo" src="' + escapeHtml(h.logo_url) + '" alt="' + escapeHtml(h.logo_alt || '') + '" style="max-height:' + logoHeight + 'px;">'
       : '<span class="cpb-page-header-logo-placeholder">Logo</span>';
-    var center = escapeHtml(resolveHeaderTokensPreview(h.center_text)).replace(/\n/g, '<br>');
-    var right = escapeHtml(resolveHeaderTokensPreview(h.right_text)).replace(/\n/g, '<br>');
-    var footerLeft = escapeHtml(resolveHeaderTokensPreview(f.left_text)).replace(/\n/g, '<br>');
-    var footerCenter = escapeHtml(resolveHeaderTokensPreview(f.center_text)).replace(/\n/g, '<br>');
-    var footerRight = escapeHtml(resolveHeaderTokensPreview(f.right_text)).replace(/\n/g, '<br>');
+    var center = escapeHtml(resolveHeaderTokensPreview(h.center_text, pageNumber, pageTotal)).replace(/\n/g, '<br>');
+    var right = escapeHtml(resolveHeaderTokensPreview(h.right_text, pageNumber, pageTotal)).replace(/\n/g, '<br>');
+    var footerLeft = escapeHtml(resolveHeaderTokensPreview(f.left_text, pageNumber, pageTotal)).replace(/\n/g, '<br>');
+    var footerCenter = escapeHtml(resolveHeaderTokensPreview(f.center_text, pageNumber, pageTotal)).replace(/\n/g, '<br>');
+    var footerRight = escapeHtml(resolveHeaderTokensPreview(f.right_text, pageNumber, pageTotal)).replace(/\n/g, '<br>');
     return '<header class="cpb-page-header">'
       + '<table class="cpb-page-header-table" role="presentation"><tr>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerRowCellStyleAttr(headerRow) + '>' + logo + '</td>'
@@ -3987,7 +4305,9 @@
   function stripEditorChromeFromHtml(html) {
     var tmp = document.createElement('div');
     tmp.innerHTML = html || '';
-    tmp.querySelectorAll('.cpb-section-number, .cpb-regulatory-ref, .cpb-col-resize').forEach(function (el) {
+    tmp.querySelectorAll(
+      '.cpb-section-number, .cpb-regulatory-ref, .cpb-col-resize, [data-editor-only="1"]'
+    ).forEach(function (el) {
       el.remove();
     });
     return tmp.innerHTML;
@@ -6563,6 +6883,7 @@
         }
       }
       setStatus('Added', 'saved');
+      markPaginationChanged();
       applyNumberingState(res);
       if (blockType === 'table') {
         var createdTable = anchor ? anchor.nextElementSibling : (body ? body.querySelector('.cpb-block:last-child') : null);
