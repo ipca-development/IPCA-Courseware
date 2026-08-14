@@ -5,6 +5,7 @@ require_once __DIR__ . '/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/ControlledPublishingBookRenderer.php';
 require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
 require_once __DIR__ . '/ControlledPublishingAuthoritativePaginationService.php';
+require_once __DIR__ . '/ControlledPublishingPublicationFilter.php';
 
 /**
  * Deterministic page-map generator for authoritative OM/OMM manuals.
@@ -342,11 +343,7 @@ final class ControlledPublishingPaginationService
 
     private function stripEditorChrome(string $html): string
     {
-        $html = preg_replace('/<div class="cpb-page-layout-toggle"[^>]*>.*?<\/div>/s', '', $html) ?? $html;
-        $html = preg_replace('/<div class="cpb-dropzone"[^>]*>.*?<\/div>/s', '', $html) ?? $html;
-        $html = preg_replace('/\scontenteditable="(?:true|false)"/i', '', $html) ?? $html;
-
-        return $html;
+        return ControlledPublishingPublicationFilter::filterHtml($html);
     }
 
     /**
@@ -354,49 +351,10 @@ final class ControlledPublishingPaginationService
      */
     private function parseRenderedSheet(string $shellHtml): array
     {
-        $sheetOpen = '';
-        if (preg_match('/<div class="cpb-sheet[^"]*"[^>]*>/', $shellHtml, $m) === 1) {
-            $sheetOpen = $m[0];
-        }
+        $parsed = ControlledPublishingPublicationFilter::parseSheet($shellHtml);
+        $parsed['body'] = $this->sanitizeBodyHtml((string)($parsed['body'] ?? ''));
 
-        $header = '';
-        if (preg_match('/<header class="cpb-page-header"[^>]*>.*?<\/header>/s', $shellHtml, $m) === 1) {
-            $header = $m[0];
-        }
-
-        $footer = '';
-        if (preg_match('/<footer class="cpb-page-footer"[^>]*>.*?<\/footer>/s', $shellHtml, $m) === 1) {
-            $footer = $m[0];
-        }
-
-        $usesSheetBody = str_contains($shellHtml, 'cpb-sheet-body');
-        $body = '';
-
-        if ($usesSheetBody && preg_match('/<div class="cpb-sheet-body"[^>]*>(.*)<\/div>\s*(?:<footer)/s', $shellHtml, $m) === 1) {
-            $body = trim($m[1]);
-        } else {
-            $body = $shellHtml;
-            if ($sheetOpen !== '') {
-                $body = preg_replace('/^[\s\S]*?<div class="cpb-sheet[^"]*"[^>]*>/', '', $body, 1) ?? $body;
-            }
-            if ($header !== '') {
-                $body = str_replace($header, '', $body);
-            }
-            if ($footer !== '') {
-                $body = str_replace($footer, '', $body);
-            }
-            $body = preg_replace('/<\/div>\s*$/s', '', trim($body)) ?? trim($body);
-        }
-
-        $body = $this->sanitizeBodyHtml($body);
-
-        return array(
-            'sheet_open' => $sheetOpen,
-            'header' => $header,
-            'body' => $body,
-            'footer' => $footer,
-            'uses_sheet_body' => $usesSheetBody,
-        );
+        return $parsed;
     }
 
     /**

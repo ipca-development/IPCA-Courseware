@@ -116,6 +116,7 @@ require_markers(
         '.cpb-image',
         '.cpb-cover',
         '.cpb-toc',
+        '.reader-canonical-page',
     ),
     $failures
 );

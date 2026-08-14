@@ -67,6 +67,10 @@ $contracts = array(
         'reader-page-body',
         'reader-page-footer-region',
         'justify-content:flex-end',
+        'stripPublicationChrome',
+        'HEADER_BODY_INTERSECT',
+        'BODY_STARTS_ABOVE_CONTENT_FRAME',
+        'overflow:hidden',
     ),
     'public/admin/api/controlled_book_editor_api.php' => array(
         "case 'split_block_page_break':",
@@ -77,6 +81,15 @@ $contracts = array(
         'exact browser measurement',
         'real .cpb-toc-row',
         '$this->reader->loadReaderPaginateSource($resolvedVersion)',
+        'ControlledPublishingPublicationFilter',
+    ),
+    'src/publishing/ControlledPublishingPublicationFilter.php' => array(
+        'EDITOR AUTHORING UI',
+        'cpb-dropzone',
+        'data-editor-only',
+        'cpb-image--empty',
+        'filterHtml',
+        'parseSheet',
     ),
     'src/publishing/ControlledPublishingFoundationService.php' => array(
         'assertAuthoritativePageMapReadyForRelease',

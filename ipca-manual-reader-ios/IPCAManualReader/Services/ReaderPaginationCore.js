@@ -121,9 +121,47 @@
     return result;
   }
 
+  const PUBLICATION_CHROME_SELECTOR = [
+    ".cpb-dropzone",
+    "[data-dropzone]",
+    ".cpb-block-chrome",
+    ".cpb-block-btn",
+    ".cpb-table-tools",
+    ".cpb-image-resize",
+    ".cpb-image-rotate",
+    ".cpb-page-layout-toggle",
+    ".cpb-orientation-toggle",
+    ".cpb-col-resize",
+    ".cpb-image--empty",
+    "[data-editor-only]",
+    "[data-layout-toggle]",
+    "[data-table-action]",
+    "[data-table-tools-close]",
+    "[data-image-action]",
+    "button[data-action]"
+  ].join(",");
+
+  function stripPublicationChrome(root) {
+    if (!root || !root.querySelectorAll) return root;
+    root.querySelectorAll(PUBLICATION_CHROME_SELECTOR).forEach((node) => node.remove());
+    if (root.matches && root.matches(PUBLICATION_CHROME_SELECTOR)) {
+      const holder = document.createElement("div");
+      holder.className = "reader-source-fragment-root";
+      return holder;
+    }
+    Array.from(root.querySelectorAll("[contenteditable]")).forEach((node) => {
+      node.removeAttribute("contenteditable");
+    });
+    if (root.hasAttribute && root.hasAttribute("contenteditable")) {
+      root.removeAttribute("contenteditable");
+    }
+    return root;
+  }
+
   function rootFromHTML(html) {
     const holder = document.createElement("div");
     holder.innerHTML = String(html || "");
+    stripPublicationChrome(holder);
     if (
       holder.children.length === 1
       && canonicalText([holder.childNodes[0]?.textContent])
@@ -423,6 +461,15 @@
 
   function normalizeUnit(section, unit, unitIndex) {
     const root = rootFromHTML(unit.html);
+    if (
+      !root
+      || (
+        !canonicalText([root.textContent])
+        && !root.querySelector("img,svg,canvas,video")
+      )
+    ) {
+      return [];
+    }
     const type = semanticType(unit, root);
     const forceBreakBefore = Boolean(
       unit.force_break_before
@@ -749,7 +796,7 @@
     element.className = "reader-generated-page";
     element.setAttribute("data-reader-page", String(pageNumber));
     element.style.cssText = `position:relative;box-sizing:border-box;width:${layout.pageWidth}px;`
-      + `height:${layout.pageHeight}px;margin:0;padding:0;overflow:visible;`;
+      + `height:${layout.pageHeight}px;margin:0;padding:0;overflow:hidden;`;
     const canonicalPageStyle = `position:absolute;box-sizing:border-box;left:0;top:0;`
       + `width:${layout.canonicalPageWidth}px;height:${layout.canonicalPageHeight}px;`
       + `min-height:${layout.canonicalPageHeight}px;max-width:none;margin:0;padding:0;`
@@ -759,7 +806,7 @@
       element.innerHTML = `
         <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
           <main class="reader-page-body reader-page-cover" data-blocks-root="1"
-            style="position:absolute;box-sizing:border-box;inset:0;width:${layout.canonicalPageWidth}px;height:${layout.canonicalPageHeight}px;overflow:visible">
+            style="position:absolute;box-sizing:border-box;inset:0;width:${layout.canonicalPageWidth}px;height:${layout.canonicalPageHeight}px;overflow:hidden">
             ${page.pieces.map(coverMarkup).join("")}
           </main>
         </div>
@@ -772,9 +819,9 @@
     const footerFrame = canonicalRect(layout.footerFrame);
     element.innerHTML = `
       <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
-        <div class="reader-page-header-region" style="position:absolute;box-sizing:border-box;${frameStyle(headerFrame)}">${header}</div>
-        <main class="reader-page-body cpb-sheet-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;align-content:start;${frameStyle(contentFrame)};overflow:visible">${pagePiecesMarkup(page.pieces)}</main>
-        <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-end;${frameStyle(footerFrame)}">${footer}</div>
+        <div class="reader-page-header-region" style="position:absolute;box-sizing:border-box;overflow:hidden;${frameStyle(headerFrame)}">${header}</div>
+        <main class="reader-page-body cpb-sheet-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;align-content:start;${frameStyle(contentFrame)};overflow:hidden">${pagePiecesMarkup(page.pieces)}</main>
+        <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;${frameStyle(footerFrame)}">${footer}</div>
       </div>
     `;
     applyReaderScale(element);
@@ -877,6 +924,26 @@
     const headerRect = relativeRect(header);
     const footerRect = relativeRect(footer);
     const bodyRelativeRect = relativeRect(body);
+    const contentFrame = layout.contentFrame;
+    const headerFrame = layout.headerFrame;
+    const footerFrame = layout.footerFrame;
+    const firstBlock = blockBounds[0] || null;
+    const lastBlock = blockBounds.length ? blockBounds[blockBounds.length - 1] : null;
+    const firstBodyPageY = firstBlock && bodyRelativeRect
+      ? bodyRelativeRect.y + firstBlock.top
+      : null;
+    const lastBodyPageY = lastBlock && bodyRelativeRect
+      ? bodyRelativeRect.y + lastBlock.bottom
+      : null;
+    const headerInsideFrame = !headerRect || rectInside(headerRect, headerFrame);
+    const bodyInsideFrame = !bodyRelativeRect || rectInside(bodyRelativeRect, contentFrame);
+    const footerInsideFrame = !footerRect || rectInside(footerRect, footerFrame);
+    const headerBodyIntersect = rectsIntersect(headerRect, bodyRelativeRect);
+    const bodyFooterIntersect = rectsIntersect(bodyRelativeRect, footerRect);
+    const firstBodyAboveContent = firstBodyPageY != null
+      && firstBodyPageY < contentFrame.y - tolerance;
+    const lastBodyBelowContent = lastBodyPageY != null
+      && lastBodyPageY > contentFrame.y + contentFrame.height + tolerance;
     const rectInsidePage = (rect) => Boolean(rect)
       && rect.x >= -tolerance
       && rect.y >= -tolerance
@@ -893,7 +960,14 @@
       || (requiresHeaderFooter && !rectInsidePage(headerRect))
       || !rectInsidePage(bodyRelativeRect)
       || (requiresHeaderFooter && !rectInsidePage(footerRect))
-      || Boolean(offendingBlock);
+      || Boolean(offendingBlock)
+      || (requiresHeaderFooter && !headerInsideFrame)
+      || (!page.isCover && !bodyInsideFrame)
+      || (requiresHeaderFooter && !footerInsideFrame)
+      || (requiresHeaderFooter && headerBodyIntersect)
+      || (requiresHeaderFooter && bodyFooterIntersect)
+      || (!page.isCover && firstBodyAboveContent)
+      || (!page.isCover && lastBodyBelowContent);
     return {
       fits: !hardFailure,
       horizontalOverflow,
@@ -912,7 +986,16 @@
       figureRect: relativeRect(body.querySelector("figure")),
       headerRect,
       bodyRect: bodyRelativeRect,
-      footerRect
+      footerRect,
+      firstBodyPageY,
+      lastBodyPageY,
+      headerInsideFrame,
+      bodyInsideFrame,
+      footerInsideFrame,
+      headerBodyIntersect,
+      bodyFooterIntersect,
+      firstBodyAboveContent,
+      lastBodyBelowContent
     };
   }
 
@@ -957,6 +1040,18 @@
     if (layout.contentFrame.y + layout.contentFrame.height > layout.footerFrame.y + 0.01) {
       throw new Error("Content frame overlaps the footer frame.");
     }
+    const headerBodyGap = layout.contentFrame.y
+      - (layout.headerFrame.y + layout.headerFrame.height);
+    const bodyFooterGap = layout.footerFrame.y
+      - (layout.contentFrame.y + layout.contentFrame.height);
+    const requiredHeaderGap = Number(layout.headerBodySpacing);
+    const requiredFooterGap = Number(layout.bodyFooterSpacing);
+    if (Number.isFinite(requiredHeaderGap) && headerBodyGap + 0.01 < requiredHeaderGap) {
+      throw new Error("Content frame does not honor Book Style header/body spacing.");
+    }
+    if (Number.isFinite(requiredFooterGap) && bodyFooterGap + 0.01 < requiredFooterGap) {
+      throw new Error("Content frame does not honor Book Style body/footer spacing.");
+    }
     const canonicalFrames = frames.map(canonicalRect);
     if (!canonicalFrames.every((frame) =>
       frame.x + frame.width <= layout.canonicalPageWidth + 0.01
@@ -964,6 +1059,24 @@
     )) {
       throw new Error("Canonical page frame lies outside the manifest page bounds.");
     }
+  }
+
+  function rectsIntersect(a, b, tolerance) {
+    if (!a || !b) return false;
+    const pad = Number.isFinite(tolerance) ? tolerance : VALIDATION_TOLERANCE;
+    return a.x + a.width > b.x + pad
+      && b.x + b.width > a.x + pad
+      && a.y + a.height > b.y + pad
+      && b.y + b.height > a.y + pad;
+  }
+
+  function rectInside(inner, outer, tolerance) {
+    if (!inner || !outer) return false;
+    const pad = Number.isFinite(tolerance) ? tolerance : VALIDATION_TOLERANCE;
+    return inner.x >= outer.x - pad
+      && inner.y >= outer.y - pad
+      && inner.x + inner.width <= outer.x + outer.width + pad
+      && inner.y + inner.height <= outer.y + outer.height + pad;
   }
 
   function rectMatches(actual, expected) {
@@ -1462,6 +1575,41 @@
       if (!page.isCover && !rectMatches(measurement.bodyRect, layout.contentFrame)) {
         diagnostic("BODY_FRAME_MISALIGNED", "failure", "Body region does not match contentFrame.", null, pageNumber);
       }
+      if (!page.isCover && page.section && page.section.show_header_footer) {
+        if (measurement.headerBodyIntersect) {
+          diagnostic("HEADER_BODY_INTERSECT", "failure", "Body content intersects the header region.", null, pageNumber);
+        }
+        if (measurement.bodyFooterIntersect) {
+          diagnostic("BODY_FOOTER_INTERSECT", "failure", "Body content intersects the footer region.", null, pageNumber);
+        }
+        if (!measurement.headerInsideFrame) {
+          diagnostic("HEADER_OUTSIDE_HEADER_FRAME", "failure", "Header is not fully inside headerFrame.", null, pageNumber);
+        }
+        if (!measurement.footerInsideFrame) {
+          diagnostic("FOOTER_OUTSIDE_FOOTER_FRAME", "failure", "Footer is not fully inside footerFrame.", null, pageNumber);
+        }
+      }
+      if (!page.isCover && !measurement.bodyInsideFrame) {
+        diagnostic("BODY_OUTSIDE_CONTENT_FRAME", "failure", "Body is not fully inside contentFrame.", null, pageNumber);
+      }
+      if (!page.isCover && measurement.firstBodyAboveContent) {
+        diagnostic(
+          "BODY_STARTS_ABOVE_CONTENT_FRAME",
+          "failure",
+          "First body element starts above the Book Style contentFrame top.",
+          page.pieces[0] ? page.pieces[0].fragment : null,
+          pageNumber
+        );
+      }
+      if (!page.isCover && measurement.lastBodyBelowContent) {
+        diagnostic(
+          "BODY_EXTENDS_BELOW_CONTENT_FRAME",
+          "failure",
+          "Last body element extends below the Book Style contentFrame bottom.",
+          last ? last.fragment : null,
+          pageNumber
+        );
+      }
       if (!page.isCover && metrics.content_utilization < 0.35) {
         diagnostic(
           "LOW_PAGE_UTILIZATION",
@@ -1669,6 +1817,10 @@
       remaining_body_height: Math.max(0, measurement.clientHeight - measurement.maxBlockY),
       validation_passed: measurement.fits,
       offending_block_id: measurement.offendingBlockID,
+      first_body_page_y: measurement.firstBodyPageY,
+      last_body_page_y: measurement.lastBodyPageY,
+      header_body_intersect: Boolean(measurement.headerBodyIntersect),
+      body_footer_intersect: Boolean(measurement.bodyFooterIntersect),
       block_measurements: blockMeasurements
     };
   }

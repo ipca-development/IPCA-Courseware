@@ -67,6 +67,8 @@ async function main() {
     outerMargin: side,
     topMargin: top,
     bottomMargin: bottom,
+    headerBodySpacing: headerGap,
+    bodyFooterSpacing: footerGap,
     gutterWidth: 0,
     pageScale: 1,
     mode: "singlePage",
@@ -109,6 +111,13 @@ async function main() {
           .reader-semantic-piece{break-inside:avoid;max-width:100%}
           .reader-semantic-piece table{width:100%;max-width:100%;table-layout:fixed}
           .reader-semantic-piece img{max-width:100%;height:auto}
+          .reader-canonical-page.cpb-sheet{
+            padding:0!important;margin:0!important;zoom:1;max-width:none;
+            min-height:0;box-shadow:none;border-radius:0
+          }
+          .reader-page-header-region,
+          .reader-page-footer-region,
+          .reader-page-body:not(.reader-page-cover){overflow:hidden}
           .reader-page-header-region>.cpb-page-header,
           .reader-page-footer-region>.cpb-page-footer{
             position:static!important;inset:auto!important;width:100%!important;

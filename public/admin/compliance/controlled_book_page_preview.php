@@ -34,6 +34,10 @@ cw_header('Exact Page Preview · ' . (string)$version['book_key'] . ' ' . (strin
 .cpp-page{position:relative;width:816px;min-height:1056px;background:#fff;border:1px solid #c8cdd4;box-shadow:0 5px 18px #252b3440}
 .cpp-page-label{position:absolute;left:-72px;top:8px;width:58px;text-align:right;color:#657180;font:12px/1.3 system-ui,sans-serif}
 .cpp-page>.reader-generated-page{margin:0!important}
+.reader-canonical-page.cpb-sheet{padding:0;margin:0;zoom:1;max-width:none;min-height:0;box-shadow:none;border-radius:0}
+.reader-page-header-region,
+.reader-page-footer-region,
+.reader-page-body:not(.reader-page-cover){overflow:hidden}
 .reader-page-header-region>.cpb-page-header,
 .reader-page-footer-region>.cpb-page-footer{position:static!important;inset:auto!important;width:100%!important;height:100%!important;margin:0!important;box-sizing:border-box!important}
 .cpp-sidebar{position:sticky;top:51px;align-self:start;height:calc(100vh - 51px);overflow:auto;padding:18px;background:#fff;border-left:1px solid #cbd0d8}

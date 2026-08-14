@@ -22,7 +22,7 @@ $source = (string)preg_replace('#/\*.*?\*/#s', '', $source);
 $forbidden = '/(?:editor|toolbar|dialog|overlay|picker|chrome|dropzone|resize|rotate|'
     . 'workspace|fullscreen|modal|submit|import|upload|table-tools|empty-state|'
     . 'textarea|style-input|level-check|token|add-|delete|remove|sign-btn|'
-    . 'page-layout|change-marker|is-cell-selected|contenteditable|:hover|:focus|'
+    . 'page-layout|print-layout|paginated-page|change-marker|is-cell-selected|contenteditable|:hover|:focus|'
     . '\.cmp-page|control|button)/i';
 $publicationSelector = '/\.cpb-(?:sheet(?:\b|-)|page-(?:header|footer)|block(?:\b|--)|'
     . 'heading|paragraph|cross-ref|section-number|regulatory-ref|font-|line-indent|list|'
@@ -79,6 +79,31 @@ $header = <<<'CSS'
 .cpb-image-rotate,
 .cpb-image-resize {
   display: none !important;
+}
+
+/* Authoritative page geometry: Book Style frames are the only layout. */
+.reader-canonical-page.cpb-sheet {
+  padding: 0;
+  margin: 0;
+  zoom: 1;
+  max-width: none;
+  min-height: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+.reader-page-header-region,
+.reader-page-footer-region,
+.reader-page-body:not(.reader-page-cover) {
+  overflow: hidden;
+}
+.reader-page-header-region > .cpb-page-header,
+.reader-page-footer-region > .cpb-page-footer {
+  position: static;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  box-sizing: border-box;
 }
 
 CSS;

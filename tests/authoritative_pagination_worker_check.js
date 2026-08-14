@@ -27,7 +27,16 @@ const bookStyleCSS = `
     display: flex; justify-content: space-between; align-items: center;
     width: 100%; height: 100%; border: 1px solid #aaa; padding: 8px;
   }
+  .cpb-sheet { padding: 48px 56px 64px; min-height: 1056px; }
+  .cpb-page-header { margin-bottom: 20px; }
+  .cpb-page-footer { margin-top: 24px; }
+  .cpb-dropzone {
+    margin-top: 24px; border: 2px dashed #94a3b8; padding: 20px;
+    position: absolute; right: 62px; bottom: 76px;
+  }
   article, h2, h3, p { margin: 0; }
+  figure { margin: 0; max-width: 100%; }
+  figcaption { margin-top: 6px; font-size: 12px; }
   h2, h3 { font-size: 22px; line-height: 1.2; margin-bottom: 8px; }
   p { margin-bottom: 10px; }
   .tall-block { min-height: 420px; }
@@ -110,6 +119,19 @@ function assertHeaderFooter(pages) {
     assert.ok(page.page_html.includes("reader-page-footer-region"), "footer region missing");
     assert.ok(page.page_html.includes("justify-content: flex-end"), "footer must bottom-align");
     assert.ok(page.metrics && page.metrics.validation_passed === true, "geometry validation must pass");
+    assert.strictEqual(page.metrics.header_body_intersect, false, "body must not intersect header");
+    assert.strictEqual(page.metrics.body_footer_intersect, false, "body must not intersect footer");
+    const contentY = Number(page.metrics.content_frame.y);
+    const headerBottom = Number(page.metrics.header_frame.y) + Number(page.metrics.header_frame.height);
+    assert.ok(contentY >= headerBottom, "contentFrame.minY must be >= headerFrame.maxY");
+    if (page.metrics.first_body_page_y != null) {
+      assert.ok(
+        page.metrics.first_body_page_y + 0.75 >= contentY,
+        "first body element must start at or below contentFrame top"
+      );
+    }
+    assert.ok(!/Drop image here to insert/i.test(page.page_html), "editor drop zone leaked into page_html");
+    assert.ok(!page.page_html.includes("cpb-dropzone"), "dropzone class leaked into page_html");
   });
 }
 
@@ -294,6 +316,67 @@ cases.push(["K. every page has header, footer, and sequential numbers", () => {
     result.pages.map((_, index) => index + 1)
   );
   assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["L. editor drop zone never enters authoritative page_html", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit(
+        "block-copy",
+        "paragraph",
+        '<article data-block-id="11" data-stable-anchor="block-copy"><p>Ordinary paragraph.</p>'
+          + '<div class="cpb-dropzone" data-dropzone="image">Drop image here to insert</div></article>'
+      )
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 1);
+  assertHeaderFooter(result.pages);
+  assert.ok(result.pages[0].page_html.includes("Ordinary paragraph."));
+  assert.ok(result.pages[0].page_html.includes("Controlled copy"));
+  assert.ok(result.pages[0].page_html.includes("cpb-page-number"));
+}]);
+
+cases.push(["M. real inserted image and caption remain", () => {
+  const image = '<article class="cpb-block cpb-block--image" data-block-id="12" data-block-type="image" data-stable-anchor="block-image">'
+    + '<figure class="cpb-image" data-field="image" style="width:100%" data-width-pct="100">'
+    + '<div class="cpb-image-frame">'
+    + '<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="Cabin safety diagram" width="320" height="80">'
+    + '</div><figcaption>Cabin safety diagram</figcaption></figure></article>';
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-image", "image", image, { block_id: 12, atomic: true })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 1);
+  assertHeaderFooter(result.pages);
+  assert.ok(result.pages[0].page_html.includes("cpb-image"));
+  assert.ok(result.pages[0].page_html.includes("Cabin safety diagram"));
+  assert.ok(result.pages[0].page_html.includes("<img"));
+}]);
+
+cases.push(["N. manual page-break page starts at Book Style body top", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-one", "heading", '<article data-block-id="1" data-stable-anchor="block-one"><h2>First controlled heading</h2></article>'),
+      unit("block-two", "heading", '<article data-block-id="2" data-stable-anchor="block-two"><h2>Manual break target</h2></article>', {
+        force_break_before: true,
+        manual_page_break_before: true
+      })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.ok(result.pages.length >= 2);
+  assertHeaderFooter(result.pages);
+  const afterBreak = result.pages.find((page) => page.page_html.includes("Manual break target"));
+  assert.ok(afterBreak);
+  const contentY = Number(afterBreak.metrics.content_frame.y);
+  const headerBottom = Number(afterBreak.metrics.header_frame.y)
+    + Number(afterBreak.metrics.header_frame.height);
+  assert.ok(contentY >= headerBottom + layout.header_margin_bottom_px - 0.75);
+  assert.ok(afterBreak.metrics.first_body_page_y + 0.75 >= contentY);
+  assert.ok(/overflow:\s*hidden/i.test(afterBreak.page_html));
 }]);
 
 let failed = 0;
