@@ -19,5 +19,816 @@
     "standard_table",
     "figure_image_caption"
   ],
-  "baseline": null
+  "baseline": {
+    "browser": "webkit",
+    "fixture_sha256": "90daa2603d43d9a8a532cc305308c4f5ad37e126b7dae930fbab72e8002e798f",
+    "metrics": {
+      "figure": {
+        "rect": {
+          "height": 134.406,
+          "width": 549.109,
+          "x": 133.438,
+          "y": 610.875
+        },
+        "selector": "#golden-image-7 figure",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "11.71875px",
+          "marginTop": "11.71875px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "center"
+        }
+      },
+      "figure.caption": {
+        "rect": {
+          "height": 18.594,
+          "width": 549.109,
+          "x": 133.438,
+          "y": 726.688
+        },
+        "selector": "#golden-image-7 figcaption",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(100, 116, 139)",
+          "borderTopWidth": "0px",
+          "color": "rgb(100, 116, 139)",
+          "display": "block",
+          "fontFamily": "system-ui, sans-serif",
+          "fontSize": "12px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "18.6px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "6px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "center"
+        }
+      },
+      "figure.image": {
+        "rect": {
+          "height": 109.813,
+          "width": 549.109,
+          "x": 133.438,
+          "y": 610.875
+        },
+        "selector": "#golden-image-7 img",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "0px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "center"
+        }
+      },
+      "footer": {
+        "rect": {
+          "height": 72,
+          "width": 704,
+          "x": 56,
+          "y": 920
+        },
+        "selector": ".cpb-page-footer",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(148, 163, 184)",
+          "borderTopWidth": "1px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "footer.center": {
+        "rect": {
+          "height": 31.391,
+          "width": 280.797,
+          "x": 267.594,
+          "y": 921
+        },
+        "selector": ".cpb-page-footer .cpb-page-header-cell--center",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "table-cell",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "12px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "17.4px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "7px",
+          "paddingLeft": "8px",
+          "paddingRight": "8px",
+          "paddingTop": "7px",
+          "textAlign": "center"
+        }
+      },
+      "footer.left": {
+        "rect": {
+          "height": 31.391,
+          "width": 210.594,
+          "x": 57,
+          "y": 921
+        },
+        "selector": ".cpb-page-footer .cpb-page-header-cell--left",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "table-cell",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "12px",
+          "fontStyle": "normal",
+          "fontWeight": "700",
+          "gap": "normal",
+          "lineHeight": "17.4px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "7px",
+          "paddingLeft": "8px",
+          "paddingRight": "8px",
+          "paddingTop": "7px",
+          "textAlign": "left"
+        }
+      },
+      "footer.right": {
+        "rect": {
+          "height": 31.391,
+          "width": 210.609,
+          "x": 548.391,
+          "y": 921
+        },
+        "selector": ".cpb-page-footer .cpb-page-header-cell--right",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "table-cell",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "12px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "17.4px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "7px",
+          "paddingLeft": "8px",
+          "paddingRight": "8px",
+          "paddingTop": "7px",
+          "textAlign": "left"
+        }
+      },
+      "header": {
+        "rect": {
+          "height": 84,
+          "width": 704,
+          "x": 56,
+          "y": 48
+        },
+        "selector": ".cpb-page-header",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(148, 163, 184)",
+          "borderTopWidth": "1px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "header.logo": {
+        "rect": {
+          "height": 36,
+          "width": 147.266,
+          "x": 65,
+          "y": 72.313
+        },
+        "selector": ".cpb-page-header-logo",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "17.6px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "left"
+        }
+      },
+      "header.metadata": {
+        "rect": {
+          "height": 82.625,
+          "width": 210.609,
+          "x": 548.391,
+          "y": 49
+        },
+        "selector": ".cpb-page-header-cell--right",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "table-cell",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "13.333333px",
+          "fontStyle": "normal",
+          "fontWeight": "700",
+          "gap": "normal",
+          "lineHeight": "19.333332px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "22px",
+          "paddingLeft": "8px",
+          "paddingRight": "8px",
+          "paddingTop": "22px",
+          "textAlign": "left"
+        }
+      },
+      "header.title": {
+        "rect": {
+          "height": 82.625,
+          "width": 280.797,
+          "x": 267.594,
+          "y": 49
+        },
+        "selector": ".cpb-page-header-cell--center",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "table-cell",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "700",
+          "gap": "normal",
+          "lineHeight": "21.266668px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "22px",
+          "paddingLeft": "8px",
+          "paddingRight": "8px",
+          "paddingTop": "22px",
+          "textAlign": "center"
+        }
+      },
+      "heading": {
+        "rect": {
+          "height": 33.047,
+          "width": 704,
+          "x": 56,
+          "y": 163
+        },
+        "selector": "#golden-heading-1 .cpb-heading",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 39, 68)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 39, 68)",
+          "display": "block",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "21.333334px",
+          "fontStyle": "normal",
+          "fontWeight": "700",
+          "gap": "normal",
+          "lineHeight": "33.066666px",
+          "listStyleType": "disc",
+          "marginBottom": "6px",
+          "marginTop": "11px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "left"
+        }
+      },
+      "heading.block": {
+        "rect": {
+          "height": 50.047,
+          "width": 704,
+          "x": 56,
+          "y": 152
+        },
+        "selector": "#golden-heading-1",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "heading.row": {
+        "rect": {
+          "height": 50.047,
+          "width": 704,
+          "x": 56,
+          "y": 152
+        },
+        "selector": "#golden-heading-1 .cpb-heading-row",
+        "style": {
+          "alignItems": "baseline",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "flex",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "0px",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "note": {
+        "rect": {
+          "height": 72.016,
+          "width": 704,
+          "x": 56,
+          "y": 352.156
+        },
+        "selector": "#golden-callout-5 .cpb-callout",
+        "style": {
+          "alignItems": "flex-start",
+          "backgroundColor": "rgb(240, 253, 250)",
+          "borderTopColor": "rgb(13, 148, 136)",
+          "borderTopWidth": "1px",
+          "color": "rgb(15, 23, 42)",
+          "display": "flex",
+          "fontFamily": "system-ui, sans-serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "12px",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "11.71875px",
+          "marginTop": "11.71875px",
+          "paddingBottom": "12px",
+          "paddingLeft": "14px",
+          "paddingRight": "14px",
+          "paddingTop": "12px",
+          "textAlign": "start"
+        }
+      },
+      "note.block": {
+        "rect": {
+          "height": 95.453,
+          "width": 704,
+          "x": 56,
+          "y": 340.438
+        },
+        "selector": "#golden-callout-5",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "note.text": {
+        "rect": {
+          "height": 19.313,
+          "width": 372.797,
+          "x": 111,
+          "y": 391.859
+        },
+        "selector": "#golden-callout-5 .cpb-callout-text",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(19, 78, 74)",
+          "borderTopWidth": "0px",
+          "color": "rgb(19, 78, 74)",
+          "display": "block",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "13.333333px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "19.333332px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "note.title": {
+        "rect": {
+          "height": 22.703,
+          "width": 372.797,
+          "x": 111,
+          "y": 365.156
+        },
+        "selector": "#golden-callout-5 .cpb-callout-title",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(17, 94, 89)",
+          "borderTopWidth": "0px",
+          "color": "rgb(17, 94, 89)",
+          "display": "block",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "700",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "4px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "ordered_list": {
+        "rect": {
+          "height": 24.797,
+          "width": 704,
+          "x": 56,
+          "y": 257.844
+        },
+        "selector": "#golden-list-3 ol",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "16px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "24.799999px",
+          "listStyleType": "decimal",
+          "marginBottom": "9px",
+          "marginTop": "7px",
+          "paddingBottom": "0px",
+          "paddingLeft": "46.400002px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "left"
+        }
+      },
+      "paragraph": {
+        "rect": {
+          "height": 24.797,
+          "width": 704,
+          "x": 56,
+          "y": 213.047
+        },
+        "selector": "#golden-paragraph-2 .cpb-paragraph",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "16px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "24.799999px",
+          "listStyleType": "disc",
+          "marginBottom": "9px",
+          "marginTop": "7px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "left"
+        }
+      },
+      "paragraph.block": {
+        "rect": {
+          "height": 40.797,
+          "width": 704,
+          "x": 56,
+          "y": 206.047
+        },
+        "selector": "#golden-paragraph-2",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "table": {
+        "rect": {
+          "height": 135.672,
+          "width": 702,
+          "x": 57,
+          "y": 449.688
+        },
+        "selector": ".cpb-table",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "table",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "0px",
+          "paddingLeft": "0px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "start"
+        }
+      },
+      "table.cell": {
+        "rect": {
+          "height": 33.656,
+          "width": 351,
+          "x": 57,
+          "y": 519.047
+        },
+        "selector": ".cpb-table tbody td",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "table-cell",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "13.333333px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "20.666664px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "6px",
+          "paddingLeft": "8px",
+          "paddingRight": "8px",
+          "paddingTop": "6px",
+          "textAlign": "left"
+        }
+      },
+      "table.header": {
+        "rect": {
+          "height": 33.656,
+          "width": 351,
+          "x": 57,
+          "y": 485.391
+        },
+        "selector": ".cpb-table-header-row th",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgb(241, 245, 249)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "table-cell",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "13.333333px",
+          "fontStyle": "normal",
+          "fontWeight": "700",
+          "gap": "normal",
+          "lineHeight": "20.666664px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "6px",
+          "paddingLeft": "8px",
+          "paddingRight": "8px",
+          "paddingTop": "6px",
+          "textAlign": "left"
+        }
+      },
+      "table.title": {
+        "rect": {
+          "height": 35.703,
+          "width": 702,
+          "x": 57,
+          "y": 449.688
+        },
+        "selector": ".cpb-table-title-row td",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgb(232, 238, 246)",
+          "borderTopColor": "rgb(15, 39, 68)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 39, 68)",
+          "display": "table-cell",
+          "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
+          "fontSize": "14.666667px",
+          "fontStyle": "normal",
+          "fontWeight": "700",
+          "gap": "normal",
+          "lineHeight": "22.733335px",
+          "listStyleType": "disc",
+          "marginBottom": "0px",
+          "marginTop": "0px",
+          "paddingBottom": "6px",
+          "paddingLeft": "8px",
+          "paddingRight": "8px",
+          "paddingTop": "6px",
+          "textAlign": "center"
+        }
+      },
+      "unordered_list": {
+        "rect": {
+          "height": 24.797,
+          "width": 704,
+          "x": 56,
+          "y": 302.641
+        },
+        "selector": "#golden-list-4 ul",
+        "style": {
+          "alignItems": "normal",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(15, 23, 42)",
+          "borderTopWidth": "0px",
+          "color": "rgb(15, 23, 42)",
+          "display": "block",
+          "fontFamily": "Georgia, Times New Roman, serif",
+          "fontSize": "16px",
+          "fontStyle": "normal",
+          "fontWeight": "400",
+          "gap": "normal",
+          "lineHeight": "24.799999px",
+          "listStyleType": "disc",
+          "marginBottom": "9px",
+          "marginTop": "7px",
+          "paddingBottom": "0px",
+          "paddingLeft": "46.400002px",
+          "paddingRight": "0px",
+          "paddingTop": "0px",
+          "textAlign": "left"
+        }
+      }
+    }
+  }
 }

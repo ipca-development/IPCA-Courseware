@@ -102,6 +102,7 @@
       forceBreakBefore: Boolean(options.forceBreakBefore),
       headingLevel: Number(options.headingLevel || 0),
       tableHeaderHTML: String(options.tableHeaderHTML || ""),
+      tableShellHTML: String(options.tableShellHTML || ""),
       orderedStart: Number(options.orderedStart || 0),
       unsupported: Boolean(options.unsupported)
     };
@@ -218,7 +219,8 @@
           atomic: true,
           splittable: false,
           forceBreakBefore,
-          tableHeaderHTML: `${prefix}${headerHTML}</table>`
+          tableHeaderHTML: `${prefix}${headerHTML}</table>`,
+          tableShellHTML: root.outerHTML
         }
       ));
     }
@@ -236,7 +238,8 @@
           atomic: true,
           splittable: true,
           forceBreakBefore: !header && forceBreakBefore && index === 0,
-          tableHeaderHTML: headerHTML ? `${prefix}${headerHTML}</table>` : ""
+          tableHeaderHTML: headerHTML ? `${prefix}${headerHTML}</table>` : "",
+          tableShellHTML: root.outerHTML
         }
       ));
     });
@@ -605,7 +608,15 @@
     if (header) table.appendChild(header);
     if (body.children.length) table.appendChild(body);
     let renderedTable = table.outerHTML;
-    if (!firstRoot.matches("table")) {
+    const shellHTML = values[0].fragment.tableShellHTML || "";
+    if (shellHTML) {
+      const shell = rootFromHTML(shellHTML).cloneNode(true);
+      const shellTable = shell.querySelector("table");
+      if (shellTable) {
+        shellTable.replaceWith(table);
+        renderedTable = shell.outerHTML;
+      }
+    } else if (!firstRoot.matches("table")) {
       const shell = firstRoot.cloneNode(true);
       const shellTable = shell.querySelector("table");
       if (shellTable) {
@@ -701,6 +712,8 @@
       + `height:${layout.pageHeight}px;margin:0;padding:0;overflow:visible;`;
     const canonicalPageStyle = `position:absolute;box-sizing:border-box;left:0;top:0;`
       + `width:${layout.canonicalPageWidth}px;height:${layout.canonicalPageHeight}px;`
+      + `min-height:${layout.canonicalPageHeight}px;max-width:none;margin:0;padding:0;`
+      + `box-shadow:none;border-radius:0;`
       + `transform-origin:top left;transform:scale(var(--reader-page-scale));`;
     if (page.isCover) {
       element.innerHTML = `
@@ -720,7 +733,7 @@
     element.innerHTML = `
       <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
         <div class="reader-page-header-region" style="position:absolute;box-sizing:border-box;${frameStyle(headerFrame)}">${header}</div>
-        <main class="reader-page-body cpb-sheet-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;${frameStyle(contentFrame)};overflow:visible">${pagePiecesMarkup(page.pieces)}</main>
+        <main class="reader-page-body cpb-sheet-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;align-content:start;${frameStyle(contentFrame)};overflow:visible">${pagePiecesMarkup(page.pieces)}</main>
         <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;${frameStyle(footerFrame)}">${footer}</div>
       </div>
     `;

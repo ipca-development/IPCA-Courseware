@@ -56,12 +56,14 @@ const measurements = [
   ["footer.center", ".cpb-page-footer .cpb-page-header-cell--center"],
   ["footer.right", ".cpb-page-footer .cpb-page-header-cell--right"],
   ["heading", "#golden-heading-1 .cpb-heading"],
+  ["heading.row", "#golden-heading-1 .cpb-heading-row"],
   ["heading.block", "#golden-heading-1"],
   ["paragraph", "#golden-paragraph-2 .cpb-paragraph"],
   ["paragraph.block", "#golden-paragraph-2"],
   ["ordered_list", "#golden-list-3 ol"],
   ["unordered_list", "#golden-list-4 ul"],
   ["note", "#golden-callout-5 .cpb-callout"],
+  ["note.block", "#golden-callout-5"],
   ["note.title", "#golden-callout-5 .cpb-callout-title"],
   ["note.text", "#golden-callout-5 .cpb-callout-text"],
   ["table", ".cpb-table"],
@@ -76,7 +78,7 @@ const styleProperties = [
   "fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight",
   "marginTop", "marginBottom", "paddingTop", "paddingRight", "paddingBottom",
   "paddingLeft", "textAlign", "color", "backgroundColor", "borderTopWidth",
-  "borderTopColor", "listStyleType"
+  "borderTopColor", "listStyleType", "display", "alignItems", "gap"
 ];
 
 const harnessCSS = `
@@ -87,7 +89,7 @@ const harnessCSS = `
   .parity-page>.cpb-page-header{position:absolute!important;left:56px!important;top:48px!important;
     width:704px!important;height:84px!important;margin:0!important}
   .parity-page>.cpb-sheet-body{position:absolute!important;left:56px!important;top:152px!important;
-    width:704px!important;height:744px!important;margin:0!important;padding:0!important}
+    width:704px!important;height:744px!important;margin:0!important;padding:0!important;align-content:start!important}
   .parity-page>.cpb-page-footer{position:absolute!important;left:56px!important;top:920px!important;
     width:704px!important;height:72px!important;margin:0!important}
   .reader-generated-page{margin:0!important;background:#fff!important}

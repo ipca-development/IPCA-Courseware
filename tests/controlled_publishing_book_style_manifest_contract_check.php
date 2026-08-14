@@ -83,7 +83,7 @@ $assert(str_contains($first['css']['content'], '--reader-font-scale'), 'CSS lack
 $assert(!str_contains($first['css']['content'], '.cpb-sheet{zoom:'), 'Book CSS must not scale only the sheet and bypass canonical page frames.');
 $assert(str_contains($first['css']['content'], '.reader-page-body:not(.reader-page-cover){font-size:calc(11pt * var(--reader-font-scale,1));}'), 'Reader body font scaling is not backend-controlled.');
 $assert(str_contains($first['css']['content'], '.reader-page-header-region,.reader-page-footer-region{--reader-font-scale:1;}'), 'Header/footer reader font-scale isolation is missing.');
-$assert(str_contains($first['css']['content'], '.cpb-page-header,.cpb-page-footer{font-size:initial;}'), 'Header/footer font scale independence is missing.');
+$assert(!str_contains($first['css']['content'], '.cpb-page-header,.cpb-page-footer{font-size:initial;}'), 'Header/footer must inherit the golden publication typography.');
 $assert(($first['manifest']['schema_version'] ?? '') === ControlledPublishingBookStyleManifestService::SCHEMA_VERSION, 'Manifest schema version is missing.');
 $assert(isset($first['manifest']['styles'], $first['manifest']['page_bands']['main'], $first['manifest']['page_bands']['annex']), 'Manifest style/page-band configuration is incomplete.');
 $assert(isset($first['manifest']['layout'], $first['manifest']['layout_hash'], $first['manifest']['render_pipeline']), 'Manifest layout/render pipeline identity is incomplete.');
