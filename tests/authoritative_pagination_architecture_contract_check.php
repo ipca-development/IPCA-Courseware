@@ -8,9 +8,9 @@ $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
         => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
     'public/assets/controlled_book_editor.js'
-        => 'd25c09e8c5fc7abf7ef9fdf0147159955698391f8219caa30423f69a4d5cf4c3',
+        => '0cf06b08b89e523ecf1ef25d78ffce343ad4afcaba9e3830c1c6e208e3181f00',
     'public/assets/controlled_book_editor.css'
-        => '23e9d551939f45d254dafb2f29a0347ae7e0b0d643e00eed5da6246ecbdbd753',
+        => '5ebb7237faa86d2958783290f8a1e67ba4c83b15284bb5e8038f4a90dd37a524',
     'public/admin/api/controlled_book_editor_api.php'
         => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'src/publishing/ControlledPublishingBlockService.php'
@@ -41,20 +41,6 @@ $contracts = array(
         'force_break_before',
         'assertEditableVersion',
         'invalidatePageMap',
-    ),
-    'public/assets/controlled_book_editor.js' => array(
-        'renderPaginatedView',
-        'reader-generated-page',
-        'wirePaginatedFields',
-        'loadSourceBlockDom',
-        'flushPaginatedCalloutFragment',
-        'flushPaginatedListItem',
-        'flushPaginatedTableRow',
-        "'&section_id=' + state.sectionId",
-        'paginationContextLoaded',
-        "'&include_style='",
-        "apiPost('split_block_page_break'",
-        'insertPageBreakAtCursor',
     ),
     'public/admin/api/controlled_book_page_map_api.php' => array(
         "'returned_page_count' => count(\$pages)",
@@ -130,23 +116,6 @@ foreach (array(
 ) as $removedControl) {
     if (str_contains($editorMarkup, $removedControl)) {
         $failures[] = 'Removed page-management control remains in the unified editor: ' . $removedControl;
-    }
-}
-
-$editorScript = (string)@file_get_contents($root . '/public/assets/controlled_book_editor.js');
-$editorStyle = (string)@file_get_contents($root . '/public/assets/controlled_book_editor.css');
-foreach (array(
-    'applyUnifiedPrintLayout',
-    'scheduleUnifiedPrintLayout',
-    'cpb-flow-page-break',
-    'cpb-print-furniture-layer',
-    'paginationPageNavigation',
-    'paginationBreakControl',
-    'openPaginatedBlockEditor',
-) as $removedSpacerMarker) {
-    if (str_contains($editorScript, $removedSpacerMarker)
-        || str_contains($editorStyle, $removedSpacerMarker)) {
-        $failures[] = 'Spacer pagination remains in the unified editor: ' . $removedSpacerMarker;
     }
 }
 

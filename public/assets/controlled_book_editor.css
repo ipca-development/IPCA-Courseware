@@ -683,11 +683,18 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: #e7e9ed;
 }
 
+.cpb-editor-root.cpb-editor-paginated-mode .cpb-toolbar-main,
+.cpb-editor-root.cpb-editor-paginated-mode .cpb-toolbar-toc,
+.cpb-editor-root.cpb-editor-paginated-mode .cpb-toolbar-lep,
+.cpb-editor-root.cpb-editor-paginated-mode .cpb-toolbar-part0 {
+  display: none !important;
+}
+
 .cpb-pages-stack {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 28px;
+  gap: 0;
   width: max-content;
   min-width: 100%;
   transform-origin: top center;
@@ -696,14 +703,13 @@ body.cpb-browser-fullscreen .cpb-workspace {
 .cpb-paginated-page {
   position: relative;
   box-sizing: content-box;
-  width: auto;
-  min-width: 0;
-  height: auto;
-  min-height: 0;
-  overflow: hidden;
+  width: 816px;
+  min-width: 816px;
+  height: 1056px;
+  min-height: 1056px;
+  overflow: visible;
   background: #fff;
   border: 1px solid #c8cdd4;
-  border-radius: 18px;
   box-shadow: 0 5px 18px rgba(37, 43, 52, .25);
 }
 
@@ -717,16 +723,12 @@ body.cpb-browser-fullscreen .cpb-workspace {
   width: 100% !important;
   height: 100% !important;
   margin: 0 !important;
-  border-radius: inherit;
-  overflow: hidden !important;
 }
 
 .cpb-paginated-page .reader-canonical-page {
   position: absolute !important;
   inset: 0 !important;
   margin: 0 !important;
-  border-radius: inherit !important;
-  overflow: hidden !important;
 }
 
 .cpb-paginated-page .reader-page-header-region,
@@ -741,9 +743,79 @@ body.cpb-browser-fullscreen .cpb-workspace {
   position: static !important;
   inset: auto !important;
   width: 100% !important;
-  height: auto !important;
+  height: 100% !important;
   margin: 0 !important;
   box-sizing: border-box !important;
+}
+
+.cpb-pagination-page-navigation {
+  position: sticky;
+  top: 32px;
+  z-index: 29;
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: min(816px, 100%);
+  box-sizing: border-box;
+  margin: -14px auto 22px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: rgba(248, 250, 252, .98);
+  color: #334155;
+  text-align: center;
+  font: 12px/1.3 system-ui, sans-serif;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, .08);
+}
+
+.cpb-pagination-page-navigation button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #fff;
+  color: #1e3a8a;
+  cursor: pointer;
+}
+
+.cpb-pagination-page-navigation button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.cpb-pagination-panel {
+  position: sticky;
+  top: -20px;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  width: min(816px, 100%);
+  box-sizing: border-box;
+  margin: 0 auto 22px;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .1);
+  font: 12px/1.35 system-ui, sans-serif;
+}
+
+.cpb-pagination-break-select {
+  flex: 1 1 280px;
+  min-width: 180px;
+}
+
+.cpb-pagination-break-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: #eff6ff;
+  color: #1e3a8a;
 }
 
 .cpb-pagination-empty {
@@ -772,24 +844,87 @@ body.cpb-browser-fullscreen .cpb-workspace {
   cursor: text;
 }
 
+.cpb-paginated-piece--source-editor {
+  position: relative;
+}
+
+.cpb-paginated-edit-block {
+  position: absolute;
+  z-index: 5;
+  right: 2px;
+  top: 2px;
+  display: none;
+  padding: 3px 6px;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #1e40af;
+  font: 600 10px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.cpb-paginated-piece--source-editor:hover > .cpb-paginated-edit-block {
+  display: block;
+}
+
 .cpb-manual-break-before {
   position: relative;
 }
 
-.cpb-manual-break-marker {
+.cpb-manual-break-before::before {
+  content: "Manual Page Break";
   position: absolute;
   z-index: 6;
   left: 0;
   right: 0;
   top: 0;
   transform: translateY(-55%);
-  width: 100%;
   padding: 3px 7px;
   border: 1px dashed #1e73be;
   background: #e8f2ff;
   color: #1e5f9e;
-  cursor: pointer;
+  pointer-events: none;
   font: 600 10px/1.2 system-ui, sans-serif;
+}
+
+.cpb-paginated-block-overlay {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, .58);
+}
+
+.cpb-paginated-block-dialog {
+  width: min(760px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .35);
+}
+
+.cpb-paginated-block-dialog__head,
+.cpb-paginated-block-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  font-family: system-ui, sans-serif;
+}
+
+.cpb-paginated-block-dialog__content {
+  padding: 22px;
+}
+
+.cpb-paginated-block-dialog__actions {
+  justify-content: flex-end;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 0;
 }
 
 .cpb-sheet {
@@ -810,6 +945,151 @@ body.cpb-browser-fullscreen .cpb-workspace {
   --cpb-frame-radius: 4px;
   --cpb-frame-border-color: #94a3b8;
   --cpb-frame-border-width: 1px;
+}
+
+.cpb-sheet.cpb-print-layout {
+  position: relative;
+  box-sizing: border-box;
+  width: 816px;
+  max-width: none;
+  min-height: 1056px;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  box-shadow: none;
+}
+
+.cpb-print-layout > .cpb-print-template {
+  display: none !important;
+}
+
+.cpb-print-layout > .cpb-page-layout-toggle {
+  position: absolute;
+  z-index: 8;
+  top: 8px;
+  right: 62px;
+  margin: 0;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .94);
+}
+
+.cpb-print-layout > .cpb-sheet-body {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  width: 704px;
+  max-width: 704px;
+  margin: 0 56px;
+  padding: 152px 0 0;
+  box-sizing: border-box;
+}
+
+.cpb-print-furniture-layer {
+  position: absolute;
+  z-index: auto;
+  inset: 0;
+  width: 816px;
+  pointer-events: none;
+}
+
+.cpb-print-page {
+  position: absolute;
+  left: 0;
+  width: 816px;
+  height: 1056px;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #c8cdd4;
+  box-shadow: 0 5px 18px rgba(37, 43, 52, .22);
+}
+
+.cpb-print-page-header,
+.cpb-print-page-footer {
+  position: absolute !important;
+  z-index: 4;
+  left: 56px;
+  width: 704px !important;
+  height: 84px;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  background: #fff;
+  cursor: default;
+}
+
+.cpb-print-page-header {
+  top: 48px;
+}
+
+.cpb-print-page-footer {
+  top: auto;
+  bottom: 64px;
+  height: auto !important;
+  min-height: 0;
+}
+
+.cpb-print-layout .cpb-change-marker {
+  display: none;
+}
+
+.cpb-print-change-marker {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  width: 4px;
+  background: #000;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.cpb-flow-page-break {
+  display: block;
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 1px;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+span.cpb-flow-page-break {
+  display: block;
+}
+
+.cpb-flow-page-break--manual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #64748b;
+  font: 600 10px/1.2 system-ui, sans-serif;
+  pointer-events: auto;
+}
+
+.cpb-flow-page-break--manual::before,
+.cpb-flow-page-break--manual::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px dashed #94a3b8;
+}
+
+.cpb-flow-page-break--manual button {
+  padding: 2px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cpb-print-layout > .cpb-dropzone {
+  position: absolute;
+  z-index: 5;
+  right: 62px;
+  bottom: 76px;
 }
 
 .cpb-sheet-header {
