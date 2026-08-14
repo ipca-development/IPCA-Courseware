@@ -825,7 +825,7 @@
           var firstOrderedList = focusedOrderedList.classList.contains('cpb-list')
             ? focusedOrderedList.closest('.cpb-block').querySelector('ol.cpb-list')
             : focusedOrderedList;
-          listStartInput.value = String(Math.max(
+          setListStartSelectorValue(Math.max(
             1,
             parseInt(firstOrderedList.getAttribute('start') || '1', 10) || 1
           ));
@@ -1543,14 +1543,14 @@
   function defaultBookStyles() {
     return {
       paragraph_styles: {
-        title: { font_family: 'sans', font_size: 24, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false },
-        subtitle_1: { font_family: 'sans', font_size: 18, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false },
-        subtitle_2: { font_family: 'sans', font_size: 16, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false },
-        subtitle_3: { font_family: 'sans', font_size: 14, color: '#0f2744', font_bold: false, font_italic: false, font_underline: false },
-        subtitle_4: { font_family: 'sans', font_size: 12, color: '#334155', font_bold: false, font_italic: false, font_underline: false },
-        regulatory_reference: { font_family: 'mono', font_size: 10, color: '#1e3a8a', font_bold: false, font_italic: false, font_underline: false },
-        body: { font_family: 'serif', font_size: 11, color: '#0f172a', font_bold: false, font_italic: false, font_underline: false },
-        caption: { font_family: 'sans', font_size: 9, color: '#64748b', font_bold: false, font_italic: false, font_underline: false },
+        title: { font_family: 'sans', font_size: 24, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false, margin_top: null, margin_bottom: null },
+        subtitle_1: { font_family: 'sans', font_size: 18, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false, margin_top: null, margin_bottom: null },
+        subtitle_2: { font_family: 'sans', font_size: 16, color: '#0f2744', font_bold: true, font_italic: false, font_underline: false, margin_top: null, margin_bottom: null },
+        subtitle_3: { font_family: 'sans', font_size: 14, color: '#0f2744', font_bold: false, font_italic: false, font_underline: false, margin_top: null, margin_bottom: null },
+        subtitle_4: { font_family: 'sans', font_size: 12, color: '#334155', font_bold: false, font_italic: false, font_underline: false, margin_top: null, margin_bottom: null },
+        regulatory_reference: { font_family: 'mono', font_size: 10, color: '#1e3a8a', font_bold: false, font_italic: false, font_underline: false, margin_top: null, margin_bottom: null },
+        body: { font_family: 'serif', font_size: 11, color: '#0f172a', font_bold: false, font_italic: false, font_underline: false, margin_top: null, margin_bottom: null },
+        caption: { font_family: 'sans', font_size: 9, color: '#64748b', font_bold: false, font_italic: false, font_underline: false, margin_top: null, margin_bottom: null },
       },
       table_styles: {
         standard: defaultTableStyleDef(),
@@ -2898,6 +2898,10 @@
       font_bold: !!def.font_bold,
       font_italic: !!def.font_italic,
       font_underline: !!def.font_underline,
+      margin_top: def.margin_top !== null && def.margin_top !== '' && Number.isFinite(Number(def.margin_top))
+        ? Number(def.margin_top) : null,
+      margin_bottom: def.margin_bottom !== null && def.margin_bottom !== '' && Number.isFinite(Number(def.margin_bottom))
+        ? Number(def.margin_bottom) : null,
     };
   }
 
@@ -3059,6 +3063,8 @@
     if (!el || el.classList.contains('cpb-lep-emphasis')) return;
     var styleKey = canonicalParagraphStyleKey(el.getAttribute('data-paragraph-style') || 'body') || 'body';
     var def = paragraphStyleDef(styleKey);
+    el.style.marginTop = def.margin_top === null ? '' : def.margin_top + 'px';
+    el.style.marginBottom = def.margin_bottom === null ? '' : def.margin_bottom + 'px';
     var fields = {
       font_family: el.getAttribute('data-font-family') || def.font_family || 'serif',
       font_size: parseInt(el.getAttribute('data-font-size') || String(def.font_size || 11), 10) || 11,
@@ -3371,6 +3377,18 @@
     exitListWithinBlock(list, blockEl, item, false);
   }
 
+  function setListStartSelectorValue(value) {
+    if (!listStartInput) return;
+    var normalized = String(Math.max(1, parseInt(value, 10) || 1));
+    if (!listStartInput.querySelector('option[value="' + normalized + '"]')) {
+      var option = document.createElement('option');
+      option.value = normalized;
+      option.textContent = normalized;
+      listStartInput.appendChild(option);
+    }
+    listStartInput.value = normalized;
+  }
+
   function applyOrderedListStart(value) {
     var orderedList = isConnectedEl(state.activeOrderedList)
       ? state.activeOrderedList
@@ -3389,7 +3407,7 @@
       segment.setAttribute('start', String(startNumber + precedingItems));
       precedingItems += segment.querySelectorAll(':scope > li').length;
     });
-    if (listStartInput) listStartInput.value = String(startNumber);
+    setListStartSelectorValue(startNumber);
     scheduleSave(block);
     flushSave(block);
   }
@@ -5016,7 +5034,7 @@
         var displayedOrderedList = orderedList.classList.contains('cpb-list')
           ? orderedList.closest('.cpb-block').querySelector('ol.cpb-list')
           : orderedList;
-        listStartInput.value = String(Math.max(
+        setListStartSelectorValue(Math.max(
           1,
           parseInt(displayedOrderedList.getAttribute('start') || '1', 10) || 1
         ));
@@ -5494,6 +5512,9 @@
     el.style.fontFamily = FONT_STACKS[typo.font_family] || FONT_STACKS.serif;
     el.style.fontSize = typo.font_size + 'pt';
     el.style.color = typo.color;
+    var spacing = paragraphStyleDef(paragraphStyle || 'body');
+    el.style.marginTop = spacing.margin_top === null ? '' : spacing.margin_top + 'px';
+    el.style.marginBottom = spacing.margin_bottom === null ? '' : spacing.margin_bottom + 'px';
     applyTypographyDecorationToElement(el, typo);
     syncSectionNumberTypography(el);
   }
@@ -6309,11 +6330,15 @@
         + ';font-weight:' + (def.font_bold ? '700' : '400')
         + ';font-style:' + (def.font_italic ? 'italic' : 'normal')
         + ';text-decoration:' + (def.font_underline ? 'underline' : 'none');
+      var marginTop = def.margin_top === null || def.margin_top === undefined ? '' : def.margin_top;
+      var marginBottom = def.margin_bottom === null || def.margin_bottom === undefined ? '' : def.margin_bottom;
       return ''
         + '<tr data-ps-row="' + key + '">'
         + '<td class="cpb-style-name">' + escapeHtml(sample) + '</td>'
         + '<td><select class="cpb-style-input" data-ps-field="font_family">' + styleEditorFontOptions(def.font_family || 'serif') + '</select></td>'
         + '<td><input class="cpb-style-input cpb-style-input--num" type="number" min="8" max="32" data-ps-field="font_size" value="' + (def.font_size || 11) + '"></td>'
+        + '<td><input class="cpb-style-input cpb-style-input--margin" type="number" min="0" max="200" placeholder="Auto" data-ps-field="margin_top" value="' + marginTop + '"></td>'
+        + '<td><input class="cpb-style-input cpb-style-input--margin" type="number" min="0" max="200" placeholder="Auto" data-ps-field="margin_bottom" value="' + marginBottom + '"></td>'
         + '<td><input class="cpb-style-input cpb-style-input--color" type="color" data-ps-field="color" value="' + escapeAttr(def.color || '#0f172a') + '"></td>'
         + '<td>' + styleEditorFormatToggles(def) + '</td>'
         + '<td><span class="cpb-style-sample" data-ps-sample="' + key + '" style="' + sampleStyle + '">' + escapeHtml(sample) + '</span></td>'
@@ -6396,7 +6421,7 @@
         + 'Manual content and callout preset text are not copied.</p>'
         + '</section>')
       + '<section class="cpb-style-section"><h4>Paragraph styles</h4>'
-      + '<table class="cpb-style-table"><thead><tr><th>Style</th><th>Font</th><th>Size</th><th>Color</th><th>Format</th><th>Sample</th></tr></thead><tbody>'
+      + '<table class="cpb-style-table"><thead><tr><th>Style</th><th>Font</th><th>Size</th><th>Top margin (px)</th><th>Bottom margin (px)</th><th>Color</th><th>Format</th><th>Sample</th></tr></thead><tbody>'
       + paragraphRows + '</tbody></table></section>'
       + tableSection('standard', 'Standard tables')
       + tableSection('text', 'Text tables')
@@ -6414,9 +6439,15 @@
       PARAGRAPH_STYLE_KEYS.forEach(function (key) {
         var row = overlay.querySelector('[data-ps-row="' + key + '"]');
         if (!row) return;
+        function optionalMargin(field) {
+          var value = row.querySelector('[data-ps-field="' + field + '"]').value;
+          return value === '' ? null : Math.max(0, Math.min(200, parseInt(value, 10) || 0));
+        }
         next.paragraph_styles[key] = {
           font_family: row.querySelector('[data-ps-field="font_family"]').value,
           font_size: parseInt(row.querySelector('[data-ps-field="font_size"]').value, 10) || 11,
+          margin_top: optionalMargin('margin_top'),
+          margin_bottom: optionalMargin('margin_bottom'),
           color: row.querySelector('[data-ps-field="color"]').value,
           font_bold: !!row.querySelector('[data-ps-field="font_bold"]').checked,
           font_italic: !!row.querySelector('[data-ps-field="font_italic"]').checked,

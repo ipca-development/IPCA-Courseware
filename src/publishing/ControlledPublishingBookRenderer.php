@@ -1637,7 +1637,7 @@ final class ControlledPublishingBookRenderer
             $baseTypography = $this->resolveTypography($typoPayload);
             $typoPayload['font_size'] = max(6, (int)$baseTypography['font_size'] - self::TOC_FONT_SIZE_DELTA);
             $styleClass = $this->styleClass($typoPayload);
-            $styleAttr = $this->styleAttr($typoPayload);
+            $styleAttr = $this->styleAttr($typoPayload, false);
             $titleClass = $style === 'title' ? ' cpb-toc-row--title' : '';
 
             $labelInner = h($label);
@@ -2568,7 +2568,7 @@ final class ControlledPublishingBookRenderer
     /**
      * @param array<string,mixed> $payload
      */
-    private function styleAttr(array $payload): string
+    private function styleAttr(array $payload, bool $includeSpacing = true): string
     {
         $typography = $this->resolveTypography($payload);
         $paragraphStyle = $this->canonicalParagraphStyle($payload);
@@ -2582,6 +2582,12 @@ final class ControlledPublishingBookRenderer
             'font-style:' . (!empty($typography['font_italic']) ? 'italic' : 'normal'),
             'text-decoration:' . (!empty($typography['font_underline']) ? 'underline' : 'none'),
         );
+        if ($includeSpacing && $typography['margin_top'] !== null) {
+            $styles[] = 'margin-top:' . (int)$typography['margin_top'] . 'px';
+        }
+        if ($includeSpacing && $typography['margin_bottom'] !== null) {
+            $styles[] = 'margin-bottom:' . (int)$typography['margin_bottom'] . 'px';
+        }
         $attrs = ' style="' . h(implode(';', $styles)) . '"'
             . ' data-font-family="' . h((string)$typography['font_family']) . '"'
             . ' data-text-align="' . h((string)$typography['text_align']) . '"'
@@ -2603,7 +2609,7 @@ final class ControlledPublishingBookRenderer
 
     /**
      * @param array<string,mixed> $payload
-     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int,font_bold:bool,font_italic:bool,font_underline:bool}
+     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int,font_bold:bool,font_italic:bool,font_underline:bool,margin_top:?int,margin_bottom:?int}
      */
     private function resolveTypography(array $payload): array
     {
@@ -2627,6 +2633,8 @@ final class ControlledPublishingBookRenderer
             'font_bold' => !empty($payload['font_bold']),
             'font_italic' => !empty($payload['font_italic']),
             'font_underline' => !empty($payload['font_underline']),
+            'margin_top' => null,
+            'margin_bottom' => null,
         );
     }
 

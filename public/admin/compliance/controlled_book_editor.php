@@ -109,6 +109,7 @@ compliance_page_open(array(
     <div class="cpb-workspace">
       <div class="cpb-toolbar" id="cpbToolbar">
         <div class="cpb-toolbar-main" id="cpbToolbarMain">
+        <div class="cpb-toolbar-row cpb-toolbar-row--primary">
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbUndo" title="Undo (Ctrl+Z)">↶</button>
           <button type="button" class="cpb-tool-btn" id="cpbRedo" title="Redo (Ctrl+Shift+Z)">↷</button>
@@ -164,10 +165,15 @@ compliance_page_open(array(
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-cmd="insertUnorderedList" title="Bullet list">•</button>
           <button type="button" class="cpb-tool-btn" data-cmd="insertOrderedList" title="Numbered list">1.</button>
-          <input type="number" id="cpbListStart" class="cpb-tool-list-start" min="1" step="1" value="1"
-                 title="Starting number for the selected numbered list" aria-label="Numbered list start" disabled>
-          <button type="button" class="cpb-tool-btn" data-cmd="removeList" title="Remove list formatting">☐</button>
+          <select id="cpbListStart" class="cpb-tool-select cpb-tool-select--list-start"
+                  title="Starting number for the selected numbered list" aria-label="Numbered list start" disabled>
+            <?php for ($listStart = 1; $listStart <= 100; $listStart++): ?>
+              <option value="<?= $listStart ?>"<?= $listStart === 1 ? ' selected' : '' ?>><?= $listStart ?></option>
+            <?php endfor; ?>
+          </select>
         </div>
+        </div>
+        <div class="cpb-toolbar-row cpb-toolbar-row--secondary">
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbOutdent" title="Decrease indent (Shift+Tab)">⇤</button>
           <button type="button" class="cpb-tool-btn" id="cpbIndent" title="Increase indent (Tab)">⇥</button>
@@ -195,6 +201,7 @@ compliance_page_open(array(
             <option value="hyperlinks_all">Links (all)</option>
             <option value="annex_refs_all">Annex (all)</option>
           </select>
+        </div>
         </div>
         </div>
         <div class="cpb-toolbar-toc" id="cpbToolbarToc" hidden aria-hidden="true"></div>

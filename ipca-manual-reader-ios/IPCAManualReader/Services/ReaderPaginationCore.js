@@ -743,8 +743,23 @@
       });
       body.querySelectorAll(":scope > .reader-semantic-piece").forEach((pieceNode) => {
         const type = pieceNode.getAttribute("data-semantic-type") || "";
-        const spacing = type === "heading" ? 5 : 6;
-        pieceNode.style.setProperty("margin-bottom", `${spacing * pageScale}px`, "important");
+        const styledNode = pieceNode.querySelector(
+          ".cpb-heading[style],.cpb-paragraph[style],.cpb-list[style]"
+        );
+        const hasTopMargin = styledNode && styledNode.style.marginTop !== "";
+        const hasBottomMargin = styledNode && styledNode.style.marginBottom !== "";
+        if (hasTopMargin) {
+          const top = Math.max(0, Number.parseFloat(styledNode.style.marginTop) || 0);
+          pieceNode.style.setProperty("margin-top", `${top * pageScale}px`, "important");
+          styledNode.style.setProperty("margin-top", "0", "important");
+        }
+        const bottom = hasBottomMargin
+          ? Math.max(0, Number.parseFloat(styledNode.style.marginBottom) || 0)
+          : (type === "heading" ? 5 : 6);
+        pieceNode.style.setProperty("margin-bottom", `${bottom * pageScale}px`, "important");
+        if (hasBottomMargin) {
+          styledNode.style.setProperty("margin-bottom", "0", "important");
+        }
       });
     }
     (body || root).querySelectorAll("img").forEach((image) => {

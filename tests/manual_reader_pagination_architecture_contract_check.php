@@ -6,11 +6,11 @@ $failures = array();
 
 $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
-        => '459a755e2aef5802f7bbc9c9679619252596a7705a9629bb09a5f8cf998219b7',
+        => '0c66088f01a6643a56983a81f67226e1805bf21bb2fb09941be4d21ce5df04ac',
     'public/assets/controlled_book_editor.js'
-        => 'a11c51a9a5030c2232241dbe4c1ec844fdb8e56e9fa1e067b52c07bf218aac52',
+        => '75e5b4e8a1e3f9194d7d41c524582e29cb2cc06e9537d8a10580971cae52b69f',
     'public/assets/controlled_book_editor.css'
-        => '06fa6366568e0a0952b3a8b88fa179da1cf611861bcb13a94f57bc7c983e16fe',
+        => '785a8b4354edb2f384fbd0f151752bbcb4ed9663c96415da26da935832069b7b',
     'public/admin/api/controlled_book_editor_api.php'
         => '22e5f6c90f2a63401b15d8f70942fa3ca2954c7767aaaf4d61477bdec0bac1e9',
     'src/publishing/ControlledPublishingBlockService.php'
@@ -18,7 +18,7 @@ $protected = array(
     'src/document/StructuredDocumentPayload.php'
         => '71bcbba2711d9158d952c8042af6439dc8df1697318da877f6e2225eca80a805',
     'src/publishing/ControlledPublishingBookRenderer.php'
-        => '20117d5ebfe2f5c6fcd05e589a0d8a1b65ef5dd26f673e2720fb6ffa594d6d5d',
+        => '3f4af44e623dd5dbacd91f36578cf14764c487cb0cfeef9dc99aff101d48e0e9',
 );
 
 foreach ($protected as $relative => $expectedHash) {

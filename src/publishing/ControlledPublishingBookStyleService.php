@@ -52,14 +52,14 @@ final class ControlledPublishingBookStyleService
     {
         return array(
             'paragraph_styles' => array(
-                'title' => array('font_family' => 'sans', 'font_size' => 24, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
-                'subtitle_1' => array('font_family' => 'sans', 'font_size' => 18, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
-                'subtitle_2' => array('font_family' => 'sans', 'font_size' => 16, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false),
-                'subtitle_3' => array('font_family' => 'sans', 'font_size' => 14, 'color' => '#0f2744', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
-                'subtitle_4' => array('font_family' => 'sans', 'font_size' => 12, 'color' => '#334155', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
-                'regulatory_reference' => array('font_family' => 'mono', 'font_size' => 10, 'color' => '#1e3a8a', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
-                'body' => array('font_family' => 'serif', 'font_size' => 11, 'color' => '#0f172a', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
-                'caption' => array('font_family' => 'sans', 'font_size' => 9, 'color' => '#64748b', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false),
+                'title' => array('font_family' => 'sans', 'font_size' => 24, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false, 'margin_top' => null, 'margin_bottom' => null),
+                'subtitle_1' => array('font_family' => 'sans', 'font_size' => 18, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false, 'margin_top' => null, 'margin_bottom' => null),
+                'subtitle_2' => array('font_family' => 'sans', 'font_size' => 16, 'color' => '#0f2744', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false, 'margin_top' => null, 'margin_bottom' => null),
+                'subtitle_3' => array('font_family' => 'sans', 'font_size' => 14, 'color' => '#0f2744', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false, 'margin_top' => null, 'margin_bottom' => null),
+                'subtitle_4' => array('font_family' => 'sans', 'font_size' => 12, 'color' => '#334155', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false, 'margin_top' => null, 'margin_bottom' => null),
+                'regulatory_reference' => array('font_family' => 'mono', 'font_size' => 10, 'color' => '#1e3a8a', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false, 'margin_top' => null, 'margin_bottom' => null),
+                'body' => array('font_family' => 'serif', 'font_size' => 11, 'color' => '#0f172a', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false, 'margin_top' => null, 'margin_bottom' => null),
+                'caption' => array('font_family' => 'sans', 'font_size' => 9, 'color' => '#64748b', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false, 'margin_top' => null, 'margin_bottom' => null),
             ),
             'table_styles' => array(
                 'standard' => $this->defaultTableStyle(),
@@ -326,7 +326,7 @@ final class ControlledPublishingBookStyleService
     /**
      * @param array<string,mixed> $payload
      * @param array<string,mixed> $bookStyles
-     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int,font_bold:bool,font_italic:bool,font_underline:bool}
+     * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int,font_bold:bool,font_italic:bool,font_underline:bool,margin_top:?int,margin_bottom:?int}
      */
     public function resolveBlockTypography(array $payload, array $bookStyles): array
     {
@@ -346,6 +346,8 @@ final class ControlledPublishingBookStyleService
             'font_bold' => false,
             'font_italic' => false,
             'font_underline' => false,
+            'margin_top' => null,
+            'margin_bottom' => null,
         );
         if (isset($paragraphDefs[$paragraphStyle])) {
             $def = $paragraphDefs[$paragraphStyle];
@@ -355,6 +357,8 @@ final class ControlledPublishingBookStyleService
             $base['font_bold'] = $this->normalizeBool($def['font_bold'] ?? null, $base['font_bold']);
             $base['font_italic'] = $this->normalizeBool($def['font_italic'] ?? null, $base['font_italic']);
             $base['font_underline'] = $this->normalizeBool($def['font_underline'] ?? null, $base['font_underline']);
+            $base['margin_top'] = $this->normalizeParagraphMargin($def['margin_top'] ?? null);
+            $base['margin_bottom'] = $this->normalizeParagraphMargin($def['margin_bottom'] ?? null);
         }
         if (array_key_exists('font_family', $payload)) {
             $override = $this->normalizeFont((string)$payload['font_family']);
@@ -571,7 +575,7 @@ final class ControlledPublishingBookStyleService
     /**
      * @param array<string,mixed> $input
      * @param array<string,mixed> $fallback
-     * @return array{font_family:string,font_size:int,color:string,font_bold:bool,font_italic:bool,font_underline:bool}
+     * @return array{font_family:string,font_size:int,color:string,font_bold:bool,font_italic:bool,font_underline:bool,margin_top:?int,margin_bottom:?int}
      */
     private function normalizeParagraphStyle(array $input, array $fallback): array
     {
@@ -582,7 +586,21 @@ final class ControlledPublishingBookStyleService
             'font_bold' => $this->normalizeBool($input['font_bold'] ?? null, (bool)($fallback['font_bold'] ?? false)),
             'font_italic' => $this->normalizeBool($input['font_italic'] ?? null, (bool)($fallback['font_italic'] ?? false)),
             'font_underline' => $this->normalizeBool($input['font_underline'] ?? null, (bool)($fallback['font_underline'] ?? false)),
+            'margin_top' => $this->normalizeParagraphMargin(
+                array_key_exists('margin_top', $input) ? $input['margin_top'] : ($fallback['margin_top'] ?? null)
+            ),
+            'margin_bottom' => $this->normalizeParagraphMargin(
+                array_key_exists('margin_bottom', $input) ? $input['margin_bottom'] : ($fallback['margin_bottom'] ?? null)
+            ),
         );
+    }
+
+    private function normalizeParagraphMargin(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        return max(0, min(200, (int)$value));
     }
 
     /**
