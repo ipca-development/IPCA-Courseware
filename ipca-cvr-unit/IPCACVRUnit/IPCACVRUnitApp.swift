@@ -77,6 +77,10 @@ struct IPCACVRUnitApp: App {
                     garminSDCard.bootstrap(settings: settings)
                     await recordingStore.load()
                     await workflowStore.load()
+                    await recordingStore.recoverOrphanedFinalizedRecordings(
+                        aircraft: settings.selectedAircraft,
+                        language: settings.language
+                    )
                     recordingStore.repairFlightSessionLinks(workflowStore.recordingSessionFlightRecordLinks())
                     recordingStore.requeueConnectivityFailedUploads()
                     workflowStore.requeueConnectivityFailedUploads()

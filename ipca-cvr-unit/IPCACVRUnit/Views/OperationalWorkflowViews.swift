@@ -1509,6 +1509,7 @@ private struct ScheduledFlightsView: View {
     @State private var showEngineWasShutdownConfirm = false
     @State private var showCancelRemainingLegsConfirm = false
     @State private var continuationCandidate: CVRReservationContinuationCandidate?
+    @State private var continuationEndCandidate: CVRReservationContinuationCandidate?
 
     var body: some View {
         GeometryReader { proxy in
@@ -1634,6 +1635,24 @@ private struct ScheduledFlightsView: View {
                 .environmentObject(settings)
                 .environmentObject(beacon)
                 .environmentObject(audio)
+        }
+        .confirmationDialog(
+            "Finish this reservation?",
+            isPresented: Binding(
+                get: { continuationEndCandidate != nil },
+                set: { if !$0 { continuationEndCandidate = nil } }
+            ),
+            presenting: continuationEndCandidate
+        ) { candidate in
+            Button("Finish Reservation", role: .destructive) {
+                workflow.dismissReservationContinuation(candidate)
+                continuationEndCandidate = nil
+            }
+            Button("Keep Available", role: .cancel) {
+                continuationEndCandidate = nil
+            }
+        } message: { _ in
+            Text("The completed flight remains in Log. This only removes the option to add another leg to this reservation.")
         }
     }
 
@@ -1768,6 +1787,14 @@ private struct ScheduledFlightsView: View {
             ) {
                 continuationCandidate = candidate
             }
+            Button(role: .destructive) {
+                continuationEndCandidate = candidate
+            } label: {
+                Label("FINISH RESERVATION", systemImage: "checkmark.circle")
+                    .font(.caption.weight(.bold))
+                    .frame(maxWidth: .infinity, minHeight: 34)
+            }
+            .buttonStyle(.bordered)
         }
         .padding(14)
         .background(CVROperationalPalette.cardBackground, in: RoundedRectangle(cornerRadius: 16))

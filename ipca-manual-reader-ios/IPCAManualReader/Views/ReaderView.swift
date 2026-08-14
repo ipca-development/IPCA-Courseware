@@ -88,7 +88,7 @@ struct ReaderView: View {
                 }
             }
             .task(
-                id: "\(Int(safeSize.width))x\(Int(safeSize.height))-\(session.settings.fontSize.rawValue)"
+                id: "\(Int(safeSize.width))x\(Int(safeSize.height))-\(session.settings.fontSize.rawValue)-\(viewModel.publicationLayout?.pageWidthPX ?? 0)"
             ) {
                 await viewModel.updateLayout(
                     viewport: safeSize,
@@ -151,13 +151,14 @@ struct ReaderView: View {
         let pageWidth = CGFloat(layout.pageWidth)
         let pageHeight = CGFloat(layout.pageHeight)
         let readerWidth = landscape ? pageWidth * 2 : pageWidth
+        let contentBaseURL = session.baseURL ?? URL(fileURLWithPath: Bundle.main.bundlePath)
 
         return AnyView(ZStack {
-            if let baseURL = session.baseURL, !viewModel.pageHTMLByIndex.isEmpty {
+            if !viewModel.pageHTMLByIndex.isEmpty {
                 BookPageCurlView(
                     pages: viewModel.pages,
                     htmlByIndex: viewModel.pageHTMLByIndex,
-                    baseURL: baseURL,
+                    baseURL: contentBaseURL,
                     isLandscape: landscape,
                     pageSize: CGSize(width: pageWidth, height: pageHeight),
                     pageBackground: pageBackgroundColor,

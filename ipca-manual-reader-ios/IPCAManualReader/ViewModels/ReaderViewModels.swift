@@ -93,50 +93,72 @@ final class ReaderViewModel: ObservableObject {
     var pageCount: Int { pages.count }
 
     func load() async {
-        guard let client = ManualReaderSessionStore.shared.client else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
+        if let cachedPackage = await ManualDownloadManager.shared.package(for: book),
+           cachedPackage.hasVerifiedPublicationStyle,
+           cachedPackage.paginateSourceData != nil,
+           !cachedPackage.pages.isEmpty {
+            await applyPackage(cachedPackage)
+            return
+        }
+
+        guard let client = ManualReaderSessionStore.shared.client else {
+            errorMessage = "The manual is not available offline and no server URL is configured."
+            return
+        }
+
         do {
-            let isPreview = book.isDraftPreview
             let package = try await ManualDownloadManager.shared.ensureDownloaded(
                 book: book,
                 client: client,
                 forceRefresh: false
             )
-            offlinePackage = package
-            publicationLayout = package.publicationLayout
-            pages = package.pageMap.pages.sorted { $0.pageNumber < $1.pageNumber }
-            nav = package.tableOfContents.nav
-            sectionPageIndex = package.tableOfContents.sectionPageIndex.reduce(into: [:]) { result, pair in
-                if let id = Int(pair.key) {
-                    result[id] = pair.value
-                }
-            }
-            tocReferencePageIndex = makeTOCReferencePageIndex(
-                package.pages.compactMap { page in
-                    guard let pageNumber = page.pageNumber, let html = page.pageHtml else { return nil }
-                    return (pageNumber, html)
-                }
-            )
-            if activeLayout != nil {
-                try await repaginateFromSource(preservingCurrentPosition: false)
-            }
-
-            var startIndex = 0
-            if !isPreview,
-               let anchor = book.continueStableAnchor, !anchor.isEmpty,
-               let match = pages.firstIndex(where: { $0.stableAnchor == anchor }) {
-                startIndex = match
-            } else if !isPreview,
-                      let pageNum = book.continuePageNumber,
-                      let match = pages.firstIndex(where: { $0.pageNumber == pageNum }) {
-                startIndex = match
-            }
-            await goToIndex(startIndex, persistProgress: false)
+            await applyPackage(package)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func applyPackage(_ package: OfflineManualPackage) async {
+        let isPreview = book.isDraftPreview
+        offlinePackage = package
+        publicationLayout = package.publicationLayout
+        pages = package.pageMap.pages.sorted { $0.pageNumber < $1.pageNumber }
+        nav = package.tableOfContents.nav
+        sectionPageIndex = package.tableOfContents.sectionPageIndex.reduce(into: [:]) { result, pair in
+            if let id = Int(pair.key) {
+                result[id] = pair.value
+            }
+        }
+        tocReferencePageIndex = makeTOCReferencePageIndex(
+            package.pages.compactMap { page in
+                guard let pageNumber = page.pageNumber, let html = page.pageHtml else { return nil }
+                return (pageNumber, html)
+            }
+        )
+        var startIndex = 0
+        if !isPreview,
+           let anchor = book.continueStableAnchor, !anchor.isEmpty,
+           let match = pages.firstIndex(where: { $0.stableAnchor == anchor }) {
+            startIndex = match
+        } else if !isPreview,
+                  let pageNum = book.continuePageNumber,
+                  let match = pages.firstIndex(where: { $0.pageNumber == pageNum }) {
+            startIndex = match
+        }
+        await goToIndex(startIndex, persistProgress: false)
+        if activeLayout != nil {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.repaginateFromSource(preservingCurrentPosition: true)
+                } catch {
+                    self.errorMessage = error.localizedDescription
+                }
+            }
         }
     }
 
@@ -299,8 +321,9 @@ final class ReaderViewModel: ObservableObject {
 
     private func preparePageHTML(at index: Int) {
         guard pageHTMLByIndex[index] == nil,
-              pages.indices.contains(index),
-              let client = ManualReaderSessionStore.shared.client else { return }
+              pages.indices.contains(index) else { return }
+        let client = ManualReaderSessionStore.shared.client
+            ?? ManualReaderAPIClient(baseURL: URL(fileURLWithPath: Bundle.main.bundlePath))
         let pageNumber = pages[index].pageNumber
         let settings = ManualReaderSessionStore.shared.settings
 

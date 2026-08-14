@@ -57,7 +57,7 @@ struct OfflineManualPackage: Codable {
         pages.first { $0.pageNumber == number }
     }
 
-    var hasCanonicalPublicationPackage: Bool {
+    var hasVerifiedPublicationStyle: Bool {
         guard let publicationPackage,
               let publicationManifestJSON,
               !publicationPackage.css.content.isEmpty,
@@ -68,6 +68,11 @@ struct OfflineManualPackage: Codable {
               sha256(Data(publicationPackage.css.content.utf8)) == publicationPackage.css.hash else {
             return false
         }
+        return true
+    }
+
+    var hasCanonicalPublicationPackage: Bool {
+        guard hasVerifiedPublicationStyle, let publicationPackage else { return false }
         let downloadedByURL = Dictionary(
             uniqueKeysWithValues: (publicationAssets ?? []).map { ($0.sourceURL, $0) }
         )
@@ -82,11 +87,11 @@ struct OfflineManualPackage: Codable {
     }
 
     var bookStyleCSS: String? {
-        hasCanonicalPublicationPackage ? publicationPackage?.css.content : nil
+        hasVerifiedPublicationStyle ? publicationPackage?.css.content : nil
     }
 
     var publicationLayout: PublicationLayout? {
-        hasCanonicalPublicationPackage ? publicationPackage?.manifest.layout : nil
+        hasVerifiedPublicationStyle ? publicationPackage?.manifest.layout : nil
     }
 
     func rewritePublicationURLs(in html: String) -> String {
@@ -364,45 +369,28 @@ final class ManualDownloadManager: ObservableObject {
             guard sha256(Data(publicationPackage.css.content.utf8)) == publicationPackage.css.hash else {
                 throw ManualReaderAPIError.badResponse("Book-style CSS hash verification failed.")
             }
-            let publicationAssets = try await downloadPublicationAssets(
-                publicationPackage.assets,
-                client: client
-            )
             let pageNumbers = pageMap.pages
                 .map(\.pageNumber)
                 .sorted()
-            var downloadedPages: [FrozenPageResponse] = []
-            downloadedPages.reserveCapacity(pageNumbers.count)
-
-            var batchStart = 0
-            while batchStart < pageNumbers.count {
-                try Task.checkCancellation()
-                let batchEnd = min(batchStart + 8, pageNumbers.count)
-                let batchNumbers = Array(pageNumbers[batchStart..<batchEnd])
-                let batch = try await downloadBatchWithRetry(
-                    book: book,
-                    pageNumbers: batchNumbers,
-                    client: client
-                )
-                downloadedPages.append(contentsOf: batch.pages)
-                batchStart = batchEnd
-                statuses[book.id] = .downloading(
-                    Double(batchStart) / Double(max(pageNumbers.count, 1))
-                )
+            var openingNumbers = Array(pageNumbers.prefix(1))
+            if let continuePage = book.continuePageNumber,
+               pageNumbers.contains(continuePage),
+               !openingNumbers.contains(continuePage) {
+                openingNumbers.append(continuePage)
             }
-            guard downloadedPages.count == pageNumbers.count else {
-                throw ManualReaderAPIError.badResponse(
-                    "The server returned an incomplete manual download."
-                )
-            }
+            let openingBatch = try await downloadBatchWithRetry(
+                book: book,
+                pageNumbers: openingNumbers,
+                client: client
+            )
 
-            let package = OfflineManualPackage(
+            let starterPackage = OfflineManualPackage(
                 bookID: book.id,
                 versionID: book.versionId,
                 downloadedAt: Date(),
                 pageMap: pageMap,
                 tableOfContents: tableOfContents,
-                pages: downloadedPages,
+                pages: openingBatch.pages,
                 coverImageData: coverData,
                 editorCSS: nil,
                 contentCSS: nil,
@@ -411,15 +399,95 @@ final class ManualDownloadManager: ObservableObject {
                 paginateSourceData: paginateSourceData,
                 publicationPackage: publicationPackage,
                 publicationManifestJSON: manifestJSON,
-                publicationAssets: publicationAssets
+                publicationAssets: []
             )
-            try await diskStore.save(package)
-            packages[book.id] = package
-            statuses[book.id] = .availableOffline(package.downloadedAt)
-            return package
+            try await diskStore.save(starterPackage)
+            packages[book.id] = starterPackage
+            statuses[book.id] = .downloading(
+                Double(openingBatch.pages.count) / Double(max(pageNumbers.count, 1))
+            )
+            Task { @MainActor [weak self] in
+                await self?.completeDownload(
+                    book: book,
+                    client: client,
+                    starterPackage: starterPackage,
+                    pageNumbers: pageNumbers
+                )
+            }
+            return starterPackage
         } catch {
             statuses[book.id] = .failed(error.localizedDescription)
             throw error
+        }
+    }
+
+    private func completeDownload(
+        book: LibraryBook,
+        client: ManualReaderAPIClient,
+        starterPackage: OfflineManualPackage,
+        pageNumbers: [Int]
+    ) async {
+        do {
+            guard let publicationPackage = starterPackage.publicationPackage else { return }
+            let publicationAssets = try await downloadPublicationAssets(
+                publicationPackage.assets,
+                client: client
+            )
+            var downloadedByNumber = Dictionary(
+                uniqueKeysWithValues: starterPackage.pages.compactMap { page in
+                    page.pageNumber.map { ($0, page) }
+                }
+            )
+            let missingNumbers = pageNumbers.filter { downloadedByNumber[$0] == nil }
+            var batchStart = 0
+            while batchStart < missingNumbers.count {
+                try Task.checkCancellation()
+                let batchEnd = min(batchStart + 8, missingNumbers.count)
+                let batchNumbers = Array(missingNumbers[batchStart..<batchEnd])
+                let batch = try await downloadBatchWithRetry(
+                    book: book,
+                    pageNumbers: batchNumbers,
+                    client: client
+                )
+                for page in batch.pages {
+                    if let pageNumber = page.pageNumber {
+                        downloadedByNumber[pageNumber] = page
+                    }
+                }
+                batchStart = batchEnd
+                statuses[book.id] = .downloading(
+                    Double(downloadedByNumber.count) / Double(max(pageNumbers.count, 1))
+                )
+            }
+            guard downloadedByNumber.count == pageNumbers.count else {
+                throw ManualReaderAPIError.badResponse(
+                    "The server returned an incomplete manual download."
+                )
+            }
+            let completedPackage = OfflineManualPackage(
+                bookID: starterPackage.bookID,
+                versionID: starterPackage.versionID,
+                downloadedAt: starterPackage.downloadedAt,
+                pageMap: starterPackage.pageMap,
+                tableOfContents: starterPackage.tableOfContents,
+                pages: downloadedByNumber.values.sorted {
+                    ($0.pageNumber ?? 0) < ($1.pageNumber ?? 0)
+                },
+                coverImageData: starterPackage.coverImageData,
+                editorCSS: nil,
+                contentCSS: nil,
+                readerCSS: nil,
+                readerStyleVersion: starterPackage.readerStyleVersion,
+                paginateSourceData: starterPackage.paginateSourceData,
+                publicationPackage: publicationPackage,
+                publicationManifestJSON: starterPackage.publicationManifestJSON,
+                publicationAssets: publicationAssets
+            )
+            try await diskStore.save(completedPackage)
+            packages[book.id] = completedPackage
+            statuses[book.id] = .availableOffline(completedPackage.downloadedAt)
+        } catch {
+            statuses[book.id] = .failed(error.localizedDescription)
         }
     }
 

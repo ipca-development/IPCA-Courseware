@@ -4,6 +4,7 @@ import SwiftUI
 struct ConversationListView: View {
     @EnvironmentObject private var session: AppSession
     @Environment(\.horizontalSizeClass) private var sizeClass
+    var compactPath: Binding<NavigationPath>? = nil
     @FetchRequest(
         sortDescriptors: [
             NSSortDescriptor(key: "lastMessageAt", ascending: false),
@@ -35,17 +36,23 @@ struct ConversationListView: View {
         }
         .listStyle(.plain)
         .navigationTitle("Messages")
-        .navigationDestination(for: String.self) { uuid in
-            ConversationView(conversationUUID: uuid)
-        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                NavigationLink {
-                    NewMessageView()
-                } label: {
-                    Image(systemName: "square.and.pencil")
+                if let compactPath {
+                    Button {
+                        compactPath.wrappedValue.append(MessagesCompose())
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("New Message")
+                } else {
+                    NavigationLink {
+                        NewMessageView()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("New Message")
                 }
-                .accessibilityLabel("New Message")
             }
         }
         .onAppear {

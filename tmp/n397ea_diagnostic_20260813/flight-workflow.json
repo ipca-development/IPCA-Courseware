@@ -1,0 +1,49 @@
+{
+  "consents" : [
+
+  ],
+  "discrepancies" : [
+
+  ],
+  "flightEvents" : [
+
+  ],
+  "flightLegs" : [
+
+  ],
+  "postFlightGarminHandoff" : {
+    "aircraftRegistration" : "N397EA",
+    "beaconLossConfirmedAt" : "2026-08-14T02:56:01Z",
+    "cardReturnedConfirmedAt" : "2026-08-14T02:57:16Z",
+    "countdownEndsAt" : "2026-08-14T02:56:31Z",
+    "dispatchUUID" : "a7b49d57-8427-4210-998b-41707c706253",
+    "flightRecordUUID" : "d3a23068-098e-43ec-81fc-b9d4a148fd47",
+    "legReviewRevisionUUID" : "0506d6b7-987b-4a3c-872a-bf614c68d36e",
+    "operationalSessionUUID" : "bcb90e59-b628-4c5a-9862-790b36684e06",
+    "phase" : "completed",
+    "reservationUUID" : "1274f722-5797-4886-8d1d-0389c0c21124"
+  },
+  "recorderVerifications" : [
+
+  ],
+  "selectedTab" : "scheduled",
+  "updatedAt" : "2026-08-14T03:19:55Z",
+  "uploadComponents" : [
+    {
+      "attemptCount" : 1,
+      "byteCount" : 702,
+      "componentType" : "schedule_duty_sync",
+      "flightRecordID" : "1D5D46CB-7FCA-4B13-9F35-D22AEE5A0E55",
+      "id" : "schedule-duty-9829916a-a5bf-47ca-a68e-d219a454bab9",
+      "lastAttemptAt" : "2026-08-13T18:55:39Z",
+      "lastError" : "",
+      "progress" : 1,
+      "reconciliationRequired" : false,
+      "requestID" : "schedule-duty-9829916a-a5bf-47ca-a68e-d219a454bab9",
+      "requestPayloadSnapshot" : "eyJhaXJjcmFmdF9pZCI6MSwiYWlyY3JhZnRfcmVnaXN0cmF0aW9uIjoiTjM5N0VBIiwiY3JldyI6W3siaXNfcGljIjp0cnVlLCJpc19wcmltYXJ5X2N1c3RvbWVyIjp0cnVlLCJwZXJzb25fbmFtZSI6IlZpa3RvciBLdW1wcyIsInBpbG90X2Z1bmN0aW9uIjoiUEYiLCJyb2xlIjoic3R1ZGVudCIsInVzZXJfaWQiOjMyfV0sImxlZ3MiOlt7ImRlc3RpbmF0aW9uX2FpcnBvcnQiOiJLVFJNIiwibGVnX3V1aWQiOiI3YTMyZTdkMy1jYTJkLTRmNmEtYTg1MC01NGE1NWE4ZDBlYWEiLCJvcmlnaW5fYWlycG9ydCI6IktISUkiLCJzZXF1ZW5jZV9udW1iZXIiOjF9XSwibWlzc2lvbl9jb2RlIjoiNC0xLTEwIiwib3BlcmF0aW9uIjoiY3JlYXRlIiwicmVxdWVzdF9pZCI6InNjaGVkdWxlLWR1dHktOTgyOTkxNmEtYTViZi00N2NhLWE2OGUtZDIxOWE0NTRiYWI5IiwicmVzZXJ2YXRpb25fdHlwZSI6ImZsaWdodF90cmFpbmluZyIsInJlc2VydmF0aW9uX3V1aWQiOiI5ODI5OTE2YS1hNWJmLTQ3Y2EtYTY4ZS1kMjE5YTQ1NGJhYjkiLCJzY2hlZHVsZWRfZGF0ZSI6IjIwMjYtMDgtMTMiLCJzY2hlZHVsZWRfZW5kX3RpbWUiOiIyMDI2LTA4LTEzIDE0OjAwOjAwIiwic2NoZWR1bGVkX3N0YXJ0X3RpbWUiOiIyMDI2LTA4LTEzIDExOjQ1OjAwIiwic2NoZWR1bGVyX3JlY29yZF9pZCI6Ijk4Mjk5MTZhLWE1YmYtNDdjYS1hNjhlLWQyMTlhNDU0YmFiOSJ9",
+      "serverReceiptID" : "9829916a-a5bf-47ca-a68e-d219a454bab9",
+      "serverVerificationAt" : "2026-08-13T18:55:39Z",
+      "state" : "serverVerified"
+    }
+  ]
+}

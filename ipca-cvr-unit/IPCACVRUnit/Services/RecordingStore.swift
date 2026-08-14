@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 
@@ -38,6 +39,73 @@ final class RecordingStore: ObservableObject {
     func add(_ recording: Recording) {
         recordings.insert(recording, at: 0)
         save()
+    }
+
+    @discardableResult
+    func recoverOrphanedFinalizedRecordings(
+        aircraft: CockpitAircraft?,
+        language: String
+    ) async -> Int {
+        let knownIDs = Set(recordings.map { $0.id.uppercased() })
+        guard let directory = try? Self.recordingsDirectory(),
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return 0
+        }
+        var recovered: [Recording] = []
+        for fileURL in files where fileURL.pathExtension.lowercased() == "m4a" {
+            let filename = fileURL.deletingPathExtension().lastPathComponent
+            guard !filename.lowercased().contains(".part-"),
+                  UUID(uuidString: filename) != nil,
+                  !knownIDs.contains(filename.uppercased()) else {
+                continue
+            }
+            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let fileSize = Int64(values?.fileSize ?? 0)
+            guard fileSize > 0 else { continue }
+            let asset = AVURLAsset(url: fileURL)
+            let duration = (try? await asset.load(.duration).seconds) ?? 0
+            guard duration > 0 else { continue }
+            let completedAt = values?.contentModificationDate ?? Date()
+            let startedAt = completedAt.addingTimeInterval(-duration)
+            let sidecar: (String) -> String? = { suffix in
+                let path = directory.appendingPathComponent("\(filename).\(suffix)").path
+                return FileManager.default.fileExists(atPath: path) ? path : nil
+            }
+            recovered.append(Recording(
+                id: filename,
+                serverID: nil,
+                startedAt: startedAt,
+                duration: duration,
+                filePath: fileURL.path,
+                inputDeviceName: "Recovered finalized cockpit recording",
+                aircraftID: aircraft?.id,
+                aircraftRegistration: aircraft?.registration,
+                aircraftDisplayName: aircraft?.displayName,
+                aircraftType: aircraft?.aircraftType,
+                aircraftADSBHex: aircraft?.adsbHex,
+                fileSize: fileSize,
+                uploadStatus: .pending,
+                transcriptStatus: .pending,
+                uploadProgress: 0,
+                transcriptProgress: 0,
+                language: language,
+                transcript: "",
+                lastError: "Recovered finalized audio that was missing from the upload queue.",
+                gpsSamplesPath: sidecar("gps.json"),
+                beaconDiagnosticsPath: sidecar("beacon.json"),
+                recordingEventsPath: sidecar("events.json"),
+                flightSessionID: filename
+            ))
+        }
+        guard !recovered.isEmpty else { return 0 }
+        recordings.append(contentsOf: recovered)
+        recordings.sort { $0.startedAt > $1.startedAt }
+        save()
+        return recovered.count
     }
 
     func update(_ id: String, mutate: (inout Recording) -> Void) {

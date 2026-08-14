@@ -387,6 +387,20 @@ try {
 }
 comm_assert('server flag can disable messaging without an app update', $disabled);
 
+comm_assert(
+    'Courseware user UUIDs without RFC variant bits are accepted',
+    CommunicationSupport::isUuid('7fa33990-2525-1ae2-6f5a-0ddc2d9a4969')
+    && CommunicationSupport::isUuid('bf12be0f-0bc7-bfcb-e092-632f941adcc0')
+    && CommunicationSupport::isUuid('f70c19f7-2268-11f1-9326-2ee9f951d5a3')
+    && !CommunicationSupport::isUuid('')
+    && !CommunicationSupport::isUuid('not-a-uuid')
+);
+comm_assert(
+    'iOS opens the conversation after create instead of only dismissing',
+    str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/NewMessageView.swift'), 'revealOpenedConversation')
+    && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/MessagesRootView.swift'), 'compactPath')
+);
+
 foreach (glob($root . '/public/api/communication/*.php') ?: array() as $apiFile) {
     $src = (string)file_get_contents($apiFile);
     comm_assert(basename($apiFile) . ' uses PDO-only communication bootstrap', str_contains($src, 'api_bootstrap.php') && !str_contains($src, 'src/bootstrap.php'));

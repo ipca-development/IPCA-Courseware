@@ -6,6 +6,7 @@ struct LibraryView: View {
     @ObservedObject private var downloads = ManualDownloadManager.shared
     @StateObject private var viewModel = LibraryViewModel()
     @State private var selectedBook: LibraryBook?
+    @State private var isReaderPresented = false
     @State private var selectedDestination: LibraryDestination = .library
     @State private var searchText = ""
     @State private var selectedFilter: LibraryFilter = .all
@@ -24,9 +25,16 @@ struct LibraryView: View {
         }
         .background(IPCAReaderTheme.shelfBackground.ignoresSafeArea())
         .task { await viewModel.load() }
-        .fullScreenCover(item: $selectedBook) { book in
-            ReaderView(book: book) {
-                selectedBook = nil
+        .fullScreenCover(
+            isPresented: $isReaderPresented,
+            onDismiss: { selectedBook = nil }
+        ) {
+            if let book = selectedBook {
+                ReaderView(book: book) {
+                    isReaderPresented = false
+                }
+            } else {
+                ProgressView("Opening manual…")
             }
         }
         .sheet(item: $utilityDestination) { destination in
@@ -138,10 +146,15 @@ struct LibraryView: View {
                 searchText: $searchText,
                 selectedFilter: $selectedFilter,
                 selectedCategory: $selectedCategory,
-                onSelectBook: { selectedBook = $0 },
+                onSelectBook: presentReader,
                 onRetry: { Task { await viewModel.load() } }
             )
         }
+    }
+
+    private func presentReader(_ book: LibraryBook) {
+        selectedBook = book
+        isReaderPresented = true
     }
 }
 
@@ -665,7 +678,10 @@ private struct ManualShelf: View {
                                 showsProgress: showsProgress,
                                 onSelect: {
                                     showsAll = false
-                                    onSelect(book)
+                                    Task { @MainActor in
+                                        try? await Task.sleep(for: .milliseconds(350))
+                                        onSelect(book)
+                                    }
                                 }
                             )
                         }
@@ -707,29 +723,33 @@ private struct ManualCoverCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            cover
-                .onTapGesture(perform: onSelect)
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 9) {
+                cover
 
-            Text(book.displayTitle)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .frame(height: 32, alignment: .topLeading)
+                Text(book.displayTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .frame(height: 32, alignment: .topLeading)
 
-            if showsProgress || book.hasProgress {
-                HStack(spacing: 7) {
-                    Text(progress.map { "\(Int($0 * 100))%" } ?? "Continue")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    ProgressView(value: progress ?? 0.04)
-                        .tint(IPCAReaderTheme.navy)
+                if showsProgress || book.hasProgress {
+                    HStack(spacing: 7) {
+                        Text(progress.map { "\(Int($0 * 100))%" } ?? "Continue")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        ProgressView(value: progress ?? 0.04)
+                            .tint(IPCAReaderTheme.navy)
+                    }
                 }
-            }
 
-            DownloadStatusIndicator(book: book)
+                DownloadStatusIndicator(book: book)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .frame(width: width, alignment: .leading)
+        .accessibilityLabel("Open \(book.displayTitle)")
         .contextMenu {
             downloadActions
             Button("Open Manual", action: onSelect)

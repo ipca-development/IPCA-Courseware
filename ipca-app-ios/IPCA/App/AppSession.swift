@@ -9,6 +9,7 @@ final class AppSession: ObservableObject {
     @Published var user: PublicUser?
     @Published var capabilities = ServerCapabilities.disabled
     @Published var loginError: String?
+    @Published var actionError: String?
     @Published var isLoggingIn = false
     @Published var updateRequired = false
     @Published var selectedConversationUUID: String?
@@ -117,7 +118,8 @@ final class AppSession: ObservableObject {
         await outbox.drain()
     }
 
-    func openDirect(with person: PublicUser) async {
+    func openDirect(with person: PublicUser) async -> Bool {
+        actionError = nil
         do {
             let conversation = try await api.createDirect(peerUserUUID: person.uuid)
             _ = await store.applySync(
@@ -128,12 +130,18 @@ final class AppSession: ObservableObject {
                 advancesCursor: false
             )
             selectedConversationUUID = conversation.conversationUUID
+            return true
+        } catch let error as APIClientError {
+            actionError = error.errorDescription ?? "Couldn't start that conversation."
+            return false
         } catch {
-            loginError = "Couldn't start that conversation."
+            actionError = "Couldn't start that conversation."
+            return false
         }
     }
 
-    func createGroup(title: String, members: [PublicUser]) async {
+    func createGroup(title: String, members: [PublicUser]) async -> Bool {
+        actionError = nil
         do {
             let conversation = try await api.createGroup(title: title, memberUUIDs: members.map(\.uuid))
             _ = await store.applySync(
@@ -144,8 +152,13 @@ final class AppSession: ObservableObject {
                 advancesCursor: false
             )
             selectedConversationUUID = conversation.conversationUUID
+            return true
+        } catch let error as APIClientError {
+            actionError = error.errorDescription ?? "Couldn't create that group."
+            return false
         } catch {
-            loginError = "Couldn't create that group."
+            actionError = "Couldn't create that group."
+            return false
         }
     }
 
@@ -245,6 +258,8 @@ final class AppSession: ObservableObject {
         isAuthenticated = false
         capabilities = .disabled
         selectedConversationUUID = nil
+        actionError = nil
+        people = []
         Task { await api.setToken(nil) }
     }
 

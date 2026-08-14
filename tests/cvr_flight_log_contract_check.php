@@ -106,6 +106,13 @@ $checks = array(
         && str_contains($recordingStore, 'func repairFlightSessionLinks(')
         && str_contains($recordingStore, 'recordings[index].uploadStatus = .pending')
         && str_contains($views, '$0.flightSessionID = entry.flightRecordID'),
+    'finalized audio missing from the manifest is recovered into the upload queue' =>
+        str_contains($recordingStore, 'recoverOrphanedFinalizedRecordings(')
+        && str_contains($recordingStore, 'Recovered finalized cockpit recording')
+        && str_contains($recordingStore, 'uploadStatus: .pending')
+        && str_contains($app, 'await recordingStore.recoverOrphanedFinalizedRecordings(')
+        && strpos($app, 'recoverOrphanedFinalizedRecordings(')
+            < strpos($app, 'repairFlightSessionLinks(workflowStore.recordingSessionFlightRecordLinks())'),
     'connectivity recovery requeues archived workflow and cockpit audio uploads' =>
         str_contains($workflowStore, 'func requeueConnectivityFailedUploads()')
         && str_contains($recordingStore, 'func requeueConnectivityFailedUploads()')

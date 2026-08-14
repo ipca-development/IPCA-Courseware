@@ -221,6 +221,9 @@ final class ConversationService
         $stmt->execute($params);
         $out = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!CommunicationSupport::isUuid((string)($row['uuid'] ?? ''))) {
+                continue;
+            }
             $out[] = CommunicationSupport::publicUser($row);
         }
         return $out;

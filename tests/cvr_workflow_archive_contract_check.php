@@ -26,7 +26,13 @@ $checks = array(
     'archive is written and verified before active reset' =>
         strpos($store, 'guard archiveActiveWorkflow() else { return }')
         < strpos($store, '$0.activeDispatch = nil')
-        && str_contains($store, 'verification.map(\\.id) == records.map(\\.id)'),
+        && str_contains($store, 'try Data(contentsOf: url) == data'),
+    'verified upload snapshots are compacted without removing flight evidence' =>
+        str_contains($store, 'compactVerifiedArchivePayloads')
+        && str_contains($store, 'state == .serverVerified')
+        && str_contains($store, 'requestPayloadSnapshot = nil')
+        && str_contains($store, 'archives = compacted')
+        && str_contains($models, 'var flightEvents: [CVRFlightEventRecord]'),
     'archives retain interrupted uploads for recovery' =>
         str_contains($store, 'archives.flatMap(\\.uploadComponents)')
         && str_contains($models, 'case uploadPending'),
@@ -146,7 +152,7 @@ $checks = array(
         && str_contains($store, 'quarantineArchiveRecord(')
         && str_contains($store, 'rawRecord.write(to: evidenceURL, options: [.atomic])')
         && str_contains($store, 'archiveRewriteSafe')
-        && strpos($store, 'quarantineArchiveRecord(') < strpos($store, 'try saveArchives(recovered)'),
+        && strpos($store, 'quarantineArchiveRecord(') < strpos($store, 'try saveArchives(compacted)'),
     'archive failure cannot suppress active workflow loading' =>
         str_contains($store, 'Historical workflow archive recovery failed:')
         && str_contains($store, 'Active workflow recovery failed:')

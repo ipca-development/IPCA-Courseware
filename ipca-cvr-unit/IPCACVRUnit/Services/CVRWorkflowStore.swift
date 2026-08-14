@@ -41,6 +41,7 @@ final class CVRWorkflowStore: ObservableObject {
     @Published private(set) var archives: [CVRWorkflowArchiveRecord] = []
     /// Soft-voided Log rows (local hide). Includes remote-only flight record IDs.
     @Published private(set) var voidedFlightRecordIDs: Set<String> = []
+    @Published private(set) var dismissedContinuationArchiveIDs: Set<String> = []
     @Published private(set) var lastError = ""
     @Published private(set) var scheduleRefreshRevision = 0
 
@@ -49,8 +50,10 @@ final class CVRWorkflowStore: ObservableObject {
     }
 
     private let encoder: JSONEncoder
+    private let archiveEncoder: JSONEncoder
     private let decoder: JSONDecoder
     private var archiveRewriteSafe = true
+    private static let dismissedContinuationArchiveIDsKey = "cvr.dismissedContinuationArchiveIDs"
     /// Wall-clock when avionics first came ON for the current power session (arms taxi inference).
     private var avionicsOnSince: Date?
     /// Continuous taxi-speed window start for forgotten Engine Start inference.
@@ -61,8 +64,15 @@ final class CVRWorkflowStore: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
 
+        archiveEncoder = JSONEncoder()
+        archiveEncoder.outputFormatting = [.sortedKeys]
+        archiveEncoder.dateEncodingStrategy = .iso8601
+
         decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        dismissedContinuationArchiveIDs = Set(
+            UserDefaults.standard.stringArray(forKey: Self.dismissedContinuationArchiveIDsKey) ?? []
+        )
     }
 
     func load() async {
@@ -2556,6 +2566,7 @@ final class CVRWorkflowStore: ObservableObject {
         guard state.activeDispatch == nil, state.activeFlightRecord == nil,
               remainingOpenPlannedLegs.isEmpty else { return nil }
         guard let latest = archives.max(by: { $0.archivedAt < $1.archivedAt }),
+              !dismissedContinuationArchiveIDs.contains(latest.id.lowercased()),
               latest.flightRecord.checkInMode == .engineShutdown,
               latest.flightRecord.endingHobbs != nil,
               latest.flightRecord.endingTacho != nil,
@@ -2578,6 +2589,14 @@ final class CVRWorkflowStore: ObservableObject {
             departureAirport: departure,
             missionCode: latest.dispatch.missionCode,
             completedLegCount: max(1, completedLegCount)
+        )
+    }
+
+    func dismissReservationContinuation(_ candidate: CVRReservationContinuationCandidate) {
+        dismissedContinuationArchiveIDs.insert(candidate.archiveID.lowercased())
+        UserDefaults.standard.set(
+            dismissedContinuationArchiveIDs.sorted(),
+            forKey: Self.dismissedContinuationArchiveIDsKey
         )
     }
 
@@ -5524,11 +5543,13 @@ final class CVRWorkflowStore: ObservableObject {
                 }
             }
         }
+        let compacted = Self.compactVerifiedArchivePayloads(recovered)
+        let compactedVerifiedPayloads = compacted != recovered
         let damagedRecordCount = rawRecords.count - recovered.count
-        if (changed || damagedRecordCount > 0) && allDamagedRecordsQuarantined {
-            try saveArchives(recovered)
+        if (changed || compactedVerifiedPayloads || damagedRecordCount > 0) && allDamagedRecordsQuarantined {
+            try saveArchives(compacted)
         }
-        archives = recovered
+        archives = compacted
         return diagnostics
     }
 
@@ -5602,11 +5623,25 @@ final class CVRWorkflowStore: ObservableObject {
             ])
         }
         let url = try archivesURL()
-        try encoder.encode(records).write(to: url, options: [.atomic])
-        let verification = try decoder.decode([CVRWorkflowArchiveRecord].self, from: Data(contentsOf: url))
-        guard verification.map(\.id) == records.map(\.id) else {
+        let compacted = Self.compactVerifiedArchivePayloads(records)
+        let data = try archiveEncoder.encode(compacted)
+        try data.write(to: url, options: [.atomic])
+        guard try Data(contentsOf: url) == data else {
             throw CocoaError(.fileWriteUnknown)
         }
+    }
+
+    private static func compactVerifiedArchivePayloads(
+        _ records: [CVRWorkflowArchiveRecord]
+    ) -> [CVRWorkflowArchiveRecord] {
+        var compacted = records
+        for archiveIndex in compacted.indices {
+            for componentIndex in compacted[archiveIndex].uploadComponents.indices
+            where compacted[archiveIndex].uploadComponents[componentIndex].state == .serverVerified {
+                compacted[archiveIndex].uploadComponents[componentIndex].requestPayloadSnapshot = nil
+            }
+        }
+        return compacted
     }
 
     private func archiveQuarantineDirectory() throws -> URL {

@@ -34,8 +34,10 @@ final class CommunicationSupport
 
     public static function isUuid(string $value): bool
     {
+        // Courseware users.uuid values are 8-4-4-4-12 hex, but many are not RFC 4122
+        // version/variant UUIDs. Treat the stored identity string as canonical.
         return (bool)preg_match(
-            '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
+            '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i',
             $value
         );
     }

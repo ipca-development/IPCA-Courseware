@@ -82,6 +82,8 @@ require_contains($store, 'func continueReservation(', 'append next leg under sam
 require_contains($store, 'session.carryoverCrew = archive.dispatch.crew', 'continued reservation preserves crew', $failures);
 require_contains($views, 'CONTINUE SAME RESERVATION', 'continued reservation sheet', $failures);
 require_contains($views, 'ADD NEXT LEG', 'continued reservation action', $failures);
+require_contains($store, 'dismissReservationContinuation', 'completed reservation can be explicitly finished', $failures);
+require_contains($views, 'FINISH RESERVATION', 'finish reservation action', $failures);
 require_contains($views, 'normal Engine Start', 'continued leg requires engine start', $failures);
 require_contains($views, 'ENGINE WAS SHUT DOWN', 'schedule recovery for mistaken transient', $failures);
 require_contains($views, 'CANCEL REMAINING LEGS', 'schedule cancel unused legs', $failures);
