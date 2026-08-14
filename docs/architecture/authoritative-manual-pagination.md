@@ -2,7 +2,20 @@
 
 Canonical controlled-manual flow:
 
-`Admin Manual Editor (continuous Print Layout) → Book Style → server browser pagination → approved frozen map → web/iOS`
+`Author edits one continuous source document → author inserts Manual Page Breaks → server validates/generates those pages (`manual_segments_v1`) → Exact Page Preview shows stored page_html → release freezes the map → iOS displays the same pages`
+
+Ordinary page boundaries are author-controlled. The server does not invent ordinary page breaks.
+
+## Policy: `manual_segments_v1`
+
+Each persisted manual-break segment is one intended authoritative page.
+
+- If the segment fits the Book Style body: emit exactly one page.
+- If multiple ordinary blocks exceed the body: return first-class `MANUAL_BREAK_REQUIRED`. Do not persist a partial page map. Do not insert the break.
+- Automatic continuation is allowed only for generated TOC, long-table row presentation, and a single oversized source block that cannot fit an empty page.
+- TOC and long-table continuation pages are scoped to that object. Following ordinary blocks must not flow onto them.
+- Every semantic source block appears exactly once, in source order, except presentation-only repeated table headers.
+- Released page maps remain immutable. Draft maps using the previous engine version are stale.
 
 ## Runtime
 
@@ -23,14 +36,13 @@ cursor-based manual breaks.
 
 ## Editorial workflow
 
-Open a controlled book version in the Editor and edit the continuous document
-directly in its stacked physical-page presentation. The editor canvas contains
-the same independent header/body/footer page fragments produced by the
-authoritative server paginator; it does not insert layout spacers into a tall
-editable DOM. Fragment edits are merged back into the single source block model.
-A cursor-based Page Break command persists a stable break before the following
-source block. Browser pagination is refreshed after edits and the validated
-server map is approved before release.
+Open a controlled book version in the Editor and edit the continuous source
+document. Visual page spacers in the editor are advisory only.
+
+A Manual Page Break command persists a stable `before_block_anchor`. Exact Page
+Preview at `public/admin/compliance/controlled_book_page_preview.php` renders
+stored `pages[].page_html` only. Viewing never regenerates or reinterprets
+content. Approve the stored map before release.
 
 Release is blocked unless the approved map matches current source, style,
 manifest, layout, header/footer, and manual-break hashes. Released maps cannot
@@ -39,7 +51,7 @@ be regenerated, invalidated, or edited.
 ## Verification
 
 ```bash
+php tests/controlled_book_editor_44df02b9_parity_gate_check.php
 php tests/authoritative_pagination_architecture_contract_check.php
 node tests/authoritative_pagination_worker_check.js
-node scripts/qa_publication_geometry_parity.js
 ```

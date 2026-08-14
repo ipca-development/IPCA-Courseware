@@ -7,7 +7,7 @@
   }
 
   const NORMALIZER_VERSION = "reader-normalizer-v1";
-  const ENGINE_VERSION = "semantic-paginator-v2";
+  const ENGINE_VERSION = "manual-segments-v1";
   const VALIDATOR_VERSION = "pagination-validator-v2";
   const VALIDATION_TOLERANCE = 0.75;
   const source = input.source;
@@ -426,7 +426,7 @@
     const type = semanticType(unit, root);
     const forceBreakBefore = Boolean(
       unit.force_break_before
-      || (unitIndex === 0 && section.flags && section.flags.force_page_break_before)
+      || unit.manual_page_break_before
     );
     if (root.matches(".cpb-lep") || root.querySelector(".cpb-lep")) {
       return normalizeLep(section, unit, root, forceBreakBefore);
@@ -1092,10 +1092,92 @@
     return best;
   }
 
+  function humanTitleForFragment(fragmentValue) {
+    const text = String(fragmentValue && fragmentValue.text || "").replace(/\s+/g, " ").trim();
+    if (text) return text.slice(0, 180);
+    const sectionTitle = String(fragmentValue && fragmentValue.section && fragmentValue.section.title || "").trim();
+    return sectionTitle || String(fragmentValue && fragmentValue.anchor || fragmentValue.id || "");
+  }
+
+  function manualBreakRequiredError(fragmentValue) {
+    const title = humanTitleForFragment(fragmentValue);
+    const message = "Page content exceeds the available body area. "
+      + `A Manual Page Break is required before: “${title}”`;
+    const error = new Error(message);
+    error.paginationError = {
+      code: "MANUAL_BREAK_REQUIRED",
+      message,
+      before_block_anchor: String(fragmentValue && fragmentValue.anchor || ""),
+      before_block_title: title,
+      section_id: Number(fragmentValue && fragmentValue.section && fragmentValue.section.section_id || 0) || null
+    };
+    diagnostic(
+      "MANUAL_BREAK_REQUIRED",
+      "failure",
+      message,
+      fragmentValue,
+      null
+    );
+    return error;
+  }
+
+  function unlayoutableFragmentError(fragmentValue, measurement, extra) {
+    const mediaDetail = extra || "";
+    diagnostic(
+      "UNLAYOUTABLE_FRAGMENT",
+      "failure",
+      `Atomic fragment ${fragmentValue.id} exceeds a fresh content frame `
+        + `(${measurement.bodyHeight.toFixed(2)}px > `
+        + `${measurement.clientHeight.toFixed(2)}px; `
+        + `horizontal overflow ${measurement.horizontalOverflow.toFixed(2)}px; `
+        + `scroll ${measurement.scrollWidth.toFixed(2)}x`
+        + `${measurement.scrollHeight.toFixed(2)}; `
+        + `max block y ${measurement.maxBlockY.toFixed(2)}; `
+        + `header overflow ${JSON.stringify(measurement.headerOverflow)}; `
+        + `footer overflow ${JSON.stringify(measurement.footerOverflow)}).`
+        + mediaDetail,
+      fragmentValue,
+      null
+    );
+    return new Error(`Atomic fragment exceeds page body: ${fragmentValue.id}.`);
+  }
+
   function paginate(normalized) {
     const pages = [];
     let current = null;
     let pendingTableHeader = null;
+    let continuation = null;
+
+    function sourceBlockKey(fragmentValue) {
+      if (Number(fragmentValue.blockId || 0) > 0) {
+        return "block:" + fragmentValue.blockId;
+      }
+      const id = String(fragmentValue.id || "");
+      const cut = id.lastIndexOf("/");
+      return cut > 0 ? id.slice(0, cut) : id;
+    }
+
+    function isTocFragment(fragmentValue) {
+      return fragmentValue.type === "toc" || fragmentValue.type === "tocRow";
+    }
+
+    function isTableFragment(fragmentValue) {
+      return fragmentValue.type === "tableHeader"
+        || fragmentValue.type === "tableRow"
+        || fragmentValue.type === "table";
+    }
+
+    function hasSourceContent(page) {
+      return Boolean(page && page.pieces.some((value) => !value.presentationCopy));
+    }
+
+    function sourceKeysOnPage(page) {
+      const keys = new Set();
+      (page && page.pieces || []).forEach((value) => {
+        if (!value.presentationCopy) keys.add(sourceBlockKey(value.fragment));
+      });
+      return keys;
+    }
 
     function finish() {
       if (current && current.pieces.length) pages.push(current);
@@ -1119,34 +1201,48 @@
       }
     }
 
+    function allowedOnContinuation(fragmentValue) {
+      if (!continuation) return true;
+      if (sourceBlockKey(fragmentValue) !== continuation.blockKey) return false;
+      if (continuation.kind === "toc") return isTocFragment(fragmentValue);
+      if (continuation.kind === "table") return isTableFragment(fragmentValue);
+      return continuation.kind === "oversized";
+    }
+
+    function startContinuation(fragmentValue, kind) {
+      continuation = { kind, blockKey: sourceBlockKey(fragmentValue) };
+      begin(fragmentValue, { breakReason: kind + "_continuation" });
+    }
+
     for (let index = 0; index < normalized.fragments.length; index++) {
       const sourceFragment = normalized.fragments[index];
-      const next = normalized.fragments[index + 1] || null;
       if (sourceFragment.type === "cover") {
         finish();
+        continuation = null;
+        pendingTableHeader = null;
         pages.push(pageWith(sourceFragment.section, [
           piece(sourceFragment, sourceFragment.html, 0, sourceFragment.textLength, false)
         ], { isCover: true, isSectionStart: true, isMajorSectionStart: true }));
         continue;
       }
-      let breakReason = "";
-      if (
-        current
-        && Number(current.section && current.section.section_id || 0)
-          !== Number(sourceFragment.section && sourceFragment.section.section_id || 0)
-      ) {
-        finish();
-        breakReason = "section_change";
-      }
+
       if (sourceFragment.forceBreakBefore) {
         finish();
-        breakReason = "forced_source_break";
+        continuation = null;
+        current = null;
       }
+
+      if (continuation && !allowedOnContinuation(sourceFragment)) {
+        throw manualBreakRequiredError(sourceFragment);
+      }
+
       if (!current) {
         begin(sourceFragment, {
           isSectionStart: true,
-          isMajorSectionStart: Boolean(sourceFragment.section.flags && sourceFragment.section.flags.is_major_section_start),
-          breakReason
+          isMajorSectionStart: Boolean(
+            sourceFragment.section.flags && sourceFragment.section.flags.is_major_section_start
+          ),
+          breakReason: sourceFragment.forceBreakBefore ? "forced_source_break" : ""
         });
       }
 
@@ -1156,52 +1252,69 @@
       }
 
       const whole = piece(sourceFragment, sourceFragment.html, 0, sourceFragment.textLength, false);
-
-      if (
-        (sourceFragment.type === "heading"
-          || (sourceFragment.type === "tableHeader" && next && next.type === "tableRow"))
-        && next
-      ) {
-        const keepNext = meaningfulFollowingPiece(next);
-        const keepTrial = pageWith(
-          current.section,
-          current.pieces.concat([whole, keepNext]),
-          {}
-        );
-        if (current.pieces.length && !measurePage(keepTrial).fits) {
-          current.decisions.push(
-            `${sourceFragment.type} ${sourceFragment.id} moved with ${next.id}`
-          );
-          finish();
-          begin(sourceFragment, { breakReason: "keep_with_next" });
-        }
-      }
-
       let trial = pageWith(current.section, current.pieces.concat([whole]), {});
       if (measurePage(trial).fits) {
         current.pieces.push(whole);
         continue;
       }
 
-      if (sourceFragment.atomic && current.pieces.length) {
-        const freshPageTrial = pageWith(current.section, [whole], {});
-        if (measurePage(freshPageTrial).fits) {
-          current.decisions.push(`atomic ${sourceFragment.id} moved intact to next page`);
-          finish();
-          begin(sourceFragment, { breakReason: "atomic_keep_together" });
+      if (isTocFragment(sourceFragment)) {
+        if (!hasSourceContent(current)) {
+          throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+        }
+        finish();
+        startContinuation(sourceFragment, "toc");
+        trial = pageWith(current.section, current.pieces.concat([whole]), {});
+        if (measurePage(trial).fits) {
+          current.pieces.push(whole);
+          continue;
+        }
+        throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+      }
+
+      if (isTableFragment(sourceFragment)) {
+        if (!hasSourceContent(current)) {
+          throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+        }
+        finish();
+        startContinuation(sourceFragment, "table");
+        trial = pageWith(current.section, current.pieces.concat([whole]), {});
+        if (measurePage(trial).fits) {
+          current.pieces.push(whole);
+          continue;
+        }
+        throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
+      }
+
+      const keys = sourceKeysOnPage(current);
+      const thisKey = sourceBlockKey(sourceFragment);
+      const onlyThisBlock = keys.size === 1 && keys.has(thisKey);
+      const pageEmpty = !hasSourceContent(current);
+
+      if (!pageEmpty && !onlyThisBlock) {
+        throw manualBreakRequiredError(sourceFragment);
+      }
+
+      if (!pageEmpty && onlyThisBlock) {
+        finish();
+        startContinuation(sourceFragment, "oversized");
+        trial = pageWith(current.section, current.pieces.concat([whole]), {});
+        if (measurePage(trial).fits) {
           current.pieces.push(whole);
           continue;
         }
       }
 
       if (sourceFragment.splittable && sourceFragment.textLength > 0) {
+        continuation = { kind: "oversized", blockKey: thisKey };
         let offset = 0;
         while (offset < sourceFragment.textLength) {
-          if (!current) begin(sourceFragment, {});
+          if (!current) begin(sourceFragment, { breakReason: "oversized_block" });
           const fitted = bestTextSplit(current, sourceFragment, offset);
           if (!fitted) {
-            if (current.pieces.length) {
+            if (hasSourceContent(current)) {
               finish();
+              startContinuation(sourceFragment, "oversized");
               continue;
             }
             diagnostic(
@@ -1215,19 +1328,12 @@
           }
           current.pieces.push(fitted);
           offset = fitted.rangeEnd;
-          if (offset < sourceFragment.textLength) finish();
+          if (offset < sourceFragment.textLength) {
+            finish();
+            startContinuation(sourceFragment, "oversized");
+          }
         }
         continue;
-      }
-
-      if (current.pieces.length) {
-        finish();
-        begin(sourceFragment, {});
-        trial = pageWith(current.section, [whole], {});
-        if (measurePage(trial).fits) {
-          current.pieces.push(whole);
-          continue;
-        }
       }
 
       if (sourceFragment.type === "figure") {
@@ -1253,23 +1359,7 @@
         ? ` Figure ${JSON.stringify(failedMeasurement.figureRect)}, image `
           + `${JSON.stringify(failedMeasurement.imageRect)}.`
         : "";
-      diagnostic(
-        "UNLAYOUTABLE_FRAGMENT",
-        "failure",
-        `Atomic fragment ${sourceFragment.id} exceeds a fresh content frame `
-          + `(${failedMeasurement.bodyHeight.toFixed(2)}px > `
-          + `${failedMeasurement.clientHeight.toFixed(2)}px; `
-          + `horizontal overflow ${failedMeasurement.horizontalOverflow.toFixed(2)}px; `
-          + `scroll ${failedMeasurement.scrollWidth.toFixed(2)}x`
-          + `${failedMeasurement.scrollHeight.toFixed(2)}; `
-          + `max block y ${failedMeasurement.maxBlockY.toFixed(2)}; `
-          + `header overflow ${JSON.stringify(failedMeasurement.headerOverflow)}; `
-          + `footer overflow ${JSON.stringify(failedMeasurement.footerOverflow)}).`
-          + mediaDetail,
-        sourceFragment,
-        pages.length + 1
-      );
-      throw new Error(`Atomic fragment exceeds page body: ${sourceFragment.id}.`);
+      throw unlayoutableFragmentError(sourceFragment, failedMeasurement, mediaDetail);
     }
     finish();
     return pages;
@@ -1337,8 +1427,8 @@
       if (last && last.fragment.type === "heading") {
         diagnostic(
           "ORPHAN_HEADING",
-          "failure",
-          `Heading ${last.fragment.id} is isolated at the end of page ${pageNumber}.`,
+          "info",
+          `Heading ${last.fragment.id} ends page ${pageNumber}; ordinary page boundaries are author-controlled.`,
           last.fragment,
           pageNumber
         );
@@ -1652,6 +1742,7 @@
       };
     });
     window.webkit.messageHandlers.pagination.postMessage({
+      ok: true,
       pages: responsePages,
       section_page_index: sectionIndex(pages),
       validation,
@@ -1662,7 +1753,14 @@
   }
 
   run().catch((error) => {
+    const structured = error && error.paginationError
+      ? error.paginationError
+      : {
+        code: "PAGINATION_FAILED",
+        message: String(error && error.message || error)
+      };
     window.webkit.messageHandlers.pagination.postMessage({
+      ok: false,
       pages: [],
       section_page_index: {},
       validation: {
@@ -1674,7 +1772,7 @@
       normalizer_version: NORMALIZER_VERSION,
       engine_version: ENGINE_VERSION,
       validator_version: VALIDATOR_VERSION,
-      error: String(error && error.message || error)
+      error: structured
     });
   });
 }());

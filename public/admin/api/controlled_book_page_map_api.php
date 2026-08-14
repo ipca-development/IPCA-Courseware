@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderLayoutProfile.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderPageMapStore.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAuthoritativePaginationService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -222,6 +223,8 @@ try {
         default:
             cp_pm_json(400, array('ok' => false, 'error' => 'Unknown action'));
     }
+} catch (ControlledPublishingPaginationValidationException $e) {
+    cp_pm_json(409, array('ok' => false, 'error' => $e->payload()));
 } catch (RuntimeException $e) {
     cp_pm_json(400, array('ok' => false, 'error' => $e->getMessage()));
 } catch (Throwable $e) {

@@ -4,6 +4,33 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingReaderService.php';
 
 /**
+ * First-class pagination validation result. Must not persist a page map.
+ */
+final class ControlledPublishingPaginationValidationException extends RuntimeException
+{
+    /**
+     * @param array<string,mixed> $payload
+     */
+    public function __construct(private array $payload)
+    {
+        parent::__construct((string)($payload['message'] ?? 'Pagination validation failed.'));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function payload(): array
+    {
+        return $this->payload;
+    }
+
+    public function codeName(): string
+    {
+        return (string)($this->payload['code'] ?? '');
+    }
+}
+
+/**
  * Runs the one authoritative, browser-measured pagination engine.
  *
  * The worker consumes canonical MODE_READ HTML and the exact publication CSS.
@@ -12,7 +39,7 @@ require_once __DIR__ . '/ControlledPublishingReaderService.php';
  */
 final class ControlledPublishingAuthoritativePaginationService
 {
-    public const ENGINE_VERSION = 'authoritative-browser-pagination-v1';
+    public const ENGINE_VERSION = 'manual-segments-v1';
 
     private string $root;
 
@@ -55,7 +82,14 @@ final class ControlledPublishingAuthoritativePaginationService
             $this->runWorker($inputPath, $outputPath);
             $raw = file_get_contents($outputPath);
             $result = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
-            if (!is_array($result) || !is_array($result['pages'] ?? null)) {
+            if (!is_array($result)) {
+                throw new RuntimeException('Pagination worker returned an invalid response.');
+            }
+            $error = is_array($result['error'] ?? null) ? $result['error'] : null;
+            if (is_array($error) && (string)($error['code'] ?? '') === 'MANUAL_BREAK_REQUIRED') {
+                throw $this->manualBreakRequired($error, $source, $version);
+            }
+            if (!is_array($result['pages'] ?? null)) {
                 throw new RuntimeException('Pagination worker returned an invalid response.');
             }
             $validation = is_array($result['validation'] ?? null) ? $result['validation'] : array();
@@ -225,6 +259,41 @@ final class ControlledPublishingAuthoritativePaginationService
                 . ($detail !== '' ? ': ' . mb_substr($detail, 0, 2000) : '.')
             );
         }
+    }
+
+    /**
+     * @param array<string,mixed> $error
+     * @param array<string,mixed> $source
+     * @param array<string,mixed> $version
+     */
+    private function manualBreakRequired(
+        array $error,
+        array $source,
+        array $version
+    ): ControlledPublishingPaginationValidationException {
+        $versionId = (int)($source['version_id'] ?? $version['id'] ?? 0);
+        $sectionId = (int)($error['section_id'] ?? 0);
+        $title = trim((string)($error['before_block_title'] ?? ''));
+        $message = trim((string)($error['message'] ?? ''));
+        if ($message === '') {
+            $message = 'Page content exceeds the available body area.';
+            if ($title !== '') {
+                $message .= ' A Manual Page Break is required before: “' . $title . '”';
+            }
+        }
+        $editorUrl = '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId;
+        if ($sectionId > 0) {
+            $editorUrl .= '&section_id=' . $sectionId;
+        }
+
+        return new ControlledPublishingPaginationValidationException(array(
+            'code' => 'MANUAL_BREAK_REQUIRED',
+            'message' => $message,
+            'before_block_anchor' => (string)($error['before_block_anchor'] ?? ''),
+            'before_block_title' => $title,
+            'section_id' => $sectionId > 0 ? $sectionId : null,
+            'editor_url' => $editorUrl,
+        ));
     }
 
     /**

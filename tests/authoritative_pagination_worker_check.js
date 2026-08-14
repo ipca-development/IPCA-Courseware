@@ -8,120 +8,18 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const root = path.resolve(__dirname, "..");
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ipca-authoritative-pagination-"));
-const inputPath = path.join(directory, "input.json");
-const outputPath = path.join(directory, "output.json");
-const paragraph = "Controlled source content must remain in source order. ".repeat(18);
-const tocRows = Array.from({ length: 72 }, (_, index) =>
-  `<div class="cpb-toc-row" data-stable-anchor="toc-${index + 1}">`
-    + `<span>Section ${index + 1} — Controlled Operations</span><span>${index + 3}</span></div>`
-).join("");
-const listItems = Array.from({ length: 16 }, (_, index) =>
-  `<li>Controlled list item ${index + 1} with semantic source coverage.</li>`
-).join("");
-const tableRows = Array.from({ length: 18 }, (_, index) =>
-  `<tr><td>Row ${index + 1}</td><td>Controlled table row content</td></tr>`
-).join("");
-
-const source = {
-  layout_profile: "IPCA_READER_CANONICAL_816x1056_v1",
-  layout_hash: "fixture-layout",
-  layout: {
-    page_width_px: 816,
-    page_height_px: 1056,
-    sheet_padding_x_px: 56,
-    sheet_padding_top_px: 48,
-    sheet_padding_bottom_px: 64,
-    header_band_px: 84,
-    header_margin_bottom_px: 20,
-    footer_margin_top_px: 24,
-    footer_band_px: 72,
-    body_capacity_px: 744
-  },
-  header_template_html: '<header class="cpb-page-header"><div style="height:96px"><strong>Fixture Manual</strong></div></header>',
-  footer_template_html: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
-  sections: [{
-    id: 2,
-    section_id: 2,
-    stable_anchor: "table-of-contents",
-    title: "Table of Contents",
-    section_key: "toc",
-    manual_part: 0,
-    part_title: "Front Matter",
-    flags: { force_page_break_before: true },
-    units: [{
-      unit_key: "toc-2-0",
-      block_id: 0,
-      stable_anchor: "table-of-contents",
-      block_type: "toc",
-      force_break_before: true,
-      html: `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`
-    }]
-  }, {
-    id: 1,
-    section_id: 1,
-    stable_anchor: "section-one",
-    title: "Section One",
-    section_key: "section-one",
-    manual_part: 1,
-    part_title: "Part One",
-    flags: {},
-    units: [
-      {
-        unit_key: "block-one",
-        block_id: 1,
-        stable_anchor: "block-one",
-        block_type: "heading",
-        html: '<article data-block-id="1" data-stable-anchor="block-one"><h2>First controlled heading</h2></article>'
-      },
-      {
-        unit_key: "block-two",
-        block_id: 2,
-        stable_anchor: "block-two",
-        block_type: "paragraph",
-        html: `<article data-block-id="2" data-stable-anchor="block-two"><p>${paragraph}</p></article>`
-      },
-      {
-        unit_key: "block-three",
-        block_id: 3,
-        stable_anchor: "block-three",
-        block_type: "heading",
-        force_break_before: true,
-        manual_page_break_before: true,
-        html: '<article data-block-id="3" data-stable-anchor="block-three"><h2>Manual break target</h2></article>'
-      },
-      {
-        unit_key: "block-four",
-        block_id: 4,
-        stable_anchor: "block-four",
-        block_type: "paragraph",
-        html: `<article data-block-id="4" data-stable-anchor="block-four"><p>${paragraph}</p></article>`
-      },
-      {
-        unit_key: "block-note",
-        block_id: 5,
-        stable_anchor: "block-note",
-        block_type: "callout",
-        html: '<article class="cpb-block" data-block-id="5" data-block-type="callout" data-stable-anchor="block-note"><aside class="cpb-callout cpb-callout--note"><strong class="cpb-callout-title">NOTE</strong><div class="cpb-callout-text">This complete note fits on a fresh physical page and must move there intact when the preceding page has insufficient room.</div></aside></article>'
-      },
-      {
-        unit_key: "block-list",
-        block_id: 6,
-        stable_anchor: "block-list",
-        block_type: "list",
-        html: `<article class="cpb-block" data-block-id="6" data-block-type="list" data-stable-anchor="block-list"><ol class="cpb-list">${listItems}</ol></article>`
-      },
-      {
-        unit_key: "block-table",
-        block_id: 7,
-        stable_anchor: "block-table",
-        block_type: "table",
-        html: `<article class="cpb-block" data-block-id="7" data-block-type="table" data-stable-anchor="block-table"><table class="cpb-table"><thead><tr><th>Item</th><th>Description</th></tr></thead><tbody>${tableRows}</tbody></table></article>`
-      }
-    ]
-  }]
+const layout = {
+  page_width_px: 816,
+  page_height_px: 1056,
+  sheet_padding_x_px: 56,
+  sheet_padding_top_px: 48,
+  sheet_padding_bottom_px: 64,
+  header_band_px: 84,
+  header_margin_bottom_px: 20,
+  footer_margin_top_px: 24,
+  footer_band_px: 72,
+  body_capacity_px: 744
 };
-
 const bookStyleCSS = `
   * { box-sizing: border-box; }
   body { font-family: Arial, sans-serif; font-size: 16px; line-height: 1.45; }
@@ -129,12 +27,11 @@ const bookStyleCSS = `
     display: flex; justify-content: space-between; align-items: center;
     width: 100%; height: 100%; border: 1px solid #aaa; padding: 8px;
   }
-  article, h2, p { margin: 0; }
-  h2 { font-size: 24px; line-height: 1.2; margin-bottom: 12px; }
-  p { margin-bottom: 14px; }
-  .cpb-callout { border: 2px solid #0d9488; padding: 18px; margin: 16px 0; }
-  .cpb-callout-title { display: block; margin-bottom: 10px; }
-  .cpb-list { margin: 12px 0; }
+  article, h2, h3, p { margin: 0; }
+  h2, h3 { font-size: 22px; line-height: 1.2; margin-bottom: 8px; }
+  p { margin-bottom: 10px; }
+  .tall-block { min-height: 420px; }
+  .cpb-list { margin: 8px 0; }
   .cpb-list > li { min-height: 42px; }
   .cpb-table { width: 100%; border-collapse: collapse; }
   .cpb-table th, .cpb-table td { height: 64px; border: 1px solid #333; padding: 8px; }
@@ -144,84 +41,274 @@ const bookStyleCSS = `
   }
 `;
 
-fs.writeFileSync(inputPath, JSON.stringify({ source, book_style_css: bookStyleCSS }));
-const execution = spawnSync(process.execPath, [
-  path.join(root, "scripts", "authoritative_manual_paginator.cjs"),
-  "--input", inputPath,
-  "--output", outputPath
-], { encoding: "utf8", cwd: root, timeout: 120000 });
+function section(id, key, title, flags, units, extra) {
+  return Object.assign({
+    id,
+    section_id: id,
+    stable_anchor: key,
+    title,
+    section_key: key,
+    manual_part: 1,
+    part_title: "Part One",
+    flags: flags || {},
+    header_template: '<header class="cpb-page-header"><div style="height:96px"><strong>Fixture Manual</strong></div></header>',
+    footer_template: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
+    show_header_footer: true,
+    units
+  }, extra || {});
+}
 
-try {
+function unit(id, type, html, extra) {
+  const numeric = Number(String(id).replace(/\D/g, ""));
+  const hashed = Array.from(String(id)).reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  return Object.assign({
+    unit_key: id,
+    block_id: extra && extra.block_id ? extra.block_id : (numeric || hashed),
+    stable_anchor: id,
+    block_type: type,
+    html
+  }, extra || {});
+}
+
+function sourceWith(sections) {
+  return {
+    layout_profile: "IPCA_READER_CANONICAL_816x1056_v1",
+    layout_hash: "fixture-layout",
+    layout,
+    header_template_html: '<header class="cpb-page-header"><div style="height:96px"><strong>Fixture Manual</strong></div></header>',
+    footer_template_html: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
+    sections
+  };
+}
+
+function runWorker(source) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ipca-manual-segments-"));
+  const inputPath = path.join(directory, "input.json");
+  const outputPath = path.join(directory, "output.json");
+  fs.writeFileSync(inputPath, JSON.stringify({ source, book_style_css: bookStyleCSS }));
+  const execution = spawnSync(process.execPath, [
+    path.join(root, "scripts/authoritative_manual_paginator.cjs"),
+    "--input", inputPath,
+    "--output", outputPath
+  ], { encoding: "utf8", cwd: root, timeout: 120000 });
+  let result = null;
+  if (fs.existsSync(outputPath)) {
+    try {
+      result = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+    } catch (_) {
+      result = null;
+    }
+  }
+  fs.rmSync(directory, { recursive: true, force: true });
+  return { execution, result };
+}
+
+function assertHeaderFooter(pages) {
+  assert.ok(pages.length > 0, "expected generated pages");
+  pages.forEach((page) => {
+    assert.ok(page.page_html.includes("reader-page-header-region"), "header region missing");
+    assert.ok(page.page_html.includes("reader-page-footer-region"), "footer region missing");
+    assert.ok(page.page_html.includes("justify-content: flex-end"), "footer must bottom-align");
+    assert.ok(page.metrics && page.metrics.validation_passed === true, "geometry validation must pass");
+  });
+}
+
+function sourceCoverage(result) {
+  return result.pages.flatMap((page) =>
+    page.coverage.filter((item) => item.presentation_copy !== true)
+  );
+}
+
+const cases = [];
+
+cases.push(["A. one ordinary segment fits one page", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-one", "heading", '<article data-block-id="1" data-stable-anchor="block-one"><h2>Fits on one page</h2></article>'),
+      unit("block-two", "paragraph", '<article data-block-id="2" data-stable-anchor="block-two"><p>Short ordinary paragraph.</p></article>')
+    ])
+  ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
-  const result = JSON.parse(fs.readFileSync(outputPath, "utf8"));
-  assert.strictEqual(result.validation.is_valid, true, "final validation must pass");
-  assert.ok(
-    result.authoritative_layout.headerFrame.height >= 96,
-    "Book Style header content must expand the authoritative header frame"
-  );
-  assert.strictEqual(
-    result.authoritative_layout.contentFrame.y,
-    48 + result.authoritative_layout.headerFrame.height + 20,
-    "body frame must begin after the measured header and configured margin"
-  );
-  assert.ok(result.pages.length >= 2, "manual page break must create a later page");
-  assert.ok(
-    result.pages.filter((page) => page.section_id === 2).length >= 3,
-    "generated TOC rows must automatically paginate across physical pages"
-  );
+  assert.strictEqual(result.error, undefined);
+  assert.strictEqual(result.pages.length, 1);
+  assert.strictEqual(result.engine_version, "manual-segments-v1");
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["B. multiple ordinary blocks exceed intended page", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-one", "paragraph", '<article data-block-id="1" data-stable-anchor="block-one"><p class="tall-block">6.1.7 First overflowing block</p></article>'),
+      unit("block-two", "paragraph", '<article data-block-id="2" data-stable-anchor="block-two"><p class="tall-block">6.1.8 Seats, seat safety belts, restraint systems and child restraint devices</p></article>')
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
+  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
+  assert.ok(String(result.error.before_block_title || result.error.message).includes("6.1.8"));
+  assert.strictEqual(result.error.before_block_anchor, "block-two");
+}]);
+
+cases.push(["C. persisted manual break starts the next page", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-one", "heading", '<article data-block-id="1" data-stable-anchor="block-one"><h2>First controlled heading</h2></article>'),
+      unit("block-two", "heading", '<article data-block-id="2" data-stable-anchor="block-two"><h2>Manual break target</h2></article>', {
+        force_break_before: true,
+        manual_page_break_before: true
+      })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  const opening = result.pages.find((page) => page.page_html.includes("First controlled heading"));
+  const target = result.pages.find((page) => page.page_html.includes("Manual break target"));
+  assert.ok(opening && target && target.page_number > opening.page_number);
+}]);
+
+cases.push(["D. chapter heading without manual break does not start a page", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "intro", "Introduction", {}, [
+      unit("block-one", "paragraph", '<article data-block-id="1" data-stable-anchor="block-one"><p>Lead-in paragraph before a chapter heading.</p></article>')
+    ]),
+    section(2, "chapter-one", "Chapter One", { is_chapter_start: true, is_major_section_start: true }, [
+      unit("block-two", "heading", '<article data-block-id="2" data-stable-anchor="block-two"><h2>Chapter heading stays on the same intended page</h2></article>')
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 1, "chapter boundary must not auto-paginate");
+  assert.ok(result.pages[0].page_html.includes("Lead-in paragraph"));
+  assert.ok(result.pages[0].page_html.includes("Chapter heading stays"));
+}]);
+
+cases.push(["E. part boundary without manual break does not start a page", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "part_1", "Part 1", { is_part_start: true, is_major_section_start: true }, [
+      unit("block-one", "paragraph", '<article data-block-id="1" data-stable-anchor="block-one"><p>End of part one copy.</p></article>')
+    ]),
+    section(2, "part_2", "Part 2", { is_part_start: true, is_major_section_start: true }, [
+      unit("block-two", "heading", '<article data-block-id="2" data-stable-anchor="block-two"><h2>Part 2 heading shares the intended page</h2></article>')
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 1, "part boundary must not auto-paginate");
+}]);
+
+cases.push(["F. section boundary without manual break does not start a page", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-a", "Section A", { is_section_start: true }, [
+      unit("block-one", "paragraph", '<article data-block-id="1" data-stable-anchor="block-one"><p>Section A copy.</p></article>')
+    ]),
+    section(2, "section-b", "Section B", { is_section_start: true }, [
+      unit("block-two", "heading", '<article data-block-id="2" data-stable-anchor="block-two"><h3>Section B heading stays put</h3></article>')
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 1, "section boundary must not auto-paginate");
+}]);
+
+cases.push(["G. generated TOC continues automatically", () => {
+  const tocRows = Array.from({ length: 72 }, (_, index) =>
+    `<div class="cpb-toc-row" data-stable-anchor="toc-${index + 1}">`
+      + `<span>Section ${index + 1} — Controlled Operations</span><span>${index + 3}</span></div>`
+  ).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(2, "toc", "Table of Contents", {}, [
+      unit("toc-2-0", "toc", `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`, { block_id: 20 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.ok(result.pages.length >= 3, "TOC must continue across physical pages");
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["H/I. long table row-paginates with presentation-only headers", () => {
+  const tableRows = Array.from({ length: 18 }, (_, index) =>
+    `<tr><td>Row ${index + 1}</td><td>Controlled table row content</td></tr>`
+  ).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-table", "table",
+        `<article class="cpb-block" data-block-id="7" data-block-type="table" data-stable-anchor="block-table"><table class="cpb-table"><thead><tr><th>Item</th><th>Description</th></tr></thead><tbody>${tableRows}</tbody></table></article>`,
+        { block_id: 7 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.ok(result.pages.length >= 2, "long table must continue");
+  const rows = sourceCoverage(result).filter((item) => item.source_fragment_id.includes("/block-table/table-row-"));
+  assert.strictEqual(rows.length, 18, "each table row must appear exactly once");
+  assert.strictEqual(new Set(rows.map((item) => item.source_fragment_id)).size, 18);
+  assert.ok(result.pages.flatMap((page) => page.coverage).some((item) =>
+    item.source_fragment_id.endsWith("/block-table/table-header") && item.presentation_copy === true
+  ), "continued tables must repeat the header as a presentation-only copy");
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["long table continuation does not absorb following ordinary blocks", () => {
+  const tableRows = Array.from({ length: 18 }, (_, index) =>
+    `<tr><td>Row ${index + 1}</td><td>Controlled table row content</td></tr>`
+  ).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-table", "table",
+        `<article class="cpb-block" data-block-id="7" data-block-type="table" data-stable-anchor="block-table"><table class="cpb-table"><thead><tr><th>Item</th><th>Description</th></tr></thead><tbody>${tableRows}</tbody></table></article>`,
+        { block_id: 7 }),
+      unit("block-after", "paragraph", '<article data-block-id="8" data-stable-anchor="block-after"><p>Following ordinary paragraph must not ride table continuation.</p></article>', { block_id: 8 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
+  assert.strictEqual(result.error.before_block_anchor, "block-after");
+  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
+}]);
+
+cases.push(["J. oversized single block may split", () => {
+  const items = Array.from({ length: 28 }, (_, index) =>
+    `<li>Oversized list item ${index + 1} with enough height to exceed one page.</li>`
+  ).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-list", "list",
+        `<article class="cpb-block" data-block-id="6" data-block-type="list" data-stable-anchor="block-list"><ol class="cpb-list">${items}</ol></article>`,
+        { block_id: 6 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.ok(result.pages.length >= 2, "one oversized block may continue");
+  const listCoverage = sourceCoverage(result).filter((item) => item.source_fragment_id.includes("/block-list/li-"));
+  assert.strictEqual(listCoverage.length, 28, "list items appear exactly once");
+}]);
+
+cases.push(["K. every page has header, footer, and sequential numbers", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-one", "heading", '<article data-block-id="1" data-stable-anchor="block-one"><h2>Opening</h2></article>'),
+      unit("block-two", "heading", '<article data-block-id="2" data-stable-anchor="block-two"><h2>After break</h2></article>', {
+        force_break_before: true,
+        manual_page_break_before: true
+      })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
   assert.deepStrictEqual(
     result.pages.map((page) => page.page_number),
-    result.pages.map((_, index) => index + 1),
-    "official page numbers must be sequential"
+    result.pages.map((_, index) => index + 1)
   );
-  assert.ok(
-    result.pages.every((page) =>
-      page.page_html.includes("reader-page-header-region")
-      && page.page_html.includes("reader-page-footer-region")
-      && page.page_html.includes("justify-content: flex-end")
-      && page.metrics.validation_passed === true
-    ),
-    "every final page must include fixed regions, bottom-align its footer, and pass geometry validation"
-  );
-  const breakTargetPage = result.pages.find((page) =>
-    page.page_html.includes("Manual break target")
-  );
-  const openingPage = result.pages.find((page) =>
-    page.page_html.includes("First controlled heading")
-  );
-  assert.ok(
-    breakTargetPage && openingPage
-      && breakTargetPage.page_number > openingPage.page_number,
-    "manual break target must start on a later authoritative page"
-  );
-  const seen = result.pages.flatMap((page) =>
-    page.coverage.filter((item) => item.presentation_copy !== true)
-      .map((item) => item.source_fragment_id)
-  );
-  assert.strictEqual(new Set(seen).size, seen.length, "source fragments must not duplicate");
-  const noteCoverage = result.pages.flatMap((page) => page.coverage)
-    .filter((item) => item.source_fragment_id.endsWith("/block-note/root"));
-  assert.strictEqual(noteCoverage.length, 1, "a NOTE that fits a fresh page must remain intact");
-  assert.strictEqual(noteCoverage[0].range_start, 0, "intact NOTE must begin at source offset zero");
-  assert.strictEqual(
-    noteCoverage[0].range_end,
-    noteCoverage[0].source_length,
-    "intact NOTE must cover its complete source range"
-  );
-  const listCoverage = result.pages.flatMap((page) => page.coverage)
-    .filter((item) => item.source_fragment_id.includes("/block-list/li-"));
-  assert.strictEqual(listCoverage.length, 16, "each list item must appear exactly once");
-  const tableRowsCoverage = result.pages.flatMap((page) => page.coverage)
-    .filter((item) => item.source_fragment_id.includes("/block-table/table-row-"));
-  assert.strictEqual(tableRowsCoverage.length, 18, "each table row must appear exactly once");
-  assert.ok(
-    result.pages.flatMap((page) => page.coverage).some((item) =>
-      item.source_fragment_id.endsWith("/block-table/table-header")
-        && item.presentation_copy === true
-    ),
-    "continued tables must repeat the header as a presentation-only copy"
-  );
-  process.stdout.write(`AUTHORITATIVE_PAGINATION_WORKER_PASS pages=${result.pages.length}\n`);
-} finally {
-  fs.rmSync(directory, { recursive: true, force: true });
+  assertHeaderFooter(result.pages);
+}]);
+
+let failed = 0;
+for (const [name, run] of cases) {
+  try {
+    run();
+    process.stdout.write(`PASS ${name}\n`);
+  } catch (error) {
+    failed += 1;
+    process.stderr.write(`FAIL ${name}: ${error && error.message || error}\n`);
+  }
 }
+
+if (failed) {
+  process.stderr.write(`manual_segments_v1 worker check: FAIL ${failed}/${cases.length}\n`);
+  process.exit(1);
+}
+process.stdout.write(`AUTHORITATIVE_PAGINATION_WORKER_PASS cases=${cases.length}\n`);

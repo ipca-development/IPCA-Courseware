@@ -212,6 +212,18 @@ async function main() {
     }, { sourceValue: source, layoutValue: layout });
     await page.addScriptTag({ content: core });
     const result = await page.evaluate(() => window.__authoritativePagination);
+    if (result && result.error && result.error.code === "MANUAL_BREAK_REQUIRED") {
+      fs.writeFileSync(outputPath, JSON.stringify({
+        ok: false,
+        error: result.error,
+        pages: [],
+        section_page_index: {},
+        validation: result.validation || { is_valid: false },
+        authoritative_layout: layout,
+        engine_version: result.engine_version || null
+      }));
+      return;
+    }
     if (result.error || result.validation?.is_valid !== true) {
       const failures = (result.validation?.diagnostics || [])
         .filter((item) => item.severity === "failure")
@@ -219,6 +231,7 @@ async function main() {
       fail(JSON.stringify({ error: result.error || "validation failed", failures }));
     }
     fs.writeFileSync(outputPath, JSON.stringify({
+      ok: true,
       ...result,
       authoritative_layout: layout
     }));

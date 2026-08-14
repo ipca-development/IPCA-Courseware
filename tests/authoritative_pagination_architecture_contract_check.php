@@ -24,11 +24,13 @@ foreach ($protected as $relative => $hash) {
 
 $contracts = array(
     'src/publishing/ControlledPublishingAuthoritativePaginationService.php' => array(
-        'authoritative-browser-pagination-v1',
+        'manual-segments-v1',
+        'MANUAL_BREAK_REQUIRED',
         'There is deliberately no heuristic fallback',
         'validation',
         'page_map_hash',
         'header_footer_hash',
+        'ControlledPublishingPaginationValidationException',
     ),
     'scripts/authoritative_manual_paginator.cjs' => array(
         'ReaderPaginationCore.js',
@@ -46,6 +48,8 @@ $contracts = array(
         "'returned_page_count' => count(\$pages)",
         "\$sectionId > 0 ? \$sectionId : null",
         "\$reader->authoritativePageMapFreshness(\$version, \$paginateSource)",
+        'ControlledPublishingPaginationValidationException',
+        '$e->payload()',
     ),
     'src/publishing/ControlledPublishingReaderPageMapStore.php' => array(
         '?int $sectionId = null',
@@ -56,7 +60,8 @@ $contracts = array(
         "' AND s.id = ?'",
     ),
     'ipca-manual-reader-ios/IPCAManualReader/Services/ReaderPaginationCore.js' => array(
-        'atomic_keep_together',
+        'MANUAL_BREAK_REQUIRED',
+        'manual-segments-v1',
         'reader-generated-page',
         'reader-page-header-region',
         'reader-page-body',
@@ -75,6 +80,13 @@ $contracts = array(
     ),
     'src/publishing/ControlledPublishingFoundationService.php' => array(
         'assertAuthoritativePageMapReadyForRelease',
+    ),
+    'public/admin/compliance/controlled_book_page_preview.php' => array(
+        'action=stored_preview',
+        'Exact Page Preview',
+        'MANUAL_BREAK_REQUIRED',
+        'Loading stored pages',
+        'Return to Editor',
     ),
     'ipca-manual-reader-ios/IPCAManualReader/Models/ManualReaderModels.swift' => array(
         'static let controlledFrozenPages = true',
@@ -124,6 +136,43 @@ $cache = (string)@file_get_contents(
 );
 if (str_contains($cache, 'client.fetchPaginateSource(')) {
     $failures[] = 'Canonical offline download still fetches client pagination source.';
+}
+
+$preview = (string)@file_get_contents(
+    $root . '/public/admin/compliance/controlled_book_page_preview.php'
+);
+if (preg_match('/redirect\s*\(\s*[\'"]\/admin\/compliance\/controlled_book_editor\.php/', $preview) === 1) {
+    $failures[] = 'Exact Page Preview still redirects to the editor.';
+}
+if (str_contains($preview, 'contenteditable')) {
+    $failures[] = 'Exact Page Preview contains editing controls.';
+}
+if (!str_contains($preview, 'loadStored()') || !str_contains($preview, 'stored_preview')) {
+    $failures[] = 'Exact Page Preview does not load stored_preview on view.';
+}
+
+$paginationService = (string)@file_get_contents(
+    $root . '/src/publishing/ControlledPublishingPaginationService.php'
+);
+if (str_contains($paginationService, 'function paginateSourceDeterministic')) {
+    $failures[] = 'Obsolete paginateSourceDeterministic() remains in the pagination service.';
+}
+
+$versionPage = (string)@file_get_contents(
+    $root . '/public/admin/compliance/controlled_book_version.php'
+);
+if (!str_contains($versionPage, 'controlled_book_page_preview.php')) {
+    $failures[] = 'Version page is missing the Exact Page Preview entry.';
+}
+
+$draftGenerate = (string)@file_get_contents(
+    $root . '/src/publishing/ControlledPublishingReaderService.php'
+);
+$generatePos = strpos($draftGenerate, 'function generateFrozenPageMapDraft');
+$replacePos = strpos($draftGenerate, 'replaceDraftPages', $generatePos !== false ? $generatePos : 0);
+$mapPos = strpos($draftGenerate, 'generateFrozenPageMap(', $generatePos !== false ? $generatePos : 0);
+if ($generatePos === false || $mapPos === false || $replacePos === false || $mapPos > $replacePos) {
+    $failures[] = 'Draft generation must run generateFrozenPageMap before replaceDraftPages.';
 }
 
 if ($failures !== array()) {

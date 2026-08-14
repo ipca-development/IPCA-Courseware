@@ -188,8 +188,8 @@ compliance_page_open(array(
             'variant' => 'primary',
         ),
         array(
-            'label' => 'Editor',
-            'href' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId,
+            'label' => 'Exact Page Preview',
+            'href' => '/admin/compliance/controlled_book_page_preview.php?version_id=' . $versionId,
             'variant' => 'secondary',
         ),
         array(
