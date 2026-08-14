@@ -796,3 +796,53 @@
   line-height: 1.55;
   color: #0f172a;
 }
+
+.mr-body[data-mr-theme="sepia"] .reader-generated-page,
+.mr-body[data-mr-theme="sepia"] .reader-generated-page .cpb-sheet {
+  background: var(--mr-page-bg) !important;
+  color: var(--mr-text) !important;
+}
+
+.mr-body[data-mr-theme="sepia"] .reader-generated-page .reader-page-body,
+.mr-body[data-mr-theme="sepia"] .reader-generated-page .cpb-heading,
+.mr-body[data-mr-theme="sepia"] .reader-generated-page .cpb-section-title,
+.mr-body[data-mr-theme="sepia"] .reader-generated-page .cpb-page-header-table td,
+.mr-body[data-mr-theme="sepia"] .reader-generated-page .cpb-page-footer-table td {
+  color: var(--mr-text) !important;
+}
+
+.mr-body[data-mr-theme="dark"] .reader-generated-page,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-sheet {
+  background: var(--mr-page-bg) !important;
+  color: var(--mr-text) !important;
+}
+
+.mr-body[data-mr-theme="dark"] .reader-generated-page .reader-page-body,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-heading,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-section-title,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-paragraph,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-list,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-page-header-table td,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-page-footer-table td {
+  color: var(--mr-text) !important;
+}
+
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-page-header,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-page-footer,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-page-header-table td,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-page-footer-table td,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-table th,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-table td {
+  border-color: #636366 !important;
+}
+
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-table th,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-table td {
+  background: #343438 !important;
+  color: var(--mr-text) !important;
+}
+
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-table-title-row td,
+.mr-body[data-mr-theme="dark"] .reader-generated-page .cpb-table-header-row th {
+  background: #444448 !important;
+}

@@ -46,6 +46,7 @@ struct OfflineManualPackage: Codable {
     let editorCSS: String?
     let contentCSS: String?
     let readerCSS: String?
+    let readerStyleVersion: String?
     let paginateSourceData: Data?
 
     func page(number: Int) -> FrozenPageResponse? {
@@ -234,9 +235,25 @@ final class ManualDownloadManager: ObservableObject {
                     contentCSS = bundledTextAsset(name: "manual_reader_content", extension: "css")
                 }
             }
+            var readerCSS = existing.readerCSS
+            let needsReaderStyleRefresh = existing.readerStyleVersion != ReaderPaginationVersion.style
+            var didRefreshReaderStyle = false
+            if readerCSS == nil || needsReaderStyleRefresh {
+                if let downloadedReaderCSS = await downloadTextAsset(
+                    path: "assets/manual_reader.css",
+                    client: client
+                ) {
+                    readerCSS = downloadedReaderCSS
+                    didRefreshReaderStyle = true
+                }
+            }
             if sourceData != nil,
                contentCSS != nil,
-               (existing.paginateSourceData == nil || existing.contentCSS == nil) {
+               (
+                   existing.paginateSourceData == nil
+                       || existing.contentCSS == nil
+                       || didRefreshReaderStyle
+               ) {
                 let upgraded = OfflineManualPackage(
                     bookID: existing.bookID,
                     versionID: existing.versionID,
@@ -247,7 +264,8 @@ final class ManualDownloadManager: ObservableObject {
                     coverImageData: existing.coverImageData,
                     editorCSS: existing.editorCSS,
                     contentCSS: contentCSS,
-                    readerCSS: existing.readerCSS,
+                    readerCSS: readerCSS,
+                    readerStyleVersion: readerCSS == nil ? nil : ReaderPaginationVersion.style,
                     paginateSourceData: sourceData
                 )
                 try? await diskStore.save(upgraded)
@@ -345,6 +363,7 @@ final class ManualDownloadManager: ObservableObject {
                 editorCSS: nil,
                 contentCSS: contentCSS,
                 readerCSS: readerCSS,
+                readerStyleVersion: readerCSS == nil ? nil : ReaderPaginationVersion.style,
                 paginateSourceData: paginateSourceData
             )
             try await diskStore.save(package)

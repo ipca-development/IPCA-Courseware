@@ -25,7 +25,9 @@ struct LibraryView: View {
         .background(IPCAReaderTheme.shelfBackground.ignoresSafeArea())
         .task { await viewModel.load() }
         .fullScreenCover(item: $selectedBook) { book in
-            ReaderView(book: book)
+            ReaderView(book: book) {
+                selectedBook = nil
+            }
         }
         .sheet(item: $utilityDestination) { destination in
             NavigationStack {

@@ -247,6 +247,83 @@ final class ControlledPublishingBookStyleService
     }
 
     /**
+     * Copy visual book styles from an existing version without copying content
+     * or callout preset text.
+     *
+     * @return array<string,mixed>
+     */
+    public function copyStylesFromVersion(
+        int $targetVersionId,
+        int $sourceVersionId,
+        ?int $actorUserId = null
+    ): array {
+        if ($targetVersionId <= 0 || $sourceVersionId <= 0) {
+            throw new InvalidArgumentException('Source and target version IDs are required.');
+        }
+        if ($targetVersionId === $sourceVersionId) {
+            throw new InvalidArgumentException('Choose a different source version.');
+        }
+
+        $target = $this->requireVersion($targetVersionId);
+        $source = $this->requireVersion($sourceVersionId);
+        if ((string)($target['lifecycle_status'] ?? '') === 'released') {
+            throw new RuntimeException('Released versions cannot receive copied styles.');
+        }
+
+        $targetMeta = $this->decodeMeta($target);
+        $sourceMeta = $this->decodeMeta($source);
+        $previousTargetStyles = $this->resolveFromMetadata($targetMeta);
+        $sourceStyles = $this->resolveFromMetadata($sourceMeta);
+
+        $targetMeta['paragraph_styles'] = $sourceStyles['paragraph_styles'];
+        $targetMeta['table_styles'] = $sourceStyles['table_styles'];
+        $targetMeta['callout_styles'] = $sourceStyles['callout_styles'];
+        $targetMeta['page_header'] = $sourceStyles['page_header'];
+        $targetMeta['page_footer'] = $sourceStyles['page_footer'];
+
+        foreach (array('annex_page_header', 'annex_page_footer') as $key) {
+            if (is_array($sourceMeta[$key] ?? null)) {
+                $targetMeta[$key] = $sourceMeta[$key];
+            } else {
+                unset($targetMeta[$key]);
+            }
+        }
+
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+        try {
+            $stmt = $this->pdo->prepare("
+                UPDATE ipca_publishing_book_versions
+                SET metadata_json = :metadata_json, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+            ");
+            $stmt->execute(array(
+                ':metadata_json' => json_encode(
+                    $targetMeta,
+                    JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR
+                ),
+                ':id' => $targetVersionId,
+            ));
+            $this->stripRedundantBlockTypography(
+                $targetVersionId,
+                $previousTargetStyles['paragraph_styles']
+            );
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $this->resolveFromMetadata($targetMeta);
+    }
+
+    /**
      * @param array<string,mixed> $payload
      * @param array<string,mixed> $bookStyles
      * @return array{font_family:string,font_size:int,color:string,text_align:string,indent_level:int,font_bold:bool,font_italic:bool,font_underline:bool}

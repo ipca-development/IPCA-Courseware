@@ -90,6 +90,12 @@ try {
         case 'save_book_styles':
             cp_editor_handle_save_book_styles($foundation, $styleSvc, $uid);
             break;
+        case 'list_style_copy_sources':
+            cp_editor_handle_list_style_copy_sources($foundation);
+            break;
+        case 'copy_book_styles':
+            cp_editor_handle_copy_book_styles($foundation, $styleSvc, $uid);
+            break;
         case 'regenerate_toc':
             cp_editor_handle_regenerate_toc($foundation, $tocSvc, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
             break;
@@ -916,6 +922,86 @@ function cp_editor_handle_save_book_styles(
     }
     $saved = $styleSvc->saveForVersion($versionId, $styles, $uid);
     cp_editor_json(200, array('ok' => true, 'book_styles' => $saved));
+}
+
+function cp_editor_handle_list_style_copy_sources(
+    ControlledPublishingFoundationService $foundation
+): void {
+    $targetVersionId = (int)($_GET['version_id'] ?? 0);
+    if ($targetVersionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    if ($foundation->getVersion($targetVersionId) === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Target version not found'));
+    }
+
+    $sources = array();
+    foreach ($foundation->listBooksWithVersions() as $row) {
+        $versionId = (int)($row['version_id'] ?? 0);
+        if ($versionId <= 0 || $versionId === $targetVersionId) {
+            continue;
+        }
+        $sources[] = array(
+            'version_id' => $versionId,
+            'book_key' => (string)($row['book_key'] ?? ''),
+            'book_title' => (string)($row['book_title'] ?? ''),
+            'version_label' => (string)($row['version_label'] ?? ''),
+            'lifecycle_status' => (string)($row['lifecycle_status'] ?? ''),
+        );
+    }
+
+    cp_editor_json(200, array(
+        'ok' => true,
+        'current_version_id' => $targetVersionId,
+        'sources' => $sources,
+    ));
+}
+
+function cp_editor_handle_copy_book_styles(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingBookStyleService $styleSvc,
+    int $uid
+): void {
+    $in = cp_editor_input();
+    $targetVersionId = (int)($in['version_id'] ?? 0);
+    $sourceVersionId = (int)($in['source_version_id'] ?? 0);
+    if ($targetVersionId <= 0 || $sourceVersionId <= 0) {
+        cp_editor_json(400, array(
+            'ok' => false,
+            'error' => 'version_id and source_version_id are required',
+        ));
+    }
+    if ($targetVersionId === $sourceVersionId) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Choose a different source version'));
+    }
+
+    $target = $foundation->getVersion($targetVersionId);
+    $source = $foundation->getVersion($sourceVersionId);
+    if ($target === null || $source === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Source or target version not found'));
+    }
+    if ((string)($target['lifecycle_status'] ?? '') === 'released') {
+        cp_editor_json(403, array(
+            'ok' => false,
+            'error' => 'Released versions cannot receive copied styles',
+        ));
+    }
+
+    $styles = $styleSvc->copyStylesFromVersion(
+        $targetVersionId,
+        $sourceVersionId,
+        $uid
+    );
+    cp_editor_json(200, array(
+        'ok' => true,
+        'book_styles' => $styles,
+        'copied_from' => array(
+            'version_id' => $sourceVersionId,
+            'book_key' => (string)($source['book_key'] ?? ''),
+            'book_title' => (string)($source['book_title'] ?? ''),
+            'version_label' => (string)($source['version_label'] ?? ''),
+        ),
+    ));
 }
 
 function cp_editor_handle_regenerate_toc(

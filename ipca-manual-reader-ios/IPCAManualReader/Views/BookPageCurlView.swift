@@ -7,6 +7,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
     let baseURL: URL
     let isLandscape: Bool
     let pageSize: CGSize
+    let pageBackground: Color
     @Binding var currentIndex: Int
     let onTap: () -> Void
 
@@ -24,7 +25,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
         controller.dataSource = context.coordinator
         controller.delegate = context.coordinator
         controller.isDoubleSided = isLandscape
-        controller.view.backgroundColor = .white
+        controller.view.backgroundColor = UIColor(pageBackground)
 
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.didTap))
         tap.cancelsTouchesInView = false
@@ -38,6 +39,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: UIPageViewController, context: Context) {
         context.coordinator.parent = self
+        controller.view.backgroundColor = UIColor(pageBackground)
         context.coordinator.refreshCachedPages()
         guard !context.coordinator.isTransitioning else { return }
         context.coordinator.installVisiblePages(animated: false, direction: .forward)
@@ -72,7 +74,8 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     baseURL: parent.baseURL,
                     isLandscape: parent.isLandscape,
                     pageNumber: parent.pages[position].pageNumber,
-                    pageSize: parent.pageSize
+                    pageSize: parent.pageSize,
+                    pageBackground: parent.pageBackground
                 )
             }
         }
@@ -137,10 +140,14 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     baseURL: parent.baseURL,
                     isLandscape: parent.isLandscape,
                     pageNumber: parent.pages[position].pageNumber,
-                    pageSize: parent.pageSize
+                    pageSize: parent.pageSize,
+                    pageBackground: parent.pageBackground
                 )
             } else {
-                host = PageHostController(position: position)
+                host = PageHostController(
+                    position: position,
+                    pageBackground: parent.pageBackground
+                )
             }
             cache[position] = host
             return host
@@ -212,18 +219,20 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         pageSize: CGSize = CGSize(
             width: ManualPageLayout.width,
             height: ManualPageLayout.height
-        )
+        ),
+        pageBackground: Color = .white
     ) {
         self.position = position
-        super.init(rootView: AnyView(Color.white))
-        view.backgroundColor = .white
+        super.init(rootView: AnyView(pageBackground))
+        view.backgroundColor = UIColor(pageBackground)
         if let html, let baseURL {
             update(
                 html: html,
                 baseURL: baseURL,
                 isLandscape: isLandscape,
                 pageNumber: pageNumber,
-                pageSize: pageSize
+                pageSize: pageSize,
+                pageBackground: pageBackground
             )
         }
     }
@@ -237,15 +246,18 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         baseURL: URL,
         isLandscape: Bool,
         pageNumber: Int,
-        pageSize: CGSize
+        pageSize: CGSize,
+        pageBackground: Color
     ) {
+        view.backgroundColor = UIColor(pageBackground)
         rootView = AnyView(
             PhysicalManualPage(
                 html: html,
                 baseURL: baseURL,
                 isLandscape: isLandscape,
                 isLeftPage: pageNumber.isMultiple(of: 2),
-                pageSize: pageSize
+                pageSize: pageSize,
+                pageBackground: pageBackground
             )
         )
     }
@@ -257,6 +269,7 @@ private struct PhysicalManualPage: View {
     let isLandscape: Bool
     let isLeftPage: Bool
     let pageSize: CGSize
+    let pageBackground: Color
 
     var body: some View {
         GeometryReader { proxy in
@@ -265,9 +278,10 @@ private struct PhysicalManualPage: View {
                 baseURL: baseURL,
                 zoomMode: .fitPage,
                 containerSize: proxy.size,
-                pageSize: pageSize
+                pageSize: pageSize,
+                pageBackground: pageBackground
             )
-            .background(Color.white)
+            .background(pageBackground)
             .overlay {
                 if isLandscape {
                     LinearGradient(
@@ -284,7 +298,7 @@ private struct PhysicalManualPage: View {
             }
             .clipped()
         }
-        .background(Color.white)
+        .background(pageBackground)
     }
 }
 

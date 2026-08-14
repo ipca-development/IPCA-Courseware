@@ -462,6 +462,19 @@ extension ManualReaderAPIClient {
             }
         }()
         let fontScale = settings.fontSize.scale
+        let pageBackground: String
+        let pageText: String
+        switch settings.theme {
+        case .light:
+            pageBackground = "#ffffff"
+            pageText = "#0f172a"
+        case .sepia:
+            pageBackground = "#f4ecd8"
+            pageText = "#3d3428"
+        case .dark:
+            pageBackground = "#2c2c2e"
+            pageText = "#f5f5f7"
+        }
         let pageWidth = layout?.pageWidth ?? Double(ManualPageLayout.width)
         let pageHeight = layout?.pageHeight ?? Double(ManualPageLayout.height)
         let scaledFontRules = layout == nil
@@ -487,7 +500,8 @@ extension ManualReaderAPIClient {
               height: 100%;
               max-height: none;
               overflow: hidden;
-              background: #fff !important;
+              background: \(pageBackground) !important;
+              color: \(pageText);
             }
             .mr-ios-shell { display: flex; align-items: flex-start; justify-content: center; }
             .mr-page-frame { display: block; flex: none; }
@@ -496,11 +510,25 @@ extension ManualReaderAPIClient {
               width: \(pageWidth)px;
               height: \(pageHeight)px;
               transform-origin: top center;
-              background: #fff;
+              background: \(pageBackground);
             }
             .mr-ios-frame .cpb-sheet { margin: 0 auto; box-shadow: none !important; \(frameFontRule) }
-            .reader-generated-page { margin: 0 !important; box-shadow: none !important; background: #fff !important; }
+            .reader-generated-page {
+              margin: 0 !important;
+              box-shadow: none !important;
+              background: \(pageBackground) !important;
+              color: \(pageText) !important;
+            }
             .reader-page-header-region, .reader-page-body, .reader-page-footer-region { max-width: none !important; }
+            .reader-generated-page .reader-page-body,
+            .reader-generated-page .cpb-heading,
+            .reader-generated-page .cpb-section-title,
+            .reader-generated-page .cpb-paragraph,
+            .reader-generated-page .cpb-list,
+            .reader-generated-page .cpb-page-header-table td,
+            .reader-generated-page .cpb-page-footer-table td {
+              color: \(pageText) !important;
+            }
             .reader-page-header-region > .cpb-page-header,
             .reader-page-footer-region > .cpb-page-footer {
               position: static !important;

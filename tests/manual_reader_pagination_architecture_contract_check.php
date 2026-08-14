@@ -8,11 +8,11 @@ $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
         => '459a755e2aef5802f7bbc9c9679619252596a7705a9629bb09a5f8cf998219b7',
     'public/assets/controlled_book_editor.js'
-        => '1c9c0248a216fc8030a0340b3a7aa141d968541c1975aee1f941a32128121ec5',
+        => 'a11c51a9a5030c2232241dbe4c1ec844fdb8e56e9fa1e067b52c07bf218aac52',
     'public/assets/controlled_book_editor.css'
-        => '66220ae05054673ee9814a0b75da0eefc609148a208fed6dfe523f8241eacdeb',
+        => '06fa6366568e0a0952b3a8b88fa179da1cf611861bcb13a94f57bc7c983e16fe',
     'public/admin/api/controlled_book_editor_api.php'
-        => '86ac508039fb617d467f22c6b81101475d548740b57d07963a16fe2d137b2df2',
+        => '22e5f6c90f2a63401b15d8f70942fa3ca2954c7767aaaf4d61477bdec0bac1e9',
     'src/publishing/ControlledPublishingBlockService.php'
         => 'd63175aa9e0292b9137f27a38eeb913337e6af8ab5e6086cdf4207385474f265',
     'src/document/StructuredDocumentPayload.php'

@@ -7,6 +7,7 @@ struct ManualPageWebView: UIViewRepresentable {
     var zoomMode: ReaderZoomMode
     var containerSize: CGSize
     var pageSize: CGSize
+    var pageBackground: Color
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -17,8 +18,8 @@ struct ManualPageWebView: UIViewRepresentable {
         config.defaultWebpagePreferences.allowsContentJavaScript = false
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isOpaque = true
-        webView.backgroundColor = .white
-        webView.scrollView.backgroundColor = .white
+        webView.backgroundColor = UIColor(pageBackground)
+        webView.scrollView.backgroundColor = UIColor(pageBackground)
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.minimumZoomScale = 1
@@ -28,6 +29,8 @@ struct ManualPageWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
+        webView.backgroundColor = UIColor(pageBackground)
+        webView.scrollView.backgroundColor = UIColor(pageBackground)
         let fitScale = min(
             containerSize.width / max(pageSize.width, 1),
             containerSize.height / max(pageSize.height, 1)

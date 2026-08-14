@@ -2428,6 +2428,45 @@ ol.cpb-list > li[data-indent-level="8"] {
   letter-spacing: 0.05em;
 }
 
+.cpb-style-copy-section {
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.cpb-style-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cpb-style-copy-select {
+  flex: 1;
+  min-width: 220px;
+  padding: 7px 9px;
+}
+
+.cpb-style-copy-button {
+  border: 1px solid #1e3c72;
+  border-radius: 6px;
+  padding: 7px 14px;
+  color: #fff;
+  background: #1e3c72;
+  cursor: pointer;
+}
+
+.cpb-style-copy-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cpb-style-copy-help {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
 .cpb-style-table {
   width: 100%;
   border-collapse: collapse;

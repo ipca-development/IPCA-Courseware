@@ -12,9 +12,12 @@ struct ReaderView: View {
     @State private var showSettings = false
     @State private var searchQuery = ""
     @State private var controlsHideTask: Task<Void, Never>?
+    @State private var isExiting = false
+    private let onExit: (() -> Void)?
 
-    init(book: LibraryBook) {
+    init(book: LibraryBook, onExit: (() -> Void)? = nil) {
         _viewModel = StateObject(wrappedValue: ReaderViewModel(book: book))
+        self.onExit = onExit
     }
 
     var body: some View {
@@ -50,17 +53,14 @@ struct ReaderView: View {
                 } else {
                     physicalBookReader(size: safeSize)
                         .frame(width: safeSize.width, height: safeSize.height)
-                        .offset(
-                            x: (proxy.safeAreaInsets.leading - proxy.safeAreaInsets.trailing) / 2,
-                            y: (proxy.safeAreaInsets.top - proxy.safeAreaInsets.bottom) / 2
-                        )
                 }
 
                 if showChrome && !viewModel.isLoading {
                     ReaderControlsOverlay(
                         pageDescription: pageDescription,
                         isBookmarked: viewModel.isCurrentPageBookmarked(),
-                        onClose: { dismiss() },
+                        isExiting: isExiting,
+                        onClose: exitReader,
                         onSearch: {
                             showSearch = true
                             scheduleControlsAutoHide()
@@ -125,7 +125,22 @@ struct ReaderView: View {
     }
 
     private var readerBackground: some View {
-        Color.white
+        pageBackgroundColor
+    }
+
+    private var pageBackgroundColor: Color {
+        switch session.settings.theme {
+        case .light:
+            return .white
+        case .sepia:
+            return Color(red: 0.957, green: 0.925, blue: 0.847)
+        case .dark:
+            return Color(red: 0.173, green: 0.173, blue: 0.180)
+        }
+    }
+
+    private var readerColorScheme: ColorScheme {
+        session.settings.theme == .dark ? .dark : .light
     }
 
     private func physicalBookReader(size: CGSize) -> some View {
@@ -147,6 +162,7 @@ struct ReaderView: View {
                     baseURL: baseURL,
                     isLandscape: landscape,
                     pageSize: CGSize(width: pageWidth, height: pageHeight),
+                    pageBackground: pageBackgroundColor,
                     currentIndex: $viewModel.currentIndex,
                     onTap: toggleControls
                 )
@@ -187,12 +203,16 @@ struct ReaderView: View {
         TableOfContentsView(
             nav: viewModel.nav,
             sectionPageIndex: viewModel.sectionPageIndex,
-            currentSectionId: viewModel.currentPage?.sectionId
-        ) { sectionId in
+            referencePageIndex: viewModel.tocReferencePageIndex,
+            currentSectionId: viewModel.currentPage?.sectionId,
+            theme: session.settings.theme
+        ) { node in
             showTOC = false
-            Task { await viewModel.goToSection(sectionId) }
+            Task { await viewModel.goToTOCNode(node) }
         }
         .frame(minWidth: 390, idealWidth: 430, minHeight: 520)
+        .foregroundStyle(.primary)
+        .preferredColorScheme(readerColorScheme)
     }
 
     private var searchPopover: some View {
@@ -206,6 +226,8 @@ struct ReaderView: View {
             Task { await viewModel.goToSection(sectionId) }
         }
         .frame(minWidth: 390, idealWidth: 430, minHeight: 480)
+        .foregroundStyle(.primary)
+        .preferredColorScheme(readerColorScheme)
         .onChange(of: searchQuery) { _, newValue in
             Task { await viewModel.search(query: newValue) }
         }
@@ -216,9 +238,12 @@ struct ReaderView: View {
             Task { await viewModel.reloadCurrentPageStyles() }
         }
         .frame(width: 320)
+        .foregroundStyle(.primary)
+        .preferredColorScheme(readerColorScheme)
     }
 
     private func toggleControls() {
+        guard !isExiting else { return }
         controlsHideTask?.cancel()
         withAnimation(.easeInOut(duration: 0.18)) {
             showChrome.toggle()
@@ -246,6 +271,20 @@ struct ReaderView: View {
         session.saveSettings()
         Task { await viewModel.reloadCurrentPageStyles() }
         scheduleControlsAutoHide()
+    }
+
+    private func exitReader() {
+        guard !isExiting else { return }
+        isExiting = true
+        controlsHideTask?.cancel()
+        showSearch = false
+        showTOC = false
+        showSettings = false
+        if let onExit {
+            onExit()
+        } else {
+            dismiss()
+        }
     }
 }
 
@@ -309,6 +348,7 @@ private struct PaginationDebugOverlay: View {
 private struct ReaderControlsOverlay<SearchContent: View, ContentsContent: View, SettingsContent: View>: View {
     let pageDescription: String
     let isBookmarked: Bool
+    let isExiting: Bool
     let onClose: () -> Void
     let onSearch: () -> Void
     let onContents: () -> Void
@@ -330,6 +370,10 @@ private struct ReaderControlsOverlay<SearchContent: View, ContentsContent: View,
             .frame(width: 42, height: 42)
             .background(IPCAReaderTheme.navy)
             .clipShape(Circle())
+            .contentShape(Circle())
+            .foregroundStyle(.white)
+            .disabled(isExiting)
+            .zIndex(10)
 
             Spacer(minLength: 0)
 
@@ -389,10 +433,10 @@ private struct ReaderControlsOverlay<SearchContent: View, ContentsContent: View,
             .background(IPCAReaderTheme.navy.opacity(0.94))
             .clipShape(Capsule())
             .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+            .foregroundStyle(.white)
 
             Spacer(minLength: 56)
         }
-        .foregroundStyle(.white)
         .font(.body.weight(.semibold))
         .buttonStyle(.plain)
     }
@@ -460,8 +504,10 @@ private struct CompactReaderSettingsView: View {
 struct TableOfContentsView: View {
     let nav: [NavNode]
     let sectionPageIndex: [Int: Int]
+    let referencePageIndex: [String: Int]
     let currentSectionId: Int?
-    let onSelect: (Int) -> Void
+    let theme: ReaderTheme
+    let onSelect: (NavNode) -> Void
 
     var body: some View {
         NavigationStack {
@@ -471,30 +517,36 @@ struct TableOfContentsView: View {
                         Divider()
                     } else {
                         Button {
-                            if let sectionId = row.node.id {
-                                onSelect(sectionId)
-                            }
+                            onSelect(row.node)
                         } label: {
                             HStack {
                                 Text(row.node.title ?? "Section")
                                     .font(row.depth == 0 ? .headline : .body)
-                                    .foregroundStyle(row.node.isNavigable == true ? .primary : .secondary)
+                                    .foregroundStyle(
+                                        row.node.isNavigable == true
+                                            ? primaryTextColor
+                                            : secondaryTextColor
+                                    )
                                     .padding(.leading, CGFloat(row.depth) * 16)
                                 Spacer()
-                                if let sectionId = row.node.id, let page = sectionPageIndex[sectionId] {
+                                if let page = pageNumber(for: row.node) {
                                     Text("\(page)")
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(secondaryTextColor)
                                         .monospacedDigit()
                                 }
                             }
                         }
-                        .disabled(row.node.isNavigable != true || row.node.id == nil)
+                        .disabled(row.node.isNavigable != true || pageNumber(for: row.node) == nil)
+                        .listRowBackground(popoverBackground)
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(popoverBackground)
             .navigationTitle("Contents")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .background(popoverBackground)
     }
 
     private struct TocRow: Identifiable {
@@ -503,12 +555,65 @@ struct TableOfContentsView: View {
         var depth: Int
     }
 
-    private func flatten(_ nodes: [NavNode], depth: Int = 0) -> [TocRow] {
+    private var primaryTextColor: Color {
+        theme == .dark ? .white : .black
+    }
+
+    private var secondaryTextColor: Color {
+        theme == .dark ? Color.white.opacity(0.65) : Color.black.opacity(0.58)
+    }
+
+    private var popoverBackground: Color {
+        theme == .dark
+            ? Color(red: 0.12, green: 0.12, blue: 0.13)
+            : Color(uiColor: .systemBackground)
+    }
+
+    private func pageNumber(for node: NavNode) -> Int? {
+        if let reference = normalizedReference(node.scrollSectionRef),
+           let page = referencePageIndex[reference] {
+            return page
+        }
+        guard let sectionID = node.id, sectionID > 0 else { return nil }
+        return sectionPageIndex[sectionID]
+    }
+
+    private func normalizedReference(_ reference: String?) -> String? {
+        guard let reference else { return nil }
+        let normalized = reference.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func subtitleLevel(_ node: NavNode) -> Int? {
+        guard node.labelStyle == "subtitle",
+              let reference = normalizedReference(node.scrollSectionRef) else {
+            return nil
+        }
+        return max(0, reference.split(separator: ".").count - 1)
+    }
+
+    private func flatten(
+        _ nodes: [NavNode],
+        depth: Int = 0,
+        path: String = "root"
+    ) -> [TocRow] {
         var rows: [TocRow] = []
-        for node in nodes {
-            rows.append(TocRow(id: node.nodeID, node: node, depth: depth))
+        for (index, node) in nodes.enumerated() {
+            let nodePath = "\(path).\(index)"
+            if let level = subtitleLevel(node), level > 2 {
+                continue
+            }
+            if node.isSeparator == true || !(node.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                rows.append(TocRow(id: "\(nodePath)-\(node.nodeID)", node: node, depth: depth))
+            }
             if let children = node.children, !children.isEmpty {
-                rows.append(contentsOf: flatten(children, depth: depth + 1))
+                rows.append(
+                    contentsOf: flatten(
+                        children,
+                        depth: depth + 1,
+                        path: nodePath
+                    )
+                )
             }
         }
         return rows

@@ -6384,6 +6384,17 @@
       + '<p class="cpb-style-lead">Paragraph styles drive the Table of Contents and automatic section numbering '
       + '(Title 1. · Subtitle 1 1.1 · Subtitle 2 1.1.1 · …). '
       + 'Regulatory Reference blocks show an MCCF cross-reference — auto-derived or entered manually in the toolbar.</p>'
+      + (documentType === 'form' ? '' : ''
+        + '<section class="cpb-style-section cpb-style-copy-section">'
+        + '<h4>Copy style from another book</h4>'
+        + '<div class="cpb-style-copy-row">'
+        + '<select class="cpb-style-input cpb-style-copy-select" aria-label="Source book version">'
+        + '<option value="">Loading existing books…</option></select>'
+        + '<button type="button" class="cpb-style-copy-button" disabled>Copy style</button>'
+        + '</div>'
+        + '<p class="cpb-style-copy-help">Copies paragraph, table, callout, header and footer styles only. '
+        + 'Manual content and callout preset text are not copied.</p>'
+        + '</section>')
       + '<section class="cpb-style-section"><h4>Paragraph styles</h4>'
       + '<table class="cpb-style-table"><thead><tr><th>Style</th><th>Font</th><th>Size</th><th>Color</th><th>Format</th><th>Sample</th></tr></thead><tbody>'
       + paragraphRows + '</tbody></table></section>'
@@ -6455,6 +6466,41 @@
     function close() { overlay.remove(); }
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
     overlay.querySelector('.cpb-style-cancel').addEventListener('click', close);
+    var copySelect = overlay.querySelector('.cpb-style-copy-select');
+    var copyButton = overlay.querySelector('.cpb-style-copy-button');
+    if (copySelect && copyButton) {
+      copySelect.addEventListener('change', function () {
+        copyButton.disabled = !parseInt(copySelect.value || '0', 10);
+      });
+      copyButton.addEventListener('click', function () {
+        var sourceVersionId = parseInt(copySelect.value || '0', 10);
+        if (!sourceVersionId) return;
+        var selected = copySelect.options[copySelect.selectedIndex];
+        var sourceLabel = selected ? selected.textContent : 'the selected book';
+        if (!confirm(
+          'Replace this draft\'s book styles, running header and footer with the style from '
+          + sourceLabel + '?\\n\\nManual content will not be copied.'
+        )) return;
+        copyButton.disabled = true;
+        setStatus('Copying book style…', 'saving');
+        apiPost('copy_book_styles', {
+          version_id: state.versionId,
+          source_version_id: sourceVersionId,
+        }).then(function (res) {
+          if (!res.ok) throw new Error(res.error || 'Style copy failed');
+          state.bookStyles = res.book_styles || state.bookStyles;
+          state.pageHeader = state.bookStyles.page_header || state.pageHeader;
+          state.pageFooter = state.bookStyles.page_footer || state.pageFooter;
+          state.calloutPresets = state.bookStyles.callout_presets || state.calloutPresets;
+          close();
+          setStatus('Book style copied from ' + sourceLabel, 'saved');
+          return loadSection(state.sectionId);
+        }).catch(function (err) {
+          copyButton.disabled = false;
+          showError(err);
+        });
+      });
+    }
     overlay.querySelector('.cpb-style-save').addEventListener('click', function () {
       var payload = readStylesFromDialog();
       apiPost('save_book_styles', { version_id: state.versionId, book_styles: payload })
@@ -6476,6 +6522,28 @@
         .catch(showError);
     });
     document.body.appendChild(overlay);
+    if (copySelect && copyButton) {
+      apiGet(apiBase + '?action=list_style_copy_sources&version_id=' + state.versionId)
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.error || 'Could not load existing books');
+          var sources = Array.isArray(res.sources) ? res.sources : [];
+          copySelect.innerHTML = '<option value="">Choose a book and revision…</option>'
+            + sources.map(function (source) {
+              var status = source.lifecycle_status ? ' · ' + source.lifecycle_status : '';
+              var label = (source.book_key || source.book_title || 'Book')
+                + ' — ' + (source.version_label || ('Version ' + source.version_id))
+                + status;
+              return '<option value="' + parseInt(source.version_id, 10) + '">'
+                + escapeHtml(label) + '</option>';
+            }).join('');
+          copyButton.disabled = true;
+        })
+        .catch(function (err) {
+          copySelect.innerHTML = '<option value="">Unable to load existing books</option>';
+          copyButton.disabled = true;
+          showError(err);
+        });
+    }
   }
 
   function syncToc(skipConfirm) {

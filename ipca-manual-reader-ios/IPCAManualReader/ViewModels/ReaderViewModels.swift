@@ -49,6 +49,7 @@ final class ReaderViewModel: ObservableObject {
     @Published var currentIndex = 0
     @Published var nav: [NavNode] = []
     @Published var sectionPageIndex: [Int: Int] = [:]
+    @Published private(set) var tocReferencePageIndex: [String: Int] = [:]
     @Published var isLoading = true
     @Published var errorMessage: String?
     @Published var currentPageHTML: String = ""
@@ -111,6 +112,12 @@ final class ReaderViewModel: ObservableObject {
                     result[id] = pair.value
                 }
             }
+            tocReferencePageIndex = makeTOCReferencePageIndex(
+                package.pages.compactMap { page in
+                    guard let pageNumber = page.pageNumber, let html = page.pageHtml else { return nil }
+                    return (pageNumber, html)
+                }
+            )
             if activeLayout != nil {
                 try await repaginateFromSource(preservingCurrentPosition: false)
             }
@@ -150,6 +157,17 @@ final class ReaderViewModel: ObservableObject {
         guard let pageNumber = sectionPageIndex[sectionId],
               let index = pages.firstIndex(where: { $0.pageNumber == pageNumber }) else { return }
         await goToIndex(index)
+    }
+
+    func goToTOCNode(_ node: NavNode) async {
+        if let reference = node.scrollSectionRef,
+           let pageNumber = tocReferencePageIndex[reference] {
+            await goToPageNumber(pageNumber)
+            return
+        }
+        if let sectionID = node.id {
+            await goToSection(sectionID)
+        }
     }
 
     func nextPage() async {
@@ -373,6 +391,9 @@ final class ReaderViewModel: ObservableObject {
         personalPages = result.personalPages
         pages = result.pages
         personalPageHTMLByNumber = result.pageHTMLByNumber
+        tocReferencePageIndex = makeTOCReferencePageIndex(
+            result.personalPages.map { ($0.pageNumber, $0.pageHTML) }
+        )
         sectionPageIndex = result.sectionPageIndex
         paginationValidation = result.validation
 #if DEBUG
@@ -462,6 +483,30 @@ final class ReaderViewModel: ObservableObject {
         }
         byAnchor = byAnchor.filter { !$0.key.isEmpty && $0.value > 0 }
         return (byAnchor, bySection)
+    }
+
+    private func makeTOCReferencePageIndex(
+        _ pages: [(pageNumber: Int, html: String)]
+    ) -> [String: Int] {
+        let pattern = #"data-section-number\s*=\s*["']([^"']+)["']"#
+        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+            return [:]
+        }
+        var result: [String: Int] = [:]
+        for page in pages.sorted(by: { $0.pageNumber < $1.pageNumber }) {
+            let range = NSRange(page.html.startIndex..<page.html.endIndex, in: page.html)
+            expression.matches(in: page.html, range: range).forEach { match in
+                guard match.numberOfRanges > 1,
+                      let referenceRange = Range(match.range(at: 1), in: page.html) else {
+                    return
+                }
+                let reference = String(page.html[referenceRange])
+                    .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+                guard !reference.isEmpty else { return }
+                result[reference] = result[reference] ?? page.pageNumber
+            }
+        }
+        return result
     }
 
     private func paginationCacheIdentity(

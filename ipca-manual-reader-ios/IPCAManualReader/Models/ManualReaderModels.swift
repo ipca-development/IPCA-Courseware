@@ -201,6 +201,8 @@ struct NavNode: Codable, Identifiable, Hashable {
     var isNavigable: Bool?
     var isGroup: Bool?
     var isSeparator: Bool?
+    var labelStyle: String?
+    var scrollSectionRef: String?
     var children: [NavNode]?
 
     enum CodingKeys: String, CodingKey {
@@ -211,10 +213,15 @@ struct NavNode: Codable, Identifiable, Hashable {
         case isNavigable = "is_navigable"
         case isGroup = "is_group"
         case isSeparator = "is_separator"
+        case labelStyle = "label_style"
+        case scrollSectionRef = "scroll_section_ref"
         case children
     }
 
     var nodeID: String {
+        if let scrollSectionRef, !scrollSectionRef.isEmpty {
+            return "r-\(id ?? 0)-\(scrollSectionRef)"
+        }
         if let id { return "s-\(id)" }
         return "k-\(sectionKey ?? title ?? UUID().uuidString)"
     }
