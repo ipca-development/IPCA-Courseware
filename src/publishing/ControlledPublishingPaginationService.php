@@ -114,6 +114,10 @@ final class ControlledPublishingPaginationService
                 'manual_part' => $flags['manual_part'],
                 'part_title' => $partTitle,
                 'parent_section_id' => $section['parent_section_id'] !== null ? (int)$section['parent_section_id'] : null,
+                'pagination_authority' => (string)($flags['pagination_authority'] ?? 'author'),
+                'is_generated' => !empty($section['is_generated']),
+                'is_system_managed' => !empty($section['is_system_managed']),
+                'allow_author_blocks' => !empty($section['allow_author_blocks']),
                 'flags' => $flags,
                 'header_template' => $headerFooter['header_template'],
                 'footer_template' => $headerFooter['footer_template'],
@@ -252,7 +256,40 @@ final class ControlledPublishingPaginationService
             'is_section_start' => $isPartStart || $isChapterStart || $isCover || $isPart0,
             'force_page_break_before' => $pageBreakBefore,
             'manual_part' => $manualPart,
+            'pagination_authority' => $this->paginationAuthority($section),
+            'is_generated' => !empty($section['is_generated']),
+            'is_system_managed' => !empty($section['is_system_managed']),
+            'allow_author_blocks' => !empty($section['allow_author_blocks']),
         );
+    }
+
+    /**
+     * Generated/system-owned content cannot receive Manual Page Breaks.
+     * Author-editable content stays on manual_segments_v1.
+     *
+     * @param array<string,mixed> $section
+     * @param array<string,mixed> $hints
+     */
+    private function paginationAuthority(array $section, array $hints = array()): string
+    {
+        $declared = strtolower(trim((string)($hints['pagination_authority'] ?? $section['pagination_authority'] ?? '')));
+        if ($declared === 'generated' || $declared === 'author') {
+            return $declared;
+        }
+        if (!empty($hints['is_system_managed'])) {
+            return 'generated';
+        }
+        $key = strtolower(trim((string)($section['section_key'] ?? '')));
+        if (in_array($key, array('toc', 'lep'), true)) {
+            return 'generated';
+        }
+        $allowAuthor = !empty($section['allow_author_blocks']);
+        $systemOwned = !empty($section['is_system_managed']) || !empty($section['is_generated']);
+        if ($systemOwned && !$allowAuthor) {
+            return 'generated';
+        }
+
+        return 'author';
     }
 
     /**
@@ -406,6 +443,7 @@ final class ControlledPublishingPaginationService
                 if (preg_match('/\bdata-block-id="(\d+)"/', $articleHtml, $blockMatch) === 1) {
                     $blockId = (int)$blockMatch[1];
                 }
+                $systemManaged = str_contains($articleHtml, 'data-system-managed="1"');
                 $units[] = array(
                     'unit_key' => $stableAnchor !== '' ? $stableAnchor : 'b' . $sectionId . '_' . $idx,
                     'block_id' => $blockId,
@@ -416,6 +454,11 @@ final class ControlledPublishingPaginationService
                     'atomic' => in_array($type, self::ATOMIC_BLOCK_TYPES, true) || $isHeading,
                     'force_break_before' => false,
                     'is_heading' => $isHeading,
+                    'is_system_managed' => $systemManaged,
+                    'pagination_authority' => $this->paginationAuthority(
+                        $section,
+                        array('is_system_managed' => $systemManaged)
+                    ),
                 );
                 $idx++;
             }
@@ -423,15 +466,17 @@ final class ControlledPublishingPaginationService
             return $units;
         }
 
+        $authority = $this->paginationAuthority($section);
         $units[] = array(
             'unit_key' => 's' . $sectionId . '_0',
             'block_id' => 0,
-            'block_type' => 'shell',
+            'block_type' => $authority === 'generated' ? 'generated' : 'shell',
             'html' => $bodyHtml,
             'splittable' => false,
-            'atomic' => true,
+            'atomic' => $authority !== 'generated',
             'force_break_before' => false,
             'is_heading' => false,
+            'pagination_authority' => $authority,
         );
 
         return $units;
@@ -462,6 +507,7 @@ final class ControlledPublishingPaginationService
             'atomic' => false,
             'force_break_before' => false,
             'is_heading' => false,
+            'pagination_authority' => 'generated',
         ));
     }
 
@@ -488,6 +534,7 @@ final class ControlledPublishingPaginationService
             'atomic' => false,
             'force_break_before' => false,
             'is_heading' => false,
+            'pagination_authority' => 'generated',
         ));
     }
 

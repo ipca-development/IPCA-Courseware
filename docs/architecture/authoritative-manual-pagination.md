@@ -11,10 +11,11 @@ Ordinary page boundaries are author-controlled. The server does not invent ordin
 Each persisted manual-break segment is one intended authoritative page.
 
 - If the segment fits the Book Style body: emit exactly one page.
-- If multiple ordinary blocks exceed the body: return first-class `MANUAL_BREAK_REQUIRED`. Do not persist a partial page map. Do not insert the break.
-- Automatic continuation is allowed only for generated TOC, generated LEP/List of Effective Pages or Parts, long-table row presentation, and a single oversized source block that cannot fit an empty page.
-- TOC, LEP, and long-table continuation pages are scoped to that object. Following ordinary blocks must not flow onto them.
-- Generated LEP remains one logical object: fill the body, continue rows/items in order on the next page, and repeat the controlled header/footer. Do not require or persist Manual Page Breaks inside LEP. Ordinary Part 0 content outside LEP stays author-controlled.
+- If multiple ordinary **author-editable** blocks exceed the body: return first-class `MANUAL_BREAK_REQUIRED`. Do not persist a partial page map. Do not insert the break.
+- `pagination_authority` is `generated` or `author`. It is derived from the publishing model (`is_generated`, `is_system_managed`, `allow_author_blocks`, and per-block `is_system_managed`), not from section titles.
+- Generated/system-owned/non-editable content auto-paginates: fill the body, continue in source order on the next page, repeat the controlled header/footer/page number, and never return `MANUAL_BREAK_REQUIRED`. Continuation pages are not persisted as Manual Page Breaks.
+- `MANUAL_BREAK_REQUIRED` is valid only where the author can insert a Manual Page Break.
+- Long-table row presentation and a single oversized author block that cannot fit an empty page may still continue. Generated and table continuation leftover space must not absorb following author-editable blocks.
 - Every semantic source block appears exactly once, in source order, except presentation-only repeated table headers.
 - Released page maps remain immutable. Draft maps using the previous engine version are stale.
 

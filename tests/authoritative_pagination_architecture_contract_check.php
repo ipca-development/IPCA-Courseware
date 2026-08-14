@@ -78,6 +78,9 @@ $contracts = array(
         'lep-row-',
         'startContinuation(sourceFragment, "lep")',
         'humanTitleForFragment',
+        'pagination_authority',
+        'paginationAuthority',
+        'isGeneratedFragment',
     ),
     'public/admin/api/controlled_book_editor_api.php' => array(
         "case 'split_block_page_break':",
@@ -89,6 +92,8 @@ $contracts = array(
         'real .cpb-toc-row',
         'unitsFromLepBody',
         'real .cpb-lep-part-row',
+        'paginationAuthority',
+        "'pagination_authority' => 'generated'",
         '$this->reader->loadReaderPaginateSource($resolvedVersion)',
         'ControlledPublishingPublicationFilter',
     ),

@@ -53,6 +53,10 @@ const bookStyleCSS = `
   .cpb-lep-table { width: 100%; border-collapse: collapse; }
   .cpb-lep-table th, .cpb-lep-table td { height: 42px; border: 1px solid #333; padding: 6px; }
   .cpb-lep-part-row { min-height: 42px; }
+  .cpb-part0-heading { font-size: 18px; line-height: 1.2; margin: 4px 0; }
+  .cpb-part0-table { width: 100%; border-collapse: collapse; }
+  .cpb-part0-table th, .cpb-part0-table td { height: 42px; border: 1px solid #333; padding: 6px; }
+  .cpb-part0-amend-row { min-height: 42px; }
 `;
 
 function section(id, key, title, flags, units, extra) {
@@ -156,6 +160,7 @@ function lepHtml(rowCount) {
     + '<div class="cpb-lep-heading">PART 0 – Manual Administration</div>'
     + '<div class="cpb-lep-heading">0. OUTLINE</div>'
     + '<div class="cpb-lep-heading">0.1 List of effective Parts</div>'
+    + '<div class="cpb-lep-heading">0.1.1 Effective Parts</div>'
     + '<div class="cpb-lep-cert-wrap"><div class="cpb-lep-cert-text">Certification statement.</div></div>'
     + '<table class="cpb-lep-table cpb-table" data-lep-parts-table="1">'
     + '<thead><tr class="cpb-table-header-row"><th>Part</th><th>Pages</th><th>Date</th><th>Revision</th></tr></thead>'
@@ -170,6 +175,39 @@ function lepSection(id, rowCount) {
 
 function lepRowCoverage(result) {
   return sourceCoverage(result).filter((item) => item.source_fragment_id.includes("/lep-row-"));
+}
+
+function amendmentHtml(rowCount) {
+  const rows = Array.from({ length: rowCount }, (_, index) =>
+    `<tr class="cpb-part0-amend-row" data-part0-row="${index}">`
+      + `<td>Amd ${index + 1}</td><td>2026-01-01</td><td>Change ${index + 1}</td></tr>`
+  ).join("");
+  return '<div class="cpb-part0 cpb-lep">'
+    + '<div class="cpb-part0-heading">0.3 Amendment List</div>'
+    + '<div class="cpb-part0-body">'
+    + '<table class="cpb-table cpb-part0-table" data-part0-table="amendment_list">'
+    + '<thead><tr><th>No</th><th>Date</th><th>Change</th></tr></thead>'
+    + `<tbody>${rows}</tbody></table></div></div>`;
+}
+
+function generatedPart0Section(id, key, title, html) {
+  return section(id, key, title, {
+    is_part0: true,
+    pagination_authority: "generated",
+    is_generated: true,
+    is_system_managed: true,
+    allow_author_blocks: false
+  }, [
+    unit(`${key}-generated`, "generated", html, {
+      block_id: id * 11,
+      pagination_authority: "generated"
+    })
+  ], {
+    pagination_authority: "generated",
+    is_generated: true,
+    is_system_managed: true,
+    allow_author_blocks: false
+  });
 }
 
 const cases = [];
@@ -535,6 +573,102 @@ cases.push(["U. MANUAL_BREAK_REQUIRED title uses a clean heading, not concatenat
   const title = String(result.error.before_block_title || "");
   assert.ok(!/[A-Za-z]0\./.test(title), `concatenated structural title leaked: ${title}`);
   assert.strictEqual(title, "0.1 List of effective Parts");
+}]);
+
+cases.push(["V. generated 0.1.1 Effective Parts spans pages automatically", () => {
+  const { execution, result } = runWorker(sourceWith([lepSection(3, 48)]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.ok(result.pages.length >= 3, "0.1.1 Effective Parts must continue automatically");
+  assert.ok(result.pages[0].page_html.includes("0.1.1 Effective Parts"));
+  assert.ok(result.pages.some((page) => page.page_html.includes("Part 48")));
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["W. no MANUAL_BREAK_REQUIRED for generated Part 0 blocks", () => {
+  const tocRows = Array.from({ length: 72 }, (_, index) =>
+    `<div class="cpb-toc-row" data-stable-anchor="toc-${index + 1}">`
+      + `<span>Section ${index + 1}</span><span>${index + 3}</span></div>`
+  ).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(2, "toc", "Table of Contents", {
+      pagination_authority: "generated",
+      is_generated: true,
+      allow_author_blocks: false
+    }, [
+      unit("toc-2-0", "toc", `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`, {
+        block_id: 20,
+        pagination_authority: "generated"
+      })
+    ], { pagination_authority: "generated" }),
+    lepSection(3, 24),
+    generatedPart0Section(5, "amendment_list", "0.3 Amendment List", amendmentHtml(40))
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  assert.ok(result.pages.length >= 4, "generated Part 0 sequence must auto-paginate");
+  assert.ok(result.pages.some((page) => page.page_html.includes("0.1.1 Effective Parts")));
+  assert.ok(result.pages.some((page) => page.page_html.includes("Amd 40")));
+}]);
+
+cases.push(["X. generated Part 0 continuation pages have header/footer/page number", () => {
+  const { execution, result } = runWorker(sourceWith([
+    generatedPart0Section(5, "amendment_list", "0.3 Amendment List", amendmentHtml(40))
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.ok(result.pages.length >= 2, "generated Part 0 must continue");
+  assert.deepStrictEqual(
+    result.pages.map((page) => page.page_number),
+    result.pages.map((_, index) => index + 1)
+  );
+  result.pages.forEach((page) => {
+    assert.ok(page.page_html.includes("reader-page-header-region"));
+    assert.ok(page.page_html.includes("reader-page-footer-region"));
+    assert.ok(page.page_html.includes("cpb-page-number"));
+  });
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["Y. generated Part 0 items appear exactly once and in order", () => {
+  const rowCount = 40;
+  const { execution, result } = runWorker(sourceWith([
+    generatedPart0Section(5, "amendment_list", "0.3 Amendment List", amendmentHtml(rowCount))
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined, result.error && result.error.message);
+  const rows = sourceCoverage(result).filter((item) => item.source_fragment_id.includes("/generated-row-"));
+  assert.strictEqual(rows.length, rowCount);
+  assert.strictEqual(new Set(rows.map((item) => item.source_fragment_id)).size, rowCount);
+  const ordered = rows.map((item) => item.source_order);
+  const sorted = ordered.slice().sort((a, b) => a - b);
+  assert.deepStrictEqual(ordered, sorted);
+  const html = result.pages.map((page) => page.page_html).join("\n");
+  for (let index = 1; index <= rowCount; index++) {
+    const matches = html.match(new RegExp(`Amd ${index}(?!\\d)`, "g")) || [];
+    assert.strictEqual(matches.length, 1, `generated item Amd ${index} count=${matches.length}`);
+  }
+}]);
+
+cases.push(["Z. following author-editable content returns to manual-break authority", () => {
+  const { execution, result } = runWorker(sourceWith([
+    generatedPart0Section(5, "amendment_list", "0.3 Amendment List", amendmentHtml(40)),
+    section(6, "revision_system", "0.2 Revision System", {
+      is_part0: true,
+      pagination_authority: "author",
+      allow_author_blocks: true
+    }, [
+      unit(
+        "author-after-generated",
+        "paragraph",
+        '<article data-block-id="71" data-stable-anchor="author-after-generated"><p>Author-editable Part 0 copy after generated content.</p></article>',
+        { block_id: 71, pagination_authority: "author" }
+      )
+    ], { pagination_authority: "author", allow_author_blocks: true })
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
+  assert.strictEqual(result.error.before_block_anchor, "author-after-generated");
+  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
 }]);
 
 let failed = 0;
