@@ -66,6 +66,7 @@ function comm_sqlite(): PDO
       app_version TEXT NOT NULL DEFAULT '',
       apns_token TEXT NULL,
       push_authorized INTEGER NULL,
+      apns_environment TEXT NULL,
       last_seen_at_utc TEXT NULL,
       last_sync_at_utc TEXT NULL,
       last_sync_cursor INTEGER NOT NULL DEFAULT 0,
@@ -161,7 +162,8 @@ function comm_sqlite(): PDO
       accepted_at_utc TEXT NULL,
       failed_at_utc TEXT NULL,
       provider_response TEXT NULL,
-      created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (message_id, device_id)
     )");
     $pdo->exec("CREATE TABLE ipca_communication_acknowledgements (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,6 +186,7 @@ function comm_sqlite(): PDO
         'training_enabled' => '0',
         'community_enabled' => '0',
         'community_posting_enabled' => '0',
+        'push_enabled' => '1',
     );
     $insert = $pdo->prepare('INSERT INTO ipca_communication_app_config (config_key, config_value) VALUES (?, ?)');
     foreach ($flags as $key => $value) {
@@ -357,6 +360,64 @@ foreach ($syncC['messages'] as $message) {
 }
 comm_assert('group message reaches members via sync', $groupHit && $group['conversation_type'] === 'group');
 
+$recorder = new CommunicationPushRecordingTransport();
+$kernel->push->useTransport($recorder);
+$tokenB = str_repeat('ab', 32);
+$kernel->auth->upsertDevice((int)$sessionB['user']['id'], array(
+    'device_uuid' => (string)$sessionB['device']['device_uuid'],
+    'platform' => (string)$sessionB['device']['platform'],
+    'model' => (string)($sessionB['device']['model'] ?? 'iPhone'),
+    'os_version' => '17.0',
+    'app_version' => '1.0.0',
+    'apns_token' => $tokenB,
+    'push_authorized' => 1,
+    'apns_environment' => 'sandbox',
+));
+$sessionAPad = comm_session($kernel, $loginAPad);
+$kernel->auth->upsertDevice((int)$sessionAPad['user']['id'], array(
+    'device_uuid' => (string)$sessionAPad['device']['device_uuid'],
+    'platform' => 'ipad',
+    'model' => 'iPad',
+    'os_version' => '17.0',
+    'app_version' => '1.0.0',
+    'apns_token' => str_repeat('cd', 32),
+    'push_authorized' => 1,
+    'apns_environment' => 'sandbox',
+));
+$pushed = $kernel->messages->send($sessionA, $conversationUuid, comm_uuid(), 'push-wake');
+comm_assert('APNs wakes the recipient device only', count($recorder->sent) === 1 && (string)$recorder->sent[0]['device_token'] === $tokenB);
+comm_assert(
+    'push payload is a wake with conversation uuid and badge',
+    (string)($recorder->sent[0]['payload']['conversation_uuid'] ?? '') === $conversationUuid
+    && isset($recorder->sent[0]['payload']['aps']['badge'])
+    && (string)($recorder->sent[0]['payload']['aps']['alert']['body'] ?? '') === 'push-wake'
+);
+$pushRow = $pdo->query('SELECT accepted_at_utc, failed_at_utc FROM ipca_communication_push_attempts ORDER BY id DESC LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+$syncRowCount = (int)$pdo->query(
+    'SELECT COUNT(*) FROM ipca_communication_message_device_syncs ds INNER JOIN ipca_communication_messages m ON m.id = ds.message_id WHERE m.message_uuid = ' . $pdo->quote((string)$pushed['message_uuid'])
+)->fetchColumn();
+comm_assert(
+    'push_accepted is recorded separately from device_synced',
+    is_array($pushRow) && trim((string)($pushRow['accepted_at_utc'] ?? '')) !== '' && $syncRowCount >= 1
+);
+$duplicateClient = (string)$pushed['client_id'];
+$kernel->messages->send($sessionA, $conversationUuid, $duplicateClient, 'push-wake');
+comm_assert('duplicate send does not create a second APNs attempt', count($recorder->sent) === 1);
+
+$key = openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1'));
+$pem = '';
+if (is_object($key) || is_resource($key)) {
+    openssl_pkey_export($key, $pem);
+}
+$jwt = $pem !== '' ? CommunicationApnsClient::jwtFromPem('KEYIDKEYID', 'W9RY547Y4P', $pem, time()) : '';
+$jwtParts = explode('.', $jwt);
+$jwtSig = $jwtParts[2] ?? '';
+$jwtSigBin = base64_decode(strtr($jwtSig, '-_', '+/') . str_repeat('=', (4 - strlen($jwtSig) % 4) % 4));
+comm_assert('APNs JWT is ES256 with a raw P-256 signature', count($jwtParts) === 3 && strlen((string)$jwtSigBin) === 64);
+
+$phase2Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_13_communication_phase2_apns.sql');
+comm_assert('phase 2 SQL is additive for APNs environment', str_contains($phase2Sql, 'apns_environment') && str_contains($phase2Sql, 'push_enabled'));
+
 $pdo->prepare("UPDATE users SET status = 'locked' WHERE id = ?")->execute(array($userA));
 $blocked = false;
 try {
@@ -422,6 +483,9 @@ if ($iosApp === '') {
     comm_assert('iOS upserts synced messages by client_id then message_uuid', str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Persistence/StoreWriter.swift'), 'message(clientID: dto.clientID) ?? message(uuid: dto.messageUUID)'));
     comm_assert('iOS recovers interrupted outbox on launch', str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Sync/OutboxWorker.swift'), 'recoverOutbox'));
     comm_assert('iOS awaits bearer token before post-login API calls', str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/App/AppSession.swift'), 'await api.setToken(response.token)'));
+    comm_assert('iOS registers for APNs after login', str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/App/AppSession.swift'), 'requestPushAuthorization'));
+    comm_assert('iOS Debug entitlements request development APNs', str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/IPCA-Debug.entitlements'), 'aps-environment') && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/IPCA-Debug.entitlements'), 'development'));
+    comm_assert('iOS opens conversations from ipca://c/ deep links', str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Info.plist'), 'ipca') && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/App/AppSession.swift'), 'handleOpenURL'));
 }
 
 if ($failures) {

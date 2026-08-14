@@ -50,31 +50,79 @@ try {
 
     switch ($action) {
         case 'generate':
-            $bookKey = cp_pm_validate_book_key((string)($in['book_key'] ?? $in['book'] ?? ''));
             $versionId = (int)($in['book_version_id'] ?? 0);
+            $bookKey = strtoupper(trim((string)($in['book_key'] ?? $in['book'] ?? '')));
+            $version = null;
             if ($versionId > 0) {
-                $version = $reader->requireReleasedVersionById($versionId);
+                $version = $reader->resolveVersionById($versionId);
+                if ($version === null) {
+                    throw new RuntimeException('Manual version not found.');
+                }
                 $bookKey = strtoupper((string)($version['book_key'] ?? $bookKey));
+            } else {
+                $bookKey = cp_pm_validate_book_key($bookKey);
             }
-            $result = $reader->generateFrozenPageMapDraft($bookKey, $uid);
+            $result = $reader->generateFrozenPageMapDraft($bookKey, $uid, $version);
             cp_pm_json(200, array('ok' => true, 'result' => $result));
 
         case 'preview':
-            $bookKey = cp_pm_validate_book_key((string)($in['book_key'] ?? $in['book'] ?? ''));
             $versionId = (int)($in['book_version_id'] ?? 0);
+            $bookKey = strtoupper(trim((string)($in['book_key'] ?? $in['book'] ?? '')));
+            $version = null;
             if ($versionId > 0) {
-                $version = $reader->requireReleasedVersionById($versionId);
+                $version = $reader->resolveVersionById($versionId);
+                if ($version === null) {
+                    throw new RuntimeException('Manual version not found.');
+                }
                 $bookKey = strtoupper((string)($version['book_key'] ?? $bookKey));
+            } else {
+                $bookKey = cp_pm_validate_book_key($bookKey);
             }
-            $result = $reader->previewFrozenPageMap($bookKey);
+            $result = $reader->previewFrozenPageMap($bookKey, $version);
             cp_pm_json(200, array('ok' => true, 'result' => $result));
 
-        case 'approve':
-            $bookKey = cp_pm_validate_book_key((string)($in['book_key'] ?? $in['book'] ?? ''));
+        case 'stored_preview':
             $versionId = (int)($in['book_version_id'] ?? 0);
+            $version = $reader->resolveVersionById($versionId);
+            if ($version === null) {
+                throw new RuntimeException('Manual version not found.');
+            }
+            $layoutProfile = ControlledPublishingReaderLayoutProfile::profileKey();
+            $approval = $store->getApprovalState($versionId, $layoutProfile);
+            $pages = $store->loadStoredPages($versionId, $layoutProfile);
+            $freshness = $reader->authoritativePageMapFreshness($version);
+            cp_pm_json(200, array(
+                'ok' => true,
+                'result' => array(
+                    'book_version_id' => $versionId,
+                    'book_key' => (string)($version['book_key'] ?? ''),
+                    'version_label' => (string)($version['version_label'] ?? ''),
+                    'lifecycle_status' => (string)($version['lifecycle_status'] ?? ''),
+                    'pagination' => $approval,
+                    'freshness' => $freshness,
+                    'page_count' => count($pages),
+                    'pages' => array_map(static fn(array $page): array => array(
+                        'page_number' => (int)$page['page_number'],
+                        'stable_anchor' => $page['stable_anchor'],
+                        'page_type' => (string)$page['page_type'],
+                        'is_cover' => !empty($page['is_cover']),
+                        'is_section_start' => !empty($page['is_section_start']),
+                        'page_html' => (string)$page['page_html'],
+                        'metadata' => $page['metadata'] ?? array(),
+                    ), $pages),
+                ),
+            ));
+
+        case 'approve':
+            $versionId = (int)($in['book_version_id'] ?? 0);
+            $bookKey = strtoupper(trim((string)($in['book_key'] ?? $in['book'] ?? '')));
             if ($versionId > 0) {
-                $version = $reader->requireReleasedVersionById($versionId);
+                $version = $reader->resolveVersionById($versionId);
+                if ($version === null) {
+                    throw new RuntimeException('Manual version not found.');
+                }
             } else {
+                $bookKey = cp_pm_validate_book_key($bookKey);
                 $version = $reader->requireReleasedVersion($bookKey);
             }
             $versionId = (int)$version['id'];
@@ -88,11 +136,15 @@ try {
             ));
 
         case 'invalidate':
-            $bookKey = cp_pm_validate_book_key((string)($in['book_key'] ?? $in['book'] ?? ''));
             $versionId = (int)($in['book_version_id'] ?? 0);
+            $bookKey = strtoupper(trim((string)($in['book_key'] ?? $in['book'] ?? '')));
             if ($versionId > 0) {
-                $version = $reader->requireReleasedVersionById($versionId);
+                $version = $reader->resolveVersionById($versionId);
+                if ($version === null) {
+                    throw new RuntimeException('Manual version not found.');
+                }
             } else {
+                $bookKey = cp_pm_validate_book_key($bookKey);
                 $version = $reader->requireReleasedVersion($bookKey);
             }
             $versionId = (int)$version['id'];
@@ -105,11 +157,15 @@ try {
             ));
 
         case 'status':
-            $bookKey = cp_pm_validate_book_key((string)($in['book_key'] ?? $in['book'] ?? ''));
             $versionId = (int)($in['book_version_id'] ?? 0);
+            $bookKey = strtoupper(trim((string)($in['book_key'] ?? $in['book'] ?? '')));
             if ($versionId > 0) {
-                $version = $reader->requireReleasedVersionById($versionId);
+                $version = $reader->resolveVersionById($versionId);
+                if ($version === null) {
+                    throw new RuntimeException('Manual version not found.');
+                }
             } else {
+                $bookKey = cp_pm_validate_book_key($bookKey);
                 $version = $reader->requireReleasedVersion($bookKey);
             }
             $versionId = (int)$version['id'];

@@ -17,6 +17,156 @@ struct PaginationSelfTestView: View {
     }
 }
 
+struct RealOMPaginationSelfTestView: View {
+    @StateObject private var runner = RealOMPaginationSelfTestRunner()
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            Text(runner.status)
+                .font(.system(.body, design: .monospaced))
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .task { await runner.run() }
+    }
+}
+
+@MainActor
+private final class RealOMPaginationSelfTestRunner: ObservableObject {
+    @Published var status = "Loading cached OM publication package…"
+    private let engine = HTMLPaginationEngine()
+
+    func run() async {
+        do {
+            let package = try cachedOMPackage()
+            guard let css = package.bookStyleCSS,
+                  let source = package.paginateSourceData,
+                  let publicationLayout = package.publicationLayout,
+                  let layoutHash = package.publicationPackage?.manifest.layoutHash else {
+                throw SelfTestError.failed("Cached OM package is incomplete or unverified.")
+            }
+            let lookups = officialPageLookups(package)
+            var configurations = [
+                ("OM-46-47-landscape", CGSize(width: 1194, height: 834), true),
+                ("OM-48-portrait", CGSize(width: 834, height: 1194), false)
+            ]
+            if ProcessInfo.processInfo.arguments.contains("--landscape-only") {
+                configurations = [configurations[0]]
+            }
+            for (name, viewport, landscape) in configurations {
+                status = "Paginating \(name)…"
+                let layout = PageLayoutConfiguration.make(
+                    viewport: viewport,
+                    isLandscape: landscape,
+                    fontScale: ReaderFontSize.standard.scale,
+                    publicationLayout: publicationLayout,
+                    manifestLayoutHash: layoutHash
+                )
+                let result = try await engine.paginateBySection(
+                    sourceData: source,
+                    bookStyleCSS: css,
+                    readerCSS: "",
+                    layout: layout,
+                    baseURL: URL(fileURLWithPath: NSHomeDirectory()),
+                    officialPageByAnchor: lookups.byAnchor,
+                    officialPageBySection: lookups.bySection,
+                    officialPageTotal: package.pageMap.pageCount ?? package.pageMap.pages.count,
+                    rewriteString: package.rewritePublicationURLs(in:)
+                )
+                guard result.validation.isValid,
+                      result.personalPages.allSatisfy(\.metrics.validationPassed) else {
+                    throw SelfTestError.failed("\(name): final page validation failed.")
+                }
+                let targetPages = result.personalPages.filter { page in
+                    let numbers = page.officialLocations.compactMap(\.officialPageNumber)
+                        + [page.startLocation?.officialLocation.officialPageNumber,
+                           page.endLocation?.officialLocation.officialPageNumber].compactMap { $0 }
+                    return numbers.contains { (46...48).contains($0) }
+                }
+                guard !targetPages.isEmpty else {
+                    throw SelfTestError.failed("\(name): OM pages 46–48 were not mapped.")
+                }
+                targetPages.forEach { page in
+                    let metrics = page.metrics
+                    print(
+                        "OM_GEOMETRY \(name) readerPage=\(page.pageNumber) "
+                            + "official=\(page.startLocation?.officialLocation.officialPageNumber.map(String.init) ?? "-")"
+                            + "...\(page.endLocation?.officialLocation.officialPageNumber.map(String.init) ?? "-") "
+                            + "page=\(metrics.pageWidth)x\(metrics.pageHeight) "
+                            + "scroll=\(metrics.contentScrollWidth)x\(metrics.contentScrollHeight) "
+                            + "client=\(metrics.contentClientWidth)x\(metrics.contentClientHeight) "
+                            + "footerY=\(metrics.footerFrame.y) "
+                            + "maxBlockY=\(metrics.maxBlockY) "
+                            + "validation=PASS"
+                    )
+                }
+            }
+            status = "PASS OM pages 46–48"
+            print("PAGINATION_REAL_OM_TEST_PASS")
+            fflush(stdout)
+            exit(0)
+        } catch {
+            status = "FAIL: \(error.localizedDescription)"
+            print("PAGINATION_REAL_OM_TEST_FAIL \(error.localizedDescription)")
+            fflush(stdout)
+            exit(1)
+        }
+    }
+
+    private func cachedOMPackage() throws -> OfflineManualPackage {
+        let root = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+            .appendingPathComponent("IPCAManualReader", isDirectory: true)
+            .appendingPathComponent("ManualDownloads", isDirectory: true)
+        let urls = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+        for url in urls {
+            let package = try JSONDecoder().decode(
+                OfflineManualPackage.self,
+                from: Data(contentsOf: url)
+            )
+            if package.bookID.uppercased().hasPrefix("OM"),
+               package.paginateSourceData != nil {
+                return package
+            }
+        }
+        throw SelfTestError.failed("No cached OM pagination package was found.")
+    }
+
+    private func officialPageLookups(
+        _ package: OfflineManualPackage
+    ) -> (byAnchor: [String: Int], bySection: [Int: Int]) {
+        var byAnchor: [String: Int] = [:]
+        var bySection: [Int: Int] = [:]
+        package.pageMap.pages.forEach { page in
+            if let sectionID = page.sectionId {
+                bySection[sectionID] = bySection[sectionID] ?? page.pageNumber
+            }
+            if let anchor = page.stableAnchor, !anchor.isEmpty {
+                byAnchor[anchor] = byAnchor[anchor] ?? page.pageNumber
+            }
+        }
+        let pattern = #"data-stable-anchor\s*=\s*["']([^"']+)["']"#
+        if let expression = try? NSRegularExpression(pattern: pattern) {
+            package.pages.forEach { page in
+                guard let html = page.pageHtml, let pageNumber = page.pageNumber else { return }
+                let range = NSRange(html.startIndex..<html.endIndex, in: html)
+                expression.matches(in: html, range: range).forEach { match in
+                    guard match.numberOfRanges > 1,
+                          let anchorRange = Range(match.range(at: 1), in: html) else { return }
+                    byAnchor[String(html[anchorRange])] = pageNumber
+                }
+            }
+        }
+        return (byAnchor, bySection)
+    }
+}
+
 @MainActor
 private final class PaginationSelfTestRunner: ObservableObject {
     @Published var status = "Preparing deterministic pagination fixtures…"
@@ -42,6 +192,7 @@ private final class PaginationSelfTestRunner: ObservableObject {
                     publicationLayout: fixtureLayout,
                     manifestLayoutHash: "self-test-layout"
                 )
+                try assertViewportFit(standardLayout, name: name)
                 let standard = try await paginate(source: source, layout: standardLayout)
                 try assertValid(standard, name: name)
                 standardCounts[name] = standard.personalPages.count
@@ -59,6 +210,7 @@ private final class PaginationSelfTestRunner: ObservableObject {
                     publicationLayout: fixtureLayout,
                     manifestLayoutHash: "self-test-layout"
                 )
+                try assertViewportFit(largeLayout, name: "\(name)-large")
                 let large = try await paginate(source: source, layout: largeLayout)
                 try assertValid(large, name: "\(name)-large")
                 guard large.personalPages.count >= standard.personalPages.count else {
@@ -124,7 +276,7 @@ private final class PaginationSelfTestRunner: ObservableObject {
         }
         guard result.personalPages.allSatisfy({
             $0.pageHTML.contains("reader-canonical-page")
-                && $0.pageHTML.contains("transform: scale(var(--reader-page-scale))")
+                && $0.pageHTML.contains("--reader-page-scale")
         }) else {
             throw SelfTestError.failed("\(name): canonical presentation wrapper is missing.")
         }
@@ -141,8 +293,13 @@ private final class PaginationSelfTestRunner: ObservableObject {
         guard result.personalPages.allSatisfy({
             (0...1).contains($0.metrics.contentUtilization)
                 && (0...1).contains($0.metrics.whitespaceRatio)
+                && $0.metrics.validationPassed
+                && $0.metrics.contentScrollWidth <= $0.metrics.contentClientWidth + 0.5
+                && $0.metrics.contentScrollHeight <= $0.metrics.contentClientHeight + 0.5
+                && $0.metrics.maxBlockY <= $0.metrics.contentClientHeight + 0.5
+                && $0.metrics.offendingBlockID == nil
         }) else {
-            throw SelfTestError.failed("\(name): invalid deterministic page metrics.")
+            throw SelfTestError.failed("\(name): final DOM overflow validation failed.")
         }
         let contentPages = result.personalPages.filter { !$0.isCover }
         guard contentPages.allSatisfy({
@@ -154,6 +311,54 @@ private final class PaginationSelfTestRunner: ObservableObject {
             $0.startLocation?.officialLocation.officialPageNumber == 42
         }) else {
             throw SelfTestError.failed("\(name): official document location was conflated or lost.")
+        }
+        let coverage = contentPages.flatMap(\.coverage).filter { !$0.presentationCopy }
+        let splitIDs = Dictionary(grouping: coverage, by: \.sourceFragmentID)
+        guard (splitIDs["section-test/paragraph-1/root"]?.count ?? 0) > 1 else {
+            throw SelfTestError.failed("\(name): fixture A/F long paragraph did not split.")
+        }
+        let listPages = Set(contentPages.enumerated().compactMap { index, page in
+            page.coverage.contains {
+                $0.sourceFragmentID.hasPrefix("section-test/list-1/")
+                    && !$0.presentationCopy
+            } ? index : nil
+        })
+        guard listPages.count > 1 else {
+            throw SelfTestError.failed("\(name): fixture E long list did not split before footer.")
+        }
+        let tablePages = Set(contentPages.enumerated().compactMap { index, page in
+            page.coverage.contains {
+                $0.sourceFragmentID.hasPrefix("section-test/table-1/")
+                    && !$0.presentationCopy
+            } ? index : nil
+        })
+        guard tablePages.count > 1 else {
+            throw SelfTestError.failed("\(name): fixture C long table did not split before footer.")
+        }
+        guard contentPages.allSatisfy({
+            $0.pageHTML.contains("Copyright IPCA")
+                && $0.metrics.footerFrame.maxY <= $0.metrics.pageHeight + 0.01
+        }) else {
+            throw SelfTestError.failed("\(name): fixture G footer invariant failed.")
+        }
+    }
+
+    private func assertViewportFit(
+        _ layout: PageLayoutConfiguration,
+        name: String
+    ) throws {
+        let availableWidth = layout.viewportWidth
+            - layout.safeAreaInsets.leading
+            - layout.safeAreaInsets.trailing
+        let availableHeight = layout.viewportHeight
+            - layout.safeAreaInsets.top
+            - layout.safeAreaInsets.bottom
+        let spreadWidth = layout.mode == .twoPageSpread
+            ? layout.pageWidth * 2 + layout.gutterWidth
+            : layout.pageWidth
+        guard spreadWidth <= availableWidth + 0.01,
+              layout.pageHeight <= availableHeight + 0.01 else {
+            throw SelfTestError.failed("\(name): page or spread exceeds the safe viewport.")
         }
     }
 
@@ -231,7 +436,7 @@ private final class PaginationSelfTestRunner: ObservableObject {
             [
                 "unit_key": "heading-2",
                 "block_type": "heading",
-                "html": "<article class=\"cpb-block cpb-block--heading\" data-stable-anchor=\"section-test-nested\"><h3>6.1.1 Nested Heading</h3></article>",
+                "html": "<article class=\"cpb-block cpb-block--heading\" data-stable-anchor=\"section-test-nested\"><h3>6.1.1 Narrow-Page Heading With Sufficiently Long Controlled Publication Text To Require Safe Wrapping</h3></article>",
                 "is_heading": true,
                 "atomic": true
             ],

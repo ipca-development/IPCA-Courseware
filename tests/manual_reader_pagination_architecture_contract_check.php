@@ -54,7 +54,10 @@ require_markers(
         'footerFrame',
         'reader-normalizer-v1',
         'semantic-paginator-v2',
-        'pagination-validator-v1',
+        'pagination-validator-v2',
+        'safeAreaInsets',
+        'gutterWidth',
+        'pageScale',
     ),
     $failures
 );
@@ -146,6 +149,9 @@ require_markers(
         'ORPHAN_HEADING',
         'CONTENT_WIDTH_OVERFLOW',
         'CONTENT_HEIGHT_OVERFLOW',
+        'SEMANTIC_BLOCK_OUTSIDE_CONTENT_FRAME',
+        'HEADER_CLIPPED',
+        'FOOTER_CLIPPED',
         'MISSING_HEADER',
         'MISSING_FOOTER',
         'LOW_PAGE_UTILIZATION',

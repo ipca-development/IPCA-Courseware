@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLepService.
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingApprovalService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderPageMapStore.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -140,6 +141,11 @@ $selections = $svc->getVersionSourceSelections($versionId);
 $scaffoldSections = $svc->listVersionScaffoldSections($versionId);
 $allSections = $svc->listVersionSections($versionId);
 $validation = $svc->validateVersionReleaseFoundation($versionId);
+$pageMapStore = new ControlledPublishingReaderPageMapStore($pdo);
+$pageMapApproval = $pageMapStore->getApprovalState(
+    $versionId,
+    ControlledPublishingReaderLayoutProfile::profileKey()
+);
 $canRelease = $svc->canReleaseVersion($versionId);
 $suggestedNextVersion = $svc->suggestNextVersionLabel((string)$version['version_label']);
 $allSourceSets = $svc->listActiveSourceSets();
@@ -166,6 +172,11 @@ compliance_page_open(array(
     'stats' => array(
         array('label' => 'Lifecycle', 'value' => (string)$version['lifecycle_status']),
         array('label' => 'Foundation', 'value' => (string)$validation['status'], 'tone' => $validation['ok'] ? 'ok' : 'warn'),
+        array(
+            'label' => 'Pagination',
+            'value' => (string)($pageMapApproval['status'] ?? 'not generated'),
+            'tone' => ($pageMapApproval['status'] ?? '') === 'approved' ? 'ok' : 'warn',
+        ),
         array('label' => 'Source sets', 'value' => (int)$validation['selected_count']),
         array('label' => 'Sections', 'value' => count($allSections)),
         array('label' => 'Scaffold', 'value' => count($scaffoldSections)),
@@ -175,6 +186,11 @@ compliance_page_open(array(
             'label' => 'Open editor',
             'href' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId,
             'variant' => 'primary',
+        ),
+        array(
+            'label' => 'Page Preview',
+            'href' => '/admin/compliance/controlled_book_page_preview.php?version_id=' . $versionId,
+            'variant' => 'secondary',
         ),
         array(
             'label' => 'Import from Word',

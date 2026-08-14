@@ -19,6 +19,9 @@ require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingAnnexService.php';
 require_once __DIR__ . '/ControlledPublishingReaderTokenResolver.php';
 require_once __DIR__ . '/ControlledPublishingReaderCoverService.php';
+require_once __DIR__ . '/ControlledPublishingBookStyleManifestService.php';
+require_once __DIR__ . '/ControlledPublishingManualPageBreakService.php';
+require_once __DIR__ . '/ControlledPublishingAuthoritativePaginationService.php';
 
 /**
  * Read-only manual e-reader backed by released ipca_publishing_* content only.
@@ -393,19 +396,35 @@ final class ControlledPublishingReaderService
         $needle = mb_strtolower($query);
         $results = array();
 
-        foreach ($this->sections()->listFlatSections($versionId) as $row) {
-            $title = trim((string)($row['title'] ?? ''));
-            if ($title === '') {
+        require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        $pages = $this->pageMapStore()->isApproved($versionId, $profile)
+            ? $this->pageMapStore()->loadStoredPages($versionId, $profile)
+            : $this->getEphemeralPageMapPages($version);
+        foreach ($pages as $page) {
+            $plain = trim(preg_replace(
+                '/\s+/u',
+                ' ',
+                html_entity_decode(
+                    strip_tags((string)($page['page_html'] ?? '')),
+                    ENT_QUOTES | ENT_HTML5,
+                    'UTF-8'
+                )
+            ) ?? '');
+            $position = mb_stripos($plain, $query);
+            if ($position === false) {
                 continue;
             }
-            if (!str_contains(mb_strtolower($title), $needle)) {
-                continue;
-            }
+            $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+            $start = max(0, (int)$position - 55);
+            $excerpt = mb_substr($plain, $start, mb_strlen($query) + 130);
             $results[] = array(
-                'section_id' => (int)($row['id'] ?? 0),
-                'section_title' => $title,
-                'stable_anchor' => (string)($row['stable_anchor'] ?? ''),
-                'section_key' => (string)($row['section_key'] ?? ''),
+                'section_id' => (int)($page['section_id'] ?? 0),
+                'section_title' => (string)($metadata['section_title'] ?? ''),
+                'stable_anchor' => (string)($page['stable_anchor'] ?? ''),
+                'page_number' => (int)($page['page_number'] ?? 0),
+                'excerpt' => ($start > 0 ? '…' : '') . $excerpt
+                    . (($start + mb_strlen($excerpt)) < mb_strlen($plain) ? '…' : ''),
             );
             if (count($results) >= $limit) {
                 break;
@@ -1062,6 +1081,120 @@ final class ControlledPublishingReaderService
         return $source;
     }
 
+    /**
+     * Shared publication contract used by authoritative pagination and readers.
+     *
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $paginateSource
+     * @return array<string,mixed>
+     */
+    public function paginationPublicationPackage(array $version, array $paginateSource): array
+    {
+        return (new ControlledPublishingBookStyleManifestService($this->pdo))
+            ->buildPublicationPackage($version, $paginateSource);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $sections
+     * @return list<array<string,mixed>>
+     */
+    public function paginationApplyManualPageBreaks(int $versionId, array $sections): array
+    {
+        return (new ControlledPublishingManualPageBreakService($this->pdo))
+            ->applyToSections($versionId, $sections);
+    }
+
+    /**
+     * @return array{count:int,hash:string,anchors:list<string>}
+     */
+    public function paginationManualPageBreakIdentity(int $versionId): array
+    {
+        return (new ControlledPublishingManualPageBreakService($this->pdo))->identity($versionId);
+    }
+
+    /**
+     * Blocks release unless the approved map was generated from the current
+     * content, style, layout, manual-break set, and validated page payload.
+     *
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    public function assertAuthoritativePageMapReadyForRelease(array $version): array
+    {
+        $versionId = (int)($version['id'] ?? 0);
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        $store = $this->pageMapStore();
+        $approval = $store->getApprovalState($versionId, $profile);
+        if (($approval['status'] ?? '') !== 'approved') {
+            throw new RuntimeException(
+                'Release blocked: generate, validate, and approve Page Preview pagination first.'
+            );
+        }
+        $generation = is_array($approval['generation'] ?? null)
+            ? $approval['generation']
+            : array();
+        $source = $this->loadReaderPaginateSource($version);
+        $expected = (new ControlledPublishingAuthoritativePaginationService($this))
+            ->fingerprint($source, $version);
+        foreach ($expected as $key => $value) {
+            if ($value === '' || !hash_equals((string)($generation[$key] ?? ''), $value)) {
+                throw new RuntimeException(
+                    'Release blocked: Page Preview pagination is stale (' . $key . '). Regenerate and approve it.'
+                );
+            }
+        }
+        $validation = is_array($generation['validation'] ?? null)
+            ? $generation['validation']
+            : array();
+        if (empty($validation['is_valid'])) {
+            throw new RuntimeException('Release blocked: authoritative page validation did not pass.');
+        }
+        $pages = $store->loadStoredPages($versionId, $profile);
+        if ($pages === array() || count($pages) !== (int)($generation['page_count'] ?? 0)) {
+            throw new RuntimeException('Release blocked: frozen page payload is incomplete.');
+        }
+        $actualPageMapHash = hash(
+            'sha256',
+            implode("\n", array_map(
+                static fn(array $page): string => (string)$page['page_html'],
+                $pages
+            ))
+        );
+        if (!hash_equals((string)($generation['page_map_hash'] ?? ''), $actualPageMapHash)) {
+            throw new RuntimeException('Release blocked: frozen page payload hash does not match approval.');
+        }
+
+        return $generation;
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @return array{is_current:bool,mismatches:list<string>}
+     */
+    public function authoritativePageMapFreshness(array $version): array
+    {
+        $versionId = (int)($version['id'] ?? 0);
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        $approval = $this->pageMapStore()->getApprovalState($versionId, $profile);
+        $generation = is_array($approval['generation'] ?? null)
+            ? $approval['generation']
+            : array();
+        if ($generation === array()) {
+            return array('is_current' => false, 'mismatches' => array('not_generated'));
+        }
+        $source = $this->loadReaderPaginateSource($version);
+        $expected = (new ControlledPublishingAuthoritativePaginationService($this))
+            ->fingerprint($source, $version);
+        $mismatches = array();
+        foreach ($expected as $key => $value) {
+            if ($value === '' || !hash_equals((string)($generation[$key] ?? ''), $value)) {
+                $mismatches[] = $key;
+            }
+        }
+
+        return array('is_current' => $mismatches === array(), 'mismatches' => $mismatches);
+    }
+
     public function pageMapStore(): ControlledPublishingReaderPageMapStore
     {
         require_once __DIR__ . '/ControlledPublishingReaderPageMapStore.php';
@@ -1106,7 +1239,9 @@ final class ControlledPublishingReaderService
         $lifecycle = (string)($version['lifecycle_status'] ?? '');
         $isPreview = $lifecycle !== 'released';
 
-        if (!$isPreview && $this->pageMapStore()->isApproved($versionId, $profile)) {
+        $hasStoredMap = $this->pageMapStore()->pageCount($versionId, $profile) > 0
+            && ($isPreview || $this->pageMapStore()->isApproved($versionId, $profile));
+        if ($hasStoredMap) {
             $summary = $this->pageMapStore()->loadPageMapSummary($versionId, $profile);
 
             return array_merge($summary, array(
@@ -1154,7 +1289,9 @@ final class ControlledPublishingReaderService
             throw new RuntimeException('page_number required.');
         }
 
-        if (!$isPreview && $this->pageMapStore()->isApproved($versionId, $profile)) {
+        $hasStoredMap = $this->pageMapStore()->pageCount($versionId, $profile) > 0
+            && ($isPreview || $this->pageMapStore()->isApproved($versionId, $profile));
+        if ($hasStoredMap) {
             $page = $this->pageMapStore()->loadPage($versionId, $profile, $pageNumber);
             if ($page === null) {
                 throw new RuntimeException('Page not found.');
@@ -1201,7 +1338,9 @@ final class ControlledPublishingReaderService
         $lifecycle = (string)($version['lifecycle_status'] ?? '');
         $isPreview = $lifecycle !== 'released';
 
-        if (!$isPreview && $this->pageMapStore()->isApproved($versionId, $profile)) {
+        $hasStoredMap = $this->pageMapStore()->pageCount($versionId, $profile) > 0
+            && ($isPreview || $this->pageMapStore()->isApproved($versionId, $profile));
+        if ($hasStoredMap) {
             $sectionPages = $this->pageMapStore()->sectionPageIndex($versionId, $profile);
             $nav = $this->buildReaderNavTree($bookKey, $version);
             $this->annotateNavWithPageNumbers($nav, $sectionPages);
@@ -1292,12 +1431,22 @@ final class ControlledPublishingReaderService
                 'thumbnail_html' => $page['thumbnail_html'] ?? null,
             );
         }
+        $firstMetadata = is_array($pages[0]['metadata'] ?? null) ? $pages[0]['metadata'] : array();
+        $generation = is_array($firstMetadata['publication_generation'] ?? null)
+            ? $firstMetadata['publication_generation']
+            : array();
 
         return array(
             'layout_profile' => ControlledPublishingReaderLayoutProfile::profileKey(),
             'layout_hash' => ControlledPublishingReaderLayoutProfile::layoutHash(),
             'layout' => ControlledPublishingReaderLayoutProfile::spec(),
             'page_count' => count($summaryPages),
+            'page_map_hash' => (string)($generation['page_map_hash'] ?? ''),
+            'source_hash' => (string)($generation['source_hash'] ?? ''),
+            'style_hash' => (string)($generation['style_hash'] ?? ''),
+            'manual_page_break_hash' => (string)($generation['manual_page_break_hash'] ?? ''),
+            'header_footer_hash' => (string)($generation['header_footer_hash'] ?? ''),
+            'manifest_hash' => (string)($generation['manifest_hash'] ?? ''),
             'approval' => null,
             'pages' => $summaryPages,
         );
@@ -1338,14 +1487,21 @@ final class ControlledPublishingReaderService
      *
      * @return array<string,mixed>
      */
-    public function generateFrozenPageMapDraft(string $bookKey, int $generatedByUserId): array
+    public function generateFrozenPageMapDraft(
+        string $bookKey,
+        int $generatedByUserId,
+        ?array $version = null
+    ): array
     {
         require_once __DIR__ . '/ControlledPublishingPaginationService.php';
         require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
 
-        $version = $this->requireReleasedVersion($bookKey);
+        $version = $version ?? $this->requireReleasedVersion($bookKey);
+        if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+            throw new RuntimeException('Released authoritative pagination is immutable.');
+        }
         $pagination = new ControlledPublishingPaginationService($this);
-        $pages = $pagination->generateFrozenPageMap($bookKey);
+        $pages = $pagination->generateFrozenPageMap($bookKey, $version);
         $profile = ControlledPublishingReaderLayoutProfile::profileKey();
         $hash = ControlledPublishingReaderLayoutProfile::layoutHash();
         $count = $this->pageMapStore()->replaceDraftPages(
@@ -1353,7 +1509,8 @@ final class ControlledPublishingReaderService
             $profile,
             $hash,
             $pages,
-            $generatedByUserId
+            $generatedByUserId,
+            $pagination->lastGeneration()
         );
 
         return array(
@@ -1372,13 +1529,14 @@ final class ControlledPublishingReaderService
      *
      * @return array<string,mixed>
      */
-    public function previewFrozenPageMap(string $bookKey): array
+    public function previewFrozenPageMap(string $bookKey, ?array $version = null): array
     {
         require_once __DIR__ . '/ControlledPublishingPaginationService.php';
         require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
 
-        $version = $this->requireReleasedVersion($bookKey);
-        $pages = (new ControlledPublishingPaginationService($this))->generateFrozenPageMap($bookKey);
+        $version = $version ?? $this->requireReleasedVersion($bookKey);
+        $pagination = new ControlledPublishingPaginationService($this);
+        $pages = $pagination->generateFrozenPageMap($bookKey, $version);
 
         return array(
             'book_key' => $bookKey,
@@ -1386,6 +1544,7 @@ final class ControlledPublishingReaderService
             'layout_profile' => ControlledPublishingReaderLayoutProfile::profileKey(),
             'layout_hash' => ControlledPublishingReaderLayoutProfile::layoutHash(),
             'page_count' => count($pages),
+            'generation' => $pagination->lastGeneration(),
             'pages' => array_map(static function (array $p): array {
                 return array(
                     'page_number' => (int)$p['page_number'],
@@ -1394,6 +1553,7 @@ final class ControlledPublishingReaderService
                     'is_cover' => !empty($p['is_cover']),
                     'section_title' => is_array($p['metadata'] ?? null)
                         ? (string)($p['metadata']['section_title'] ?? '') : '',
+                    'page_html' => (string)($p['page_html'] ?? ''),
                 );
             }, $pages),
         );

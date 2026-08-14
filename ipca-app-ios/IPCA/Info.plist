@@ -50,5 +50,22 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>IPCA uses the local network only when connecting to a development or staging Courseware server.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>training.ipca.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ipca</string>
+			</array>
+		</dict>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

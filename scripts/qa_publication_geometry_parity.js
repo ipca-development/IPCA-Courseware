@@ -139,18 +139,31 @@ async function paginate(browser, fixture, core, readerCSS) {
       + '<body><div id="pagination-measure-host"></div></body></html>',
     { waitUntil: "domcontentloaded" }
   );
+  const canonicalLayout = {
+    ...fixture.layout,
+    viewportWidth: 816,
+    viewportHeight: 1056,
+    safeAreaInsets: { top: 0, leading: 0, bottom: 0, trailing: 0 },
+    canonicalPageWidth: fixture.layout.canonicalPageWidth || 816,
+    canonicalPageHeight: fixture.layout.canonicalPageHeight || 1056,
+    gutterWidth: 0,
+    pageScale: 1
+  };
   await page.evaluate(({ source, layout }) => {
     window.IPCAPaginationInput = { source, layout };
     window.__paginationResult = new Promise((resolve) => {
       window.webkit = { messageHandlers: { pagination: { postMessage: resolve } } };
     });
-  }, { source: fixture.source, layout: fixture.layout });
+  }, { source: fixture.source, layout: canonicalLayout });
   await page.addScriptTag({ content: core });
   const result = await page.evaluate(() => window.__paginationResult);
   await page.close();
   if (result.error || result.validation?.is_valid !== true) {
     const failures = (result.validation?.diagnostics || []).filter((item) => item.severity === "failure");
-    throw new Error(`ReaderPaginationCore failed: ${result.error || JSON.stringify(failures, null, 2)}`);
+    throw new Error(
+      `ReaderPaginationCore failed: ${result.error || "validation failed"}`
+      + `\n${JSON.stringify(failures, null, 2)}`
+    );
   }
   if (result.pages.length !== 1) {
     throw new Error(`Representative fixture must produce exactly one canonical page; got ${result.pages.length}.`);

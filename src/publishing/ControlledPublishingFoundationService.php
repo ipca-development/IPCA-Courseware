@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ControlledPublishingReaderService.php';
+
 /**
  * Controlled Publishing foundation: book registry, Statement of Compliance Source
  * selection, and immutable source baseline freeze.
@@ -364,15 +366,34 @@ final class ControlledPublishingFoundationService
 
     public function canReleaseVersion(int $versionId): bool
     {
-        return $this->validateVersionReleaseFoundation($versionId)['ok'];
+        if (!$this->validateVersionReleaseFoundation($versionId)['ok']) {
+            return false;
+        }
+        $version = $this->getVersion($versionId);
+        if ($version === null) {
+            return false;
+        }
+        try {
+            (new ControlledPublishingReaderService($this->pdo))
+                ->assertAuthoritativePageMapReadyForRelease($version);
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     public function releaseVersion(int $versionId, ?int $actorUserId = null): void
     {
-        if (!$this->canReleaseVersion($versionId)) {
-            $validation = $this->validateVersionReleaseFoundation($versionId);
+        $validation = $this->validateVersionReleaseFoundation($versionId);
+        if (!$validation['ok']) {
             throw new RuntimeException('Cannot release version: ' . (string)($validation['status'] ?? 'not_ready'));
         }
+        $version = $this->getVersion($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Book version not found.');
+        }
+        (new ControlledPublishingReaderService($this->pdo))
+            ->assertAuthoritativePageMapReadyForRelease($version);
 
         $stmt = $this->pdo->prepare("
             UPDATE ipca_publishing_book_versions
@@ -428,6 +449,10 @@ final class ControlledPublishingFoundationService
         if ($stmt->rowCount() === 0) {
             throw new RuntimeException('Version could not be reopened to draft.');
         }
+        (new ControlledPublishingReaderPageMapStore($this->pdo))->invalidate(
+            $versionId,
+            ControlledPublishingReaderLayoutProfile::profileKey()
+        );
     }
 
     /**

@@ -8,7 +8,8 @@
 
   const NORMALIZER_VERSION = "reader-normalizer-v1";
   const ENGINE_VERSION = "semantic-paginator-v2";
-  const VALIDATOR_VERSION = "pagination-validator-v1";
+  const VALIDATOR_VERSION = "pagination-validator-v2";
+  const VALIDATION_TOLERANCE = 0.75;
   const source = input.source;
   const layout = input.layout;
   const officialPageByAnchor = input.officialPageByAnchor || {};
@@ -532,7 +533,7 @@
   }
 
   function pageScale() {
-    return layout.pageWidth / layout.canonicalPageWidth;
+    return Number(layout.pageScale);
   }
 
   function canonicalRect(rect) {
@@ -557,7 +558,7 @@
   function pieceMarkup(value) {
     const root = rootFromHTML(value.html).cloneNode(true);
     if (!root || root.nodeType !== Node.ELEMENT_NODE) {
-      return `<div class="reader-semantic-piece" `
+      return `<div class="reader-semantic-piece" style="align-self:start" `
         + `data-source-fragment-id="${escapeHTML(value.fragment.id)}" `
         + `data-source-order="${value.fragment.sourceOrder}" `
         + `data-source-range-start="${value.rangeStart}" `
@@ -566,6 +567,7 @@
         + `data-semantic-type="${escapeHTML(value.fragment.type)}">${value.html}</div>`;
     }
     root.classList.add("reader-semantic-piece");
+    root.style.setProperty("align-self", "start");
     annotateCoverage(root, value);
     root.setAttribute("data-semantic-type", value.fragment.type);
     return root.outerHTML;
@@ -626,6 +628,7 @@
     }
     const renderedRoot = rootFromHTML(renderedTable).cloneNode(true);
     renderedRoot.classList.add("reader-semantic-piece", "reader-table-group");
+    renderedRoot.style.setProperty("align-self", "start");
     renderedRoot.setAttribute("data-semantic-type", "table");
     return renderedRoot.outerHTML;
   }
@@ -684,6 +687,21 @@
     const root = rootFromHTML(value.html);
     const sheet = root.matches(".cpb-sheet") ? root : root.querySelector(".cpb-sheet");
     if (!sheet) return pieceMarkup(value);
+    const renderedSheet = sheet.cloneNode(true);
+    renderedSheet.style.setProperty("box-sizing", "border-box", "important");
+    renderedSheet.style.setProperty("width", `${layout.canonicalPageWidth}px`, "important");
+    renderedSheet.style.setProperty("height", `${layout.canonicalPageHeight}px`, "important");
+    renderedSheet.style.setProperty("min-height", `${layout.canonicalPageHeight}px`, "important");
+    renderedSheet.style.setProperty("max-width", "none", "important");
+    renderedSheet.style.setProperty("margin", "0", "important");
+    renderedSheet.style.setProperty(
+      "padding",
+      `${layout.topMargin / pageScale()}px ${layout.innerMargin / pageScale()}px `
+        + `${layout.bottomMargin / pageScale()}px`,
+      "important"
+    );
+    renderedSheet.style.setProperty("transform", "none", "important");
+    renderedSheet.style.setProperty("zoom", "1", "important");
     return `<div class="reader-semantic-piece reader-cover-scale" `
       + `data-source-fragment-id="${escapeHTML(value.fragment.id)}" `
       + `data-source-order="${value.fragment.sourceOrder}" `
@@ -691,7 +709,7 @@
       + `data-source-range-end="${value.rangeEnd}" `
       + `data-presentation-copy="0" data-semantic-type="cover" `
       + `style="position:absolute;inset:0;width:${layout.canonicalPageWidth}px;`
-      + `height:${layout.canonicalPageHeight}px">${value.html}</div>`;
+      + `height:${layout.canonicalPageHeight}px">${renderedSheet.outerHTML}</div>`;
   }
 
   function buildPageElement(page, pageNumber, total) {
@@ -755,6 +773,8 @@
     host.replaceChildren(element);
     const body = element.querySelector(".reader-page-body");
     const pageRect = element.getBoundingClientRect();
+    const header = element.querySelector(".reader-page-header-region");
+    const footer = element.querySelector(".reader-page-footer-region");
     const relativeRect = (node) => {
       if (!node) return null;
       const rect = node.getBoundingClientRect();
@@ -768,22 +788,115 @@
     const scale = pageScale();
     const horizontalOverflow = (body.scrollWidth - body.clientWidth) * scale;
     const verticalOverflow = (body.scrollHeight - body.clientHeight) * scale;
+    const bodyRect = body.getBoundingClientRect();
+    const blocks = Array.from(body.querySelectorAll(":scope > .reader-semantic-piece"));
+    const blockBounds = blocks.map((block) => {
+      const rect = block.getBoundingClientRect();
+      const identified = block.hasAttribute("data-source-fragment-id")
+        ? block
+        : block.querySelector("[data-source-fragment-id]");
+      return {
+        id: identified?.getAttribute("data-source-fragment-id") || null,
+        left: rect.left - bodyRect.left,
+        top: rect.top - bodyRect.top,
+        right: rect.right - bodyRect.left,
+        bottom: rect.bottom - bodyRect.top
+      };
+    });
+    const tolerance = VALIDATION_TOLERANCE;
+    const offendingBlock = blockBounds.find((block) =>
+      block.left < -tolerance
+      || block.top < -tolerance
+      || block.right > bodyRect.width + tolerance
+      || block.bottom > bodyRect.height + tolerance
+    ) || null;
+    const overflowingDescendant = Array.from(body.querySelectorAll("*")).map((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        tag: node.tagName.toLowerCase(),
+        className: String(node.className || ""),
+        left: rect.left - bodyRect.left,
+        right: rect.right - bodyRect.left,
+        top: rect.top - bodyRect.top,
+        bottom: rect.bottom - bodyRect.top
+      };
+    }).find((rect) =>
+      rect.left < -tolerance
+      || rect.right > bodyRect.width + tolerance
+      || rect.top < -tolerance
+      || rect.bottom > bodyRect.height + tolerance
+    ) || null;
+    const regionOverflow = (region) => {
+      if (!region) return { horizontal: 0, vertical: 0 };
+      const bounds = region.getBoundingClientRect();
+      const descendants = Array.from(region.querySelectorAll("*"));
+      const overflow = descendants.reduce((maximum, node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          horizontal: Math.max(
+            maximum.horizontal,
+            bounds.left - rect.left,
+            rect.right - bounds.right
+          ),
+          vertical: Math.max(
+            maximum.vertical,
+            bounds.top - rect.top,
+            rect.bottom - bounds.bottom
+          )
+        };
+      }, { horizontal: 0, vertical: 0 });
+      return {
+        horizontal: Math.max(0, overflow.horizontal) * scale,
+        vertical: Math.max(0, overflow.vertical) * scale
+      };
+    };
+    const headerOverflow = regionOverflow(header);
+    const footerOverflow = regionOverflow(footer);
+    const headerRect = relativeRect(header);
+    const footerRect = relativeRect(footer);
+    const bodyRelativeRect = relativeRect(body);
+    const rectInsidePage = (rect) => Boolean(rect)
+      && rect.x >= -tolerance
+      && rect.y >= -tolerance
+      && rect.x + rect.width <= layout.pageWidth + tolerance
+      && rect.y + rect.height <= layout.pageHeight + tolerance;
+    const requiresHeaderFooter = !page.isCover
+      && Boolean(page.section && page.section.show_header_footer);
+    const hardFailure = horizontalOverflow > tolerance
+      || verticalOverflow > tolerance
+      || (requiresHeaderFooter && headerOverflow.horizontal > tolerance)
+      || (requiresHeaderFooter && headerOverflow.vertical > tolerance)
+      || (requiresHeaderFooter && footerOverflow.horizontal > tolerance)
+      || (requiresHeaderFooter && footerOverflow.vertical > tolerance)
+      || (requiresHeaderFooter && !rectInsidePage(headerRect))
+      || !rectInsidePage(bodyRelativeRect)
+      || (requiresHeaderFooter && !rectInsidePage(footerRect))
+      || Boolean(offendingBlock);
     return {
-      fits: horizontalOverflow <= 0.75 && verticalOverflow <= 0.75,
+      fits: !hardFailure,
       horizontalOverflow,
       verticalOverflow,
-      bodyHeight: body.scrollHeight * scale,
+      scrollWidth: body.scrollWidth * scale,
+      clientWidth: body.clientWidth * scale,
+      scrollHeight: body.scrollHeight * scale,
       clientHeight: body.clientHeight * scale,
+      bodyHeight: body.scrollHeight * scale,
+      maxBlockY: blockBounds.reduce((maximum, block) => Math.max(maximum, block.bottom), 0),
+      offendingBlockID: offendingBlock?.id || null,
+      overflowingDescendant,
+      headerOverflow,
+      footerOverflow,
       imageRect: relativeRect(body.querySelector("img")),
       figureRect: relativeRect(body.querySelector("figure")),
-      headerRect: relativeRect(element.querySelector(".reader-page-header-region")),
-      bodyRect: relativeRect(body),
-      footerRect: relativeRect(element.querySelector(".reader-page-footer-region"))
+      headerRect,
+      bodyRect: bodyRelativeRect,
+      footerRect
     };
   }
 
   function validateLayoutContract() {
     const scale = pageScale();
+    const derivedScale = layout.pageWidth / layout.canonicalPageWidth;
     if (
       !Number.isFinite(scale)
       || scale <= 0
@@ -791,6 +904,21 @@
       || layout.canonicalPageHeight <= 0
     ) {
       throw new Error("Canonical page dimensions or presentation scale are invalid.");
+    }
+    if (Math.abs(scale - derivedScale) > 0.0001) {
+      throw new Error("Serialized pageScale does not match the authoritative page width.");
+    }
+    const expectedSpreadWidth = layout.mode === "twoPageSpread"
+      ? (layout.pageWidth * 2) + layout.gutterWidth
+      : layout.pageWidth;
+    const availableWidth = layout.viewportWidth
+      - layout.safeAreaInsets.leading
+      - layout.safeAreaInsets.trailing;
+    const availableHeight = layout.viewportHeight
+      - layout.safeAreaInsets.top
+      - layout.safeAreaInsets.bottom;
+    if (expectedSpreadWidth > availableWidth + 0.01 || layout.pageHeight > availableHeight + 0.01) {
+      throw new Error("Page or spread lies outside the safe reader viewport.");
     }
     const frames = [layout.headerFrame, layout.contentFrame, layout.footerFrame];
     const valid = frames.every((frame) => frame
@@ -1098,7 +1226,12 @@
         `Atomic fragment ${sourceFragment.id} exceeds a fresh content frame `
           + `(${failedMeasurement.bodyHeight.toFixed(2)}px > `
           + `${failedMeasurement.clientHeight.toFixed(2)}px; `
-          + `horizontal overflow ${failedMeasurement.horizontalOverflow.toFixed(2)}px).`
+          + `horizontal overflow ${failedMeasurement.horizontalOverflow.toFixed(2)}px; `
+          + `scroll ${failedMeasurement.scrollWidth.toFixed(2)}x`
+          + `${failedMeasurement.scrollHeight.toFixed(2)}; `
+          + `max block y ${failedMeasurement.maxBlockY.toFixed(2)}; `
+          + `header overflow ${JSON.stringify(failedMeasurement.headerOverflow)}; `
+          + `footer overflow ${JSON.stringify(failedMeasurement.footerOverflow)}).`
           + mediaDetail,
         sourceFragment,
         pages.length + 1
@@ -1136,21 +1269,34 @@
         priorMetrics ? priorMetrics.content_utilization : null
       );
       page.metrics = metrics;
-      if (measurement.horizontalOverflow > 0.75) {
+      if (measurement.horizontalOverflow > VALIDATION_TOLERANCE) {
         diagnostic(
           "CONTENT_WIDTH_OVERFLOW",
           "failure",
-          `Body exceeds contentFrame width by ${measurement.horizontalOverflow.toFixed(2)}px.`,
+          `Body exceeds contentFrame width by ${measurement.horizontalOverflow.toFixed(2)}px. `
+            + `First crossing descendant: ${JSON.stringify(measurement.overflowingDescendant)}.`,
           page.pieces[page.pieces.length - 1].fragment,
           pageNumber
         );
       }
-      if (measurement.verticalOverflow > 0.75) {
+      if (measurement.verticalOverflow > VALIDATION_TOLERANCE) {
         diagnostic(
           "CONTENT_HEIGHT_OVERFLOW",
           "failure",
           `Body exceeds contentFrame height by ${measurement.verticalOverflow.toFixed(2)}px.`,
           page.pieces[page.pieces.length - 1].fragment,
+          pageNumber
+        );
+      }
+      if (measurement.offendingBlockID) {
+        const offending = page.pieces.find(
+          (value) => value.fragment.id === measurement.offendingBlockID
+        );
+        diagnostic(
+          "SEMANTIC_BLOCK_OUTSIDE_CONTENT_FRAME",
+          "failure",
+          `Semantic block ${measurement.offendingBlockID} crosses the body frame.`,
+          offending?.fragment || null,
           pageNumber
         );
       }
@@ -1176,6 +1322,18 @@
         }
         if (!rectMatches(measurement.footerRect, layout.footerFrame)) {
           diagnostic("FOOTER_MISALIGNED", "failure", "Footer region does not match footerFrame.", null, pageNumber);
+        }
+        if (
+          measurement.headerOverflow.horizontal > VALIDATION_TOLERANCE
+          || measurement.headerOverflow.vertical > VALIDATION_TOLERANCE
+        ) {
+          diagnostic("HEADER_CLIPPED", "failure", "Controlled header content exceeds its reserved frame.", null, pageNumber);
+        }
+        if (
+          measurement.footerOverflow.horizontal > VALIDATION_TOLERANCE
+          || measurement.footerOverflow.vertical > VALIDATION_TOLERANCE
+        ) {
+          diagnostic("FOOTER_CLIPPED", "failure", "Controlled footer content exceeds its reserved frame.", null, pageNumber);
         }
       }
       if (!page.isCover && !rectMatches(measurement.bodyRect, layout.contentFrame)) {
@@ -1332,6 +1490,8 @@
   function metricsForPage(page, pageNumber, total, priorPageUtilization = null) {
     const element = buildPageElement(page, pageNumber, total);
     host.replaceChildren(element);
+    const measurement = measurePage(page);
+    host.replaceChildren(element);
     const body = element.querySelector(".reader-page-body");
     const bodyRect = body.getBoundingClientRect();
     const blocks = Array.from(body.querySelectorAll(":scope > .reader-semantic-piece"));
@@ -1373,6 +1533,19 @@
       prior_page_near_capacity: priorPageUtilization != null && priorPageUtilization >= 0.8,
       forced_break_before: ["section_change", "forced_source_break"].includes(page.breakReason),
       break_reason: page.breakReason || null,
+      page_width: layout.pageWidth,
+      page_height: layout.pageHeight,
+      header_frame: layout.headerFrame,
+      content_frame: layout.contentFrame,
+      footer_frame: layout.footerFrame,
+      content_scroll_width: measurement.scrollWidth,
+      content_client_width: measurement.clientWidth,
+      content_scroll_height: measurement.scrollHeight,
+      content_client_height: measurement.clientHeight,
+      max_block_y: measurement.maxBlockY,
+      remaining_body_height: Math.max(0, measurement.clientHeight - measurement.maxBlockY),
+      validation_passed: measurement.fits,
+      offending_block_id: measurement.offendingBlockID,
       block_measurements: blockMeasurements
     };
   }

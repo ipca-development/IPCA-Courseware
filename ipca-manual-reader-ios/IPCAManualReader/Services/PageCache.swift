@@ -307,8 +307,7 @@ final class ManualDownloadManager: ObservableObject {
     ) async throws -> OfflineManualPackage {
         if !forceRefresh,
            let existing = await package(for: book),
-           existing.hasCanonicalPublicationPackage,
-           existing.paginateSourceData != nil {
+           existing.hasCanonicalPublicationPackage {
             return existing
         }
 
@@ -322,11 +321,6 @@ final class ManualDownloadManager: ObservableObject {
                 isPreview: isPreview
             )
             async let tocTask = client.fetchToc(
-                bookKey: book.bookKey,
-                versionId: versionID,
-                isPreview: isPreview
-            )
-            async let paginateSourceTask = client.fetchPaginateSource(
                 bookKey: book.bookKey,
                 versionId: versionID,
                 isPreview: isPreview
@@ -349,10 +343,9 @@ final class ManualDownloadManager: ObservableObject {
                 coverData = result.0
             }
 
-            let (pageMap, tableOfContents, paginateSourceData, publicationResponse) = try await (
+            let (pageMap, tableOfContents, publicationResponse) = try await (
                 pageMapTask,
                 tocTask,
-                paginateSourceTask,
                 publicationPackageTask
             )
             guard publicationResponse.ok,
@@ -369,11 +362,28 @@ final class ManualDownloadManager: ObservableObject {
             guard sha256(Data(publicationPackage.css.content.utf8)) == publicationPackage.css.hash else {
                 throw ManualReaderAPIError.badResponse("Book-style CSS hash verification failed.")
             }
+            if let frozenStyleHash = pageMap.styleHash,
+               !frozenStyleHash.isEmpty,
+               frozenStyleHash != publicationPackage.css.hash {
+                throw ManualReaderAPIError.badResponse(
+                    "Frozen page map and publication style hashes do not match."
+                )
+            }
+            if let frozenManifestHash = pageMap.manifestHash,
+               !frozenManifestHash.isEmpty,
+               frozenManifestHash != publicationPackage.manifestHash {
+                throw ManualReaderAPIError.badResponse(
+                    "Frozen page map and publication manifest hashes do not match."
+                )
+            }
             let pageNumbers = pageMap.pages
                 .map(\.pageNumber)
                 .sorted()
             var openingNumbers = Array(pageNumbers.prefix(1))
-            if let continuePage = book.continuePageNumber,
+            let anchorPage = book.continueStableAnchor.flatMap { stableAnchor in
+                pageMap.pages.first(where: { $0.stableAnchor == stableAnchor })?.pageNumber
+            }
+            if let continuePage = anchorPage ?? book.continuePageNumber,
                pageNumbers.contains(continuePage),
                !openingNumbers.contains(continuePage) {
                 openingNumbers.append(continuePage)
@@ -396,7 +406,7 @@ final class ManualDownloadManager: ObservableObject {
                 contentCSS: nil,
                 readerCSS: nil,
                 readerStyleVersion: ReaderPaginationVersion.style,
-                paginateSourceData: paginateSourceData,
+                paginateSourceData: nil,
                 publicationPackage: publicationPackage,
                 publicationManifestJSON: manifestJSON,
                 publicationAssets: []
@@ -464,15 +474,25 @@ final class ManualDownloadManager: ObservableObject {
                     "The server returned an incomplete manual download."
                 )
             }
+            let orderedPages = downloadedByNumber.values.sorted {
+                ($0.pageNumber ?? 0) < ($1.pageNumber ?? 0)
+            }
+            if let expectedHash = starterPackage.pageMap.pageMapHash,
+               !expectedHash.isEmpty {
+                let payload = orderedPages.compactMap(\.pageHtml).joined(separator: "\n")
+                guard sha256(Data(payload.utf8)) == expectedHash else {
+                    throw ManualReaderAPIError.badResponse(
+                        "Frozen authoritative page-map hash verification failed."
+                    )
+                }
+            }
             let completedPackage = OfflineManualPackage(
                 bookID: starterPackage.bookID,
                 versionID: starterPackage.versionID,
                 downloadedAt: starterPackage.downloadedAt,
                 pageMap: starterPackage.pageMap,
                 tableOfContents: starterPackage.tableOfContents,
-                pages: downloadedByNumber.values.sorted {
-                    ($0.pageNumber ?? 0) < ($1.pageNumber ?? 0)
-                },
+                pages: orderedPages,
                 coverImageData: starterPackage.coverImageData,
                 editorCSS: nil,
                 contentCSS: nil,

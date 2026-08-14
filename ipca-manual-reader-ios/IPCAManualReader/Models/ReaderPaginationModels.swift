@@ -4,8 +4,8 @@ import Foundation
 enum ReaderPaginationVersion {
     static let normalizer = "reader-normalizer-v1"
     static let engine = "semantic-paginator-v2"
-    static let validator = "pagination-validator-v1"
-    static let style = "reader-page-frame-v2"
+    static let validator = "pagination-validator-v2"
+    static let style = "reader-page-frame-v3"
 }
 
 enum ReaderLayoutMode: String, Codable, Hashable {
@@ -23,9 +23,21 @@ struct ReaderRect: Codable, Hashable {
     var maxY: Double { y + height }
 }
 
+struct ReaderEdgeInsets: Codable, Hashable {
+    let top: Double
+    let leading: Double
+    let bottom: Double
+    let trailing: Double
+
+    static let zero = ReaderEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
+}
+
 /// One authoritative geometry contract shared by measurement, assembly, display,
 /// caching, and QA. Values are CSS points inside the final page WKWebView.
 struct PageLayoutConfiguration: Codable, Hashable {
+    let viewportWidth: Double
+    let viewportHeight: Double
+    let safeAreaInsets: ReaderEdgeInsets
     let pageWidth: Double
     let pageHeight: Double
     let canonicalPageWidth: Double
@@ -37,30 +49,41 @@ struct PageLayoutConfiguration: Codable, Hashable {
     let outerMargin: Double
     let topMargin: Double
     let bottomMargin: Double
-    let viewportWidth: Double
-    let viewportHeight: Double
+    let gutterWidth: Double
+    let pageScale: Double
     let mode: ReaderLayoutMode
     let fontScale: Double
     let layoutVersion: String
 
     static func make(
         viewport: CGSize,
+        safeAreaInsets: ReaderEdgeInsets = .zero,
         isLandscape: Bool,
         fontScale: Double,
         publicationLayout: PublicationLayout,
         manifestLayoutHash: String
     ) -> PageLayoutConfiguration {
-        let safeWidth = max(320, Double(viewport.width))
-        let safeHeight = max(320, Double(viewport.height))
+        let viewportWidth = max(1, Double(viewport.width))
+        let viewportHeight = max(1, Double(viewport.height))
+        let safeWidth = max(
+            1,
+            viewportWidth - safeAreaInsets.leading - safeAreaInsets.trailing
+        )
+        let safeHeight = max(
+            1,
+            viewportHeight - safeAreaInsets.top - safeAreaInsets.bottom
+        )
         let canonicalWidth = max(1, publicationLayout.pageWidthPX)
         let canonicalHeight = max(1, publicationLayout.pageHeightPX)
-        let pageAspect = canonicalWidth / canonicalHeight
-        let spreadGutter = isLandscape ? 6.0 : 0.0
-        let pageSlotWidth = (safeWidth - spreadGutter) / (isLandscape ? 2.0 : 1.0)
-        let availableHeight = safeHeight
-        let pageWidth = max(1, min(pageSlotWidth, availableHeight * pageAspect))
-        let pageHeight = pageWidth / pageAspect
-        let scale = pageWidth / canonicalWidth
+        // UIPageViewController's mid-spine overlays the visual gutter; it does not
+        // insert space between its two equal page slots.
+        let gutterWidth = 0.0
+        let pageCount = isLandscape ? 2.0 : 1.0
+        let widthScale = max(0.001, (safeWidth - gutterWidth) / (canonicalWidth * pageCount))
+        let heightScale = max(0.001, safeHeight / canonicalHeight)
+        let scale = min(widthScale, heightScale)
+        let pageWidth = canonicalWidth * scale
+        let pageHeight = canonicalHeight * scale
 
         let sideMargin = publicationLayout.sheetPaddingXPX * scale
         let topMargin = publicationLayout.sheetPaddingTopPX * scale
@@ -73,6 +96,9 @@ struct PageLayoutConfiguration: Codable, Hashable {
         let contentHeight = max(1, publicationLayout.bodyCapacityPX * scale)
 
         return PageLayoutConfiguration(
+            viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight,
+            safeAreaInsets: safeAreaInsets,
             pageWidth: pageWidth,
             pageHeight: pageHeight,
             canonicalPageWidth: canonicalWidth,
@@ -99,8 +125,8 @@ struct PageLayoutConfiguration: Codable, Hashable {
             outerMargin: sideMargin,
             topMargin: topMargin,
             bottomMargin: bottomMargin,
-            viewportWidth: safeWidth,
-            viewportHeight: safeHeight,
+            gutterWidth: gutterWidth,
+            pageScale: scale,
             mode: isLandscape ? .twoPageSpread : .singlePage,
             fontScale: max(0.75, min(1.5, fontScale)),
             layoutVersion: "\(ReaderPaginationVersion.style):\(manifestLayoutHash)"
@@ -111,10 +137,28 @@ struct PageLayoutConfiguration: Codable, Hashable {
         [
             layoutVersion,
             mode.rawValue,
+            decimal(viewportWidth),
+            decimal(viewportHeight),
+            decimal(safeAreaInsets.top),
+            decimal(safeAreaInsets.leading),
+            decimal(safeAreaInsets.bottom),
+            decimal(safeAreaInsets.trailing),
             decimal(pageWidth),
             decimal(pageHeight),
+            decimal(pageScale),
+            decimal(gutterWidth),
+            decimal(headerFrame.x),
+            decimal(headerFrame.y),
+            decimal(headerFrame.width),
+            decimal(headerFrame.height),
+            decimal(contentFrame.x),
+            decimal(contentFrame.y),
             decimal(contentFrame.width),
             decimal(contentFrame.height),
+            decimal(footerFrame.x),
+            decimal(footerFrame.y),
+            decimal(footerFrame.width),
+            decimal(footerFrame.height),
             decimal(fontScale)
         ].joined(separator: ":")
     }
@@ -218,6 +262,19 @@ struct ReaderPageMetrics: Codable, Hashable {
     let priorPageNearCapacity: Bool?
     let forcedBreakBefore: Bool?
     let breakReason: String?
+    let pageWidth: Double
+    let pageHeight: Double
+    let headerFrame: ReaderRect
+    let contentFrame: ReaderRect
+    let footerFrame: ReaderRect
+    let contentScrollWidth: Double
+    let contentClientWidth: Double
+    let contentScrollHeight: Double
+    let contentClientHeight: Double
+    let maxBlockY: Double
+    let remainingBodyHeight: Double
+    let validationPassed: Bool
+    let offendingBlockID: String?
     let blockMeasurements: [SemanticBlockMeasurement]
 
     enum CodingKeys: String, CodingKey {
@@ -232,6 +289,19 @@ struct ReaderPageMetrics: Codable, Hashable {
         case priorPageNearCapacity = "prior_page_near_capacity"
         case forcedBreakBefore = "forced_break_before"
         case breakReason = "break_reason"
+        case pageWidth = "page_width"
+        case pageHeight = "page_height"
+        case headerFrame = "header_frame"
+        case contentFrame = "content_frame"
+        case footerFrame = "footer_frame"
+        case contentScrollWidth = "content_scroll_width"
+        case contentClientWidth = "content_client_width"
+        case contentScrollHeight = "content_scroll_height"
+        case contentClientHeight = "content_client_height"
+        case maxBlockY = "max_block_y"
+        case remainingBodyHeight = "remaining_body_height"
+        case validationPassed = "validation_passed"
+        case offendingBlockID = "offending_block_id"
         case blockMeasurements = "block_measurements"
     }
 }

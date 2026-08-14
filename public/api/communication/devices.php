@@ -10,13 +10,23 @@ try {
     $kernel = new CommunicationKernel($pdo);
     $session = $kernel->auth->requireSession();
     $in = CommunicationHttp::input();
-    $device = $kernel->auth->upsertDevice((int)$session['user']['id'], array(
+    $input = array(
         'device_uuid' => (string)($in['device_uuid'] ?? $session['device']['device_uuid']),
         'platform' => (string)($in['platform'] ?? $session['device']['platform']),
         'model' => (string)($in['model'] ?? $session['device']['model'] ?? ''),
         'os_version' => (string)($in['os_version'] ?? $session['device']['os_version'] ?? ''),
         'app_version' => (string)($in['app_version'] ?? $session['device']['app_version'] ?? ''),
-    ));
+    );
+    if (array_key_exists('apns_token', $in)) {
+        $input['apns_token'] = $in['apns_token'];
+    }
+    if (array_key_exists('push_authorized', $in)) {
+        $input['push_authorized'] = $in['push_authorized'];
+    }
+    if (array_key_exists('apns_environment', $in)) {
+        $input['apns_environment'] = $in['apns_environment'];
+    }
+    $device = $kernel->auth->upsertDevice((int)$session['user']['id'], $input);
     CommunicationHttp::json(200, array(
         'ok' => true,
         'device' => $kernel->auth->publicDevice($device),

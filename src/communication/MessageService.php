@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/CommunicationSupport.php';
 require_once __DIR__ . '/ConversationService.php';
+require_once __DIR__ . '/CommunicationPushService.php';
 
 final class MessageService
 {
@@ -11,7 +12,8 @@ final class MessageService
 
     public function __construct(
         private PDO $pdo,
-        private ConversationService $conversations
+        private ConversationService $conversations,
+        private ?CommunicationPushService $push = null
     ) {
     }
 
@@ -133,6 +135,17 @@ final class MessageService
             'sender_user_id' => $senderUserId,
             'sender_device_id' => $senderDeviceId,
         ));
+
+        if ($this->push !== null) {
+            try {
+                $this->push->notifyNewMessage($messageId, $senderDeviceId);
+            } catch (Throwable $e) {
+                CommunicationSupport::log('communication.push.error', array(
+                    'message_uuid' => $messageUuid,
+                    'error' => $e->getMessage(),
+                ));
+            }
+        }
 
         $row = $this->findByUuid($messageUuid);
         return $this->publicMessage(is_array($row) ? $row : array(

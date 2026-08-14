@@ -65,6 +65,14 @@ final class StoreWriter: @unchecked Sendable {
         return clientID
     }
 
+    func unreadTotal() async -> Int {
+        await context.perform {
+            let request = ConversationEntity.fetchRequest()
+            let rows = (try? self.context.fetch(request)) ?? []
+            return rows.reduce(0) { $0 + Int($1.unreadCount) }
+        }
+    }
+
     func nextRunnableOperation() async -> OutboxOp? {
         await context.perform {
             let request = OutboxOperationEntity.fetchRequest()

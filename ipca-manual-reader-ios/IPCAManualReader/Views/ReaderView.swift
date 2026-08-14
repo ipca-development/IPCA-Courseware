@@ -88,10 +88,16 @@ struct ReaderView: View {
                 }
             }
             .task(
-                id: "\(Int(safeSize.width))x\(Int(safeSize.height))-\(session.settings.fontSize.rawValue)-\(viewModel.publicationLayout?.pageWidthPX ?? 0)"
+                id: "\(Int(proxy.size.width))x\(Int(proxy.size.height))-\(viewModel.publicationLayout?.pageWidthPX ?? 0)"
             ) {
                 await viewModel.updateLayout(
-                    viewport: safeSize,
+                    viewport: proxy.size,
+                    safeAreaInsets: ReaderEdgeInsets(
+                        top: Double(proxy.safeAreaInsets.top),
+                        leading: Double(proxy.safeAreaInsets.leading),
+                        bottom: Double(proxy.safeAreaInsets.bottom),
+                        trailing: Double(proxy.safeAreaInsets.trailing)
+                    ),
                     isLandscape: safeSize.width > safeSize.height
                 )
             }
@@ -150,7 +156,9 @@ struct ReaderView: View {
         }
         let pageWidth = CGFloat(layout.pageWidth)
         let pageHeight = CGFloat(layout.pageHeight)
-        let readerWidth = landscape ? pageWidth * 2 : pageWidth
+        let readerWidth = landscape
+            ? pageWidth * 2 + CGFloat(layout.gutterWidth)
+            : pageWidth
         let contentBaseURL = session.baseURL ?? URL(fileURLWithPath: Bundle.main.bundlePath)
 
         return AnyView(ZStack {
@@ -191,11 +199,7 @@ struct ReaderView: View {
 
     private var pageDescription: String {
         guard let page = viewModel.currentPage else { return "" }
-        let readerPage = "Reader page \(page.pageNumber) of \(viewModel.pageCount)"
-        if let officialPage = viewModel.currentOfficialLocation?.officialPageNumber {
-            return "\(readerPage) · Official page \(officialPage)"
-        }
-        return readerPage
+        return "Page \(page.pageNumber) of \(viewModel.pageCount)"
     }
 
     private var contentsPopover: some View {
@@ -220,9 +224,15 @@ struct ReaderView: View {
             results: viewModel.searchResults,
             sectionPageIndex: viewModel.sectionPageIndex,
             isSearching: viewModel.isSearching
-        ) { sectionId in
+        ) { result in
             showSearch = false
-            Task { await viewModel.goToSection(sectionId) }
+            Task {
+                if let pageNumber = result.pageNumber {
+                    await viewModel.goToPageNumber(pageNumber)
+                } else {
+                    await viewModel.goToSection(result.sectionId)
+                }
+            }
         }
         .frame(minWidth: 390, idealWidth: 430, minHeight: 480)
         .foregroundStyle(.primary)
@@ -464,12 +474,12 @@ private struct CompactReaderSettingsView: View {
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Text size")
+                Text("Page zoom")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Picker("Text size", selection: $session.settings.fontSize) {
-                    ForEach(ReaderFontSize.allCases) { size in
-                        Text(size.label).tag(size)
+                Picker("Page zoom", selection: $session.settings.zoom) {
+                    ForEach(ReaderZoomMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
                     }
                 }
                 .labelsHidden()
@@ -489,7 +499,7 @@ private struct CompactReaderSettingsView: View {
             }
         }
         .padding(20)
-        .onChange(of: session.settings.fontSize) { _, _ in
+        .onChange(of: session.settings.zoom) { _, _ in
             session.saveSettings()
             onChanged()
         }
@@ -624,7 +634,7 @@ struct SearchSheetView: View {
     let results: [SearchResult]
     let sectionPageIndex: [Int: Int]
     let isSearching: Bool
-    let onSelect: (Int) -> Void
+    let onSelect: (SearchResult) -> Void
 
     var body: some View {
         NavigationStack {
@@ -634,20 +644,28 @@ struct SearchSheetView: View {
                 }
                 ForEach(results) { result in
                     Button {
-                        onSelect(result.sectionId)
+                        onSelect(result)
                     } label: {
-                        HStack {
-                            Text(result.sectionTitle)
-                            Spacer()
-                            if let page = sectionPageIndex[result.sectionId] {
-                                Text("p. \(page)")
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(result.sectionTitle)
+                                Spacer()
+                                if let page = result.pageNumber ?? sectionPageIndex[result.sectionId] {
+                                    Text("p. \(page)")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            if let excerpt = result.excerpt, !excerpt.isEmpty {
+                                Text(excerpt)
+                                    .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(3)
                             }
                         }
                     }
                 }
             }
-            .searchable(text: $query, prompt: "Search section titles")
+            .searchable(text: $query, prompt: "Search manual")
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -718,9 +736,9 @@ struct ReaderSettingsView: View {
                             Text(theme.label).tag(theme)
                         }
                     }
-                    Picker("Text Size", selection: $session.settings.fontSize) {
-                        ForEach(ReaderFontSize.allCases) { size in
-                            Text(size.label).tag(size)
+                    Picker("Page Zoom", selection: $session.settings.zoom) {
+                        ForEach(ReaderZoomMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
                         }
                     }
                 }
@@ -740,7 +758,7 @@ struct ReaderSettingsView: View {
                 serverURL = session.baseURL?.absoluteString ?? ""
             }
             .onChange(of: session.settings.theme) { _, _ in session.saveSettings(); onChanged?() }
-            .onChange(of: session.settings.fontSize) { _, _ in session.saveSettings(); onChanged?() }
+            .onChange(of: session.settings.zoom) { _, _ in session.saveSettings(); onChanged?() }
         }
     }
 }

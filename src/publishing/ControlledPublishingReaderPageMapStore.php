@@ -57,8 +57,10 @@ final class ControlledPublishingReaderPageMapStore
         string $layoutProfile,
         string $layoutHash,
         array $pages,
-        int $generatedByUserId
+        int $generatedByUserId,
+        array $generation = array()
     ): int {
+        $this->assertVersionMutable($bookVersionId);
         $this->pdo->beginTransaction();
         try {
             $this->deletePages($bookVersionId, $layoutProfile);
@@ -95,7 +97,14 @@ final class ControlledPublishingReaderPageMapStore
                 ));
             }
 
-            $this->setDraftMeta($bookVersionId, $layoutProfile, $layoutHash, count($pages), $generatedByUserId);
+            $this->setDraftMeta(
+                $bookVersionId,
+                $layoutProfile,
+                $layoutHash,
+                count($pages),
+                $generatedByUserId,
+                $generation
+            );
             $this->pdo->commit();
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
@@ -109,6 +118,7 @@ final class ControlledPublishingReaderPageMapStore
 
     public function approve(int $bookVersionId, int $approvedByUserId, ?string $layoutProfile = null): array
     {
+        $this->assertVersionMutable($bookVersionId);
         $layoutProfile = $layoutProfile ?? ControlledPublishingReaderLayoutProfile::profileKey();
         $count = $this->pageCount($bookVersionId, $layoutProfile);
         if ($count <= 0) {
@@ -130,7 +140,7 @@ final class ControlledPublishingReaderPageMapStore
 
         $now = gmdate('Y-m-d H:i:s');
         $meta = $this->loadVersionMetadata($bookVersionId);
-        $meta[self::META_KEY] = array(
+        $meta[self::META_KEY] = array_merge($draft, array(
             'status' => 'approved',
             'layout_profile' => $layoutProfile,
             'layout_hash' => $expectedHash,
@@ -139,7 +149,7 @@ final class ControlledPublishingReaderPageMapStore
             'generated_by_user_id' => (int)($draft['generated_by_user_id'] ?? 0),
             'approved_at' => $now,
             'approved_by_user_id' => $approvedByUserId,
-        );
+        ));
         $this->saveVersionMetadata($bookVersionId, $meta);
 
         return $meta[self::META_KEY];
@@ -147,6 +157,7 @@ final class ControlledPublishingReaderPageMapStore
 
     public function invalidate(int $bookVersionId, ?string $layoutProfile = null): void
     {
+        $this->assertVersionMutable($bookVersionId);
         $layoutProfile = $layoutProfile ?? ControlledPublishingReaderLayoutProfile::profileKey();
         $this->pdo->beginTransaction();
         try {
@@ -196,12 +207,21 @@ final class ControlledPublishingReaderPageMapStore
         }
 
         $approval = $this->approvalMeta($bookVersionId);
+        $generation = is_array($approval['generation'] ?? null)
+            ? $approval['generation']
+            : array();
 
         return array(
             'layout_profile' => $layoutProfile,
             'layout_hash' => ControlledPublishingReaderLayoutProfile::layoutHash(),
             'layout' => ControlledPublishingReaderLayoutProfile::spec(),
             'page_count' => count($pages),
+            'page_map_hash' => (string)($generation['page_map_hash'] ?? ''),
+            'source_hash' => (string)($generation['source_hash'] ?? ''),
+            'style_hash' => (string)($generation['style_hash'] ?? ''),
+            'manual_page_break_hash' => (string)($generation['manual_page_break_hash'] ?? ''),
+            'header_footer_hash' => (string)($generation['header_footer_hash'] ?? ''),
+            'manifest_hash' => (string)($generation['manifest_hash'] ?? ''),
             'approval' => $approval,
             'pages' => $pages,
         );
@@ -276,7 +296,8 @@ final class ControlledPublishingReaderPageMapStore
         string $layoutProfile,
         string $layoutHash,
         int $pageCount,
-        int $generatedByUserId
+        int $generatedByUserId,
+        array $generation
     ): void {
         $meta = $this->loadVersionMetadata($bookVersionId);
         $meta[self::META_KEY] = array(
@@ -286,6 +307,7 @@ final class ControlledPublishingReaderPageMapStore
             'page_count' => $pageCount,
             'generated_at' => gmdate('Y-m-d H:i:s'),
             'generated_by_user_id' => $generatedByUserId,
+            'generation' => $generation,
         );
         $this->saveVersionMetadata($bookVersionId, $meta);
     }
@@ -322,5 +344,20 @@ final class ControlledPublishingReaderPageMapStore
             json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             $bookVersionId,
         ));
+    }
+
+    private function assertVersionMutable(int $bookVersionId): void
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT lifecycle_status FROM ipca_publishing_book_versions WHERE id = ? LIMIT 1'
+        );
+        $stmt->execute(array($bookVersionId));
+        $status = $stmt->fetchColumn();
+        if ($status === false) {
+            throw new RuntimeException('Manual version not found.');
+        }
+        if ((string)$status === 'released') {
+            throw new RuntimeException('Released authoritative pagination is immutable.');
+        }
     }
 }

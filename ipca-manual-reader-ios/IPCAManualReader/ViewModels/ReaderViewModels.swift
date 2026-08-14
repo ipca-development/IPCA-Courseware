@@ -93,32 +93,66 @@ final class ReaderViewModel: ObservableObject {
     var pageCount: Int { pages.count }
 
     func load() async {
+#if DEBUG
+        print("READER_LOAD_START book=\(book.id)")
+#endif
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+#if DEBUG
+            print(
+                "READER_LOAD_END error=\(errorMessage ?? "none") "
+                    + "pages=\(pages.count) htmlPages=\(pageHTMLByIndex.count)"
+            )
+#endif
+        }
 
-        if let cachedPackage = await ManualDownloadManager.shared.package(for: book),
-           cachedPackage.hasVerifiedPublicationStyle,
-           cachedPackage.paginateSourceData != nil,
-           !cachedPackage.pages.isEmpty {
-            await applyPackage(cachedPackage)
-            return
+        if let cachedPackage = await ManualDownloadManager.shared.package(for: book) {
+            let openingPageNumber = preferredOpeningPageNumber(in: cachedPackage)
+#if DEBUG
+            print(
+                "READER_CACHE packagePages=\(cachedPackage.pages.count) "
+                    + "target=\(openingPageNumber ?? -1) "
+                    + "verified=\(cachedPackage.hasVerifiedPublicationStyle)"
+            )
+#endif
+            if cachedPackage.hasCanonicalPublicationPackage,
+               openingPageNumber.flatMap({ cachedPackage.page(number: $0)?.pageHtml }) != nil {
+                await applyPackage(cachedPackage)
+#if DEBUG
+                print("READER_LOAD_CACHE_COMPLETE htmlPages=\(pageHTMLByIndex.count)")
+#endif
+                return
+            }
         }
 
         guard let client = ManualReaderSessionStore.shared.client else {
             errorMessage = "The manual is not available offline and no server URL is configured."
+#if DEBUG
+            print("READER_LOAD_NO_CLIENT")
+#endif
             return
         }
 
         do {
+#if DEBUG
+            print("READER_DOWNLOAD_START")
+#endif
             let package = try await ManualDownloadManager.shared.ensureDownloaded(
                 book: book,
                 client: client,
                 forceRefresh: false
             )
             await applyPackage(package)
+#if DEBUG
+            print("READER_DOWNLOAD_COMPLETE htmlPages=\(pageHTMLByIndex.count)")
+#endif
         } catch {
             errorMessage = error.localizedDescription
+#if DEBUG
+            print("READER_LOAD_ERROR \(error.localizedDescription)")
+#endif
         }
     }
 
@@ -126,6 +160,9 @@ final class ReaderViewModel: ObservableObject {
         let isPreview = book.isDraftPreview
         offlinePackage = package
         publicationLayout = package.publicationLayout
+        personalPages = []
+        personalPageHTMLByNumber = [:]
+        paginationValidation = nil
         pages = package.pageMap.pages.sorted { $0.pageNumber < $1.pageNumber }
         nav = package.tableOfContents.nav
         sectionPageIndex = package.tableOfContents.sectionPageIndex.reduce(into: [:]) { result, pair in
@@ -142,24 +179,37 @@ final class ReaderViewModel: ObservableObject {
         var startIndex = 0
         if !isPreview,
            let anchor = book.continueStableAnchor, !anchor.isEmpty,
-           let match = pages.firstIndex(where: { $0.stableAnchor == anchor }) {
+           let match = pages.firstIndex(where: { $0.stableAnchor == anchor }),
+           package.page(number: pages[match].pageNumber)?.pageHtml != nil {
             startIndex = match
         } else if !isPreview,
                   let pageNum = book.continuePageNumber,
-                  let match = pages.firstIndex(where: { $0.pageNumber == pageNum }) {
+                  let match = pages.firstIndex(where: { $0.pageNumber == pageNum }),
+                  package.page(number: pageNum)?.pageHtml != nil {
             startIndex = match
         }
         await goToIndex(startIndex, persistProgress: false)
-        if activeLayout != nil {
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                do {
-                    try await self.repaginateFromSource(preservingCurrentPosition: true)
-                } catch {
-                    self.errorMessage = error.localizedDescription
-                }
-            }
+#if DEBUG
+        print(
+            "READER_PACKAGE_APPLIED pages=\(pages.count) start=\(startIndex) "
+                + "htmlPages=\(pageHTMLByIndex.count) layout=\(activeLayout != nil)"
+        )
+#endif
+    }
+
+    private func preferredOpeningPageNumber(in package: OfflineManualPackage) -> Int? {
+        if !book.isDraftPreview,
+           let anchor = book.continueStableAnchor,
+           !anchor.isEmpty,
+           let page = package.pageMap.pages.first(where: { $0.stableAnchor == anchor }) {
+            return page.pageNumber
         }
+        if !book.isDraftPreview,
+           let pageNumber = book.continuePageNumber,
+           package.pageMap.pages.contains(where: { $0.pageNumber == pageNumber }) {
+            return pageNumber
+        }
+        return package.pageMap.pages.map(\.pageNumber).min()
     }
 
     func goToIndex(_ index: Int, persistProgress: Bool = true) async {
@@ -206,21 +256,44 @@ final class ReaderViewModel: ObservableObject {
         pageHTMLByIndex[index]
     }
 
-    func updateLayout(viewport: CGSize, isLandscape: Bool) async {
+    func updateLayout(
+        viewport: CGSize,
+        safeAreaInsets: ReaderEdgeInsets = .zero,
+        isLandscape: Bool
+    ) async {
         guard let publicationLayout,
               let manifestLayoutHash = offlinePackage?.publicationPackage?.manifest.layoutHash else {
+#if DEBUG
+            print("READER_LAYOUT_WAITING publication=\(publicationLayout != nil)")
+#endif
             return
         }
         let next = PageLayoutConfiguration.make(
             viewport: viewport,
+            safeAreaInsets: safeAreaInsets,
             isLandscape: isLandscape,
-            fontScale: ManualReaderSessionStore.shared.settings.fontSize.scale,
+            fontScale: 1,
             publicationLayout: publicationLayout,
             manifestLayoutHash: manifestLayoutHash
         )
         guard next != activeLayout else { return }
         activeLayout = next
+#if DEBUG
+        print(
+            "READER_LAYOUT_ACTIVE page=\(next.pageWidth)x\(next.pageHeight) "
+                + "htmlPages=\(pageHTMLByIndex.count)"
+        )
+#endif
         guard offlinePackage != nil else { return }
+        if ReaderDisplayMode.controlledFrozenPages {
+            pageHTMLByIndex.removeAll()
+            preparePageHTML(around: currentIndex)
+            currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
+#if DEBUG
+            print("READER_LAYOUT_USING_FROZEN_PAGES htmlPages=\(pageHTMLByIndex.count)")
+#endif
+            return
+        }
         do {
             try await repaginateFromSource(preservingCurrentPosition: true)
             pageHTMLByIndex.removeAll()
@@ -240,7 +313,61 @@ final class ReaderViewModel: ObservableObject {
         isSearching = true
         defer { isSearching = false }
         let needle = trimmed.lowercased()
+        if let client = ManualReaderSessionStore.shared.client,
+           let response = try? await client.searchTitles(
+               bookKey: book.bookKey,
+               query: trimmed,
+               versionId: book.versionId,
+               isPreview: book.isDraftPreview
+           ),
+           response.ok {
+            searchResults = response.results
+            return
+        }
         var matches: [SearchResult] = []
+
+        if let package = offlinePackage {
+            for cachedPage in package.pages.sorted(by: {
+                ($0.pageNumber ?? 0) < ($1.pageNumber ?? 0)
+            }) {
+                guard let pageNumber = cachedPage.pageNumber,
+                      let html = cachedPage.pageHtml else { continue }
+                let plain = html
+                    .replacingOccurrences(
+                        of: "<[^>]+>",
+                        with: " ",
+                        options: .regularExpression
+                    )
+                    .replacingOccurrences(
+                        of: "\\s+",
+                        with: " ",
+                        options: .regularExpression
+                    )
+                guard let range = plain.lowercased().range(of: needle) else { continue }
+                let offset = plain.distance(from: plain.startIndex, to: range.lowerBound)
+                let startOffset = max(0, offset - 55)
+                let start = plain.index(plain.startIndex, offsetBy: startOffset)
+                let end = plain.index(
+                    start,
+                    offsetBy: min(150, plain.distance(from: start, to: plain.endIndex))
+                )
+                let meta = pages.first(where: { $0.pageNumber == pageNumber })
+                matches.append(
+                    SearchResult(
+                        sectionId: meta?.sectionId ?? 0,
+                        sectionTitle: meta?.sectionTitle ?? "Page \(pageNumber)",
+                        stableAnchor: meta?.stableAnchor,
+                        pageNumber: pageNumber,
+                        excerpt: String(plain[start..<end])
+                    )
+                )
+                if matches.count >= 40 { break }
+            }
+            if !matches.isEmpty {
+                searchResults = matches
+                return
+            }
+        }
 
         func collect(_ nodes: [NavNode]) {
             for node in nodes {
@@ -252,7 +379,9 @@ final class ReaderViewModel: ObservableObject {
                         SearchResult(
                             sectionId: sectionID,
                             sectionTitle: title,
-                            stableAnchor: node.stableAnchor
+                            stableAnchor: node.stableAnchor,
+                            pageNumber: sectionPageIndex[sectionID],
+                            excerpt: nil
                         )
                     )
                 }
@@ -285,6 +414,7 @@ final class ReaderViewModel: ObservableObject {
         } else {
             store.addBookmark(
                 bookKey: book.bookKey,
+                versionID: book.versionId,
                 pageNumber: page.pageNumber,
                 label: label,
                 stableAnchor: page.stableAnchor,
@@ -327,8 +457,7 @@ final class ReaderViewModel: ObservableObject {
         let pageNumber = pages[index].pageNumber
         let settings = ManualReaderSessionStore.shared.settings
 
-        let rawHTML = personalPageHTMLByNumber[pageNumber]
-            ?? offlinePackage?.page(number: pageNumber)?.pageHtml
+        let rawHTML = offlinePackage?.page(number: pageNumber)?.pageHtml
         guard let html = rawHTML,
               let package = offlinePackage,
               let bookStyleCSS = package.bookStyleCSS,
@@ -338,7 +467,7 @@ final class ReaderViewModel: ObservableObject {
             settings: settings,
             bookStyleCSS: bookStyleCSS,
             readerCSS: "",
-            layout: personalPageHTMLByNumber[pageNumber] == nil ? nil : activeLayout,
+            layout: nil,
             publicationLayout: publicationLayout
         )
     }
@@ -352,17 +481,12 @@ final class ReaderViewModel: ObservableObject {
                     width: CGFloat(activeLayout.viewportWidth),
                     height: CGFloat(activeLayout.viewportHeight)
                 ),
+                safeAreaInsets: activeLayout.safeAreaInsets,
                 isLandscape: activeLayout.mode == .twoPageSpread,
-                fontScale: ManualReaderSessionStore.shared.settings.fontSize.scale,
+                fontScale: 1,
                 publicationLayout: publicationLayout,
                 manifestLayoutHash: manifestLayoutHash
             )
-            do {
-                try await repaginateFromSource(preservingCurrentPosition: true)
-            } catch {
-                errorMessage = error.localizedDescription
-                return
-            }
         }
         pageHTMLByIndex.removeAll()
         preparePageHTML(around: currentIndex)
@@ -385,10 +509,11 @@ final class ReaderViewModel: ObservableObject {
             }
         }
         guard let package = offlinePackage,
-              let sourceData = package.rewrittenPaginateSourceData(),
+              let sourceData = package.paginateSourceData,
               let bookStyleCSS = package.bookStyleCSS,
-              let baseURL = ManualReaderSessionStore.shared.baseURL,
               let activeLayout else { return }
+        let baseURL = ManualReaderSessionStore.shared.baseURL
+            ?? URL(fileURLWithPath: Bundle.main.bundlePath)
 
         let savedSemanticLocation = preservingCurrentPosition ? currentSemanticLocation : nil
         let currentRawHTML = preservingCurrentPosition
@@ -411,7 +536,7 @@ final class ReaderViewModel: ObservableObject {
             result = cached
         } else {
             let officialPages = officialPageLookups(package: package)
-            result = try await paginationEngine.paginate(
+            result = try await paginationEngine.paginateBySection(
                 sourceData: sourceData,
                 bookStyleCSS: bookStyleCSS,
                 readerCSS: "",
@@ -419,11 +544,34 @@ final class ReaderViewModel: ObservableObject {
                 baseURL: baseURL,
                 officialPageByAnchor: officialPages.byAnchor,
                 officialPageBySection: officialPages.bySection,
-                officialPageTotal: package.pageMap.pageCount ?? package.pageMap.pages.count
+                officialPageTotal: package.pageMap.pageCount ?? package.pageMap.pages.count,
+                rewriteString: package.rewritePublicationURLs(in:)
             )
-            try? await PersonalPaginationCache.shared.save(result, identity: cacheIdentity)
+            guard result.validation.isValid,
+                  result.personalPages.allSatisfy(\.metrics.validationPassed) else {
+                throw NSError(
+                    domain: "IPCAManualReader.Pagination",
+                    code: 2,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "The generated page map failed final geometry validation."
+                    ]
+                )
+            }
+            try await PersonalPaginationCache.shared.save(result, identity: cacheIdentity)
         }
-        guard !result.pages.isEmpty else { return }
+        guard !result.pages.isEmpty,
+              result.validation.isValid,
+              result.personalPages.allSatisfy(\.metrics.validationPassed) else {
+            throw NSError(
+                domain: "IPCAManualReader.Pagination",
+                code: 3,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "A cached personal page map failed final geometry validation."
+                ]
+            )
+        }
 
         personalPages = result.personalPages
         pages = result.pages
@@ -450,12 +598,24 @@ final class ReaderViewModel: ObservableObject {
                 )
             }
             result.personalPages.forEach { page in
+                let metrics = page.metrics
                 print(
                     "PAGINATION PAGE \(page.pageNumber) "
-                        + "utilization=\(String(format: "%.3f", page.metrics.contentUtilization)) "
-                        + "whitespace=\(String(format: "%.3f", page.metrics.whitespaceRatio)) "
-                        + "blocks=\(page.metrics.blockMeasurements.count) "
-                        + "anchor=\(page.startLocation?.semanticAnchor ?? "-")"
+                        + "official=\(page.startLocation?.officialLocation.officialPageNumber.map(String.init) ?? "-")"
+                        + "...\(page.endLocation?.officialLocation.officialPageNumber.map(String.init) ?? "-") "
+                        + "page=\(String(format: "%.2f", metrics.pageWidth))x"
+                        + "\(String(format: "%.2f", metrics.pageHeight)) "
+                        + "header=\(metrics.headerFrame) body=\(metrics.contentFrame) "
+                        + "footer=\(metrics.footerFrame) "
+                        + "scroll=\(String(format: "%.2f", metrics.contentScrollWidth))x"
+                        + "\(String(format: "%.2f", metrics.contentScrollHeight)) "
+                        + "client=\(String(format: "%.2f", metrics.contentClientWidth))x"
+                        + "\(String(format: "%.2f", metrics.contentClientHeight)) "
+                        + "maxBlockY=\(String(format: "%.2f", metrics.maxBlockY)) "
+                        + "remaining=\(String(format: "%.2f", metrics.remainingBodyHeight)) "
+                        + "utilization=\(String(format: "%.1f", metrics.contentUtilization * 100))% "
+                        + "validation=\(metrics.validationPassed ? "PASS" : "FAIL") "
+                        + "offending=\(metrics.offendingBlockID ?? "-")"
                 )
             }
         }
@@ -567,6 +727,7 @@ final class ReaderViewModel: ObservableObject {
             publicationManifestHash,
             ReaderPaginationVersion.normalizer,
             ReaderPaginationVersion.engine,
+            ReaderPaginationVersion.validator,
             ReaderPaginationVersion.style,
             layout.cacheIdentity,
             officialLayoutHash,

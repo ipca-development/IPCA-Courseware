@@ -115,6 +115,11 @@ struct PageMapResponse: Codable {
     var pages: [FrozenPageMeta]
     var layoutProfile: String?
     var layoutHash: String?
+    var pageMapHash: String?
+    var sourceHash: String?
+    var styleHash: String?
+    var manualPageBreakHash: String?
+    var manifestHash: String?
     var error: String?
 
     enum CodingKeys: String, CodingKey {
@@ -127,6 +132,11 @@ struct PageMapResponse: Codable {
         case pages
         case layoutProfile = "layout_profile"
         case layoutHash = "layout_hash"
+        case pageMapHash = "page_map_hash"
+        case sourceHash = "source_hash"
+        case styleHash = "style_hash"
+        case manualPageBreakHash = "manual_page_break_hash"
+        case manifestHash = "manifest_hash"
         case error
     }
 }
@@ -268,13 +278,17 @@ struct SearchResult: Codable, Identifiable, Hashable {
     var sectionId: Int
     var sectionTitle: String
     var stableAnchor: String?
+    var pageNumber: Int?
+    var excerpt: String?
 
-    var id: Int { sectionId }
+    var id: String { "\(sectionId)-\(pageNumber ?? 0)-\(stableAnchor ?? "")" }
 
     enum CodingKeys: String, CodingKey {
         case sectionId = "section_id"
         case sectionTitle = "section_title"
         case stableAnchor = "stable_anchor"
+        case pageNumber = "page_number"
+        case excerpt
     }
 }
 
@@ -632,9 +646,15 @@ struct ReaderSettings: Codable, Equatable {
     }
 }
 
+enum ReaderDisplayMode {
+    /// Canonical controlled manuals always display the server-frozen page map.
+    static let controlledFrozenPages = true
+}
+
 struct LocalBookmark: Codable, Identifiable, Hashable {
     var id: UUID
     var bookKey: String
+    var versionID: Int?
     /// Legacy personal page snapshot retained for decoding existing bookmarks.
     var pageNumber: Int
     var label: String

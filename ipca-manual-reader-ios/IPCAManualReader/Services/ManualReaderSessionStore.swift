@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Security
 
 @MainActor
 final class ManualReaderSessionStore: ObservableObject {
@@ -15,6 +16,14 @@ final class ManualReaderSessionStore: ObservableObject {
     private let settingsKey = "ipca.manual_reader.settings"
     private let bookmarksKey = "ipca.manual_reader.bookmarks"
     private let offlineUserKey = "ipca.manual_reader.offline_user"
+    private let credentialService = "com.europilotcenter.IPCAManualReader.credentials"
+    private let credentialAccount = "manual-reader-login"
+
+    private struct StoredCredentials: Codable {
+        let serverURL: String
+        let email: String
+        let password: String
+    }
 
     private init() {
         if let raw = UserDefaults.standard.string(forKey: baseURLKey),
@@ -70,6 +79,7 @@ final class ManualReaderSessionStore: ObservableObject {
 
     func addBookmark(
         bookKey: String,
+        versionID: Int? = nil,
         pageNumber: Int,
         label: String,
         stableAnchor: String? = nil,
@@ -80,6 +90,7 @@ final class ManualReaderSessionStore: ObservableObject {
         let bookmark = LocalBookmark(
             id: UUID(),
             bookKey: bookKey,
+            versionID: versionID,
             pageNumber: pageNumber,
             label: label,
             createdAt: Date(),
@@ -143,8 +154,21 @@ final class ManualReaderSessionStore: ObservableObject {
             clearSession()
             return
         }
-        let session = try await client.fetchSession()
-        applySession(session)
+        let restoredSession = try await client.fetchSession()
+        if restoredSession.loggedIn == true {
+            applySession(restoredSession)
+            return
+        }
+        if let credentials = loadCredentials(),
+           credentials.serverURL == baseURL?.absoluteString {
+            let authenticated = try await client.login(
+                email: credentials.email,
+                password: credentials.password
+            )
+            applySession(authenticated)
+            return
+        }
+        applySession(restoredSession)
     }
 
     /// Background session check — never blocks or rebuilds the login UI.
@@ -161,12 +185,64 @@ final class ManualReaderSessionStore: ObservableObject {
         guard let client else { throw ManualReaderAPIError.invalidServerURL }
         let response = try await client.login(email: email, password: password)
         applySession(response)
+        if response.loggedIn == true, let baseURL {
+            try saveCredentials(
+                StoredCredentials(
+                    serverURL: baseURL.absoluteString,
+                    email: email,
+                    password: password
+                )
+            )
+        }
     }
 
     func logout() async {
         if let client {
             _ = try? await client.logout()
         }
+        deleteCredentials()
         clearSession()
+    }
+
+    private func saveCredentials(_ credentials: StoredCredentials) throws {
+        let data = try JSONEncoder().encode(credentials)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: credentialService,
+            kSecAttrAccount as String: credentialAccount,
+        ]
+        SecItemDelete(query as CFDictionary)
+        var item = query
+        item[kSecValueData as String] = data
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(item as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw ManualReaderAPIError.badResponse("Unable to securely remember this login.")
+        }
+    }
+
+    private func loadCredentials() -> StoredCredentials? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: credentialService,
+            kSecAttrAccount as String: credentialAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else {
+            return nil
+        }
+        return try? JSONDecoder().decode(StoredCredentials.self, from: data)
+    }
+
+    private func deleteCredentials() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: credentialService,
+            kSecAttrAccount as String: credentialAccount,
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }

@@ -12,24 +12,33 @@ function argument(name, fallback = "") {
 }
 
 function layout(viewportWidth, viewportHeight, landscape, fontScale) {
-  const pageAspect = 816 / 1056;
-  const pageSlotWidth = (viewportWidth - (landscape ? 6 : 0)) / (landscape ? 2 : 1);
-  const availableHeight = viewportHeight;
-  const pageWidth = Math.max(1, Math.min(pageSlotWidth, availableHeight * pageAspect));
-  const pageHeight = pageWidth / pageAspect;
-  const scale = pageWidth / 816;
+  const canonicalPageWidth = 816;
+  const canonicalPageHeight = 1056;
+  const gutterWidth = 0;
+  const pageCount = landscape ? 2 : 1;
+  const scale = Math.min(
+    (viewportWidth - gutterWidth) / (canonicalPageWidth * pageCount),
+    viewportHeight / canonicalPageHeight
+  );
+  const pageWidth = canonicalPageWidth * scale;
+  const pageHeight = canonicalPageHeight * scale;
   const sideMargin = 56 * scale;
   const topMargin = 48 * scale;
-  const bottomMargin = 20 * scale;
+  const bottomMargin = 64 * scale;
   const headerHeight = 84 * scale;
   const headerGap = 20 * scale;
-  const footerGap = 20 * scale;
-  const footerHeight = 32 * scale;
+  const footerGap = 24 * scale;
+  const footerHeight = 72 * scale;
   const contentY = topMargin + headerHeight + headerGap;
-  const contentHeight = pageHeight - contentY - footerGap - footerHeight - bottomMargin;
+  const contentHeight = 744 * scale;
   return {
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets: { top: 0, leading: 0, bottom: 0, trailing: 0 },
     pageWidth,
     pageHeight,
+    canonicalPageWidth,
+    canonicalPageHeight,
     headerFrame: {
       x: sideMargin,
       y: topMargin,
@@ -52,11 +61,11 @@ function layout(viewportWidth, viewportHeight, landscape, fontScale) {
     outerMargin: sideMargin,
     topMargin,
     bottomMargin,
-    viewportWidth,
-    viewportHeight,
+    gutterWidth,
+    pageScale: scale,
     mode: landscape ? "twoPageSpread" : "singlePage",
     fontScale,
-    layoutVersion: "reader-page-frame-v2"
+    layoutVersion: "reader-page-frame-v3"
   };
 }
 
@@ -70,7 +79,14 @@ async function paginate(browser, source, css, core, configuration, baseURL) {
   try {
     await page.setContent(
       `<!doctype html><html><head><base href="${baseURL}"><style>${css}</style></head>`
-        + '<body><div id="pagination-measure-host"></div></body></html>',
+        + `<style>
+          .reader-page-header-region > .cpb-page-header,
+          .reader-page-footer-region > .cpb-page-footer {
+            position: static !important; inset: auto !important;
+            width: 100% !important; height: 100% !important;
+            margin: 0 !important; box-sizing: border-box !important;
+          }
+        </style><body><div id="pagination-measure-host"></div></body></html>`,
       { waitUntil: "domcontentloaded" }
     );
     await page.evaluate(({ sourceValue, layoutValue }) => {
@@ -144,7 +160,7 @@ async function main() {
       book_key: source.book_key,
       version_id: source.version_id,
       normalizer_version: "reader-normalizer-v1",
-      pagination_engine_version: "semantic-paginator-v1",
+      pagination_engine_version: "semantic-paginator-v2",
       exactly_once_source_coverage: true,
       results: summary
     }, null, 2));

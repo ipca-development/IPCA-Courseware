@@ -31,29 +31,29 @@ struct ManualPageWebView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         webView.backgroundColor = UIColor(pageBackground)
         webView.scrollView.backgroundColor = UIColor(pageBackground)
-        let fitScale = min(
-            containerSize.width / max(pageSize.width, 1),
-            containerSize.height / max(pageSize.height, 1)
-        )
-        let scale: CGFloat
-        switch zoomMode {
+        let scaleExpression: String = switch zoomMode {
         case .fitPage:
-            scale = fitScale
+            "Math.min(\(containerSize.width) / contentWidth, \(containerSize.height) / contentHeight)"
         case .fitWidth:
-            scale = containerSize.width / max(pageSize.width, 1)
+            "\(containerSize.width) / contentWidth"
         case .percent75:
-            scale = 0.75
+            "0.75"
         case .percent100:
-            scale = 1
+            "1"
         case .percent125:
-            scale = 1.25
+            "1.25"
         }
         let js = """
         (function() {
           var frame = document.querySelector('.mr-ios-frame');
           if (!frame) return;
-          frame.style.transform = 'scale(\(scale))';
-          frame.style.marginBottom = '\((pageSize.height * scale) - pageSize.height)px';
+          frame.style.transform = 'none';
+          var contentWidth = Math.max(frame.offsetWidth, 1);
+          var contentHeight = Math.max(frame.offsetHeight, 1);
+          var isLayoutBound = frame.getAttribute('data-layout-bound') === '1';
+          var scale = isLayoutBound ? 1 : \(scaleExpression);
+          frame.style.transform = 'scale(' + scale + ')';
+          frame.style.marginBottom = ((contentHeight * scale) - contentHeight) + 'px';
         })();
         """
         context.coordinator.pendingScaleJS = js

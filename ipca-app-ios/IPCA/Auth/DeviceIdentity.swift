@@ -38,4 +38,12 @@ enum DeviceIdentity {
             "app_version": appVersion
         ]
     }
+
+    static var apnsEnvironment: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
 }

@@ -2,6 +2,8 @@ import Combine
 import Foundation
 import Network
 import SwiftUI
+import UIKit
+import UserNotifications
 
 @MainActor
 final class AppSession: ObservableObject {
@@ -13,6 +15,7 @@ final class AppSession: ObservableObject {
     @Published var isLoggingIn = false
     @Published var updateRequired = false
     @Published var selectedConversationUUID: String?
+    @Published var pendingConversationUUID: String?
     @Published var people: [PublicUser] = []
 
     let persistence: PersistenceController
@@ -55,6 +58,7 @@ final class AppSession: ObservableObject {
         do {
             let bootstrap = try await api.bootstrap()
             await applyBootstrap(bootstrap, token: token)
+            await requestPushAuthorization()
             await startLoops()
         } catch let error as APIClientError {
             if error.httpStatus == 401 || error.errorCode == "account_ineligible" || error.errorCode == "credential_revoked" {
@@ -84,6 +88,7 @@ final class AppSession: ObservableObject {
             let response = try await api.login(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
             try KeychainStore.setString(response.token, for: tokenAccount)
             await applyLogin(response)
+            await requestPushAuthorization()
             if startBackgroundLoops {
                 await startLoops()
             }
@@ -176,6 +181,48 @@ final class AppSession: ObservableObject {
         } catch {
             // Read receipts retry on the next open; not user-facing.
         }
+        await refreshBadge()
+    }
+
+    func requestPushAuthorization() async {
+        guard isAuthenticated else { return }
+        do {
+            let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
+            await MainActor.run {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+            if !granted {
+                await registerPush(token: nil, authorized: false)
+            }
+        } catch {
+            await registerPush(token: nil, authorized: false)
+        }
+    }
+
+    func registerPush(token: String?, authorized: Bool) async {
+        guard isAuthenticated else { return }
+        do {
+            try await api.registerDevice(apnsToken: token, authorized: authorized)
+        } catch {
+            // Token registration retries on the next launch or login.
+        }
+    }
+
+    func handleOpenURL(_ url: URL) {
+        guard url.scheme == "ipca", url.host == "c" else { return }
+        let uuid = url.pathComponents.dropFirst().first
+        guard let uuid, !uuid.isEmpty else { return }
+        openConversationFromNotification(uuid)
+    }
+
+    func openConversationFromNotification(_ conversationUUID: String) {
+        selectedConversationUUID = conversationUUID
+        pendingConversationUUID = conversationUUID
+    }
+
+    func refreshBadge() async {
+        let total = await store.unreadTotal()
+        try? await UNUserNotificationCenter.current().setBadgeCount(total)
     }
 
     func syncNow() async {
@@ -194,6 +241,7 @@ final class AppSession: ObservableObject {
                     keepGoing = false
                 }
             }
+            await refreshBadge()
         } catch let error as APIClientError {
             if error.httpStatus == 401 || error.errorCode == "account_ineligible" {
                 clearSession()
@@ -258,8 +306,10 @@ final class AppSession: ObservableObject {
         isAuthenticated = false
         capabilities = .disabled
         selectedConversationUUID = nil
+        pendingConversationUUID = nil
         actionError = nil
         people = []
+        Task { try? await UNUserNotificationCenter.current().setBadgeCount(0) }
         Task { await api.setToken(nil) }
     }
 

@@ -461,6 +461,7 @@ extension ManualReaderAPIClient {
         let theme = settings.theme.rawValue
         let pageWidth = layout?.pageWidth ?? publicationLayout.pageWidthPX
         let pageHeight = layout?.pageHeight ?? publicationLayout.pageHeightPX
+        let isValidatedPersonalPage = layout != nil
 
         return """
         <!DOCTYPE html>
@@ -481,11 +482,18 @@ extension ManualReaderAPIClient {
             }
             .mr-ios-shell { display: flex; align-items: flex-start; justify-content: center; }
             .mr-page-frame { display: block; flex: none; }
+            .mr-body[data-reader-validated="1"],
+            .mr-body[data-reader-validated="1"] .mr-app,
+            .mr-body[data-reader-validated="1"] .mr-ios-shell,
+            .mr-body[data-reader-validated="1"] .mr-page-frame,
+            .mr-body[data-reader-validated="1"] .mr-ios-frame {
+              overflow: visible;
+            }
             .mr-ios-frame {
               position: relative;
               width: \(pageWidth)px;
               height: \(pageHeight)px;
-              transform-origin: top center;
+              transform-origin: top left;
             }
             .reader-page-header-region > .cpb-page-header,
             .reader-page-footer-region > .cpb-page-footer {
@@ -505,10 +513,10 @@ extension ManualReaderAPIClient {
             .mr-app .cpb-block-chrome, .mr-app .cpb-dropzone, .mr-app .cpb-change-marker, .mr-app .cpb-page-layout-toggle { display: none !important; }
           </style>
         </head>
-        <body class="mr-body" data-mr-theme="\(theme)">
+        <body class="mr-body" data-mr-theme="\(theme)" data-reader-validated="\(isValidatedPersonalPage ? "1" : "0")">
           <div class="mr-app mr-ios-shell">
             <div class="mr-page-frame">
-              <div class="mr-ios-frame mr-page-scale">
+              <div class="mr-ios-frame mr-page-scale" data-layout-bound="\(isValidatedPersonalPage ? "1" : "0")">
                 \(pageHtml)
               </div>
             </div>

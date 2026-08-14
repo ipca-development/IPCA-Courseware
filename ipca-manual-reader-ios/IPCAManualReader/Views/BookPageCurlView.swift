@@ -264,6 +264,8 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
 }
 
 private struct PhysicalManualPage: View {
+    @ObservedObject private var session = ManualReaderSessionStore.shared
+
     let html: String
     let baseURL: URL
     let isLandscape: Bool
@@ -276,7 +278,7 @@ private struct PhysicalManualPage: View {
             ManualPageWebView(
                 html: html,
                 baseURL: baseURL,
-                zoomMode: .fitPage,
+                zoomMode: session.settings.zoom,
                 containerSize: proxy.size,
                 pageSize: pageSize,
                 pageBackground: pageBackground
@@ -296,7 +298,6 @@ private struct PhysicalManualPage: View {
                     .allowsHitTesting(false)
                 }
             }
-            .clipped()
         }
         .background(pageBackground)
     }

@@ -188,6 +188,7 @@ final class CommunicationAuthService
                 SET platform = ?, model = ?, os_version = ?, app_version = ?, revoked_at_utc = NULL, updated_at_utc = ?
                 WHERE id = ?
             ")->execute(array($platform, $model, $osVersion, $appVersion, $now, (int)$row['id']));
+            $this->applyPushFields((int)$row['id'], $deviceInput);
             $existing->execute(array($deviceUuid));
             $updated = $existing->fetch(PDO::FETCH_ASSOC);
             return is_array($updated) ? $updated : $row;
@@ -199,6 +200,12 @@ final class CommunicationAuthService
             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
         ")->execute(array($deviceUuid, $userId, $platform, $model, $osVersion, $appVersion, $now, $now));
 
+        $existing->execute(array($deviceUuid));
+        $created = $existing->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($created)) {
+            throw new CommunicationException('server_error', 'Could not register this device.', 500);
+        }
+        $this->applyPushFields((int)$created['id'], $deviceInput);
         $existing->execute(array($deviceUuid));
         $created = $existing->fetch(PDO::FETCH_ASSOC);
         if (!is_array($created)) {
@@ -293,7 +300,69 @@ final class CommunicationAuthService
             'model' => (string)($device['model'] ?? ''),
             'app_version' => (string)($device['app_version'] ?? ''),
             'last_seen_at_utc' => $device['last_seen_at_utc'] ?? null,
+            'push_authorized' => array_key_exists('push_authorized', $device) && $device['push_authorized'] !== null && $device['push_authorized'] !== ''
+                ? ((int)$device['push_authorized'] === 1)
+                : null,
         );
+    }
+
+    /**
+     * @param array<string,mixed> $deviceInput
+     */
+    private function applyPushFields(int $deviceId, array $deviceInput): void
+    {
+        $sets = array();
+        $params = array();
+        if (array_key_exists('push_authorized', $deviceInput) && $deviceInput['push_authorized'] !== null && $deviceInput['push_authorized'] !== '') {
+            $authorized = ((int)$deviceInput['push_authorized'] === 1) ? 1 : 0;
+            $sets[] = 'push_authorized = ?';
+            $params[] = $authorized;
+            if ($authorized === 0 && !array_key_exists('apns_token', $deviceInput)) {
+                $sets[] = 'apns_token = NULL';
+            }
+        }
+        if (array_key_exists('apns_token', $deviceInput)) {
+            $token = strtolower(preg_replace('/[^0-9a-f]/', '', (string)$deviceInput['apns_token']) ?? '');
+            if ($token === '') {
+                $sets[] = 'apns_token = NULL';
+            } else {
+                if (strlen($token) < 32 || strlen($token) > 200) {
+                    throw new CommunicationException('validation_error', 'apns_token is invalid.', 400);
+                }
+                $this->pdo->prepare('UPDATE ipca_communication_devices SET apns_token = NULL WHERE apns_token = ? AND id != ?')
+                    ->execute(array($token, $deviceId));
+                $sets[] = 'apns_token = ?';
+                $params[] = $token;
+            }
+        }
+        if (array_key_exists('apns_environment', $deviceInput) && $this->hasApnsEnvironmentColumn()) {
+            $env = strtolower(trim((string)$deviceInput['apns_environment']));
+            $sets[] = 'apns_environment = ?';
+            $params[] = $env === 'production' ? 'production' : 'sandbox';
+        }
+        if ($sets === array()) {
+            return;
+        }
+        $sets[] = 'updated_at_utc = ?';
+        $params[] = CommunicationSupport::nowUtc();
+        $params[] = $deviceId;
+        $this->pdo->prepare('UPDATE ipca_communication_devices SET ' . implode(', ', $sets) . ' WHERE id = ?')
+            ->execute($params);
+    }
+
+    private function hasApnsEnvironmentColumn(): bool
+    {
+        static $has = null;
+        if ($has !== null) {
+            return $has;
+        }
+        try {
+            $stmt = $this->pdo->query('SELECT apns_environment FROM ipca_communication_devices LIMIT 0');
+            $has = $stmt !== false;
+        } catch (Throwable) {
+            $has = false;
+        }
+        return $has;
     }
 
     private function touchDevice(int $deviceId): void

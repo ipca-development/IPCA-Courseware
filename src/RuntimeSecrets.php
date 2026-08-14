@@ -43,6 +43,8 @@ final class RuntimeSecrets
         'CW_ADSBEXCHANGE_API_KEY',
         'CW_CESIUM_ION_TOKEN',
         'CW_OPENSKY_TRINO_PASSWORD',
+        'IPCA_APNS_KEY_P8',
+        'CW_APNS_KEY_P8',
     ];
 
     /** @var list<string> */

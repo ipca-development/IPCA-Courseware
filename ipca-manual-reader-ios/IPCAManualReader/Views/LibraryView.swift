@@ -6,7 +6,6 @@ struct LibraryView: View {
     @ObservedObject private var downloads = ManualDownloadManager.shared
     @StateObject private var viewModel = LibraryViewModel()
     @State private var selectedBook: LibraryBook?
-    @State private var isReaderPresented = false
     @State private var selectedDestination: LibraryDestination = .library
     @State private var searchText = ""
     @State private var selectedFilter: LibraryFilter = .all
@@ -25,16 +24,9 @@ struct LibraryView: View {
         }
         .background(IPCAReaderTheme.shelfBackground.ignoresSafeArea())
         .task { await viewModel.load() }
-        .fullScreenCover(
-            isPresented: $isReaderPresented,
-            onDismiss: { selectedBook = nil }
-        ) {
-            if let book = selectedBook {
-                ReaderView(book: book) {
-                    isReaderPresented = false
-                }
-            } else {
-                ProgressView("Opening manual…")
+        .fullScreenCover(item: $selectedBook) { book in
+            ReaderView(book: book) {
+                selectedBook = nil
             }
         }
         .sheet(item: $utilityDestination) { destination in
@@ -153,8 +145,10 @@ struct LibraryView: View {
     }
 
     private func presentReader(_ book: LibraryBook) {
+#if DEBUG
+        print("READER_PRESENT_REQUEST book=\(book.id)")
+#endif
         selectedBook = book
-        isReaderPresented = true
     }
 }
 
@@ -723,7 +717,12 @@ private struct ManualCoverCard: View {
     }
 
     var body: some View {
-        Button(action: onSelect) {
+        Button {
+#if DEBUG
+            print("READER_CARD_TAP book=\(book.id)")
+#endif
+            onSelect()
+        } label: {
             VStack(alignment: .leading, spacing: 9) {
                 cover
 

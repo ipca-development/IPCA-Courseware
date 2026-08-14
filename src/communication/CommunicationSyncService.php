@@ -5,6 +5,7 @@ require_once __DIR__ . '/CommunicationSupport.php';
 require_once __DIR__ . '/ConversationService.php';
 require_once __DIR__ . '/MessageService.php';
 require_once __DIR__ . '/CommunicationConfigService.php';
+require_once __DIR__ . '/CommunicationPushService.php';
 
 final class CommunicationSyncService
 {
@@ -12,7 +13,8 @@ final class CommunicationSyncService
         private PDO $pdo,
         private ConversationService $conversations,
         private MessageService $messages,
-        private CommunicationConfigService $config
+        private CommunicationConfigService $config,
+        private ?CommunicationPushService $push = null
     ) {
     }
 
@@ -150,9 +152,20 @@ final class CommunicationSyncService
             'unread_count' => $unread,
             'needs_action_count' => 0,
             'notifications' => array(
-                'push_configured' => false,
-                'push_authorized' => null,
+                'push_configured' => $this->push !== null && $this->push->isConfigured(),
+                'push_authorized' => $this->devicePushAuthorized((int)$session['device']['id']),
             ),
         );
+    }
+
+    private function devicePushAuthorized(int $deviceId): ?bool
+    {
+        $stmt = $this->pdo->prepare('SELECT push_authorized FROM ipca_communication_devices WHERE id = ? LIMIT 1');
+        $stmt->execute(array($deviceId));
+        $value = $stmt->fetchColumn();
+        if ($value === false || $value === null || $value === '') {
+            return null;
+        }
+        return (int)$value === 1;
     }
 }

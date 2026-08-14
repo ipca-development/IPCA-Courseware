@@ -76,6 +76,16 @@ actor APIClient {
         return envelope.people
     }
 
+    func registerDevice(apnsToken: String?, authorized: Bool) async throws {
+        var body: [String: Any] = DeviceIdentity.payload
+        body["push_authorized"] = authorized
+        body["apns_environment"] = DeviceIdentity.apnsEnvironment
+        if let apnsToken, !apnsToken.isEmpty {
+            body["apns_token"] = apnsToken
+        }
+        let _: OKEnvelope = try await post("api/communication/devices.php", body: body)
+    }
+
     private func get<T: Decodable>(_ path: String, query: [String: String] = [:], authorized: Bool = true) async throws -> T {
         try await send(path, method: "GET", query: query, body: nil, authorized: authorized)
     }

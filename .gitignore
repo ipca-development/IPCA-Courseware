@@ -3,6 +3,10 @@
 .DS_Store
 **/.DS_Store
 
+# APNs auth keys are never committed.
+/secrets/
+**/AuthKey_*.p8
+
 # Admin-uploaded resource library JSON (per-edition folders under storage/resource_library/)
 /storage/resource_library/
 /storage/easa_erules/

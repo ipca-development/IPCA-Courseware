@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/ControlledPublishingBookRenderer.php';
 require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+require_once __DIR__ . '/ControlledPublishingAuthoritativePaginationService.php';
 
 /**
  * Deterministic page-map generator for authoritative OM/OMM manuals.
@@ -13,6 +14,9 @@ require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
  */
 final class ControlledPublishingPaginationService
 {
+    /** @var array<string,mixed> */
+    private array $lastGeneration = array();
+
     /** @var list<string> */
     private const PART_KEYS = array('part_1', 'part_2', 'part_3', 'part_4', 'main_content');
 
@@ -180,6 +184,9 @@ final class ControlledPublishingPaginationService
             $manualCode = (string)($version['book_key'] ?? $bookKey);
         }
 
+        $manualBreakIdentity = $this->reader->paginationManualPageBreakIdentity($versionId);
+        $sectionsOut = $this->reader->paginationApplyManualPageBreaks($versionId, $sectionsOut);
+
         return array(
             'book_key' => (string)($version['book_key'] ?? $bookKey),
             'book_title' => (string)($version['book_title'] ?? ''),
@@ -191,6 +198,7 @@ final class ControlledPublishingPaginationService
             'layout' => ControlledPublishingReaderLayoutProfile::spec(),
             'layout_profile' => ControlledPublishingReaderLayoutProfile::profileKey(),
             'layout_hash' => ControlledPublishingReaderLayoutProfile::layoutHash(),
+            'manual_page_breaks' => $manualBreakIdentity,
             'nav' => $this->reader->buildReaderNavTree($bookKey, $version),
             'sections' => $sectionsOut,
         );
@@ -425,9 +433,22 @@ final class ControlledPublishingPaginationService
                     $type = $tm[1];
                 }
                 $isHeading = $type === 'heading';
+                $stableAnchor = '';
+                if (preg_match('/\bdata-stable-anchor="([^"]+)"/', $articleHtml, $anchorMatch) === 1) {
+                    $stableAnchor = html_entity_decode(
+                        (string)$anchorMatch[1],
+                        ENT_QUOTES | ENT_HTML5,
+                        'UTF-8'
+                    );
+                }
+                $blockId = 0;
+                if (preg_match('/\bdata-block-id="(\d+)"/', $articleHtml, $blockMatch) === 1) {
+                    $blockId = (int)$blockMatch[1];
+                }
                 $units[] = array(
-                    'unit_key' => 'b' . $sectionId . '_' . $idx,
-                    'block_id' => 0,
+                    'unit_key' => $stableAnchor !== '' ? $stableAnchor : 'b' . $sectionId . '_' . $idx,
+                    'block_id' => $blockId,
+                    'stable_anchor' => $stableAnchor,
                     'block_type' => $type,
                     'html' => $articleHtml,
                     'splittable' => in_array($type, self::SPLITTABLE_BLOCK_TYPES, true),
@@ -574,68 +595,26 @@ final class ControlledPublishingPaginationService
     public function generateFrozenPageMap(string $bookKey, ?array $version = null): array
     {
         $source = $this->buildPaginateSource($bookKey, $version);
-
-        $tocSection = null;
-        $sectionsWithoutToc = array();
-        foreach ($source['sections'] ?? array() as $section) {
-            if (($section['section_key'] ?? '') === 'toc') {
-                $tocSection = $section;
-            } else {
-                $sectionsWithoutToc[] = $section;
-            }
+        $resolvedVersion = $version ?? $this->reader->requireReleasedVersion($bookKey);
+        $result = (new ControlledPublishingAuthoritativePaginationService($this->reader))
+            ->generate($source, $resolvedVersion);
+        $this->lastGeneration = $result['generation'];
+        foreach ($result['pages'] as &$page) {
+            $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+            $metadata['publication_generation'] = $this->lastGeneration;
+            $page['metadata'] = $metadata;
         }
+        unset($page);
 
-        $pass1Source = $source;
-        $pass1Source['sections'] = $sectionsWithoutToc;
-        $draftPages = $this->paginateSourceDeterministic($pass1Source);
-        $sectionPageIndex = $this->buildSectionFirstPageIndex($draftPages);
+        return $result['pages'];
+    }
 
-        $tocPages = array();
-        if ($tocSection !== null) {
-            $tocSection = $this->rebuildTocSectionEntry($source, $tocSection, $sectionPageIndex);
-            $tocSource = $source;
-            $tocSource['sections'] = array($tocSection);
-            $tocPages = $this->paginateSourceDeterministic($tocSource);
-            $tocOffset = count($tocPages);
-
-            if ($tocOffset > 0) {
-                $shiftedIndex = array();
-                foreach ($sectionPageIndex as $sectionId => $pageNum) {
-                    $shiftedIndex[(int)$sectionId] = (int)$pageNum + $tocOffset;
-                }
-                $tocSection = $this->rebuildTocSectionEntry($source, $tocSection, $shiftedIndex);
-                $tocSource['sections'] = array($tocSection);
-                $tocPages = $this->paginateSourceDeterministic($tocSource);
-            }
-
-            $draftPages = $this->insertTocPagesAfterCover($draftPages, $tocPages);
-        }
-
-        $total = count($draftPages);
-
-        $stored = array();
-        foreach ($draftPages as $idx => $page) {
-            $pageNum = $idx + 1;
-            $pageHtml = $this->assembleFrozenPageHtml($page, $pageNum, $total);
-            $stored[] = array(
-                'page_number' => $pageNum,
-                'section_id' => $page['section_id'],
-                'stable_anchor' => $page['section_stable_anchor'] ?? null,
-                'page_type' => !empty($page['is_cover']) ? 'cover' : 'content',
-                'is_cover' => !empty($page['is_cover']),
-                'is_section_start' => !empty($page['is_section_start']),
-                'is_major_section_start' => !empty($page['is_major_section_start']),
-                'page_html' => $pageHtml,
-                'thumbnail_html' => null,
-                'metadata' => array(
-                    'section_title' => (string)($page['section_title'] ?? ''),
-                    'manual_part' => $page['manual_part'] ?? null,
-                    'part_title' => (string)($page['part_title'] ?? ''),
-                ),
-            );
-        }
-
-        return $stored;
+    /**
+     * @return array<string,mixed>
+     */
+    public function lastGeneration(): array
+    {
+        return $this->lastGeneration;
     }
 
     /**
