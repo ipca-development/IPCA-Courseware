@@ -178,9 +178,10 @@ try {
     result.pages.every((page) =>
       page.page_html.includes("reader-page-header-region")
       && page.page_html.includes("reader-page-footer-region")
+      && page.page_html.includes("justify-content: flex-end")
       && page.metrics.validation_passed === true
     ),
-    "every final page must include fixed regions and pass geometry validation"
+    "every final page must include fixed regions, bottom-align its footer, and pass geometry validation"
   );
   const breakTargetPage = result.pages.find((page) =>
     page.page_html.includes("Manual break target")

@@ -774,7 +774,7 @@
       <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
         <div class="reader-page-header-region" style="position:absolute;box-sizing:border-box;${frameStyle(headerFrame)}">${header}</div>
         <main class="reader-page-body cpb-sheet-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;align-content:start;${frameStyle(contentFrame)};overflow:visible">${pagePiecesMarkup(page.pieces)}</main>
-        <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;${frameStyle(footerFrame)}">${footer}</div>
+        <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-end;${frameStyle(footerFrame)}">${footer}</div>
       </div>
     `;
     applyReaderScale(element);

@@ -700,9 +700,10 @@ body.cpb-browser-fullscreen .cpb-workspace {
   min-width: 0;
   height: auto;
   min-height: 0;
-  overflow: visible;
+  overflow: hidden;
   background: #fff;
   border: 1px solid #c8cdd4;
+  border-radius: 18px;
   box-shadow: 0 5px 18px rgba(37, 43, 52, .25);
 }
 
@@ -716,12 +717,16 @@ body.cpb-browser-fullscreen .cpb-workspace {
   width: 100% !important;
   height: 100% !important;
   margin: 0 !important;
+  border-radius: inherit;
+  overflow: hidden !important;
 }
 
 .cpb-paginated-page .reader-canonical-page {
   position: absolute !important;
   inset: 0 !important;
   margin: 0 !important;
+  border-radius: inherit !important;
+  overflow: hidden !important;
 }
 
 .cpb-paginated-page .reader-page-header-region,
