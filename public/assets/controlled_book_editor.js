@@ -175,6 +175,21 @@
     printPageCount: 1,
     authoritativePageCount: 0,
     sectionPageStarts: {},
+    livePagination: {
+      mutationRevision: 0,
+      scheduledRevision: 0,
+      activeRevision: 0,
+      acceptedRevision: 0,
+      pendingMutation: null,
+      activeRequest: null,
+      debounceTimer: null,
+      retryMutation: null,
+      requestSequence: 0,
+      sourceHash: '',
+      status: 'current',
+      lastError: '',
+      retryAvailable: false,
+    },
   };
 
   var INDENT_MAX_LEVEL = 8;
@@ -355,6 +370,33 @@
     }
   }
 
+  function captureEditorSurfaceBookmarks(reason) {
+    state.surfaceBookmarks = {
+      reason: String(reason || 'surface-reconcile'),
+      section_id: state.sectionId,
+      selection: captureSemanticSelectionBookmark(),
+      scroll: captureSemanticScrollBookmark(),
+    };
+    return state.surfaceBookmarks;
+  }
+
+  function restoreEditorSurfaceBookmarks(reason) {
+    var bookmarks = state.surfaceBookmarks;
+    if (!bookmarks || bookmarks.section_id !== state.sectionId) return false;
+    if (reason && bookmarks.reason !== reason) return false;
+    state.surfaceBookmarks = null;
+    var restoredSelection = restoreSemanticSelectionBookmark(bookmarks.selection);
+    restoreSemanticScrollBookmark(bookmarks.scroll);
+    root.dispatchEvent(new CustomEvent('cpb:surface-bookmarks-restored', {
+      detail: {
+        reason: bookmarks.reason,
+        selection_restored: restoredSelection,
+        scroll_restored: !!bookmarks.scroll,
+      },
+    }));
+    return true;
+  }
+
   function applyPageHtmlFromResponse(pageHtml) {
     if (!pageHtml) return;
     blurCanvasEditing();
@@ -393,6 +435,299 @@
     });
   }
 
+  var SOURCE_MUTATION_ACTIONS = {
+    update_block: 'suffix',
+    create_block: 'suffix',
+    delete_block: 'suffix',
+    move_block: 'suffix',
+    split_block_page_break: 'suffix',
+    upload_image: 'suffix',
+    save_section_layout: 'suffix',
+    create_subsection: 'global',
+    save_book_styles: 'global',
+    copy_book_styles: 'global',
+    save_page_header: 'global',
+    upload_header_logo: 'global',
+    save_cover_page: 'global',
+    upload_cover_logo: 'global',
+    upload_cover_image: 'global',
+    save_toc_settings: 'global',
+    regenerate_toc: 'global',
+    save_lep_page: 'global',
+    regenerate_lep_parts: 'global',
+    sign_lep_slot: 'global',
+    save_part0_page: 'global',
+    regenerate_definitions: 'global',
+    regenerate_abbreviations: 'global',
+    import_definitions_text: 'global',
+    regenerate_highlights: 'global',
+    regenerate_annex_register: 'global',
+    regenerate_annex_highlights: 'global',
+    save_callout_presets: 'global',
+    sync_manual_structure: 'global',
+    recompute_section_numbers: 'global',
+    detect_callouts: 'global',
+    detect_hyperlinks: 'global',
+    detect_annex_refs: 'global',
+  };
+
+  function livePaginationPayload(payload) {
+    if (payload && payload.live_draft) return payload.live_draft;
+    if (payload && payload.result && payload.result.live_draft) return payload.result.live_draft;
+    if (payload && payload.result) return payload.result;
+    return payload || {};
+  }
+
+  function setLivePaginationState(status, values) {
+    var live = state.livePagination;
+    live.status = status;
+    Object.keys(values || {}).forEach(function (key) {
+      live[key] = values[key];
+    });
+    root.dispatchEvent(new CustomEvent('cpb:live-pagination-state', {
+      detail: {
+        version_id: state.versionId,
+        status: live.status,
+        mutation_revision: live.mutationRevision,
+        active_revision: live.activeRevision,
+        accepted_revision: live.acceptedRevision,
+        source_hash: live.sourceHash,
+        retry_available: live.retryAvailable,
+        error: live.lastError,
+      },
+    }));
+  }
+
+  function blockAnchorFromResponse(result) {
+    var html = result && (result.block_html || result.page_body_html || '');
+    if (!html) return '';
+    var holder = document.createElement('div');
+    holder.innerHTML = html;
+    var block = holder.querySelector('.cpb-block[data-stable-anchor]');
+    return block ? (block.getAttribute('data-stable-anchor') || '') : '';
+  }
+
+  function sourceMutationContext(action, payload, result, overrides) {
+    payload = payload || {};
+    overrides = overrides || {};
+    var blockId = parseInt(
+      overrides.block_id || payload.block_id || result && result.block_id || '0',
+      10
+    ) || null;
+    var block = blockId
+      ? canvasEl.querySelector('.cpb-block[data-block-id="' + blockId + '"]')
+      : null;
+    var stableAnchor = String(
+      overrides.stable_anchor
+      || payload.stable_anchor
+      || payload.before_block_anchor
+      || block && block.getAttribute('data-stable-anchor')
+      || blockAnchorFromResponse(result)
+      || ''
+    );
+    return {
+      version_id: parseInt(overrides.version_id || payload.version_id || state.versionId || '0', 10) || 0,
+      section_id: parseInt(overrides.section_id || payload.section_id || state.sectionId || '0', 10) || null,
+      block_id: blockId,
+      stable_anchor: stableAnchor,
+      mutation_kind: String(overrides.mutation_kind || action || 'source_mutation'),
+      layout_impact: String(overrides.layout_impact || SOURCE_MUTATION_ACTIONS[action] || 'suffix'),
+    };
+  }
+
+  function livePaginationDelay(mutation) {
+    if (!mutation) return 450;
+    return mutation.mutation_kind === 'update_block' ? 450 : 0;
+  }
+
+  function scheduleLivePagination(mutation) {
+    var live = state.livePagination;
+    if (!mutation || mutation.client_mutation_revision <= live.acceptedRevision) return;
+    if (
+      !live.pendingMutation
+      || mutation.client_mutation_revision >= live.pendingMutation.client_mutation_revision
+    ) {
+      live.pendingMutation = mutation;
+    }
+    live.scheduledRevision = Math.max(
+      live.scheduledRevision,
+      mutation.client_mutation_revision
+    );
+    setLivePaginationState(
+      live.activeRequest ? 'stale' : 'pending',
+      { retryAvailable: false, lastError: '' }
+    );
+    clearTimeout(live.debounceTimer);
+    live.debounceTimer = setTimeout(function () {
+      live.debounceTimer = null;
+      runPendingLivePagination();
+    }, livePaginationDelay(mutation));
+  }
+
+  function normalizeLivePaginationError(error) {
+    if (!error) return 'Live pagination failed.';
+    if (typeof error === 'string') return error;
+    return String(error.message || error.error || 'Live pagination failed.');
+  }
+
+  function requestLivePagination(action, mutation) {
+    var live = state.livePagination;
+    var revision = mutation ? mutation.client_mutation_revision : live.mutationRevision;
+    var requestSequence = ++live.requestSequence;
+    var body = {
+      action: action,
+      book_version_id: state.versionId,
+      book_key: state.versionInfo.book_key || '',
+      client_mutation_revision: revision,
+      request_token: String(state.versionId) + ':' + revision + ':' + requestSequence,
+    };
+    if (mutation) {
+      body.section_id = mutation.section_id;
+      body.block_id = mutation.block_id;
+      body.stable_anchor = mutation.stable_anchor;
+      body.mutation_kind = mutation.mutation_kind;
+      body.layout_impact = mutation.layout_impact;
+    }
+    return paginationRequest('/admin/api/controlled_book_page_map_api.php', body);
+  }
+
+  function observeLivePaginationResult(payload, requestedRevision) {
+    var live = state.livePagination;
+    var result = livePaginationPayload(payload);
+    if (requestedRevision < live.mutationRevision) {
+      setLivePaginationState('stale', { retryAvailable: false });
+      return false;
+    }
+    var status = String(result.status || 'pending');
+    var fingerprint = result.current_fingerprint || result.requested_fingerprint || result.fingerprint || {};
+    var sourceHash = String(result.source_hash || fingerprint.source_hash || '');
+    if (status === 'current') {
+      live.acceptedRevision = requestedRevision;
+      setLivePaginationState('current', {
+        sourceHash: sourceHash,
+        retryAvailable: false,
+        retryMutation: null,
+        lastError: '',
+      });
+      state.paginationStale = false;
+      loadUnifiedManualBreaks().catch(function () {});
+      return true;
+    }
+    if (status === 'failed' || status === 'retry_available') {
+      setLivePaginationState('failed', {
+        sourceHash: sourceHash || live.sourceHash,
+        retryAvailable: true,
+        retryMutation: live.retryMutation,
+        lastError: normalizeLivePaginationError(
+          result.error || result.last_error || result.last_error_message
+        ),
+      });
+      return false;
+    }
+    if (status === 'stale') {
+      setLivePaginationState('stale', {
+        sourceHash: sourceHash || live.sourceHash,
+        retryAvailable: false,
+      });
+      if (live.retryMutation) {
+        live.pendingMutation = live.retryMutation;
+      }
+      return false;
+    }
+    setLivePaginationState(status === 'generating' ? 'generating' : 'pending', {
+      sourceHash: sourceHash || live.sourceHash,
+      retryAvailable: false,
+    });
+    scheduleLivePaginationStatusPoll(requestedRevision);
+    return false;
+  }
+
+  function scheduleLivePaginationStatusPoll(requestedRevision) {
+    var live = state.livePagination;
+    clearTimeout(live.debounceTimer);
+    live.debounceTimer = setTimeout(function () {
+      live.debounceTimer = null;
+      if (live.pendingMutation && live.pendingMutation.client_mutation_revision > requestedRevision) {
+        runPendingLivePagination();
+        return;
+      }
+      if (live.activeRequest) {
+        scheduleLivePaginationStatusPoll(requestedRevision);
+        return;
+      }
+      live.activeRevision = requestedRevision;
+      live.activeRequest = requestLivePagination('live_status', {
+        client_mutation_revision: requestedRevision,
+      }).then(function (payload) {
+        observeLivePaginationResult(payload, requestedRevision);
+      }).catch(function (error) {
+        setLivePaginationState('failed', {
+          retryAvailable: true,
+          lastError: normalizeLivePaginationError(error),
+        });
+      }).finally(function () {
+        live.activeRequest = null;
+        live.activeRevision = 0;
+        if (live.pendingMutation) runPendingLivePagination();
+      });
+    }, 1000);
+  }
+
+  function runPendingLivePagination() {
+    var live = state.livePagination;
+    if (live.activeRequest) return;
+    var mutation = live.pendingMutation;
+    if (!mutation) return;
+    live.pendingMutation = null;
+    live.retryMutation = mutation;
+    live.activeRevision = mutation.client_mutation_revision;
+    setLivePaginationState('generating', {
+      retryAvailable: false,
+      lastError: '',
+    });
+    var requestAction = mutation.live_action === 'live_retry' ? 'live_retry' : 'live_ensure';
+    live.activeRequest = requestLivePagination(requestAction, mutation)
+      .then(function (payload) {
+        observeLivePaginationResult(payload, mutation.client_mutation_revision);
+      })
+      .catch(function (error) {
+        setLivePaginationState('failed', {
+          retryAvailable: true,
+          retryMutation: mutation,
+          lastError: normalizeLivePaginationError(error),
+        });
+      })
+      .finally(function () {
+        live.activeRequest = null;
+        live.activeRevision = 0;
+        if (live.pendingMutation) {
+          clearTimeout(live.debounceTimer);
+          live.debounceTimer = setTimeout(runPendingLivePagination, 0);
+        }
+      });
+  }
+
+  function retryLivePagination() {
+    var mutation = state.livePagination.retryMutation;
+    if (!mutation) return false;
+    scheduleLivePagination(Object.assign({}, mutation, { live_action: 'live_retry' }));
+    return true;
+  }
+
+  function recordCommittedSourceMutation(action, payload, result, overrides) {
+    if (!result || result.ok !== true) return null;
+    if (!SOURCE_MUTATION_ACTIONS[action] && !(overrides && overrides.mutation_kind)) {
+      return null;
+    }
+    var detail = sourceMutationContext(action, payload, result, overrides);
+    detail.client_mutation_revision = ++state.livePagination.mutationRevision;
+    root.dispatchEvent(new CustomEvent('cpb:source-mutation-committed', {
+      detail: detail,
+    }));
+    scheduleLivePagination(detail);
+    return detail;
+  }
+
   function apiPost(action, payload) {
     return fetch(apiBase, {
       method: 'POST',
@@ -400,7 +735,28 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(Object.assign({ action: action }, payload || {})),
     }).then(function (r) {
-      return parseApiResponse(r);
+      return parseApiResponse(r).then(function (result) {
+        recordCommittedSourceMutation(action, payload || {}, result || {});
+        return result;
+      });
+    });
+  }
+
+  function apiUpload(formData) {
+    var action = String(formData.get('action') || '');
+    var payload = {};
+    ['version_id', 'section_id', 'block_id', 'stable_anchor'].forEach(function (key) {
+      if (formData.has(key)) payload[key] = formData.get(key);
+    });
+    return fetch(apiBase, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: formData,
+    }).then(function (r) {
+      return r.json();
+    }).then(function (result) {
+      recordCommittedSourceMutation(action, payload, result || {});
+      return result;
     });
   }
 
@@ -779,6 +1135,17 @@
     return fetch(url, options).then(function (r) {
       return parseApiResponse(r).then(function (payload) {
         if (!r.ok || !payload.ok) throw new Error(payload.error || 'Pagination request failed');
+        if (
+          body
+          && url.indexOf('controlled_book_page_break_api.php') !== -1
+          && /^(insert|remove|move)$/.test(String(body.action || ''))
+        ) {
+          recordCommittedSourceMutation(body.action, body, payload, {
+            mutation_kind: 'manual_page_break_' + String(body.action),
+            layout_impact: 'suffix',
+            stable_anchor: body.stable_anchor || body.before_block_anchor || '',
+          });
+        }
         return payload;
       });
     });
@@ -850,6 +1217,258 @@
     };
   }
 
+  function sourceFieldIdentity(field, block) {
+    if (!field || !block) return null;
+    var editableFields = Array.prototype.slice.call(
+      block.querySelectorAll('[contenteditable="true"],input,textarea,select')
+    );
+    var className = Array.prototype.slice.call(field.classList || []).find(function (name) {
+      return /^cpb-(heading|paragraph|list|callout-title|callout-text|list-continuation)$/.test(name);
+    }) || '';
+    return {
+      data_field: field.getAttribute('data-field') || '',
+      data_part0_field: field.getAttribute('data-part0-field') || '',
+      data_part0_col: field.getAttribute('data-part0-col') || '',
+      data_lep_field: field.getAttribute('data-lep-field') || '',
+      data_cover_field: field.getAttribute('data-cover-field') || '',
+      class_name: className,
+      field_index: Math.max(0, editableFields.indexOf(field)),
+      tag_name: String(field.tagName || '').toLowerCase(),
+    };
+  }
+
+  function sourceBlockForNode(node) {
+    var element = node && node.nodeType === Node.ELEMENT_NODE ? node : node && node.parentElement;
+    return element && element.closest ? element.closest('.cpb-block') : null;
+  }
+
+  function sourceFieldForNode(node) {
+    var element = node && node.nodeType === Node.ELEMENT_NODE ? node : node && node.parentElement;
+    return element && element.closest
+      ? element.closest('[contenteditable="true"],input,textarea,select')
+      : null;
+  }
+
+  function textOffsetWithin(field, node, offset) {
+    if (!field || !node || !field.contains(node) && field !== node) return 0;
+    var range = document.createRange();
+    range.selectNodeContents(field);
+    try {
+      range.setEnd(node, offset);
+    } catch (error) {
+      return 0;
+    }
+    return range.toString().length;
+  }
+
+  function semanticSourceLocation(node, offset) {
+    var block = sourceBlockForNode(node);
+    var field = sourceFieldForNode(node);
+    if (!block || !field || !canvasEl.contains(block)) return null;
+    var element = node && node.nodeType === Node.ELEMENT_NODE ? node : node && node.parentElement;
+    var piece = element && element.closest
+      ? element.closest('[data-source-range-start][data-source-range-end]')
+      : null;
+    var location = {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+      block_id: parseInt(block.getAttribute('data-block-id') || '0', 10) || null,
+      stable_anchor: block.getAttribute('data-stable-anchor') || '',
+      block_type: block.getAttribute('data-block-type') || '',
+      field: sourceFieldIdentity(field, block),
+      source_offset: textOffsetWithin(field, node, offset),
+    };
+    if (piece) {
+      location.source_range = {
+        start: parseInt(piece.getAttribute('data-source-range-start') || '0', 10) || 0,
+        end: parseInt(piece.getAttribute('data-source-range-end') || '0', 10) || 0,
+      };
+    }
+    return location;
+  }
+
+  function findSourceBlock(location) {
+    if (!location) return null;
+    var block = null;
+    if (location.stable_anchor) {
+      block = canvasEl.querySelector(
+        '.cpb-block[data-stable-anchor="' + CSS.escape(location.stable_anchor) + '"]'
+      );
+    }
+    if (!block && location.block_id) {
+      block = canvasEl.querySelector(
+        '.cpb-block[data-block-id="' + String(location.block_id) + '"]'
+      );
+    }
+    return block;
+  }
+
+  function findSourceField(block, identity) {
+    if (!block || !identity) return null;
+    var selectors = [];
+    if (identity.data_field) {
+      selectors.push('[data-field="' + CSS.escape(identity.data_field) + '"]');
+    }
+    if (identity.data_part0_field) {
+      selectors.push('[data-part0-field="' + CSS.escape(identity.data_part0_field) + '"]');
+    }
+    if (identity.data_part0_col) {
+      selectors.push('[data-part0-col="' + CSS.escape(identity.data_part0_col) + '"]');
+    }
+    if (identity.data_lep_field) {
+      selectors.push('[data-lep-field="' + CSS.escape(identity.data_lep_field) + '"]');
+    }
+    if (identity.data_cover_field) {
+      selectors.push('[data-cover-field="' + CSS.escape(identity.data_cover_field) + '"]');
+    }
+    if (identity.class_name) selectors.push('.' + CSS.escape(identity.class_name));
+    for (var index = 0; index < selectors.length; index++) {
+      var found = block.querySelector(selectors[index]);
+      if (found) return found;
+    }
+    var fields = block.querySelectorAll('[contenteditable="true"],input,textarea,select');
+    return fields[identity.field_index] || null;
+  }
+
+  function resolveSourceBoundary(location) {
+    var block = findSourceBlock(location);
+    var field = findSourceField(block, location && location.field);
+    if (!field) return null;
+    if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+      return {
+        field: field,
+        inputOffset: Math.min(
+          Math.max(0, parseInt(location.source_offset || '0', 10)),
+          String(field.value || '').length
+        ),
+      };
+    }
+    var boundary = textBoundary(field, parseInt(location.source_offset || '0', 10));
+    return { field: field, node: boundary.node, offset: boundary.offset };
+  }
+
+  function captureSemanticSelectionBookmark() {
+    var active = document.activeElement;
+    if (
+      active
+      && canvasEl.contains(active)
+      && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)
+    ) {
+      var block = active.closest('.cpb-block');
+      if (!block) return null;
+      var base = semanticSourceLocation(active, 0);
+      if (!base) return null;
+      var start = active.selectionStart == null ? 0 : active.selectionStart;
+      var end = active.selectionEnd == null ? start : active.selectionEnd;
+      var direction = active.selectionDirection || 'none';
+      return {
+        kind: 'input',
+        active: base,
+        anchor: Object.assign({}, base, {
+          source_offset: direction === 'backward' ? end : start,
+        }),
+        focus: Object.assign({}, base, {
+          source_offset: direction === 'backward' ? start : end,
+        }),
+        start_offset: start,
+        end_offset: end,
+        direction: direction === 'backward' ? 'backward' : 'forward',
+        is_collapsed: start === end,
+      };
+    }
+    var selection = window.getSelection();
+    if (!selection || selection.rangeCount < 1 || !selectionInCanvas()) return null;
+    var anchor = semanticSourceLocation(selection.anchorNode, selection.anchorOffset);
+    var focus = semanticSourceLocation(selection.focusNode, selection.focusOffset);
+    if (!anchor || !focus) return null;
+    var range = selection.getRangeAt(0);
+    var start = semanticSourceLocation(range.startContainer, range.startOffset);
+    var end = semanticSourceLocation(range.endContainer, range.endOffset);
+    var direction = (
+      anchor.block_id === start.block_id
+      && anchor.stable_anchor === start.stable_anchor
+      && anchor.source_offset === start.source_offset
+    ) ? 'forward' : 'backward';
+    return {
+      kind: 'contenteditable',
+      active: semanticSourceLocation(
+        document.activeElement,
+        0
+      ) || anchor,
+      anchor: anchor,
+      focus: focus,
+      start: start,
+      end: end,
+      start_offset: start ? start.source_offset : 0,
+      end_offset: end ? end.source_offset : 0,
+      direction: direction,
+      is_collapsed: selection.isCollapsed,
+    };
+  }
+
+  function restoreSemanticSelectionBookmark(bookmark) {
+    if (!bookmark || !bookmark.anchor || !bookmark.focus) return false;
+    var anchor = resolveSourceBoundary(bookmark.anchor);
+    var focus = resolveSourceBoundary(bookmark.focus);
+    if (!anchor || !focus) return false;
+    if (bookmark.kind === 'input' && anchor.field === focus.field) {
+      anchor.field.focus();
+      var start = Math.min(anchor.inputOffset, focus.inputOffset);
+      var end = Math.max(anchor.inputOffset, focus.inputOffset);
+      anchor.field.setSelectionRange(start, end, bookmark.direction || 'none');
+      return true;
+    }
+    if (!anchor.node || !focus.node) return false;
+    anchor.field.focus();
+    var selection = window.getSelection();
+    selection.removeAllRanges();
+    if (typeof selection.setBaseAndExtent === 'function') {
+      selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+    } else {
+      var range = document.createRange();
+      range.setStart(anchor.node, anchor.offset);
+      range.setEnd(focus.node, focus.offset);
+      selection.addRange(range);
+      if (bookmark.direction === 'backward' && selection.extend) {
+        selection.collapse(focus.node, focus.offset);
+        selection.extend(anchor.node, anchor.offset);
+      }
+    }
+    return true;
+  }
+
+  function captureSemanticScrollBookmark() {
+    var canvasRect = canvasEl.getBoundingClientRect();
+    var blocks = Array.prototype.slice.call(
+      canvasEl.querySelectorAll('.cpb-block[data-stable-anchor]')
+    );
+    var anchor = blocks.find(function (block) {
+      return block.getBoundingClientRect().bottom >= canvasRect.top;
+    }) || null;
+    return {
+      section_id: state.sectionId,
+      scroll_top: canvasEl.scrollTop,
+      stable_anchor: anchor ? (anchor.getAttribute('data-stable-anchor') || '') : '',
+      anchor_offset_px: anchor ? anchor.getBoundingClientRect().top - canvasRect.top : 0,
+    };
+  }
+
+  function restoreSemanticScrollBookmark(bookmark) {
+    if (!bookmark) return false;
+    if (bookmark.stable_anchor) {
+      var anchor = canvasEl.querySelector(
+        '.cpb-block[data-stable-anchor="' + CSS.escape(bookmark.stable_anchor) + '"]'
+      );
+      if (anchor) {
+        var before = anchor.getBoundingClientRect().top - canvasEl.getBoundingClientRect().top;
+        canvasEl.scrollTop += before - Number(bookmark.anchor_offset_px || 0);
+        return true;
+      }
+    }
+    canvasEl.scrollTop = Number(bookmark.scroll_top || 0);
+    return true;
+  }
+
   function replaceTextRangeHtml(rootEl, start, end, replacementHtml) {
     var startBoundary = textBoundary(rootEl, start);
     var endBoundary = textBoundary(rootEl, end);
@@ -904,22 +1523,7 @@
     state.paginationStale = true;
     scheduleUnifiedPrintLayout(450);
     clearTimeout(state.paginationRegenerateTimer);
-    state.paginationRegenerateTimer = setTimeout(function () {
-      var active = document.activeElement;
-      if (active && canvasEl.contains(active) && active.isContentEditable) {
-        markPaginationChanged();
-        return;
-      }
-      paginationRequest('/admin/api/controlled_book_page_map_api.php', {
-        action: 'generate',
-        book_version_id: state.versionId,
-        book_key: (state.versionInfo.book_key || ''),
-      }).then(loadUnifiedManualBreaks).then(function () {
-        state.paginationStale = false;
-      }).catch(function () {
-        state.paginationStale = true;
-      });
-    }, 5000);
+    state.paginationRegenerateTimer = null;
   }
 
   function wirePaginatedFields() {
@@ -3051,8 +3655,7 @@
     fd.append('action', action);
     fd.append('version_id', String(state.versionId));
     fd.append('image', file);
-    fetch(apiBase, { method: 'POST', body: fd, credentials: 'same-origin' })
-      .then(function (r) { return r.json(); })
+    apiUpload(fd)
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Upload failed');
         state.coverPage = res.cover_page || state.coverPage;
@@ -7372,8 +7975,7 @@
       fd.append('image', file);
       fd.append('alt', overlay.querySelector('#cpbHeaderLogoAlt').value.trim());
       setStatus('Uploading logo…', 'saving');
-      fetch(apiBase, { method: 'POST', credentials: 'same-origin', body: fd })
-        .then(function (r) { return r.json(); })
+      apiUpload(fd)
         .then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Upload failed');
           pendingLogoUrl = res.url || (res.page_header && res.page_header.logo_url) || '';
@@ -7911,8 +8513,7 @@
     fd.append('version_id', String(state.versionId));
     fd.append('section_id', String(state.sectionId));
     fd.append('image', file);
-    fetch(apiBase, { method: 'POST', credentials: 'same-origin', body: fd })
-      .then(function (r) { return r.json(); })
+    apiUpload(fd)
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Upload failed');
         var body = canvasEl.querySelector('[data-blocks-root]');
@@ -8651,6 +9252,26 @@
 
   wireTreeToggleAll();
   initCrossRefAnnexSelects();
+
+  root.__cpbPhaseB = {
+    sourceLocation: semanticSourceLocation,
+    captureSelection: captureSemanticSelectionBookmark,
+    restoreSelection: restoreSemanticSelectionBookmark,
+    captureScroll: captureSemanticScrollBookmark,
+    restoreScroll: restoreSemanticScrollBookmark,
+    captureSurface: captureEditorSurfaceBookmarks,
+    restoreSurface: restoreEditorSurfaceBookmarks,
+    retryLivePagination: retryLivePagination,
+    livePaginationState: function () {
+      return Object.assign({}, state.livePagination, {
+        activeRequest: !!state.livePagination.activeRequest,
+        debounceTimer: !!state.livePagination.debounceTimer,
+      });
+    },
+  };
+  root.addEventListener('cpb:live-pagination-retry', function () {
+    retryLivePagination();
+  });
 
   loadCalloutPresets()
     .then(function () { return loadSection(initialSectionId || 0); })

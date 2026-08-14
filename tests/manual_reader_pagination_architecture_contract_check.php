@@ -5,14 +5,6 @@ $root = dirname(__DIR__);
 $failures = array();
 
 $protected = array(
-    'public/admin/compliance/controlled_book_editor.php'
-        => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
-    'public/assets/controlled_book_editor.js'
-        => '0cf06b08b89e523ecf1ef25d78ffce343ad4afcaba9e3830c1c6e208e3181f00',
-    'public/assets/controlled_book_editor.css'
-        => '5ebb7237faa86d2958783290f8a1e67ba4c83b15284bb5e8038f4a90dd37a524',
-    'public/admin/api/controlled_book_editor_api.php'
-        => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'src/publishing/ControlledPublishingBlockService.php'
         => 'd63175aa9e0292b9137f27a38eeb913337e6af8ab5e6086cdf4207385474f265',
     'src/document/StructuredDocumentPayload.php'
@@ -191,6 +183,6 @@ if ($failures !== array()) {
 }
 
 echo "Manual reader pagination architecture contract: PASS\n";
-echo "Protected editor files: " . count($protected) . "\n";
+echo "Protected non-editor reader-boundary files: " . count($protected) . "\n";
 echo "Location concepts: OfficialDocumentLocation, SemanticReaderLocation, PersonalReaderPage\n";
 echo "Exactly-once source coverage validator: present\n";

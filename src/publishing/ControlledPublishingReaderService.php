@@ -1202,6 +1202,39 @@ final class ControlledPublishingReaderService
         return $this->pageMapStore ??= new ControlledPublishingReaderPageMapStore($this->pdo);
     }
 
+    /**
+     * Queue/coalesce revision-safe background generation for the current source.
+     *
+     * @return array<string,mixed>
+     */
+    public function ensureLivePageMap(int $bookVersionId, int $requestedByUserId): array
+    {
+        return $this->livePageMapService()->ensure($bookVersionId, $requestedByUserId);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function livePageMapStatus(int $bookVersionId): array
+    {
+        return $this->livePageMapService()->status($bookVersionId);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function retryLivePageMap(int $bookVersionId, int $requestedByUserId): array
+    {
+        return $this->livePageMapService()->retry($bookVersionId, $requestedByUserId);
+    }
+
+    private function livePageMapService(): ControlledPublishingLivePageMapService
+    {
+        require_once __DIR__ . '/ControlledPublishingLivePageMapService.php';
+        return $this->livePageMapService
+            ??= new ControlledPublishingLivePageMapService($this->pdo, $this);
+    }
+
     public function hasApprovedFrozenPageMap(string $bookKey): bool
     {
         require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
@@ -1604,6 +1637,7 @@ final class ControlledPublishingReaderService
     }
 
     private ?ControlledPublishingReaderPageMapStore $pageMapStore = null;
+    private ?ControlledPublishingLivePageMapService $livePageMapService = null;
 
     /**
      * @param array<string,mixed> $version

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderServi
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderLayoutProfile.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderPageMapStore.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAuthoritativePaginationService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLivePageMapService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -50,6 +51,36 @@ try {
     $action = strtolower(trim((string)($in['action'] ?? $_GET['action'] ?? '')));
 
     switch ($action) {
+        case 'live_ensure':
+            $versionId = (int)($in['book_version_id'] ?? 0);
+            if ($versionId <= 0) {
+                throw new RuntimeException('book_version_id required.');
+            }
+            cp_pm_json(202, array(
+                'ok' => true,
+                'result' => $reader->ensureLivePageMap($versionId, $uid),
+            ));
+
+        case 'live_status':
+            $versionId = (int)($in['book_version_id'] ?? 0);
+            if ($versionId <= 0) {
+                throw new RuntimeException('book_version_id required.');
+            }
+            cp_pm_json(200, array(
+                'ok' => true,
+                'result' => $reader->livePageMapStatus($versionId),
+            ));
+
+        case 'live_retry':
+            $versionId = (int)($in['book_version_id'] ?? 0);
+            if ($versionId <= 0) {
+                throw new RuntimeException('book_version_id required.');
+            }
+            cp_pm_json(202, array(
+                'ok' => true,
+                'result' => $reader->retryLivePageMap($versionId, $uid),
+            ));
+
         case 'generate':
             $versionId = (int)($in['book_version_id'] ?? 0);
             $bookKey = strtoupper(trim((string)($in['book_key'] ?? $in['book'] ?? '')));

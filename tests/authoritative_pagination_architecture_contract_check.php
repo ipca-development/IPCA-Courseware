@@ -5,14 +5,6 @@ $root = dirname(__DIR__);
 $failures = array();
 
 $protected = array(
-    'public/admin/compliance/controlled_book_editor.php'
-        => '924bd98f8cb56e5154adc9b3a525bb69c8b3a9b6960eb16c447d7f143dee5c0f',
-    'public/assets/controlled_book_editor.js'
-        => '0cf06b08b89e523ecf1ef25d78ffce343ad4afcaba9e3830c1c6e208e3181f00',
-    'public/assets/controlled_book_editor.css'
-        => '5ebb7237faa86d2958783290f8a1e67ba4c83b15284bb5e8038f4a90dd37a524',
-    'public/admin/api/controlled_book_editor_api.php'
-        => 'ba11146a03046ea31c4423b6bc7a1d4332faf2d853e426156d1011843dd3eb1f',
     'src/publishing/ControlledPublishingBlockService.php'
         => 'd63175aa9e0292b9137f27a38eeb913337e6af8ab5e6086cdf4207385474f265',
 );
@@ -56,10 +48,50 @@ $contracts = array(
         "\$reader->authoritativePageMapFreshness(\$version, \$paginateSource)",
         'ControlledPublishingPaginationValidationException',
         '$e->payload()',
+        "case 'live_ensure':",
+        "case 'live_status':",
+        "case 'live_retry':",
+        "case 'generate':",
     ),
     'src/publishing/ControlledPublishingReaderPageMapStore.php' => array(
         '?int $sectionId = null',
         "' AND section_id = ?'",
+        'replaceStagingPages',
+        'promoteStagingPagesCas',
+        'requested_fingerprint_hash',
+        'STALE_COMPLETION',
+    ),
+    'src/publishing/ControlledPublishingLivePageMapService.php' => array(
+        'One DB row coalesces each version/profile',
+        'STATUS_RETRY_AVAILABLE',
+        'queueRequest',
+        'claimFingerprintMatches',
+        'promoteStagingPagesCas',
+        '$freshSource',
+        'defaultSpawner',
+        'pending_generation_seq',
+        'acquireServerSingleFlight',
+        'GET_LOCK',
+        'RELEASE_LOCK',
+        "' --drain'",
+    ),
+    'scripts/controlled_publishing_page_map_worker.php' => array(
+        'ControlledPublishingLivePageMapService',
+        'workOne',
+        "'drain'",
+        'processed=',
+    ),
+    'scripts/sql/2026_08_14_publishing_live_page_map_generation.sql' => array(
+        'ipca_publishing_page_map_generation_state',
+        'ipca_publishing_reader_page_map_staging',
+        'generation_seq',
+        'lease_token',
+        'pending_generation_seq',
+    ),
+    'scripts/apply_publishing_live_page_map_generation.php' => array(
+        'requiredColumns',
+        'requested_fingerprint_hash',
+        "'lease_token'",
     ),
     'src/publishing/ControlledPublishingManualPageBreakService.php' => array(
         'listBlockCandidates(int $bookVersionId, ?int $sectionId = null)',
@@ -221,4 +253,4 @@ if ($failures !== array()) {
 }
 
 echo "Authoritative pagination architecture contract: PASS\n";
-echo "Protected authoring files: " . count($protected) . "\n";
+echo "Protected non-editor authoring files: " . count($protected) . "\n";

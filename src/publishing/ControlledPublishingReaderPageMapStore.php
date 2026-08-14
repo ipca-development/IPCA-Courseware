@@ -357,6 +357,253 @@ final class ControlledPublishingReaderPageMapStore
         return $map;
     }
 
+    /**
+     * Writes a candidate generation without changing the last valid production map.
+     *
+     * @param list<array<string,mixed>> $pages
+     */
+    public function replaceStagingPages(
+        int $bookVersionId,
+        string $layoutProfile,
+        int $generationSeq,
+        string $leaseToken,
+        string $layoutHash,
+        array $pages,
+        int $generatedByUserId
+    ): int {
+        $this->assertVersionMutable($bookVersionId);
+        $this->pdo->beginTransaction();
+        try {
+            $this->deleteStagingPages($bookVersionId, $layoutProfile, $generationSeq, $leaseToken);
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ipca_publishing_reader_page_map_staging (
+                    book_version_id, layout_profile, generation_seq, lease_token,
+                    layout_hash, page_number,
+                    section_id, stable_anchor, page_type, is_cover, is_section_start,
+                    is_major_section_start, page_html, thumbnail_html, metadata_json,
+                    generated_by_user_id
+                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            );
+            foreach ($pages as $page) {
+                $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+                $insert->execute(array(
+                    $bookVersionId,
+                    $layoutProfile,
+                    $generationSeq,
+                    $leaseToken,
+                    $layoutHash,
+                    (int)($page['page_number'] ?? 0),
+                    isset($page['section_id']) ? (int)$page['section_id'] : null,
+                    isset($page['stable_anchor']) ? (string)$page['stable_anchor'] : null,
+                    (string)($page['page_type'] ?? 'content'),
+                    !empty($page['is_cover']) ? 1 : 0,
+                    !empty($page['is_section_start']) ? 1 : 0,
+                    !empty($page['is_major_section_start']) ? 1 : 0,
+                    (string)($page['page_html'] ?? ''),
+                    isset($page['thumbnail_html']) ? (string)$page['thumbnail_html'] : null,
+                    json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    $generatedByUserId > 0 ? $generatedByUserId : null,
+                ));
+            }
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return count($pages);
+    }
+
+    /**
+     * Promotes staging only while generation sequence, lease, and the complete
+     * freshly re-read authoritative fingerprint still match.
+     *
+     * @param array<string,mixed> $generation
+     * @param callable():array<string,mixed> $currentFingerprintLoader
+     */
+    public function promoteStagingPagesCas(
+        int $bookVersionId,
+        string $layoutProfile,
+        int $generationSeq,
+        string $leaseToken,
+        string $layoutHash,
+        int $generatedByUserId,
+        array $generation,
+        callable $currentFingerprintLoader
+    ): bool {
+        $this->assertVersionMutable($bookVersionId);
+        $this->pdo->beginTransaction();
+        try {
+            $lockSuffix = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+                ? ' FOR UPDATE'
+                : '';
+            $stateStmt = $this->pdo->prepare(
+                'SELECT generation_seq, status, requested_fingerprint_hash,
+                        requested_fingerprint_json, lease_token,
+                        pending_generation_seq, pending_fingerprint_hash,
+                        pending_fingerprint_json, pending_requested_by_user_id
+                   FROM ipca_publishing_page_map_generation_state
+                  WHERE book_version_id = ? AND layout_profile = ?' . $lockSuffix
+            );
+            $stateStmt->execute(array($bookVersionId, $layoutProfile));
+            $state = $stateStmt->fetch(PDO::FETCH_ASSOC);
+            if (
+                !is_array($state)
+                || (int)$state['generation_seq'] !== $generationSeq
+                || (string)$state['status'] !== 'generating'
+                || !hash_equals((string)($state['lease_token'] ?? ''), $leaseToken)
+            ) {
+                $this->pdo->rollBack();
+                return false;
+            }
+
+            $requested = json_decode((string)($state['requested_fingerprint_json'] ?? '{}'), true);
+            $current = $currentFingerprintLoader();
+            $currentJson = self::canonicalJson(is_array($current) ? $current : array());
+            $currentHash = hash('sha256', $currentJson);
+            $requestedJson = self::canonicalJson(is_array($requested) ? $requested : array());
+            $fingerprintMatches = hash_equals(
+                (string)$state['requested_fingerprint_hash'],
+                $currentHash
+            ) && hash_equals($requestedJson, $currentJson);
+
+            if (!$fingerprintMatches) {
+                $this->pdo->prepare(
+                    "UPDATE ipca_publishing_page_map_generation_state
+                        SET status = CASE
+                                WHEN pending_generation_seq IS NULL THEN 'stale'
+                                ELSE 'pending'
+                            END,
+                            generation_seq = COALESCE(pending_generation_seq, generation_seq),
+                            requested_fingerprint_hash = COALESCE(
+                                pending_fingerprint_hash, requested_fingerprint_hash
+                            ),
+                            requested_fingerprint_json = COALESCE(
+                                pending_fingerprint_json, requested_fingerprint_json
+                            ),
+                            requested_by_user_id = COALESCE(
+                                pending_requested_by_user_id, requested_by_user_id
+                            ),
+                            last_error_code = CASE
+                                WHEN pending_generation_seq IS NULL THEN 'STALE_COMPLETION'
+                                ELSE NULL
+                            END,
+                            last_error_message = CASE
+                                WHEN pending_generation_seq IS NULL
+                                THEN 'Authoritative fingerprint changed before promotion.'
+                                ELSE NULL
+                            END,
+                            lease_token = NULL, lease_expires_at = NULL,
+                            pending_generation_seq = NULL,
+                            pending_fingerprint_hash = NULL,
+                            pending_fingerprint_json = NULL,
+                            pending_requested_by_user_id = NULL,
+                            updated_at = CURRENT_TIMESTAMP
+                      WHERE book_version_id = ? AND layout_profile = ?
+                        AND generation_seq = ? AND lease_token = ?"
+                )->execute(array($bookVersionId, $layoutProfile, $generationSeq, $leaseToken));
+                $this->deleteStagingPages(
+                    $bookVersionId,
+                    $layoutProfile,
+                    $generationSeq,
+                    $leaseToken
+                );
+                $this->pdo->commit();
+                return false;
+            }
+
+            $candidateCountStmt = $this->pdo->prepare(
+                'SELECT COUNT(*) FROM ipca_publishing_reader_page_map_staging
+                  WHERE book_version_id = ? AND layout_profile = ?
+                    AND generation_seq = ? AND lease_token = ?'
+            );
+            $candidateCountStmt->execute(array(
+                $bookVersionId,
+                $layoutProfile,
+                $generationSeq,
+                $leaseToken,
+            ));
+            $candidateCount = (int)$candidateCountStmt->fetchColumn();
+            if ($candidateCount <= 0 || $candidateCount !== (int)($generation['page_count'] ?? 0)) {
+                throw new RuntimeException('Staging page map is incomplete.');
+            }
+
+            $cas = $this->pdo->prepare(
+                "UPDATE ipca_publishing_page_map_generation_state
+                    SET status = 'current', lease_token = NULL, lease_expires_at = NULL,
+                        pending_generation_seq = NULL,
+                        pending_fingerprint_hash = NULL,
+                        pending_fingerprint_json = NULL,
+                        pending_requested_by_user_id = NULL,
+                        last_error_code = NULL, last_error_message = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                  WHERE book_version_id = ? AND layout_profile = ?
+                    AND generation_seq = ? AND status = 'generating'
+                    AND lease_token = ? AND requested_fingerprint_hash = ?"
+            );
+            $cas->execute(array(
+                $bookVersionId,
+                $layoutProfile,
+                $generationSeq,
+                $leaseToken,
+                $currentHash,
+            ));
+            if ($cas->rowCount() !== 1) {
+                $this->pdo->rollBack();
+                return false;
+            }
+
+            $this->deletePages($bookVersionId, $layoutProfile);
+            $this->pdo->prepare(
+                'INSERT INTO ipca_publishing_reader_page_maps (
+                    book_version_id, layout_profile, layout_hash, page_number,
+                    section_id, stable_anchor, page_type, is_cover, is_section_start,
+                    is_major_section_start, page_html, thumbnail_html, metadata_json,
+                    generated_at, generated_by_user_id
+                 )
+                 SELECT book_version_id, layout_profile, layout_hash, page_number,
+                        section_id, stable_anchor, page_type, is_cover, is_section_start,
+                        is_major_section_start, page_html, thumbnail_html, metadata_json,
+                        CURRENT_TIMESTAMP, generated_by_user_id
+                   FROM ipca_publishing_reader_page_map_staging
+                  WHERE book_version_id = ? AND layout_profile = ?
+                    AND generation_seq = ? AND lease_token = ?
+                  ORDER BY page_number'
+            )->execute(array($bookVersionId, $layoutProfile, $generationSeq, $leaseToken));
+            $this->setDraftMeta(
+                $bookVersionId,
+                $layoutProfile,
+                $layoutHash,
+                $candidateCount,
+                $generatedByUserId,
+                $generation
+            );
+            $this->deleteStagingPages($bookVersionId, $layoutProfile, $generationSeq, $leaseToken);
+            $this->pdo->commit();
+            return true;
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    public function deleteStagingPages(
+        int $bookVersionId,
+        string $layoutProfile,
+        int $generationSeq,
+        string $leaseToken
+    ): void {
+        $this->pdo->prepare(
+            'DELETE FROM ipca_publishing_reader_page_map_staging
+              WHERE book_version_id = ? AND layout_profile = ?
+                AND generation_seq = ? AND lease_token = ?'
+        )->execute(array($bookVersionId, $layoutProfile, $generationSeq, $leaseToken));
+    }
+
     private function deletePages(int $bookVersionId, string $layoutProfile): void
     {
         $this->pdo->prepare(
@@ -433,5 +680,29 @@ final class ControlledPublishingReaderPageMapStore
         if ((string)$status === 'released') {
             throw new RuntimeException('Released authoritative pagination is immutable.');
         }
+    }
+
+    /**
+     * @param array<string,mixed> $value
+     */
+    private static function canonicalJson(array $value): string
+    {
+        $sort = static function (mixed $item) use (&$sort): mixed {
+            if (!is_array($item)) {
+                return $item;
+            }
+            if (!array_is_list($item)) {
+                ksort($item, SORT_STRING);
+            }
+            foreach ($item as $key => $child) {
+                $item[$key] = $sort($child);
+            }
+            return $item;
+        };
+
+        return json_encode(
+            $sort($value),
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+        );
     }
 }
