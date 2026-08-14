@@ -552,13 +552,20 @@
   }
 
   function pieceMarkup(value) {
-    return `<div class="reader-semantic-piece" `
-      + `data-source-fragment-id="${escapeHTML(value.fragment.id)}" `
-      + `data-source-order="${value.fragment.sourceOrder}" `
-      + `data-source-range-start="${value.rangeStart}" `
-      + `data-source-range-end="${value.rangeEnd}" `
-      + `data-presentation-copy="${value.presentationCopy ? "1" : "0"}" `
-      + `data-semantic-type="${escapeHTML(value.fragment.type)}">${value.html}</div>`;
+    const root = rootFromHTML(value.html).cloneNode(true);
+    if (!root || root.nodeType !== Node.ELEMENT_NODE) {
+      return `<div class="reader-semantic-piece" `
+        + `data-source-fragment-id="${escapeHTML(value.fragment.id)}" `
+        + `data-source-order="${value.fragment.sourceOrder}" `
+        + `data-source-range-start="${value.rangeStart}" `
+        + `data-source-range-end="${value.rangeEnd}" `
+        + `data-presentation-copy="${value.presentationCopy ? "1" : "0"}" `
+        + `data-semantic-type="${escapeHTML(value.fragment.type)}">${value.html}</div>`;
+    }
+    root.classList.add("reader-semantic-piece");
+    annotateCoverage(root, value);
+    root.setAttribute("data-semantic-type", value.fragment.type);
+    return root.outerHTML;
   }
 
   function annotateCoverage(node, value) {
@@ -597,8 +604,19 @@
     });
     if (header) table.appendChild(header);
     if (body.children.length) table.appendChild(body);
-    return `<div class="reader-semantic-piece reader-table-group" data-semantic-type="table">`
-      + `${table.outerHTML}</div>`;
+    let renderedTable = table.outerHTML;
+    if (!firstRoot.matches("table")) {
+      const shell = firstRoot.cloneNode(true);
+      const shellTable = shell.querySelector("table");
+      if (shellTable) {
+        shellTable.replaceWith(table);
+        renderedTable = shell.outerHTML;
+      }
+    }
+    const renderedRoot = rootFromHTML(renderedTable).cloneNode(true);
+    renderedRoot.classList.add("reader-semantic-piece", "reader-table-group");
+    renderedRoot.setAttribute("data-semantic-type", "table");
+    return renderedRoot.outerHTML;
   }
 
   function tocGroupMarkup(values) {
@@ -614,8 +632,9 @@
         nav.appendChild(clone);
       });
     });
-    return `<div class="reader-semantic-piece reader-toc-group" data-semantic-type="toc">`
-      + `${root.outerHTML}</div>`;
+    root.classList.add("reader-semantic-piece", "reader-toc-group");
+    root.setAttribute("data-semantic-type", "toc");
+    return root.outerHTML;
   }
 
   function pagePiecesMarkup(values) {
@@ -701,7 +720,7 @@
     element.innerHTML = `
       <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
         <div class="reader-page-header-region" style="position:absolute;box-sizing:border-box;${frameStyle(headerFrame)}">${header}</div>
-        <main class="reader-page-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;${frameStyle(contentFrame)};overflow:visible">${pagePiecesMarkup(page.pieces)}</main>
+        <main class="reader-page-body cpb-sheet-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;${frameStyle(contentFrame)};overflow:visible">${pagePiecesMarkup(page.pieces)}</main>
         <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;${frameStyle(footerFrame)}">${footer}</div>
       </div>
     `;

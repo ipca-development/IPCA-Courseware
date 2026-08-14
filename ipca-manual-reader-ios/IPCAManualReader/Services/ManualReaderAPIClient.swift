@@ -487,6 +487,15 @@ extension ManualReaderAPIClient {
               height: \(pageHeight)px;
               transform-origin: top center;
             }
+            .reader-page-header-region > .cpb-page-header,
+            .reader-page-footer-region > .cpb-page-footer {
+              position: static !important;
+              inset: auto !important;
+              width: 100% !important;
+              height: 100% !important;
+              margin: 0 !important;
+              box-sizing: border-box !important;
+            }
             .mr-body[data-mr-theme="sepia"] .reader-generated-page,
             .mr-body[data-mr-theme="sepia"] .cpb-sheet { background-color: #f4ecd8 !important; }
             .mr-body[data-mr-theme="sepia"] .reader-generated-page * { color: #3d3428 !important; border-color: #8a7658 !important; }

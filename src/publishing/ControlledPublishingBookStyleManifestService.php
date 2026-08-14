@@ -112,13 +112,15 @@ final class ControlledPublishingBookStyleManifestService
         $structural = is_file($structuralPath) ? (string)file_get_contents($structuralPath) : '';
         $styles = is_array($manifest['styles'] ?? null) ? $manifest['styles'] : array();
         $paragraphs = is_array($styles['paragraph_styles'] ?? null) ? $styles['paragraph_styles'] : array();
+        $layout = is_array($manifest['layout'] ?? null) ? $manifest['layout'] : array();
+        $baseFontSize = max(1, (float)($layout['font_size_pt'] ?? 11));
+        $baseFontSizeCSS = rtrim(rtrim(sprintf('%.3F', $baseFontSize), '0'), '.');
         $rules = array();
 
         $rules[] = ':root{--reader-page-scale:1;--reader-font-scale:1;}';
-        $rules[] = '.cpb-sheet-body{font-size:calc(11pt * var(--reader-font-scale,1));}';
-        $rules[] = '.reader-page-body:not(.reader-page-cover){font-size:calc(11pt * var(--reader-font-scale,1));}';
+        $rules[] = '.cpb-sheet-body{font-size:calc(' . $baseFontSizeCSS . 'pt * var(--reader-font-scale,1));}';
+        $rules[] = '.reader-page-body:not(.reader-page-cover){font-size:calc(' . $baseFontSizeCSS . 'pt * var(--reader-font-scale,1));}';
         $rules[] = '.reader-page-header-region,.reader-page-footer-region{--reader-font-scale:1;}';
-        $rules[] = '.cpb-page-header,.cpb-page-footer{font-size:initial;}';
 
         foreach ($paragraphs as $key => $style) {
             if (!is_array($style)) {

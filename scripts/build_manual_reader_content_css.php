@@ -28,9 +28,6 @@ $publicationSelector = '/\.cpb-(?:sheet(?:\b|-)|page-(?:header|footer)|block(?:\
     . 'heading|paragraph|cross-ref|section-number|regulatory-ref|font-|line-indent|list|'
     . 'table|image|callout|cover|toc(?:\b|-(?:row|link|label|page|depth|dot|title))|'
     . 'part0|lep|annex|amendment|distribution|abbreviations|definitions|highlights|revision)/i';
-$configurationOwnedSelector = '/(?:cpb-(?:heading|paragraph|list|toc|font-|callout|table|page-header|page-footer))/i';
-$configurationOwnedProperty = '/^(?:font(?:-family|-size|-weight|-style)?|color|text-decoration|'
-    . 'background(?:-color)?|border-color|margin-top|margin-bottom|--cpb-table-border-color)$/i';
 $rules = array();
 if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $source, $matches, PREG_SET_ORDER)) {
     foreach ($matches as $match) {
@@ -49,23 +46,6 @@ if (preg_match_all('/([^{}]+)\{([^{}]*)\}/s', $source, $matches, PREG_SET_ORDER)
         }
         if (!preg_match($publicationSelector, $selector)) {
             continue;
-        }
-        if (preg_match($configurationOwnedSelector, $selector)) {
-            $kept = array();
-            foreach (explode(';', $declarations) as $declaration) {
-                $declaration = trim($declaration);
-                if ($declaration === '' || !str_contains($declaration, ':')) {
-                    continue;
-                }
-                [$property] = explode(':', $declaration, 2);
-                if (!preg_match($configurationOwnedProperty, trim($property))) {
-                    $kept[] = $declaration;
-                }
-            }
-            $declarations = implode(';', $kept);
-            if ($declarations === '') {
-                continue;
-            }
         }
         $formattedDeclarations = array_values(array_filter(
             array_map('trim', explode(';', $declarations)),

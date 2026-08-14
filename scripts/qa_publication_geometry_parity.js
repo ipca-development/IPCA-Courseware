@@ -56,7 +56,9 @@ const measurements = [
   ["footer.center", ".cpb-page-footer .cpb-page-header-cell--center"],
   ["footer.right", ".cpb-page-footer .cpb-page-header-cell--right"],
   ["heading", "#golden-heading-1 .cpb-heading"],
+  ["heading.block", "#golden-heading-1"],
   ["paragraph", "#golden-paragraph-2 .cpb-paragraph"],
+  ["paragraph.block", "#golden-paragraph-2"],
   ["ordered_list", "#golden-list-3 ol"],
   ["unordered_list", "#golden-list-4 ul"],
   ["note", "#golden-callout-5 .cpb-callout"],
@@ -89,6 +91,9 @@ const harnessCSS = `
   .parity-page>.cpb-page-footer{position:absolute!important;left:56px!important;top:920px!important;
     width:704px!important;height:72px!important;margin:0!important}
   .reader-generated-page{margin:0!important;background:#fff!important}
+  .reader-page-header-region>.cpb-page-header,.reader-page-footer-region>.cpb-page-footer{
+    position:static!important;inset:auto!important;width:100%!important;height:100%!important;
+    margin:0!important;box-sizing:border-box!important}
 `;
 
 async function waitForStablePage(page) {
