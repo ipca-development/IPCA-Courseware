@@ -10,6 +10,7 @@ final class ControlledPublishingReaderAccessService
     private const READER_ROLES = array(
         'student',
         'instructor',
+        'supervisor',
         'chief_instructor',
         'admin',
     );
@@ -17,12 +18,13 @@ final class ControlledPublishingReaderAccessService
     /** @var list<string> */
     private const DRAFT_PREVIEW_ROLES = array(
         'instructor',
+        'supervisor',
         'chief_instructor',
         'admin',
     );
 
     /**
-     * Any logged-in student, instructor, chief instructor, or admin may read active released manuals.
+     * Any logged-in student, instructor/supervisor, chief instructor, or admin may read active released manuals.
      *
      * @param array<string,mixed>|null $user
      */

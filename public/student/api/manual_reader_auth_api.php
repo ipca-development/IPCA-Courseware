@@ -43,15 +43,12 @@ function mr_auth_user_payload(?array $user): ?array
 /**
  * @param array<string,mixed>|null $user
  */
-function mr_auth_can_preview_drafts(?array $user): bool
+function mr_auth_can_preview_drafts(
+    ?array $user,
+    ControlledPublishingReaderAccessService $access
+): bool
 {
-    if (!is_array($user)) {
-        return false;
-    }
-
-    $role = strtolower(trim((string)($user['role'] ?? '')));
-
-    return in_array($role, array('instructor', 'chief_instructor', 'admin'), true);
+    return $access->canPreviewDraftManuals($user);
 }
 
 try {
@@ -79,7 +76,7 @@ try {
                 'logged_in' => true,
                 'user' => mr_auth_user_payload($user),
                 'can_read_manuals' => $access->canReadManuals($user),
-                'can_preview_draft_manuals' => mr_auth_can_preview_drafts($user),
+                'can_preview_draft_manuals' => mr_auth_can_preview_drafts($user, $access),
             ));
 
         case 'login':
@@ -102,7 +99,7 @@ try {
                 'logged_in' => true,
                 'user' => mr_auth_user_payload($user),
                 'can_read_manuals' => true,
-                'can_preview_draft_manuals' => mr_auth_can_preview_drafts($user),
+                'can_preview_draft_manuals' => mr_auth_can_preview_drafts($user, $access),
             ));
 
         case 'logout':
