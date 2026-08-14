@@ -6,11 +6,11 @@ $failures = array();
 
 $protected = array(
     'public/admin/compliance/controlled_book_editor.php'
-        => '0c66088f01a6643a56983a81f67226e1805bf21bb2fb09941be4d21ce5df04ac',
+        => '456840dd3aed463fb98be206a9bf27de47d942341968bba57d3ea46a80cfb24f',
     'public/assets/controlled_book_editor.js'
-        => '75e5b4e8a1e3f9194d7d41c524582e29cb2cc06e9537d8a10580971cae52b69f',
+        => '8b82c9a76a007b266595d54a78c4f37e17b18f2dd29822b393fb068b87b256b5',
     'public/assets/controlled_book_editor.css'
-        => '785a8b4354edb2f384fbd0f151752bbcb4ed9663c96415da26da935832069b7b',
+        => '323af0d9b94337e0ce818a3601daef4bcec10add118b76e7e91ff3c70c03f8de',
     'public/admin/api/controlled_book_editor_api.php'
         => '22e5f6c90f2a63401b15d8f70942fa3ca2954c7767aaaf4d61477bdec0bac1e9',
     'src/publishing/ControlledPublishingBlockService.php'

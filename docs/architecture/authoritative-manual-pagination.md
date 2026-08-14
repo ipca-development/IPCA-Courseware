@@ -2,7 +2,7 @@
 
 Canonical controlled-manual flow:
 
-`Admin Manual Editor → Book Style → server browser pagination → Page Preview → approved frozen map → web/iOS`
+`Admin Manual Editor (Edit | Pages) → Book Style → server browser pagination → approved frozen map → web/iOS`
 
 ## Runtime
 
@@ -19,13 +19,15 @@ Set `CW_PAGINATION_NODE` when the production Node executable is not available as
 validation is unavailable.
 
 Apply `scripts/sql/2026_08_13_publishing_manual_page_breaks.sql` before enabling
-Page Preview manual breaks.
+the Editor's paginated Pages mode and manual breaks.
 
 ## Editorial workflow
 
-Open a controlled book version and select **Page Preview**. Regenerate when the
-preview reports **Needs regeneration**, inspect the separated physical pages,
-optionally insert breaks before stable blocks, then approve pagination.
+Open a controlled book version in the Editor and select **Pages**. Content is
+edited on the separated physical pages; split or compound blocks open as a
+complete source-block editor over the page to prevent partial-fragment data
+loss. Regenerate when Pages reports **Needs regeneration**, optionally insert
+breaks before stable blocks, then approve pagination.
 
 Release is blocked unless the approved map matches current source, style,
 manifest, layout, header/footer, and manual-break hashes. Released maps cannot

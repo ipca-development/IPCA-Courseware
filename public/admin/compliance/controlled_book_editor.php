@@ -14,6 +14,7 @@ $sections = new ControlledPublishingSectionService($pdo);
 
 $versionId = isset($_GET['version_id']) ? (int)$_GET['version_id'] : 0;
 $sectionId = isset($_GET['section_id']) ? (int)$_GET['section_id'] : 0;
+$initialView = strtolower((string)($_GET['view'] ?? 'edit')) === 'paginated' ? 'paginated' : 'edit';
 
 if ($versionId <= 0) {
     cw_header('Compliance · Book Editor');
@@ -91,7 +92,8 @@ compliance_page_open(array(
 
 <div class="cpb-editor-root" id="cpbEditorRoot"
      data-version-id="<?= (int)$versionId ?>"
-     data-section-id="<?= (int)$sectionId ?>">
+     data-section-id="<?= (int)$sectionId ?>"
+     data-initial-view="<?= h($initialView) ?>">
   <div class="cpb-editor-shell">
     <aside class="cpb-tree-panel">
       <div class="cpb-tree-head">
@@ -208,6 +210,14 @@ compliance_page_open(array(
         <div class="cpb-toolbar-lep" id="cpbToolbarLep" hidden aria-hidden="true"></div>
         <div class="cpb-toolbar-part0" id="cpbToolbarPart0" hidden aria-hidden="true"></div>
         <div class="cpb-toolbar-shared" id="cpbToolbarShared">
+        <div class="cpb-toolbar-group cpb-toolbar-group--mode">
+          <button type="button" class="cpb-tool-btn is-active" id="cpbViewEdit" title="Edit continuous source blocks">Edit</button>
+          <button type="button" class="cpb-tool-btn" id="cpbViewPaginated" title="Edit authoritative physical pages">Pages</button>
+        </div>
+        <div class="cpb-toolbar-group cpb-toolbar-group--pagination" id="cpbPaginationTools" hidden>
+          <button type="button" class="cpb-tool-btn" id="cpbPaginationRegenerate">Regenerate</button>
+          <button type="button" class="cpb-tool-btn" id="cpbPaginationApprove">Approve</button>
+        </div>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbZoomOut" title="Zoom out">−</button>
           <span class="cpb-zoom-label" id="cpbZoomLabel">100%</span>
@@ -224,11 +234,13 @@ compliance_page_open(array(
         </div>
         </div>
         <span class="cpb-save-status" id="cpbSaveStatus">Loading…</span>
+        <span class="cpb-pagination-status" id="cpbPaginationStatus" hidden></span>
       </div>
 
       <div class="cpb-canvas-scroll" id="cpbCanvas">
         <p style="text-align:center;color:#64748b;font-family:system-ui,sans-serif;">Loading document…</p>
       </div>
+      <style id="cpbPublicationCss"></style>
     </div>
   </div>
   <input type="file" id="cpbImageInput" accept="image/jpeg,image/png,image/webp" hidden>

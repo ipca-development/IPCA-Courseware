@@ -563,6 +563,7 @@
         + `data-source-order="${value.fragment.sourceOrder}" `
         + `data-source-range-start="${value.rangeStart}" `
         + `data-source-range-end="${value.rangeEnd}" `
+        + `data-source-length="${value.fragment.textLength}" `
         + `data-presentation-copy="${value.presentationCopy ? "1" : "0"}" `
         + `data-semantic-type="${escapeHTML(value.fragment.type)}">${value.html}</div>`;
     }
@@ -578,6 +579,7 @@
     node.setAttribute("data-source-order", String(value.fragment.sourceOrder));
     node.setAttribute("data-source-range-start", String(value.rangeStart));
     node.setAttribute("data-source-range-end", String(value.rangeEnd));
+    node.setAttribute("data-source-length", String(value.fragment.textLength));
     node.setAttribute("data-presentation-copy", value.presentationCopy ? "1" : "0");
   }
 

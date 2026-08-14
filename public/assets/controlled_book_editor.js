@@ -8,6 +8,7 @@
   var initialSectionId = parseInt(root.getAttribute('data-section-id') || '0', 10);
   var apiBase = root.getAttribute('data-api-base') || '/admin/api/controlled_book_editor_api.php';
   var documentType = root.getAttribute('data-document-type') || 'manual';
+  var initialViewMode = root.getAttribute('data-initial-view') === 'paginated' ? 'paginated' : 'edit';
   var formSelectedBlockId = 0;
 
   var treeEl = document.getElementById('cpbSectionTree');
@@ -45,6 +46,13 @@
   var zoomLabelEl = document.getElementById('cpbZoomLabel');
   var indentBtn = document.getElementById('cpbIndent');
   var outdentBtn = document.getElementById('cpbOutdent');
+  var viewEditBtn = document.getElementById('cpbViewEdit');
+  var viewPaginatedBtn = document.getElementById('cpbViewPaginated');
+  var paginationToolsEl = document.getElementById('cpbPaginationTools');
+  var paginationRegenerateBtn = document.getElementById('cpbPaginationRegenerate');
+  var paginationApproveBtn = document.getElementById('cpbPaginationApprove');
+  var paginationStatusEl = document.getElementById('cpbPaginationStatus');
+  var publicationCssEl = document.getElementById('cpbPublicationCss');
 
   var FONT_CLASSES = [
     'cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial',
@@ -153,6 +161,11 @@
     isAnnexCrossRefSection: false,
     crossRefAnnexSectionId: 0,
     tocSyncTimer: null,
+    viewMode: 'edit',
+    paginatedResult: null,
+    manualBreaks: [],
+    paginationCandidates: [],
+    paginationStale: false,
   };
 
   var INDENT_MAX_LEVEL = 8;
@@ -366,6 +379,367 @@
     }).then(function (r) {
       return parseApiResponse(r);
     });
+  }
+
+  function paginationRequest(url, body) {
+    var options = { credentials: 'same-origin' };
+    if (body) {
+      options.method = 'POST';
+      options.headers = { 'Content-Type': 'application/json' };
+      options.body = JSON.stringify(body);
+    }
+    return fetch(url, options).then(function (r) {
+      return parseApiResponse(r).then(function (payload) {
+        if (!r.ok || !payload.ok) throw new Error(payload.error || 'Pagination request failed');
+        return payload;
+      });
+    });
+  }
+
+  function setPaginationStatus(text, stale) {
+    if (!paginationStatusEl) return;
+    paginationStatusEl.hidden = false;
+    paginationStatusEl.textContent = text;
+    paginationStatusEl.classList.toggle('is-stale', !!stale);
+  }
+
+  function updateViewModeControls() {
+    var paginated = state.viewMode === 'paginated';
+    root.classList.toggle('cpb-editor-paginated-mode', paginated);
+    if (viewEditBtn) viewEditBtn.classList.toggle('is-active', !paginated);
+    if (viewPaginatedBtn) viewPaginatedBtn.classList.toggle('is-active', paginated);
+    if (paginationToolsEl) paginationToolsEl.hidden = !paginated;
+    if (paginationStatusEl) paginationStatusEl.hidden = !paginated;
+    if (toolbarMainEl) toolbarMainEl.hidden = paginated;
+    if (addSubBtn) addSubBtn.style.display = paginated ? 'none' : addSubBtn.style.display;
+  }
+
+  function paginatedEditableFields(blockEl) {
+    var type = blockEl.getAttribute('data-block-type') || '';
+    if (type === 'heading') return blockEl.querySelectorAll('.cpb-heading');
+    if (type === 'paragraph') return blockEl.querySelectorAll('.cpb-paragraph');
+    if (type === 'callout') return blockEl.querySelectorAll('.cpb-callout-title,.cpb-callout-text');
+    if (type === 'image') return blockEl.querySelectorAll('figcaption');
+    return [];
+  }
+
+  function pieceIsWholeEditable(piece, blockEl) {
+    if (!state.editable || !piece || !blockEl) return false;
+    if (piece.getAttribute('data-presentation-copy') === '1') return false;
+    var sourceLength = parseInt(piece.getAttribute('data-source-length') || '0', 10);
+    var rangeStart = parseInt(piece.getAttribute('data-source-range-start') || '0', 10);
+    var rangeEnd = parseInt(piece.getAttribute('data-source-range-end') || '0', 10);
+    if (sourceLength <= 0 || rangeStart !== 0 || rangeEnd < sourceLength) return false;
+    return ['heading', 'paragraph', 'callout', 'image'].indexOf(
+      blockEl.getAttribute('data-block-type') || ''
+    ) >= 0;
+  }
+
+  function markPaginationChanged() {
+    if (state.viewMode !== 'paginated') return;
+    state.paginationStale = true;
+    setPaginationStatus('Saved · pages need regeneration', true);
+  }
+
+  function wirePaginatedFields() {
+    canvasEl.querySelectorAll('.reader-semantic-piece').forEach(function (piece) {
+      var blockEl = piece.matches('.cpb-block') ? piece : piece.querySelector('.cpb-block');
+      if (!blockEl || piece.getAttribute('data-presentation-copy') === '1') return;
+      var editable = pieceIsWholeEditable(piece, blockEl);
+      piece.classList.toggle('cpb-paginated-piece--editable', editable);
+      piece.classList.toggle('cpb-paginated-piece--source-editor', !editable);
+      if (editable) {
+        Array.prototype.slice.call(paginatedEditableFields(blockEl)).forEach(function (field) {
+          field.setAttribute('contenteditable', 'true');
+          if (field.getAttribute('data-paginated-input-wired') === '1') return;
+          field.setAttribute('data-paginated-input-wired', '1');
+          field.addEventListener('input', function () {
+            scheduleSave(blockEl);
+          });
+          field.addEventListener('blur', function () {
+            flushSave(blockEl);
+          });
+        });
+      } else if (state.editable && blockEl.getAttribute('data-block-id')) {
+        var editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'cpb-paginated-edit-block';
+        editButton.textContent = 'Edit block';
+        editButton.addEventListener('click', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          openPaginatedBlockEditor(blockEl, piece);
+        });
+        piece.appendChild(editButton);
+      }
+    });
+  }
+
+  function closePaginatedBlockEditor() {
+    var overlay = document.getElementById('cpbPaginatedBlockEditor');
+    if (overlay) overlay.remove();
+  }
+
+  function openPaginatedBlockEditor(blockEl, piece) {
+    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+    var page = piece.closest('.cpb-paginated-page');
+    var sectionId = parseInt(page ? (page.getAttribute('data-section-id') || '0') : '0', 10);
+    if (!blockId || !sectionId) {
+      setPaginationStatus('This generated element is read-only.', true);
+      return;
+    }
+    setPaginationStatus('Loading complete source block…', false);
+    apiGet(
+      apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
+    ).then(function (response) {
+      if (!response.ok) throw new Error(response.error || 'Block load failed');
+      var holder = document.createElement('div');
+      holder.innerHTML = response.page_html || '';
+      var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
+      if (!sourceBlock) throw new Error('The complete source block could not be found.');
+      closePaginatedBlockEditor();
+      var overlay = document.createElement('div');
+      overlay.id = 'cpbPaginatedBlockEditor';
+      overlay.className = 'cpb-paginated-block-overlay';
+      var dialog = document.createElement('div');
+      dialog.className = 'cpb-paginated-block-dialog';
+      var heading = document.createElement('div');
+      heading.className = 'cpb-paginated-block-dialog__head';
+      heading.innerHTML = '<strong>Edit complete source block</strong>';
+      var close = document.createElement('button');
+      close.type = 'button';
+      close.textContent = 'Close';
+      close.addEventListener('click', closePaginatedBlockEditor);
+      heading.appendChild(close);
+      var content = document.createElement('div');
+      content.className = 'cpb-paginated-block-dialog__content';
+      content.appendChild(sourceBlock);
+      var actions = document.createElement('div');
+      actions.className = 'cpb-paginated-block-dialog__actions';
+      var save = document.createElement('button');
+      save.type = 'button';
+      save.textContent = 'Save block';
+      save.addEventListener('click', function () {
+        Promise.resolve(flushSave(sourceBlock)).then(function () {
+          markPaginationChanged();
+          closePaginatedBlockEditor();
+        });
+      });
+      actions.appendChild(save);
+      dialog.appendChild(heading);
+      dialog.appendChild(content);
+      dialog.appendChild(actions);
+      overlay.appendChild(dialog);
+      canvasEl.appendChild(overlay);
+      wireCanvas();
+    }).catch(showError);
+  }
+
+  function markManualBreaksInPages() {
+    canvasEl.querySelectorAll('.cpb-manual-break-before').forEach(function (node) {
+      node.classList.remove('cpb-manual-break-before');
+    });
+    state.manualBreaks.forEach(function (row) {
+      var anchor = String(row.before_block_anchor || '');
+      if (!anchor) return;
+      canvasEl.querySelectorAll('.cpb-block[data-stable-anchor]').forEach(function (block) {
+        if (block.getAttribute('data-stable-anchor') === anchor) {
+          block.classList.add('cpb-manual-break-before');
+        }
+      });
+    });
+  }
+
+  function paginationBreakControl() {
+    var panel = document.createElement('div');
+    panel.className = 'cpb-pagination-panel';
+    var title = document.createElement('strong');
+    title.textContent = 'Manual page breaks';
+    panel.appendChild(title);
+    if (!state.editable) {
+      panel.appendChild(document.createTextNode(' · released revision'));
+      return panel;
+    }
+    var existing = {};
+    state.manualBreaks.forEach(function (row) {
+      existing[row.before_block_anchor] = true;
+    });
+    var select = document.createElement('select');
+    select.className = 'cpb-pagination-break-select';
+    state.paginationCandidates.forEach(function (row) {
+      if (existing[row.stable_anchor]) return;
+      var option = document.createElement('option');
+      option.value = row.stable_anchor;
+      option.textContent = row.section_title + ' · ' + row.block_type;
+      select.appendChild(option);
+    });
+    var insert = document.createElement('button');
+    insert.type = 'button';
+    insert.textContent = 'Insert break';
+    insert.disabled = !select.options.length;
+    insert.addEventListener('click', function () {
+      mutateManualBreak({
+        action: 'insert',
+        book_version_id: state.versionId,
+        before_block_anchor: select.value,
+      });
+    });
+    panel.appendChild(select);
+    panel.appendChild(insert);
+    state.manualBreaks.forEach(function (row) {
+      var item = document.createElement('span');
+      item.className = 'cpb-pagination-break-item';
+      item.textContent = 'Before ' + (row.section_title || row.before_block_anchor);
+      var moveSelect = document.createElement('select');
+      moveSelect.setAttribute('aria-label', 'Move page break');
+      state.paginationCandidates.forEach(function (candidate) {
+        if (existing[candidate.stable_anchor] && candidate.stable_anchor !== row.before_block_anchor) {
+          return;
+        }
+        var moveOption = document.createElement('option');
+        moveOption.value = candidate.stable_anchor;
+        moveOption.textContent = candidate.section_title + ' · ' + candidate.block_type;
+        moveOption.selected = candidate.stable_anchor === row.before_block_anchor;
+        moveSelect.appendChild(moveOption);
+      });
+      var move = document.createElement('button');
+      move.type = 'button';
+      move.textContent = 'Move';
+      move.addEventListener('click', function () {
+        mutateManualBreak({
+          action: 'move',
+          book_version_id: state.versionId,
+          break_id: row.id,
+          before_block_anchor: moveSelect.value,
+        });
+      });
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', function () {
+        mutateManualBreak({
+          action: 'remove',
+          book_version_id: state.versionId,
+          break_id: row.id,
+        });
+      });
+      item.appendChild(moveSelect);
+      item.appendChild(move);
+      item.appendChild(remove);
+      panel.appendChild(item);
+    });
+    return panel;
+  }
+
+  function renderPaginatedView(result) {
+    state.paginatedResult = result;
+    state.paginationStale = !(result.freshness && result.freshness.is_current);
+    if (publicationCssEl) publicationCssEl.textContent = result.book_style_css || '';
+    canvasEl.innerHTML = '';
+    canvasEl.appendChild(paginationBreakControl());
+    var pages = Array.isArray(result.pages) ? result.pages : [];
+    if (!pages.length) {
+      var empty = document.createElement('div');
+      empty.className = 'cpb-pagination-empty';
+      empty.textContent = 'No authoritative pages have been generated. Click Regenerate.';
+      canvasEl.appendChild(empty);
+    } else {
+      var stack = document.createElement('div');
+      stack.className = 'cpb-pages-stack';
+      pages.forEach(function (page) {
+        var frame = document.createElement('section');
+        frame.className = 'cpb-paginated-page';
+        frame.setAttribute('data-page-number', String(page.page_number || 0));
+        frame.setAttribute('data-section-id', String(page.section_id || 0));
+        var label = document.createElement('span');
+        label.className = 'cpb-paginated-page-label';
+        label.textContent = 'Page ' + page.page_number;
+        frame.appendChild(label);
+        var content = document.createElement('div');
+        content.innerHTML = page.page_html || '';
+        while (content.firstChild) frame.appendChild(content.firstChild);
+        var generatedPage = frame.querySelector('.reader-generated-page');
+        if (generatedPage) {
+          var generatedWidth = generatedPage.style.width || '';
+          var generatedHeight = generatedPage.style.height || '';
+          if (generatedWidth) {
+            frame.style.width = generatedWidth;
+            frame.style.minWidth = generatedWidth;
+          }
+          if (generatedHeight) {
+            frame.style.height = generatedHeight;
+            frame.style.minHeight = generatedHeight;
+          }
+        }
+        stack.appendChild(frame);
+      });
+      canvasEl.appendChild(stack);
+    }
+    markManualBreaksInPages();
+    wirePaginatedFields();
+    applyCanvasZoom(state.canvasZoom, false);
+    var status = result.pagination && result.pagination.status
+      ? result.pagination.status
+      : 'not generated';
+    setPaginationStatus(
+      pages.length + ' pages · ' + state.manualBreaks.length + ' manual breaks · '
+        + (state.paginationStale ? 'Needs regeneration' : 'Current') + ' · ' + status,
+      state.paginationStale
+    );
+  }
+
+  function loadPaginatedView() {
+    setStatus('Loading pages…', 'saving');
+    var pageURL = '/admin/api/controlled_book_page_map_api.php?action=stored_preview&book_version_id='
+      + state.versionId;
+    var breakURL = '/admin/api/controlled_book_page_break_api.php?action=list&book_version_id='
+      + state.versionId;
+    return Promise.all([
+      paginationRequest(pageURL),
+      paginationRequest(breakURL),
+    ]).then(function (responses) {
+      state.manualBreaks = responses[1].breaks || [];
+      state.paginationCandidates = responses[1].candidates || [];
+      renderPaginatedView(responses[0].result || {});
+      setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
+    }).catch(showError);
+  }
+
+  function setViewMode(mode) {
+    mode = mode === 'paginated' ? 'paginated' : 'edit';
+    if (mode === state.viewMode) return Promise.resolve();
+    return Promise.resolve(flushAllPendingSaves()).then(function () {
+      closePaginatedBlockEditor();
+      state.viewMode = mode;
+      updateViewModeControls();
+      if (mode === 'paginated') return loadPaginatedView();
+      if (publicationCssEl) publicationCssEl.textContent = '';
+      return loadSection(state.sectionId || initialSectionId || 0);
+    });
+  }
+
+  function regeneratePagination() {
+    setPaginationStatus('Generating and validating authoritative pages…', false);
+    return paginationRequest('/admin/api/controlled_book_page_map_api.php', {
+      action: 'generate',
+      book_version_id: state.versionId,
+      book_key: (state.versionInfo.book_key || ''),
+    }).then(loadPaginatedView).catch(showError);
+  }
+
+  function approvePagination() {
+    setPaginationStatus('Approving pagination…', false);
+    return paginationRequest('/admin/api/controlled_book_page_map_api.php', {
+      action: 'approve',
+      book_version_id: state.versionId,
+    }).then(loadPaginatedView).catch(showError);
+  }
+
+  function mutateManualBreak(payload) {
+    setPaginationStatus('Saving page break…', false);
+    return paginationRequest('/admin/api/controlled_book_page_break_api.php', payload)
+      .then(regeneratePagination)
+      .catch(showError);
   }
 
   function loadCalloutPresets() {
@@ -582,6 +956,15 @@
     link.title = node.title;
     if (node.is_navigable !== false && node.id) {
       link.addEventListener('click', function () {
+        if (state.viewMode === 'paginated') {
+          state.sectionId = node.id;
+          renderTree(state.sectionsTree, state.sectionId);
+          var page = canvasEl.querySelector(
+            '.cpb-paginated-page[data-section-id="' + node.id + '"]'
+          );
+          if (page) page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
         loadSection(node.id, node.scroll_section_ref || null);
       });
       link.addEventListener('keydown', function (e) {
@@ -1531,6 +1914,7 @@
         applyCrossRefAnnexCatalog(res.cross_ref_annex);
       }
       setStatus('Saved', 'saved');
+      markPaginationChanged();
       if (blockNeedsTocRefresh(blockEl)) {
         scheduleTocSync();
       }
@@ -5356,9 +5740,14 @@
 
   function applyCanvasZoom(pct, persist) {
     state.canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pct));
-    var sheet = canvasEl.querySelector('.cpb-sheet');
-    if (sheet) {
-      sheet.style.setProperty('--cpb-sheet-zoom', String(state.canvasZoom / 100));
+    var pagesStack = canvasEl.querySelector('.cpb-pages-stack');
+    if (state.viewMode === 'paginated' && pagesStack) {
+      pagesStack.style.zoom = String(state.canvasZoom / 100);
+    } else {
+      var sheet = canvasEl.querySelector('.cpb-sheet');
+      if (sheet) {
+        sheet.style.setProperty('--cpb-sheet-zoom', String(state.canvasZoom / 100));
+      }
     }
     if (zoomLabelEl) zoomLabelEl.textContent = state.canvasZoom + '%';
     if (persist !== false) {
@@ -7463,10 +7852,30 @@
     });
   }
 
+  if (viewEditBtn) {
+    viewEditBtn.addEventListener('click', function () {
+      setViewMode('edit').catch(showError);
+    });
+  }
+  if (viewPaginatedBtn) {
+    viewPaginatedBtn.addEventListener('click', function () {
+      setViewMode('paginated').catch(showError);
+    });
+  }
+  if (paginationRegenerateBtn) {
+    paginationRegenerateBtn.addEventListener('click', regeneratePagination);
+  }
+  if (paginationApproveBtn) {
+    paginationApproveBtn.addEventListener('click', approvePagination);
+  }
+
   wireTreeToggleAll();
   initCrossRefAnnexSelects();
 
   loadCalloutPresets()
     .then(function () { return loadSection(initialSectionId || 0); })
+    .then(function () {
+      if (initialViewMode === 'paginated') return setViewMode('paginated');
+    })
     .catch(showError);
 })();

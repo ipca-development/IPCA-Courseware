@@ -9,6 +9,12 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderServi
 
 compliance_require_access($pdo);
 $versionId = isset($_GET['version_id']) ? (int)$_GET['version_id'] : 0;
+redirect(
+    '/admin/compliance/controlled_book_editor.php?version_id='
+    . $versionId
+    . '&view=paginated'
+);
+
 $reader = new ControlledPublishingReaderService($pdo);
 $version = $versionId > 0 ? $reader->resolveVersionById($versionId) : null;
 if ($version === null) {

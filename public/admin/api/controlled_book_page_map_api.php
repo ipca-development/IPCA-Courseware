@@ -91,6 +91,8 @@ try {
             $approval = $store->getApprovalState($versionId, $layoutProfile);
             $pages = $store->loadStoredPages($versionId, $layoutProfile);
             $freshness = $reader->authoritativePageMapFreshness($version);
+            $paginateSource = $reader->loadReaderPaginateSource($version);
+            $publicationPackage = $reader->paginationPublicationPackage($version, $paginateSource);
             cp_pm_json(200, array(
                 'ok' => true,
                 'result' => array(
@@ -100,9 +102,12 @@ try {
                     'lifecycle_status' => (string)($version['lifecycle_status'] ?? ''),
                     'pagination' => $approval,
                     'freshness' => $freshness,
+                    'book_style_css' => (string)($publicationPackage['css']['content'] ?? ''),
+                    'book_style_css_hash' => (string)($publicationPackage['css']['hash'] ?? ''),
                     'page_count' => count($pages),
                     'pages' => array_map(static fn(array $page): array => array(
                         'page_number' => (int)$page['page_number'],
+                        'section_id' => isset($page['section_id']) ? (int)$page['section_id'] : null,
                         'stable_anchor' => $page['stable_anchor'],
                         'page_type' => (string)$page['page_type'],
                         'is_cover' => !empty($page['is_cover']),
