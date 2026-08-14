@@ -25,6 +25,28 @@ final class ControlledPublishingReaderPageMapStore
         return is_array($map) ? $map : null;
     }
 
+    /**
+     * Stable status payload for admin preview/release screens.
+     *
+     * @return array<string,mixed>
+     */
+    public function getApprovalState(int $bookVersionId, string $layoutProfile): array
+    {
+        $approval = $this->approvalMeta($bookVersionId) ?? array();
+        $storedProfile = (string)($approval['layout_profile'] ?? $layoutProfile);
+        $pageCount = $this->pageCount($bookVersionId, $storedProfile);
+
+        return array_merge(array(
+            'status' => $pageCount > 0 ? 'draft' : 'not_generated',
+            'layout_profile' => $storedProfile,
+            'layout_hash' => '',
+            'page_count' => $pageCount,
+            'generation' => array(),
+        ), $approval, array(
+            'page_count' => $pageCount,
+        ));
+    }
+
     public function isApproved(int $bookVersionId, ?string $layoutProfile = null): bool
     {
         $approval = $this->approvalMeta($bookVersionId);
