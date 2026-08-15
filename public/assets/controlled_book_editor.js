@@ -861,8 +861,10 @@
       blockId: block.getAttribute('data-block-id') || '',
       field: field.getAttribute('data-field') || '',
       className: field.classList.length ? field.classList[0] : '',
+      fieldIdentity: sourceFieldIdentity(field, block),
       offset: prefix.toString().length,
       domRange: range.cloneRange(),
+      hadFocus: document.activeElement === field || field.contains(document.activeElement),
     };
   }
 
@@ -870,12 +872,21 @@
     if (!caret || !caret.blockId) return;
     var block = canvasEl.querySelector('.cpb-block[data-block-id="' + caret.blockId + '"]');
     if (!block) return;
-    var field = caret.field
-      ? block.querySelector('[data-field="' + caret.field + '"]')
-      : null;
+    var field = caret.fieldIdentity ? findSourceField(block, caret.fieldIdentity) : null;
+    if (!field && caret.field) {
+      var matchingFields = block.querySelectorAll('[data-field="' + caret.field + '"]');
+      field = matchingFields.length === 1 ? matchingFields[0] : null;
+    }
     if (!field && caret.className) field = block.querySelector('.' + caret.className);
     if (!field) return;
     var selection = window.getSelection();
+    if (caret.hadFocus && document.activeElement !== field) {
+      try {
+        field.focus({ preventScroll: true });
+      } catch (err) {
+        field.focus();
+      }
+    }
     if (
       caret.domRange
       && caret.domRange.startContainer
@@ -1650,6 +1661,16 @@
     var editableFields = Array.prototype.slice.call(
       block.querySelectorAll('[contenteditable="true"],input,textarea,select')
     );
+    var tableCell = field.matches && field.matches('.cpb-table th, .cpb-table td')
+      ? field
+      : null;
+    var table = tableCell ? tableCell.closest('.cpb-table') : null;
+    var tableRow = tableCell ? tableCell.closest('tr') : null;
+    var tables = table ? Array.prototype.slice.call(block.querySelectorAll('.cpb-table')) : [];
+    var tableRows = table ? Array.prototype.slice.call(table.querySelectorAll('tr')) : [];
+    var rowCells = tableRow
+      ? Array.prototype.slice.call(tableRow.querySelectorAll(':scope > th, :scope > td'))
+      : [];
     var className = Array.prototype.slice.call(field.classList || []).find(function (name) {
       return /^cpb-(heading|paragraph|list|callout-title|callout-text|list-continuation)$/.test(name);
     }) || '';
@@ -1662,6 +1683,9 @@
       class_name: className,
       field_index: Math.max(0, editableFields.indexOf(field)),
       tag_name: String(field.tagName || '').toLowerCase(),
+      table_index: table ? tables.indexOf(table) : -1,
+      table_row_index: tableRow ? tableRows.indexOf(tableRow) : -1,
+      table_cell_index: tableCell ? rowCells.indexOf(tableCell) : -1,
     };
   }
 
@@ -1733,6 +1757,25 @@
 
   function findSourceField(block, identity) {
     if (!block || !identity) return null;
+    var fields = Array.prototype.slice.call(
+      block.querySelectorAll('[contenteditable="true"],input,textarea,select')
+    );
+    var indexedField = fields[identity.field_index] || null;
+    if (
+      parseInt(identity.table_index, 10) >= 0
+      && parseInt(identity.table_row_index, 10) >= 0
+      && parseInt(identity.table_cell_index, 10) >= 0
+    ) {
+      var tables = block.querySelectorAll('.cpb-table');
+      var table = tables[parseInt(identity.table_index, 10)] || null;
+      var rows = table ? table.querySelectorAll('tr') : [];
+      var row = rows[parseInt(identity.table_row_index, 10)] || null;
+      var cells = row ? row.querySelectorAll(':scope > th, :scope > td') : [];
+      var cell = cells[parseInt(identity.table_cell_index, 10)] || null;
+      if (cell && cell.matches('[contenteditable="true"],input,textarea,select')) {
+        return cell;
+      }
+    }
     var selectors = [];
     if (identity.data_field) {
       selectors.push('[data-field="' + CSS.escape(identity.data_field) + '"]');
@@ -1751,11 +1794,11 @@
     }
     if (identity.class_name) selectors.push('.' + CSS.escape(identity.class_name));
     for (var index = 0; index < selectors.length; index++) {
-      var found = block.querySelector(selectors[index]);
-      if (found) return found;
+      var matches = block.querySelectorAll(selectors[index]);
+      if (indexedField && indexedField.matches(selectors[index])) return indexedField;
+      if (matches.length === 1) return matches[0];
     }
-    var fields = block.querySelectorAll('[contenteditable="true"],input,textarea,select');
-    return fields[identity.field_index] || null;
+    return indexedField;
   }
 
   function resolveSourceBoundary(location) {

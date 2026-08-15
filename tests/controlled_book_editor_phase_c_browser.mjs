@@ -31,8 +31,8 @@ const sourceBlocks = `
       <div class="cpb-table-wrap cpb-table-border-medium" data-border-width="medium" data-border-color="#94a3b8" style="width:280px;max-width:100%;--cpb-table-border-color:#94a3b8">
         <table class="cpb-table" data-field="table" style="width:280px">
           <colgroup><col style="width:140px"><col style="width:140px"></colgroup>
-          <thead><tr class="cpb-table-title-row" data-title-row="1"><td colspan="2" contenteditable="true">Table title</td></tr><tr class="cpb-table-header-row"><th contenteditable="true"><span class="cpb-th-text">A</span></th><th contenteditable="true"><span class="cpb-th-text">B</span></th></tr></thead>
-          <tbody data-table-part="body"><tr><td contenteditable="true">A1</td><td contenteditable="true">B1</td></tr><tr><td contenteditable="true">A2</td><td contenteditable="true">B2</td></tr></tbody>
+          <thead><tr class="cpb-table-title-row" data-title-row="1"><td colspan="2" contenteditable="true" data-field="cell">Table title</td></tr><tr class="cpb-table-header-row"><th contenteditable="true" data-field="cell"><span class="cpb-th-text">A</span></th><th contenteditable="true" data-field="cell"><span class="cpb-th-text">B</span></th></tr></thead>
+          <tbody data-table-part="body"><tr><td contenteditable="true" data-field="cell">A1</td><td contenteditable="true" data-field="cell">B1</td></tr><tr><td contenteditable="true" data-field="cell">A2</td><td contenteditable="true" data-field="cell">B2</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -422,6 +422,13 @@ test('table controls stay in the second toolbar row and replace floating tools',
     });
     await clickedCell.click();
     await page.keyboard.type(' typed');
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      )
+    );
+    await page.waitForTimeout(600);
+    await page.keyboard.type(' after-save');
     const clickFocus = await page.evaluate(() => {
       const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
       const target = block.querySelector('tbody tr:nth-child(2) td:nth-child(2)');
@@ -432,7 +439,7 @@ test('table controls stay in the second toolbar row and replace floating tools',
       };
     });
     assert.equal(clickFocus.activeTarget, true);
-    assert.match(clickFocus.targetText, /typed$/);
+    assert.match(clickFocus.targetText, /typed after-save$/);
     assert.equal(clickFocus.titleText, 'Table title');
 
     await page.locator('#cpbCanvas [data-block-id="3"] tbody tr:first-child td:first-child').click();
