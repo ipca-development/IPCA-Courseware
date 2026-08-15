@@ -51,4 +51,28 @@ if (empty($classified['force_page_break_before']) || empty($classified['is_part0
     throw new RuntimeException('Generated Part 0 section boundary is not explicit.');
 }
 
+$authoritative = new ControlledPublishingAuthoritativePaginationService($reader, $root);
+$coverageMethod = new ReflectionMethod($authoritative, 'validateMergedCoverageOrder');
+$page = static fn(array $orders): array => array(
+    'metadata' => array(
+        'coverage' => array_map(
+            static fn(int $order): array => array(
+                'source_order' => $order,
+                'presentation_copy' => false,
+            ),
+            $orders
+        ),
+    ),
+);
+$coverageMethod->invoke($authoritative, array($page(array(0, 2, 2, 5))));
+$reorderedRejected = false;
+try {
+    $coverageMethod->invoke($authoritative, array($page(array(0, 5)), $page(array(2))));
+} catch (RuntimeException $error) {
+    $reorderedRejected = str_contains($error->getMessage(), 'changed source order');
+}
+if (!$reorderedRejected) {
+    throw new RuntimeException('Merged coverage did not reject backward source order.');
+}
+
 echo "Controlled publishing Part 0 source: PASS\n";

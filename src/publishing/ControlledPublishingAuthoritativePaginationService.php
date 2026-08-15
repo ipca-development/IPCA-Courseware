@@ -249,14 +249,16 @@ final class ControlledPublishingAuthoritativePaginationService
 
     /**
      * Prefix reuse is accepted only when the merged map still contains every
-     * normalized source order exactly in one contiguous sequence. Split
-     * fragments may repeat an order; presentation copies do not count.
+     * normalized source order monotonically. Split fragments may repeat an
+     * order; normalization may reserve unused order values before falling
+     * back from decomposed legacy markup; presentation copies do not count.
      *
      * @param list<array<string,mixed>> $pages
      */
     private function validateMergedCoverageOrder(array $pages): void
     {
-        $orders = array();
+        $lastOrder = -1;
+        $found = false;
         foreach ($pages as $page) {
             $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
             $coverage = is_array($metadata['coverage'] ?? null) ? $metadata['coverage'] : array();
@@ -266,18 +268,18 @@ final class ControlledPublishingAuthoritativePaginationService
                 }
                 $order = (int)($entry['source_order'] ?? -1);
                 if ($order >= 0) {
-                    $orders[$order] = true;
+                    if ($found && $order < $lastOrder) {
+                        throw new RuntimeException(
+                            'Incremental authoritative page coverage changed source order.'
+                        );
+                    }
+                    $lastOrder = $order;
+                    $found = true;
                 }
             }
         }
-        if ($orders === array()) {
+        if (!$found) {
             throw new RuntimeException('Authoritative page coverage is empty.');
-        }
-        ksort($orders, SORT_NUMERIC);
-        $actual = array_map('intval', array_keys($orders));
-        $expected = range(0, max($actual));
-        if ($actual !== $expected) {
-            throw new RuntimeException('Incremental authoritative page coverage is not contiguous.');
         }
     }
 
