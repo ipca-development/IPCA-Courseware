@@ -773,6 +773,27 @@ body.cpb-browser-fullscreen .cpb-workspace {
   pointer-events: none;
 }
 
+.cpb-live-projection__portals {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cpb-live-projection__portal {
+  position: absolute;
+  box-sizing: border-box;
+  cursor: text;
+  pointer-events: auto;
+}
+
+.cpb-live-projection__portal:hover,
+.cpb-live-projection__portal.is-active {
+  outline: 2px solid rgba(37, 99, 235, .38);
+  outline-offset: -2px;
+  background: rgba(37, 99, 235, .035);
+}
+
 .cpb-live-projection__empty {
   margin: auto;
   padding: 24px;

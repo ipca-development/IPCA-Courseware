@@ -27,14 +27,65 @@ const sourceBlocks = `
   </div>`;
 
 function storedPage(sectionId, pageNumber, marker, width = 640, height = 900) {
+  const fragmentId = `section-${sectionId}/paragraph-1/root`;
+  const secondFragmentId = `section-${sectionId}/paragraph-2/root`;
   return {
     section_id: sectionId,
     page_number: pageNumber,
     page_html: `<article class="reader-generated-page proof-book-style" style="width:${width}px;height:${height}px">
       <header class="reader-page-header">Header ${marker}</header>
-      <main><div contenteditable="true">Body ${marker}</div><button type="button" onclick="window.__projectionClicked=1">Edit ${marker}</button></main>
+      <main class="reader-page-body" data-blocks-root="1">
+        <div class="reader-semantic-piece" contenteditable="true"
+          data-source-fragment-id="${fragmentId}" data-block-id="1" data-block-type="paragraph"
+          data-stable-anchor="paragraph-1" data-source-range-start="0" data-source-range-end="22"
+          data-source-length="22" data-presentation-copy="0" data-semantic-type="paragraph">
+          <p>Body ${marker}</p><button type="button" onclick="window.__projectionClicked=1">Edit ${marker}</button>
+        </div>
+        <div class="reader-semantic-piece"
+          data-source-fragment-id="${secondFragmentId}" data-block-id="2" data-block-type="paragraph"
+          data-stable-anchor="paragraph-2" data-source-range-start="0" data-source-range-end="28"
+          data-source-length="28" data-presentation-copy="0" data-semantic-type="paragraph">
+          <p>Second body ${marker}</p>
+        </div>
+        <div class="reader-semantic-piece"
+          data-source-fragment-id="section-${sectionId}/heading/root" data-block-id="3"
+          data-block-type="heading" data-stable-anchor="heading-1"
+          data-source-range-start="0" data-source-range-end="7"
+          data-source-length="7" data-presentation-copy="0" data-semantic-type="heading">
+          <h2>Heading</h2>
+        </div>
+        <div class="reader-semantic-piece"
+          data-source-fragment-id="section-${sectionId}/paragraph-copy/repeat" data-block-id="1"
+          data-block-type="paragraph" data-stable-anchor="paragraph-1"
+          data-source-range-start="0" data-source-range-end="5"
+          data-source-length="22" data-presentation-copy="1" data-semantic-type="paragraph">
+          <p>Copy</p>
+        </div>
+      </main>
       <footer class="reader-page-footer">Footer ${marker}<span class="reader-page-number">${pageNumber}</span></footer>
     </article>`,
+    metadata: {
+      metrics: {
+        content_frame: { x: 32, y: 90, width: width - 64, height: height - 160 },
+        block_measurements: [{
+          source_fragment_id: fragmentId,
+          semantic_type: 'paragraph',
+          frame: { x: 0, y: 0, width: width - 64, height: 80 },
+        }, {
+          source_fragment_id: secondFragmentId,
+          semantic_type: 'paragraph',
+          frame: { x: 0, y: 340, width: width - 64, height: 80 },
+        }, {
+          source_fragment_id: `section-${sectionId}/heading/root`,
+          semantic_type: 'heading',
+          frame: { x: 0, y: 440, width: width - 64, height: 50 },
+        }, {
+          source_fragment_id: `section-${sectionId}/paragraph-copy/repeat`,
+          semantic_type: 'paragraph',
+          frame: { x: 0, y: 510, width: width - 64, height: 40 },
+        }],
+      },
+    },
   };
 }
 
@@ -97,12 +148,17 @@ async function installMock(page, initialPreview = previewResult()) {
       previewPlans: [{ payload: initialPreview }],
       pendingPreviews: [],
       rendered: [],
+      activated: [],
       queuePreview(plan) { this.previewPlans.push(plan); },
       resolvePreview(index, payload) { this.pendingPreviews[index].deferred.resolve(payload); },
     };
     document.querySelector('#cpbEditorRoot').addEventListener(
       'cpb:live-projection-rendered',
       (event) => window.__phaseC.rendered.push(structuredClone(event.detail)),
+    );
+    document.querySelector('#cpbEditorRoot').addEventListener(
+      'cpb:projection-source-activated',
+      (event) => window.__phaseC.activated.push(structuredClone(event.detail)),
     );
     window.alert = () => {};
     window.confirm = () => true;
@@ -226,8 +282,14 @@ async function projectionMarker(page) {
 }
 
 const cases = [];
+const phaseDCases = [];
 function test(name, run) {
   cases.push({ name, run });
+}
+function testPhaseD(name, run) {
+  const testCase = { name, run };
+  cases.push(testCase);
+  phaseDCases.push(testCase);
 }
 
 test('disabled by default makes no stored_preview call', async (browser) => {
@@ -622,6 +684,177 @@ test('zoom applies to projection', async (browser) => {
   }
 });
 
+testPhaseD('paragraph portal activates only the canonical source object', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser);
+  try {
+    assert.equal(await page.locator('#cpbProjection .cpb-live-projection__portal').count(), 2);
+    assert.deepEqual(
+      await page.locator('#cpbProjection .cpb-live-projection__portal').evaluateAll((portals) =>
+        portals.map((portal) => portal.dataset.stableAnchor)
+      ),
+      ['paragraph-1', 'paragraph-2'],
+    );
+    await page.locator(
+      '#cpbProjection .cpb-live-projection__portal[data-stable-anchor="paragraph-1"]'
+    ).click();
+    const observed = await page.evaluate(() => {
+      const root = document.querySelector('#cpbEditorRoot');
+      const active = document.activeElement;
+      const bookmark = root.__cpbPhaseB.captureSelection();
+      return {
+        activeClass: active.className,
+        sourceBlock: active.closest('.cpb-block').dataset.stableAnchor,
+        sourceOffset: bookmark.anchor.source_offset,
+        activated: window.__phaseC.activated,
+        portalEditable: document.querySelectorAll(
+          '#cpbProjection [contenteditable="true"]'
+        ).length,
+      };
+    });
+    assert.match(observed.activeClass, /(?:^|\s)cpb-paragraph(?:\s|$)/);
+    assert.equal(observed.sourceBlock, 'paragraph-1');
+    assert.equal(observed.sourceOffset, 0);
+    assert.equal(observed.portalEditable, 0);
+    assert.deepEqual(observed.activated.at(-1), {
+      section_id: 11,
+      block_id: 1,
+      stable_anchor: 'paragraph-1',
+      block_type: 'paragraph',
+      source_offset: 0,
+    });
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+testPhaseD('paragraph portal typing changes source only and preserves the baseline save payload', async (browser) => {
+  const portalEditor = await newEditorPage(browser);
+  const directEditor = await newEditorPage(browser);
+  try {
+    await portalEditor.page.locator(
+      '#cpbProjection .cpb-live-projection__portal[data-stable-anchor="paragraph-1"]'
+    ).click();
+    const frame = portalEditor.page.locator('#cpbProjection iframe').first().contentFrame();
+    const projectionBefore = await frame.locator('.reader-semantic-piece').first().innerText();
+    await portalEditor.page.keyboard.type('X');
+    await portalEditor.page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) => request.action === 'update_block')
+    );
+    assert.equal(
+      await portalEditor.page.locator(
+        '#cpbCanvas [data-stable-anchor="paragraph-1"] .cpb-paragraph'
+      ).innerText(),
+      'XAlpha beta gamma delta',
+    );
+    assert.equal(
+      await frame.locator('.reader-semantic-piece').first().innerText(),
+      projectionBefore,
+    );
+
+    const directField = directEditor.page.locator(
+      '#cpbCanvas [data-stable-anchor="paragraph-1"] .cpb-paragraph'
+    );
+    await directField.evaluate((field) => {
+      field.focus();
+      const range = document.createRange();
+      range.setStart(field.firstChild, 0);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await directEditor.page.keyboard.type('X');
+    await directEditor.page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) => request.action === 'update_block')
+    );
+    const payloads = await Promise.all([portalEditor.page, directEditor.page].map((editorPage) =>
+      editorPage.evaluate(() =>
+        window.__phaseC.requests.find((request) => request.action === 'update_block').payload
+      )
+    ));
+    assert.deepEqual(payloads[0], payloads[1]);
+  } finally {
+    assert.deepEqual(portalEditor.browserErrors, []);
+    assert.deepEqual(directEditor.browserErrors, []);
+    await portalEditor.page.close();
+    await directEditor.page.close();
+  }
+});
+
+testPhaseD('paragraph portal refresh preserves focus backward selection caret and source scroll', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser);
+  try {
+    await page.locator(
+      '#cpbProjection .cpb-live-projection__portal[data-stable-anchor="paragraph-2"]'
+    ).click();
+    await page.evaluate(() => {
+      const hooks = document.querySelector('#cpbEditorRoot').__cpbPhaseB;
+      const bookmark = hooks.captureSelection();
+      bookmark.anchor.source_offset = 6;
+      bookmark.focus.source_offset = 2;
+      bookmark.direction = 'backward';
+      bookmark.is_collapsed = false;
+      hooks.restoreSelection(bookmark);
+    });
+    const before = await page.evaluate(() => ({
+      scroll: document.querySelector('#cpbCanvas').scrollTop,
+      selection: document.querySelector('#cpbEditorRoot').__cpbPhaseB.captureSelection(),
+      rendered: window.__phaseC.rendered.length,
+    }));
+    assert.ok(before.scroll > 0);
+    assert.equal(before.selection.direction, 'backward');
+    assert.equal(before.selection.anchor.source_offset, 6);
+    assert.equal(before.selection.focus.source_offset, 2);
+
+    await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }),
+      previewResult(11, 'paragraph-refresh', 41));
+    await dispatchLiveState(page, 'current');
+    await page.waitForFunction((count) => window.__phaseC.rendered.length > count, before.rendered);
+    const after = await page.evaluate(() => {
+      const active = document.activeElement;
+      return {
+        activeAnchor: active.closest('.cpb-block').dataset.stableAnchor,
+        scroll: document.querySelector('#cpbCanvas').scrollTop,
+        selection: document.querySelector('#cpbEditorRoot').__cpbPhaseB.captureSelection(),
+      };
+    });
+    assert.equal(after.activeAnchor, 'paragraph-2');
+    assert.equal(after.scroll, before.scroll);
+    assert.equal(after.selection.direction, 'backward');
+    assert.equal(after.selection.anchor.source_offset, 6);
+    assert.equal(after.selection.focus.source_offset, 2);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+testPhaseD('paragraph portal editing retains undo and redo behavior', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser);
+  try {
+    const field = page.locator(
+      '#cpbCanvas [data-stable-anchor="paragraph-1"] .cpb-paragraph'
+    );
+    await page.locator(
+      '#cpbProjection .cpb-live-projection__portal[data-stable-anchor="paragraph-1"]'
+    ).click();
+    await page.keyboard.type('Z');
+    assert.equal(await field.innerText(), 'ZAlpha beta gamma delta');
+    await page.locator('#cpbUndo').click();
+    assert.equal(await page.locator(
+      '#cpbCanvas [data-stable-anchor="paragraph-1"] .cpb-paragraph'
+    ).innerText(), 'Alpha beta gamma delta');
+    await page.locator('#cpbRedo').click();
+    assert.equal(await page.locator(
+      '#cpbCanvas [data-stable-anchor="paragraph-1"] .cpb-paragraph'
+    ).innerText(), 'ZAlpha beta gamma delta');
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
 test('continuous_editor=1 emergency fallback disables live projection', async (browser) => {
   const { page, browserErrors } = await newEditorPage(
     browser,
@@ -648,6 +881,7 @@ test('continuous_editor=1 emergency fallback disables live projection', async (b
 
 let browser;
 let failures = 0;
+let phaseDFailures = 0;
 try {
   try {
     browser = await chromium.launch({ headless: true });
@@ -662,6 +896,7 @@ try {
       console.log(`PASS ${testCase.name}`);
     } catch (error) {
       failures += 1;
+      if (phaseDCases.includes(testCase)) phaseDFailures += 1;
       console.log(`FAIL ${testCase.name} — ${String(error.message || error).replace(/\s+/g, ' ')}`);
     }
   }
@@ -672,9 +907,14 @@ try {
   if (browser) await browser.close();
 }
 
-console.log(`\nPhase C browser requirements: executed=${cases.length} passed=${cases.length - failures} failed=${failures}`);
+const phaseCCaseCount = cases.length - phaseDCases.length;
+const phaseCFailures = failures - phaseDFailures;
+console.log(`\nPhase C browser requirements: executed=${phaseCCaseCount} passed=${phaseCCaseCount - phaseCFailures} failed=${phaseCFailures}`);
+console.log(`Phase D paragraph requirements: executed=${phaseDCases.length} passed=${phaseDCases.length - phaseDFailures} failed=${phaseDFailures}`);
 if (failures) {
   console.log('CONTROLLED_BOOK_EDITOR_PHASE_C: FAIL');
+  console.log('CONTROLLED_BOOK_EDITOR_PHASE_D_PARAGRAPH: FAIL');
   process.exit(1);
 }
 console.log('CONTROLLED_BOOK_EDITOR_PHASE_C: PASS');
+console.log('CONTROLLED_BOOK_EDITOR_PHASE_D_PARAGRAPH: PASS');

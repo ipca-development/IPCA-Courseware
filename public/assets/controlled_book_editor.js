@@ -1264,6 +1264,126 @@
       + '</style></head><body>' + readOnlyPageHtml(pageHtml) + '</body></html>';
   }
 
+  function projectionPieceBindings(pageHtml) {
+    var doc = document.implementation.createHTMLDocument('');
+    var holder = doc.createElement('div');
+    holder.innerHTML = String(pageHtml || '');
+    var bindings = {};
+    holder.querySelectorAll('.reader-semantic-piece[data-source-fragment-id]').forEach(function (piece) {
+      var fragmentId = piece.getAttribute('data-source-fragment-id') || '';
+      if (!fragmentId || piece.getAttribute('data-presentation-copy') === '1') return;
+      bindings[fragmentId] = {
+        block_id: parseInt(piece.getAttribute('data-block-id') || '0', 10) || null,
+        block_type: piece.getAttribute('data-block-type') || '',
+        stable_anchor: piece.getAttribute('data-stable-anchor') || '',
+        range_start: parseInt(piece.getAttribute('data-source-range-start') || '0', 10) || 0,
+        range_end: parseInt(piece.getAttribute('data-source-range-end') || '0', 10) || 0,
+      };
+    });
+    return bindings;
+  }
+
+  function activateProjectedParagraph(portal, sourceOffset) {
+    if (!state.editable || !portal) return false;
+    var location = {
+      block_id: parseInt(portal.getAttribute('data-block-id') || '0', 10) || null,
+      stable_anchor: portal.getAttribute('data-stable-anchor') || '',
+    };
+    var block = findSourceBlock(location);
+    if (!block || (block.getAttribute('data-block-type') || '') !== 'paragraph') return false;
+    var field = block.querySelector('.cpb-paragraph[contenteditable="true"]');
+    if (!field) return false;
+    var offset = Math.min(
+      Math.max(0, parseInt(sourceOffset == null
+        ? portal.getAttribute('data-source-range-start') || '0'
+        : sourceOffset, 10) || 0),
+      String(field.textContent || '').length
+    );
+    var sourceLocation = {
+      version_id: state.versionId,
+      section_id: state.sectionId,
+      block_id: location.block_id,
+      stable_anchor: location.stable_anchor,
+      block_type: 'paragraph',
+      field: sourceFieldIdentity(field, block),
+      source_offset: offset,
+    };
+    block.scrollIntoView({ block: 'center', inline: 'nearest' });
+    var restored = restoreSemanticSelectionBookmark({
+      kind: 'contenteditable',
+      anchor: sourceLocation,
+      focus: Object.assign({}, sourceLocation),
+      direction: 'forward',
+      is_collapsed: true,
+    });
+    if (!restored) return false;
+    if (liveProjectionPagesEl) {
+      liveProjectionPagesEl.querySelectorAll('.cpb-live-projection__portal.is-active')
+        .forEach(function (node) { node.classList.remove('is-active'); });
+    }
+    portal.classList.add('is-active');
+    root.dispatchEvent(new CustomEvent('cpb:projection-source-activated', {
+      detail: {
+        section_id: state.sectionId,
+        block_id: location.block_id,
+        stable_anchor: location.stable_anchor,
+        block_type: 'paragraph',
+        source_offset: offset,
+      },
+    }));
+    return true;
+  }
+
+  function appendParagraphProjectionPortals(frame, page) {
+    var metadata = page && page.metadata && typeof page.metadata === 'object'
+      ? page.metadata
+      : {};
+    var metrics = metadata.metrics && typeof metadata.metrics === 'object'
+      ? metadata.metrics
+      : {};
+    var contentFrame = metrics.content_frame && typeof metrics.content_frame === 'object'
+      ? metrics.content_frame
+      : null;
+    var measurements = Array.isArray(metrics.block_measurements)
+      ? metrics.block_measurements
+      : [];
+    if (!contentFrame || !measurements.length) return;
+    var bindings = projectionPieceBindings(page.page_html);
+    var layer = document.createElement('div');
+    layer.className = 'cpb-live-projection__portals';
+    layer.setAttribute('aria-label', 'Paragraph source portals');
+    measurements.forEach(function (measurement) {
+      var fragmentId = String(measurement && measurement.source_fragment_id || '');
+      var binding = bindings[fragmentId];
+      var bounds = measurement && measurement.frame;
+      if (
+        !binding
+        || binding.block_type !== 'paragraph'
+        || String(measurement.semantic_type || '') !== 'paragraph'
+        || !bounds
+      ) return;
+      var portal = document.createElement('div');
+      portal.className = 'cpb-live-projection__portal';
+      portal.setAttribute('role', 'presentation');
+      portal.setAttribute('data-source-fragment-id', fragmentId);
+      portal.setAttribute('data-block-id', String(binding.block_id || ''));
+      portal.setAttribute('data-stable-anchor', binding.stable_anchor);
+      portal.setAttribute('data-source-range-start', String(binding.range_start));
+      portal.setAttribute('data-source-range-end', String(binding.range_end));
+      portal.style.left = (Number(contentFrame.x || 0) + Number(bounds.x || 0)) + 'px';
+      portal.style.top = (Number(contentFrame.y || 0) + Number(bounds.y || 0)) + 'px';
+      portal.style.width = Math.max(0, Number(bounds.width || 0)) + 'px';
+      portal.style.height = Math.max(0, Number(bounds.height || 0)) + 'px';
+      portal.addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        activateProjectedParagraph(portal, binding.range_start);
+      });
+      layer.appendChild(portal);
+    });
+    if (layer.childElementCount) frame.appendChild(layer);
+  }
+
   function renderLiveProjection(result, requestSequence, sectionId) {
     if (
       !state.liveProjection.enabled
@@ -1297,6 +1417,7 @@
       iframe.srcdoc = projectionFrameDocument(page.page_html, result.book_style_css);
       frame.appendChild(label);
       frame.appendChild(iframe);
+      appendParagraphProjectionPortals(frame, page);
       fragment.appendChild(frame);
     });
     liveProjectionPagesEl.replaceChildren(fragment);
@@ -9529,6 +9650,17 @@
     },
     root: function () {
       return liveProjectionEl;
+    },
+  };
+  root.__cpbPhaseD = {
+    paragraphPortalEnabled: state.liveProjection.enabled,
+    activateParagraph: activateProjectedParagraph,
+    portals: function () {
+      return liveProjectionPagesEl
+        ? Array.prototype.slice.call(
+          liveProjectionPagesEl.querySelectorAll('.cpb-live-projection__portal')
+        )
+        : [];
     },
   };
   root.addEventListener('cpb:live-pagination-retry', function () {
