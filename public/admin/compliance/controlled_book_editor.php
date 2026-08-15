@@ -268,8 +268,20 @@ compliance_page_open(array(
         <span class="cpb-save-status" id="cpbSaveStatus">Loading…</span>
       </div>
 
-      <div class="cpb-canvas-scroll" id="cpbCanvas">
-        <p style="text-align:center;color:#64748b;font-family:system-ui,sans-serif;">Loading document…</p>
+      <div class="cpb-canvas-host" id="cpbCanvasHost">
+        <div class="cpb-canvas-scroll" id="cpbCanvas">
+          <p style="text-align:center;color:#64748b;font-family:system-ui,sans-serif;">Loading document…</p>
+        </div>
+        <div class="cpb-section-assembly" id="cpbSectionAssembly" role="status" aria-live="polite">
+          <div class="cpb-section-assembly__card">
+            <div class="cpb-section-assembly__spinner" aria-hidden="true"></div>
+            <strong id="cpbSectionAssemblyLabel">Loading section…</strong>
+            <div class="cpb-section-assembly__track" aria-hidden="true">
+              <span id="cpbSectionAssemblyBar" style="width:8%"></span>
+            </div>
+            <span class="cpb-section-assembly__progress" id="cpbSectionAssemblyProgress">8%</span>
+          </div>
+        </div>
       </div>
       <style id="cpbPublicationCss"></style>
     </div>

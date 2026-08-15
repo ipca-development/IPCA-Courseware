@@ -713,6 +713,15 @@ body.cpb-browser-fullscreen .cpb-workspace {
   color: #b91c1c;
 }
 
+.cpb-canvas-host {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .cpb-canvas-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -721,6 +730,96 @@ body.cpb-browser-fullscreen .cpb-workspace {
   -webkit-overflow-scrolling: touch;
   padding: 28px 20px 40px;
   background: linear-gradient(180deg, #e8edf4 0%, #dfe6f0 100%);
+}
+
+.cpb-section-assembly {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 36%, rgba(255, 255, 255, .94), rgba(232, 237, 244, .96) 58%),
+    #e8edf4;
+}
+
+.cpb-section-assembly[hidden] {
+  display: none;
+}
+
+.cpb-section-assembly__card {
+  display: grid;
+  grid-template-columns: 28px minmax(190px, 360px) 38px;
+  align-items: center;
+  gap: 10px 12px;
+  width: min(460px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 18px 20px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 14px 40px rgba(15, 39, 68, .14);
+  color: #0f2744;
+  font: 12px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.cpb-section-assembly__card strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.cpb-section-assembly__spinner {
+  grid-row: 1 / span 2;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 3px solid #dbe5f0;
+  border-top-color: #1e3c72;
+  border-radius: 50%;
+  animation: cpb-section-assembly-spin .75s linear infinite;
+}
+
+.cpb-section-assembly__track {
+  grid-column: 2;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.cpb-section-assembly__track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1e3c72, #2563eb);
+  transition: width 160ms ease-out;
+}
+
+.cpb-section-assembly__progress {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cpb-editor-root.cpb-section-assembly-active .cpb-editor-stage,
+.cpb-editor-root.cpb-section-assembly-active .cpb-canvas-host > .cpb-canvas-scroll {
+  visibility: hidden;
+}
+
+.cpb-editor-root.cpb-section-assembly-active .cpb-toolbar-main,
+.cpb-editor-root.cpb-section-assembly-active .cpb-toolbar-toc,
+.cpb-editor-root.cpb-section-assembly-active .cpb-toolbar-lep,
+.cpb-editor-root.cpb-section-assembly-active .cpb-toolbar-part0,
+.cpb-editor-root.cpb-section-assembly-active .cpb-toolbar-shared {
+  pointer-events: none;
+  opacity: .58;
+}
+
+@keyframes cpb-section-assembly-spin {
+  to { transform: rotate(360deg); }
 }
 
 .cpb-editor-stage {

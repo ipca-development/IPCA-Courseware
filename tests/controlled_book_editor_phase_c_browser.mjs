@@ -159,10 +159,20 @@ async function installMock(page, initialPreview = previewResult()) {
       requests: [],
       previewPlans: [{ payload: initialPreview }],
       pendingPreviews: [],
+      loadPlans: [],
+      pendingLoads: [],
+      pageRulePlans: [],
+      pendingPageRules: [],
       rendered: [],
       activated: [],
       queuePreview(plan) { this.previewPlans.push(plan); },
       resolvePreview(index, payload) { this.pendingPreviews[index].deferred.resolve(payload); },
+      queueLoad(plan) { this.loadPlans.push(plan); },
+      resolveLoad(index) { this.pendingLoads[index].deferred.resolve(); },
+      queuePageRules(plan) { this.pageRulePlans.push(plan); },
+      resolvePageRules(index, payload) {
+        this.pendingPageRules[index].deferred.resolve(payload || { ok: true, breaks: [], candidates: [] });
+      },
     };
     document.querySelector('#cpbEditorRoot').addEventListener(
       'cpb:live-projection-rendered',
@@ -192,6 +202,12 @@ async function installMock(page, initialPreview = previewResult()) {
       if (action === 'get_callout_presets') return jsonResponse({ ok: true, presets: [] });
       if (action === 'load') {
         const sectionId = Number(payload.section_id || 11);
+        const plan = window.__phaseC.loadPlans.shift() || {};
+        if (plan.defer) {
+          const item = deferred();
+          window.__phaseC.pendingLoads.push({ request, deferred: item });
+          await item.promise;
+        }
         return jsonResponse({
           ok: true,
           editable: true,
@@ -232,7 +248,13 @@ async function installMock(page, initialPreview = previewResult()) {
         return jsonResponse(plan.payload);
       }
       if (String(url).includes('controlled_book_page_break_api.php')) {
-        return jsonResponse({ ok: true, breaks: [], candidates: [] });
+        const plan = window.__phaseC.pageRulePlans.shift() || {};
+        if (plan.defer) {
+          const item = deferred();
+          window.__phaseC.pendingPageRules.push({ request, deferred: item });
+          return jsonResponse(await item.promise);
+        }
+        return jsonResponse(plan.payload || { ok: true, breaks: [], candidates: [] });
       }
       if (action === 'section_index') {
         return jsonResponse({ ok: true, section_page_index: {}, page_count: 1 });
@@ -267,6 +289,10 @@ async function newEditorPage(browser, search = 'live_projection=1', initialPrevi
   await page.waitForFunction(() =>
     document.querySelector('#cpbCanvas .cpb-block[data-block-id="1"]')
     && document.querySelector('#cpbEditorRoot').__cpbPhaseC
+  );
+  await page.waitForFunction(() =>
+    document.querySelector('#cpbEditorRoot').getAttribute('aria-busy') === 'false'
+    && document.querySelector('#cpbSectionAssembly')?.hidden
   );
   if (search.includes('live_projection=1') && !search.includes('continuous_editor=1')) {
     await page.waitForFunction(() =>
@@ -323,6 +349,97 @@ test('disabled by default makes no stored_preview call', async (browser) => {
     assert.equal(await page.evaluate(() =>
       document.querySelector('#cpbEditorRoot').__cpbPhaseC.enabled
     ), false);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('section canvas stays covered until fonts, page rules, and final geometry are ready', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    await page.evaluate(() => {
+      window.__phaseC.assemblies = [];
+      document.querySelector('#cpbEditorRoot').addEventListener(
+        'cpb:section-assembly-complete',
+        (event) => window.__phaseC.assemblies.push(structuredClone(event.detail)),
+      );
+      window.__phaseC.queuePageRules({ defer: true });
+    });
+    await page.getByTitle('Section Twelve').click();
+    await page.waitForFunction(() => window.__phaseC.pendingPageRules.length === 1);
+    const loading = await page.evaluate(() => {
+      const root = document.querySelector('#cpbEditorRoot');
+      const overlay = document.querySelector('#cpbSectionAssembly');
+      const canvas = document.querySelector('#cpbCanvas');
+      return {
+        busy: root.getAttribute('aria-busy'),
+        overlayVisible: !overlay.hidden,
+        progress: Number(document.querySelector('#cpbSectionAssemblyProgress').textContent.replace('%', '')),
+        canvasVisibility: getComputedStyle(canvas).visibility,
+        label: document.querySelector('#cpbSectionAssemblyLabel').textContent,
+      };
+    });
+    assert.equal(loading.busy, 'true');
+    assert.equal(loading.overlayVisible, true);
+    assert.ok(loading.progress >= 52, JSON.stringify(loading));
+    assert.equal(loading.canvasVisibility, 'hidden');
+    assert.match(loading.label, /fonts|images|page rules/i);
+
+    await page.evaluate(() => window.__phaseC.resolvePageRules(0));
+    await page.waitForFunction(() =>
+      document.querySelector('#cpbEditorRoot').getAttribute('aria-busy') === 'false'
+      && document.querySelector('#cpbSectionAssembly').hidden
+      && window.__phaseC.assemblies.length === 1
+    );
+    const ready = await page.evaluate(() => ({
+      activeSection: document.querySelector('.cpb-tree-link.is-active')?.title,
+      printLayout: document.querySelector('#cpbCanvas .cpb-sheet')?.classList.contains('cpb-print-layout'),
+      furniture: document.querySelectorAll('#cpbCanvas .cpb-print-furniture-layer').length,
+      status: document.querySelector('#cpbSaveStatus').textContent,
+      assembly: window.__phaseC.assemblies[0],
+    }));
+    assert.equal(ready.activeSection, 'Section Twelve');
+    assert.equal(ready.printLayout, true);
+    assert.ok(ready.furniture >= 1);
+    assert.equal(ready.status, 'Ready');
+    assert.equal(ready.assembly.section_id, 12);
+    assert.equal(ready.assembly.complete, true);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('a slower prior section response cannot replace the newest selected section', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    await page.evaluate(() => {
+      window.__phaseC.queueLoad({ defer: true });
+      window.__phaseC.queueLoad({ defer: true });
+    });
+    await page.getByTitle('Section Twelve').click();
+    await page.waitForFunction(() => window.__phaseC.pendingLoads.length === 1);
+    await page.getByTitle('Section Eleven').click();
+    await page.waitForFunction(() => window.__phaseC.pendingLoads.length === 2);
+
+    await page.evaluate(() => window.__phaseC.resolveLoad(1));
+    await page.waitForFunction(() =>
+      document.querySelector('#cpbEditorRoot').getAttribute('aria-busy') === 'false'
+      && document.querySelector('.cpb-tree-link.is-active')?.title === 'Section Eleven'
+    );
+    await page.evaluate(() => window.__phaseC.resolveLoad(0));
+    await page.waitForTimeout(150);
+    const observed = await page.evaluate(() => ({
+      activeSection: document.querySelector('.cpb-tree-link.is-active')?.title,
+      status: document.querySelector('#cpbSaveStatus').textContent,
+      busy: document.querySelector('#cpbEditorRoot').getAttribute('aria-busy'),
+    }));
+    assert.deepEqual(observed, {
+      activeSection: 'Section Eleven',
+      status: 'Ready',
+      busy: 'false',
+    });
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

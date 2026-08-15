@@ -170,6 +170,9 @@ async function newEditorPage(browser) {
     document.querySelector('#cpbCanvas .cpb-block[data-block-id="2"]')
     && document.querySelector('#cpbEditorRoot').__cpbPhaseB
   );
+  await page.waitForFunction(() =>
+    document.querySelector('#cpbEditorRoot').getAttribute('aria-busy') === 'false'
+  );
   await page.evaluate(() => {
     window.__phaseB.requests = window.__phaseB.requests.filter((request) =>
       !['get_callout_presets', 'load', 'list', 'section_index'].includes(request.action)

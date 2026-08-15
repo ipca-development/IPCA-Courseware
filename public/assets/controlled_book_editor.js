@@ -14,6 +14,10 @@
   var treeEl = document.getElementById('cpbSectionTree');
   var treeToggleAllBtn = document.getElementById('cpbTreeToggleAll');
   var canvasEl = document.getElementById('cpbCanvas');
+  var sectionAssemblyEl = document.getElementById('cpbSectionAssembly');
+  var sectionAssemblyLabelEl = document.getElementById('cpbSectionAssemblyLabel');
+  var sectionAssemblyBarEl = document.getElementById('cpbSectionAssemblyBar');
+  var sectionAssemblyProgressEl = document.getElementById('cpbSectionAssemblyProgress');
   var toolbarEl = document.getElementById('cpbToolbar');
   var toolbarMainEl = document.getElementById('cpbToolbarMain');
   var toolbarTocEl = document.getElementById('cpbToolbarToc');
@@ -183,6 +187,8 @@
     printPageCount: 1,
     authoritativePageCount: 0,
     sectionPageStarts: {},
+    sectionLoadSequence: 0,
+    sectionAssemblyProgress: 0,
     livePagination: {
       mutationRevision: 0,
       scheduledRevision: 0,
@@ -319,6 +325,61 @@
     if (!saveStatusEl) return;
     saveStatusEl.textContent = text;
     saveStatusEl.className = 'cpb-save-status' + (tone ? ' is-' + tone : '');
+  }
+
+  function setSectionAssembly(active, label, progress) {
+    progress = Math.max(
+      state.sectionAssemblyProgress || 0,
+      Math.min(100, Math.round(Number(progress || 0)))
+    );
+    state.sectionAssemblyProgress = active ? progress : 0;
+    root.classList.toggle('cpb-section-assembly-active', !!active);
+    root.setAttribute('aria-busy', active ? 'true' : 'false');
+    if (!sectionAssemblyEl) return;
+    sectionAssemblyEl.hidden = !active;
+    if (label && sectionAssemblyLabelEl) sectionAssemblyLabelEl.textContent = label;
+    if (sectionAssemblyBarEl) sectionAssemblyBarEl.style.width = progress + '%';
+    if (sectionAssemblyProgressEl) sectionAssemblyProgressEl.textContent = progress + '%';
+  }
+
+  function nextAnimationFrame() {
+    return new Promise(function (resolve) {
+      window.requestAnimationFrame(function () { resolve(); });
+    });
+  }
+
+  function settleWithin(promise, timeoutMs) {
+    return Promise.race([
+      Promise.resolve(promise).catch(function () { return null; }),
+      new Promise(function (resolve) {
+        setTimeout(function () { resolve(null); }, timeoutMs);
+      }),
+    ]);
+  }
+
+  function waitForCanvasImages() {
+    var images = Array.prototype.slice.call(canvasEl.querySelectorAll('img'));
+    if (!images.length) return Promise.resolve();
+    return Promise.all(images.map(function (image) {
+      if (image.complete) {
+        return typeof image.decode === 'function'
+          ? image.decode().catch(function () { return null; })
+          : Promise.resolve();
+      }
+      return new Promise(function (resolve) {
+        var done = function () {
+          image.removeEventListener('load', done);
+          image.removeEventListener('error', done);
+          if (typeof image.decode === 'function') {
+            image.decode().catch(function () { return null; }).then(resolve);
+          } else {
+            resolve();
+          }
+        };
+        image.addEventListener('load', done, { once: true });
+        image.addEventListener('error', done, { once: true });
+      });
+    }));
   }
 
   function isConnectedEl(el) {
@@ -1225,7 +1286,7 @@
     }, delay == null ? 450 : delay);
   }
 
-  function loadUnifiedManualBreaks() {
+  function loadUnifiedManualBreaks(scheduleLayout) {
     return Promise.all([
       paginationRequest(
         '/admin/api/controlled_book_page_break_api.php?action=list&book_version_id=' + state.versionId
@@ -1238,7 +1299,7 @@
       state.paginationCandidates = responses[0].candidates || [];
       state.sectionPageStarts = responses[1].section_page_index || {};
       state.authoritativePageCount = parseInt(responses[1].page_count || '0', 10) || 0;
-      scheduleUnifiedPrintLayout(0);
+      if (scheduleLayout !== false) scheduleUnifiedPrintLayout(0);
       return responses[0];
     });
   }
@@ -2607,11 +2668,16 @@
   }
 
   function loadSection(sectionId, scrollRef) {
+    var loadSequence = ++state.sectionLoadSequence;
+    state.sectionAssemblyProgress = 0;
+    setSectionAssembly(true, 'Loading section…', 8);
     setStatus('Loading…', 'saving');
     state.pendingScrollRef = scrollRef || null;
     var url = apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId;
     return apiGet(url).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Load failed');
+      if (loadSequence !== state.sectionLoadSequence) return false;
+      setSectionAssembly(true, 'Preparing page content…', 28);
       state.sectionId = res.section_id;
       state.editable = !!res.editable;
       state.sectionsTree = res.sections_tree || [];
@@ -2670,25 +2736,77 @@
         refreshAnnexAdminTypographyFromBookStyles();
       }
       applyCanvasZoom(state.canvasZoom, false);
-      Promise.resolve(document.fonts && document.fonts.ready ? document.fonts.ready : null)
-        .then(loadUnifiedManualBreaks)
-        .catch(showError);
-      if (state.pendingScrollRef) {
-        var target = canvasEl.querySelector('[data-canonical-section-ref="' + state.pendingScrollRef + '"]');
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-        state.pendingScrollRef = null;
-      }
-      setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
       updateAddSubsection(res.section);
-      if (res.prior_version_label) {
-        setStatus('Ready · changes vs ' + res.prior_version_label, 'saved');
-      }
-      if (state.liveProjection.enabled) {
-        refreshLiveProjection();
-      }
-    }).catch(showError);
+      setSectionAssembly(true, 'Loading fonts, images, and page rules…', 52);
+      var fontReady = settleWithin(
+        document.fonts && document.fonts.ready
+          ? Promise.resolve(document.fonts.ready).then(function () { return true; })
+          : Promise.resolve(true),
+        5000
+      );
+      var imagesReady = settleWithin(
+        waitForCanvasImages().then(function () { return true; }),
+        6000
+      );
+      var rulesReady = settleWithin(
+        loadUnifiedManualBreaks(false).then(function () { return true; }),
+        6000
+      );
+      return Promise.all([fontReady, imagesReady, rulesReady]).then(function (readiness) {
+        if (loadSequence !== state.sectionLoadSequence) return false;
+        var incomplete = readiness.some(function (ready) { return ready !== true; });
+        setSectionAssembly(true, 'Assembling pages…', 84);
+        return nextAnimationFrame().then(function () {
+          if (loadSequence !== state.sectionLoadSequence) return false;
+          applyUnifiedPrintLayout();
+          setSectionAssembly(true, 'Finalizing page geometry…', 94);
+          return nextAnimationFrame().then(function () {
+            if (loadSequence !== state.sectionLoadSequence) return false;
+            if (state.pendingScrollRef) {
+              var target = canvasEl.querySelector(
+                '[data-canonical-section-ref="' + state.pendingScrollRef + '"]'
+              );
+              if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              state.pendingScrollRef = null;
+            }
+            var projectionReady = state.liveProjection.enabled
+              ? refreshLiveProjection()
+              : Promise.resolve(true);
+            return projectionReady.then(function () {
+              if (loadSequence !== state.sectionLoadSequence) return false;
+              setSectionAssembly(true, 'Pages ready', 100);
+              return nextAnimationFrame().then(function () {
+                if (loadSequence !== state.sectionLoadSequence) return false;
+                setSectionAssembly(false, '', 100);
+                if (incomplete) {
+                  setStatus('Ready · some page assets could not be verified', 'warn');
+                } else if (res.prior_version_label) {
+                  setStatus('Ready · changes vs ' + res.prior_version_label, 'saved');
+                } else {
+                  setStatus(
+                    state.editable ? 'Ready' : 'Read-only (released)',
+                    state.editable ? 'saved' : ''
+                  );
+                }
+                root.dispatchEvent(new CustomEvent('cpb:section-assembly-complete', {
+                  detail: {
+                    section_id: state.sectionId,
+                    load_sequence: loadSequence,
+                    complete: !incomplete,
+                  },
+                }));
+                return true;
+              });
+            });
+          });
+        });
+      });
+    }).catch(function (error) {
+      if (loadSequence !== state.sectionLoadSequence) return false;
+      setSectionAssembly(false, '', 100);
+      showError(error);
+      return false;
+    });
   }
 
   function updateAddSubsection(section) {

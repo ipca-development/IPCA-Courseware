@@ -648,6 +648,10 @@ async function runVariant(page, assets, row) {
   page.on('pageerror', onPageError);
   await page.addScriptTag({ content: assets.js });
   await page.waitForFunction(() => document.querySelector('#cpbCanvas .cpb-sheet'), null, { timeout: 5000 });
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#cpbEditorRoot');
+    return !root.hasAttribute('aria-busy') || root.getAttribute('aria-busy') === 'false';
+  }, null, { timeout: 8000 });
   const observation = normalize(await exerciseRow(page, row));
   page.off('pageerror', onPageError);
   if (errors.length) throw new Error(`browser error: ${errors.join('; ')}`);
