@@ -372,6 +372,55 @@
     }
   }
 
+  function caretRangeAtPointWithin(element, clientX, clientY) {
+    if (!element) return null;
+    var range = null;
+    if (document.caretPositionFromPoint) {
+      var position = document.caretPositionFromPoint(clientX, clientY);
+      if (position && position.offsetNode) {
+        range = document.createRange();
+        range.setStart(position.offsetNode, position.offset);
+        range.collapse(true);
+      }
+    } else if (document.caretRangeFromPoint) {
+      range = document.caretRangeFromPoint(clientX, clientY);
+    }
+    if (!range) return null;
+    var node = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer
+      : range.startContainer.parentElement;
+    return node && (node === element || element.contains(node)) ? range.cloneRange() : null;
+  }
+
+  function keepCaretInClickedTableCell(cell, fallbackRange) {
+    if (!cell || !cell.isConnected || !cell.isContentEditable) return;
+    var selection = window.getSelection();
+    var anchorNode = selection && selection.anchorNode;
+    var anchorElement = anchorNode
+      ? (anchorNode.nodeType === Node.ELEMENT_NODE ? anchorNode : anchorNode.parentElement)
+      : null;
+    if (
+      document.activeElement === cell
+      && anchorElement
+      && (anchorElement === cell || cell.contains(anchorElement))
+    ) {
+      return;
+    }
+    try {
+      cell.focus({ preventScroll: true });
+    } catch (err) {
+      cell.focus();
+    }
+    var range = fallbackRange;
+    if (!range || !range.startContainer || !range.startContainer.isConnected) {
+      range = document.createRange();
+      range.selectNodeContents(cell);
+      range.collapse(false);
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
   function clearPendingForBlock(blockId) {
     if (state.pending[blockId]) {
       delete state.pending[blockId];
@@ -3129,6 +3178,9 @@
 
     canvasEl.addEventListener('pointerdown', function (e) {
       var tableCell = e.target.closest('.cpb-table th, .cpb-table td');
+      var clickedCellCaret = tableCell
+        ? caretRangeAtPointWithin(tableCell, e.clientX, e.clientY)
+        : null;
       var tableTools = e.target.closest('.cpb-table-tools');
       var clickedTableBlock = e.target.closest(
         '.cpb-block--table, [data-structured-table-editor="1"]'
@@ -3154,6 +3206,9 @@
           openTableTools(clickedTableBlock, clickedTableBlock.querySelector('.cpb-table-wrap'));
         } else if (!tableTools && !clickedTableBlock) {
           closeTableTools();
+        }
+        if (tableCell && !toggleCell) {
+          keepCaretInClickedTableCell(tableCell, clickedCellCaret);
         }
       });
     }, true);
@@ -3184,6 +3239,13 @@
     canvasEl.addEventListener('keyup', rememberStyleTarget);
 
     canvasEl.addEventListener('click', function (e) {
+      var clickedCell = e.target.closest('.cpb-table th, .cpb-table td');
+      if (clickedCell && clickedCell.isContentEditable) {
+        keepCaretInClickedTableCell(
+          clickedCell,
+          caretRangeAtPointWithin(clickedCell, e.clientX, e.clientY)
+        );
+      }
       var closeToolsBtn = e.target.closest('[data-table-tools-close]');
       if (closeToolsBtn) {
         e.preventDefault();
@@ -6132,7 +6194,6 @@
         if (textColorControl) {
           textColorControl.value = extractCellTextColor(cell) || '#0f172a';
         }
-        openTableTools(blockEl, cell);
       });
       cell.addEventListener('input', function () {
         var titleRow = cell.closest('[data-title-row]');

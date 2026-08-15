@@ -31,7 +31,7 @@ const sourceBlocks = `
       <div class="cpb-table-wrap cpb-table-border-medium" data-border-width="medium" data-border-color="#94a3b8" style="width:280px;max-width:100%;--cpb-table-border-color:#94a3b8">
         <table class="cpb-table" data-field="table" style="width:280px">
           <colgroup><col style="width:140px"><col style="width:140px"></colgroup>
-          <thead><tr class="cpb-table-header-row"><th contenteditable="true"><span class="cpb-th-text">A</span></th><th contenteditable="true"><span class="cpb-th-text">B</span></th></tr></thead>
+          <thead><tr class="cpb-table-title-row" data-title-row="1"><td colspan="2" contenteditable="true">Table title</td></tr><tr class="cpb-table-header-row"><th contenteditable="true"><span class="cpb-th-text">A</span></th><th contenteditable="true"><span class="cpb-th-text">B</span></th></tr></thead>
           <tbody data-table-part="body"><tr><td contenteditable="true">A1</td><td contenteditable="true">B1</td></tr><tr><td contenteditable="true">A2</td><td contenteditable="true">B2</td></tr></tbody>
         </table>
       </div>
@@ -354,6 +354,27 @@ test('enabled creates #cpbProjection alongside unchanged #cpbCanvas and source s
   }
 });
 
+test('paragraph control bar stays above paragraph content', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    await page.locator('#cpbCanvas [data-block-id="1"] .cpb-paragraph').focus();
+    const geometry = await page.locator('#cpbCanvas [data-block-id="1"]').evaluate((block) => {
+      const chrome = block.querySelector('.cpb-block-chrome');
+      const paragraphRect = block.querySelector('.cpb-paragraph').getBoundingClientRect();
+      const chromeRect = chrome.getBoundingClientRect();
+      return {
+        cssTop: getComputedStyle(chrome).top,
+        contentClearance: paragraphRect.top - chromeRect.bottom,
+      };
+    });
+    assert.equal(geometry.cssTop, '-25px');
+    assert.ok(geometry.contentClearance >= 0, JSON.stringify(geometry));
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
 test('table controls stay in the second toolbar row and replace floating tools', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
@@ -375,6 +396,29 @@ test('table controls stay in the second toolbar row and replace floating tools',
     assert.equal(toolbarLayout.tableLines, 3);
     assert.deepEqual(toolbarLayout.overflow, [0, 0, 0, 0, 0]);
     assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isDisabled(), true);
+
+    const clickedCell = page.locator(
+      '#cpbCanvas [data-block-id="3"] tbody tr:nth-child(2) td:nth-child(2)'
+    );
+    await clickedCell.evaluate((cell) => {
+      cell.addEventListener('click', () => {
+        cell.closest('table').querySelector('[data-title-row] td').focus();
+      }, { once: true });
+    });
+    await clickedCell.click();
+    await page.keyboard.type(' typed');
+    const clickFocus = await page.evaluate(() => {
+      const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
+      const target = block.querySelector('tbody tr:nth-child(2) td:nth-child(2)');
+      return {
+        activeTarget: document.activeElement === target,
+        targetText: target.textContent,
+        titleText: block.querySelector('[data-title-row] td').textContent,
+      };
+    });
+    assert.equal(clickFocus.activeTarget, true);
+    assert.match(clickFocus.targetText, /typed$/);
+    assert.equal(clickFocus.titleText, 'Table title');
 
     await page.locator('#cpbCanvas [data-block-id="3"] tbody tr:first-child td:first-child').click();
     assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isEnabled(), true);

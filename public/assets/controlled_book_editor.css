@@ -1792,7 +1792,7 @@ span.cpb-flow-page-break {
 
 .cpb-block-chrome {
   position: absolute;
-  top: -10px;
+  top: -25px;
   right: 0;
   display: none;
   gap: 4px;
