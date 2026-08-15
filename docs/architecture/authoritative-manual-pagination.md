@@ -41,6 +41,10 @@ Chromium/Chrome binary. Otherwise the worker tries bundled Chromium first and
 the installed Chrome channel second. Generation fails closed if the browser,
 publication CSS, or final page validation is unavailable.
 
+Live HTTP requests spawn the background worker with the CLI executable at
+`CW_PAGINATION_PHP`, or `PHP_BINDIR/php` when it is unset. They must never invoke
+the PHP-FPM binary reported by `PHP_BINARY`.
+
 Apply `scripts/sql/2026_08_13_publishing_manual_page_breaks.sql` before enabling
 cursor-based manual breaks.
 

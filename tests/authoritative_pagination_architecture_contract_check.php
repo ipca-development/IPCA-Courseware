@@ -74,6 +74,8 @@ $contracts = array(
         'GET_LOCK',
         'RELEASE_LOCK',
         "' --drain'",
+        'CW_PAGINATION_PHP',
+        'PHP_BINDIR',
     ),
     'scripts/controlled_publishing_page_map_worker.php' => array(
         "require_once __DIR__ . '/../src/helpers.php'",

@@ -878,7 +878,14 @@ final class ControlledPublishingLivePageMapService
             // Drain every pending profile for this version. A worker spawned for
             // another profile may lose the version-wide named-lock race and exit;
             // the lock owner must therefore pick that profile up before it exits.
-            $command = escapeshellarg(PHP_BINARY)
+            $configuredPhp = trim((string)(getenv('CW_PAGINATION_PHP') ?: ''));
+            $cliPhp = $configuredPhp !== ''
+                ? $configuredPhp
+                : PHP_BINDIR . DIRECTORY_SEPARATOR . 'php';
+            if (!is_executable($cliPhp)) {
+                $cliPhp = PHP_BINARY;
+            }
+            $command = escapeshellarg($cliPhp)
                 . ' ' . escapeshellarg($root . '/scripts/controlled_publishing_page_map_worker.php')
                 . ' --drain'
                 . ' --version-id=' . $versionId
