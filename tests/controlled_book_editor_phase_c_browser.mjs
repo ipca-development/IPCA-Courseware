@@ -365,6 +365,7 @@ test('section canvas stays covered until fonts, page rules, and final geometry a
         (event) => window.__phaseC.assemblies.push(structuredClone(event.detail)),
       );
       window.__phaseC.queuePageRules({ defer: true });
+      document.querySelector('#cpbCanvas').scrollTop = 480;
     });
     await page.getByTitle('Section Twelve').click();
     await page.waitForFunction(() => window.__phaseC.pendingPageRules.length === 1);
@@ -397,12 +398,14 @@ test('section canvas stays covered until fonts, page rules, and final geometry a
       printLayout: document.querySelector('#cpbCanvas .cpb-sheet')?.classList.contains('cpb-print-layout'),
       furniture: document.querySelectorAll('#cpbCanvas .cpb-print-furniture-layer').length,
       status: document.querySelector('#cpbSaveStatus').textContent,
+      scrollTop: document.querySelector('#cpbCanvas').scrollTop,
       assembly: window.__phaseC.assemblies[0],
     }));
     assert.equal(ready.activeSection, 'Section Twelve');
     assert.equal(ready.printLayout, true);
     assert.ok(ready.furniture >= 1);
     assert.equal(ready.status, 'Ready');
+    assert.equal(ready.scrollTop, 0);
     assert.equal(ready.assembly.section_id, 12);
     assert.equal(ready.assembly.complete, true);
   } finally {

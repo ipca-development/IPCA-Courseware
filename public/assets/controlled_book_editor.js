@@ -2768,6 +2768,8 @@
               );
               if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
               state.pendingScrollRef = null;
+            } else {
+              canvasEl.scrollTop = 0;
             }
             var projectionReady = state.liveProjection.enabled
               ? refreshLiveProjection()
