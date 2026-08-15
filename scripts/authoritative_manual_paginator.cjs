@@ -39,6 +39,29 @@ function fail(message) {
   process.exit(1);
 }
 
+async function remoteImageAssets(htmlValues) {
+  const urls = new Set();
+  htmlValues.forEach((html) => {
+    for (const match of String(html).matchAll(/\bsrc=(["'])(https?:\/\/[^"']+)\1/gi)) {
+      urls.add(match[2].replaceAll("&amp;", "&"));
+    }
+  });
+  const assets = new Map();
+  await Promise.all(Array.from(urls).map(async (url) => {
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error(`Unable to load publication image ${url}: HTTP ${response.status}`);
+    const body = Buffer.from(await response.arrayBuffer());
+    if (body.length > 10 * 1024 * 1024) {
+      throw new Error(`Publication image exceeds the 10 MB pagination limit: ${url}`);
+    }
+    assets.set(url, {
+      body,
+      contentType: response.headers.get("content-type") || "application/octet-stream"
+    });
+  }));
+  return assets;
+}
+
 async function main() {
   const inputPath = argument("input");
   const outputPath = argument("output");
@@ -107,13 +130,35 @@ async function main() {
     ),
     "utf8"
   );
+  const headerTemplates = Array.from(new Set([
+    String(source.header_template_html || ""),
+    ...source.sections.map((section) => String(section?.header_template || ""))
+  ].filter(Boolean)));
+  const footerTemplates = Array.from(new Set([
+    String(source.footer_template_html || ""),
+    ...source.sections.map((section) => String(section?.footer_template || ""))
+  ].filter(Boolean)));
+  const publicationImages = await remoteImageAssets([...headerTemplates, ...footerTemplates]);
   const browser = await launchChromium();
   try {
     const page = await browser.newPage({
       viewport: { width: Math.ceil(pageWidth), height: Math.ceil(pageHeight) }
     });
-    await page.route("http://authoritative.local/**", async (route) => {
+    await page.route("**/*", async (route) => {
       const url = new URL(route.request().url());
+      const cached = publicationImages.get(url.href);
+      if (cached) {
+        await route.fulfill({
+          status: 200,
+          body: cached.body,
+          contentType: cached.contentType
+        });
+        return;
+      }
+      if (url.origin !== "http://authoritative.local") {
+        await route.continue();
+        return;
+      }
       const relative = decodeURIComponent(url.pathname).replace(/^\/+/, "");
       const localPath = path.resolve(root, "public", relative);
       const publicRoot = path.resolve(root, "public") + path.sep;
@@ -209,14 +254,8 @@ async function main() {
         footer: Math.max(0, ...footerHeights)
       };
     }, {
-      headerTemplates: Array.from(new Set([
-        String(source.header_template_html || ""),
-        ...source.sections.map((section) => String(section?.header_template || ""))
-      ].filter(Boolean))),
-      footerTemplates: Array.from(new Set([
-        String(source.footer_template_html || ""),
-        ...source.sections.map((section) => String(section?.footer_template || ""))
-      ].filter(Boolean))),
+      headerTemplates,
+      footerTemplates,
       width: pageWidth - side * 2
     });
     const resolvedHeaderHeight = measuredBands.header || headerHeight;
