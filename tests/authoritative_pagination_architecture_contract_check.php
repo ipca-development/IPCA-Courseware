@@ -45,9 +45,11 @@ $contracts = array(
         "'body_capacity_px' => 802",
     ),
     'src/publishing/ControlledPublishingBookStyleManifestService.php' => array(
-        '.reader-page-header-region .cpb-page-header-logo{max-width:70%!important;max-height:44px!important;}',
+        '.reader-page-header-region .cpb-page-header-logo{max-width:60%!important;max-height:36px!important;}',
         '.reader-page-header-region>.cpb-page-header>.cpb-page-header-table{height:100%!important;',
-        '.reader-page-header-region .cpb-page-header-table td{padding-top:4px!important;',
+        '.reader-page-header-region .cpb-page-header-table td{padding-top:2px!important;',
+        '.reader-page-header-region .cpb-page-header-cell--center{font-size:11pt!important;}',
+        '.reader-page-header-region .cpb-page-header-cell--right{font-size:8pt!important;}',
     ),
     'src/publishing/ControlledPublishingManualPageBreakService.php' => array(
         'before_block_anchor',

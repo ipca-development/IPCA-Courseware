@@ -21,7 +21,7 @@ Canonical controlled-manual flow:
 - Manual Page Breaks remain explicit overrides that force the following content to a new page.
 - `pagination_authority` is `generated` or `author`. Part 0 always has generated/automatic pagination authority, including author-editable sections such as 0.2 Revision System. Outside Part 0, authority is derived from the publishing model (`is_generated`, `is_system_managed`, `allow_author_blocks`, and per-block `is_system_managed`), not from section titles.
 - Generated/system-owned/non-editable content uses the same automatic page flow and never requires a manual break.
-- Canonical Letter furniture uses a compact 64px header band and a 34px footer band. Header logos are constrained to the header's usable 44px height; furniture must not expand either band.
+- Canonical Letter furniture uses a compact 64px header band and a 34px footer band. Header logos are constrained to the header's usable 36px height, and publication-only header typography is fitted to that band; furniture must not expand either band.
 - Generated TOC/LEP/table rows are measured as content fragments inside the authoritative body frame. They must not inherit page width, page height, header/footer geometry, or publication sheet min-height. Measurement width equals the contentFrame width.
 - Every semantic source block appears exactly once, in source order, except presentation-only repeated table headers.
 - Stored coverage records each fragment's source section. Section-scoped previews include every physical page containing that section, including pages whose primary/first section differs.

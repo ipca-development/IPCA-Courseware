@@ -59,7 +59,7 @@ async function main() {
   const top = Number(profile.sheet_padding_top_px || 48);
   const bottom = Number(profile.sheet_padding_bottom_px || 64);
   const headerHeight = Number(profile.header_band_px || 64);
-  const headerLogoMaxHeight = Math.max(16, headerHeight - 20);
+  const headerLogoMaxHeight = Math.max(16, headerHeight - 28);
   const headerGap = Number(profile.header_margin_bottom_px || 20);
   const footerGap = Number(profile.footer_margin_top_px || 24);
   const footerHeight = Number(profile.footer_band_px || 34);
@@ -150,14 +150,16 @@ async function main() {
           .reader-page-body:not(.reader-page-cover){overflow:hidden}
           .reader-page-header-measurement .cpb-page-header-logo,
           .reader-page-header-region .cpb-page-header-logo{
-            max-width:70%!important;max-height:${headerLogoMaxHeight}px!important
+            max-width:60%!important;max-height:${headerLogoMaxHeight}px!important
           }
           .reader-page-header-region>.cpb-page-header>.cpb-page-header-table{
             height:100%!important;max-height:100%;table-layout:fixed
           }
           .reader-page-header-region .cpb-page-header-table td{
-            padding-top:4px!important;padding-bottom:4px!important;line-height:1.2!important
+            padding-top:2px!important;padding-bottom:2px!important;line-height:1.15!important
           }
+          .reader-page-header-region .cpb-page-header-cell--center{font-size:11pt!important}
+          .reader-page-header-region .cpb-page-header-cell--right{font-size:8pt!important}
           .reader-page-header-region>.cpb-page-header,
           .reader-page-footer-region>.cpb-page-footer{
             position:static!important;inset:auto!important;width:100%!important;
