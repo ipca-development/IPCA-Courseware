@@ -298,7 +298,17 @@ final class ControlledPublishingAuthoritativePaginationService
             ? 'version-' . $versionId
             : 'book-' . hash('sha256', (string)($version['book_key'] ?? 'unknown'));
         $path = sys_get_temp_dir() . '/ipca-authoritative-pagination-' . $identity . '.lock';
-        $handle = @fopen($path, 'c');
+        // Opening an existing file with mode "c" includes O_CREAT. Linux
+        // protected_regular rejects that across users inside sticky /tmp even
+        // when the shared file is mode 0666, so open existing locks without it.
+        $handle = @fopen($path, 'r+');
+        if ($handle === false) {
+            $handle = @fopen($path, 'x+');
+        }
+        if ($handle === false) {
+            // Another process may have won the create race.
+            $handle = @fopen($path, 'r+');
+        }
         if ($handle === false) {
             throw new RuntimeException('Unable to allocate the authoritative pagination lock.');
         }
