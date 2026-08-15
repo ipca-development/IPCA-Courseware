@@ -52,6 +52,14 @@ $pages = array(
     array(92, 36, 'section-36', array(
         array('source_fragment_id' => 'section-36/block-f/root', 'section_id' => 36),
     )),
+    array(93, 36, 'section-36', array(
+        array(
+            'source_fragment_id' => 'section-35/repeated-header/root',
+            'section_id' => 35,
+            'presentation_copy' => true,
+        ),
+        array('source_fragment_id' => 'section-36/block-g/root', 'section_id' => 36),
+    )),
 );
 foreach ($pages as [$pageNumber, $primarySectionId, $anchor, $coverage]) {
     $insert->execute(array(
@@ -74,6 +82,10 @@ mixed_page_assert(
 mixed_page_assert(
     (int)$section35[0]['section_id'] === 9,
     'A mixed page must retain its primary section while being included for a covered section.'
+);
+mixed_page_assert(
+    !in_array(93, array_column($section35, 'page_number'), true),
+    'Presentation-only copies must not create section membership.'
 );
 
 $index = $store->sectionPageIndex(1, 'LETTER_READER_v1');

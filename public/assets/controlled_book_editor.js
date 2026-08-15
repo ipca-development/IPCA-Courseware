@@ -2020,6 +2020,16 @@
     return navigation;
   }
 
+  function storedPageContainsSection(page, sectionId) {
+    if (parseInt(page.section_id || '0', 10) === sectionId) return true;
+    var metadata = page.metadata && typeof page.metadata === 'object' ? page.metadata : {};
+    var coverage = Array.isArray(metadata.coverage) ? metadata.coverage : [];
+    return coverage.some(function (entry) {
+      return !entry.presentation_copy
+        && parseInt(entry.section_id || '0', 10) === sectionId;
+    });
+  }
+
   function renderPaginatedView(result) {
     state.paginatedResult = result;
     state.paginationStale = !(result.freshness && result.freshness.is_current);
@@ -2032,7 +2042,7 @@
     }
     var allPages = Array.isArray(result.pages) ? result.pages : [];
     var sectionPages = allPages.filter(function (page) {
-      return parseInt(page.section_id || '0', 10) === state.sectionId;
+      return storedPageContainsSection(page, state.sectionId);
     });
     if (state.pendingPaginatedAnchor) {
       var anchorNeedle = 'data-stable-anchor="' + state.pendingPaginatedAnchor + '"';

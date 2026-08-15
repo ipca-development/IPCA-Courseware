@@ -386,7 +386,7 @@ final class ControlledPublishingReaderPageMapStore
         $sectionIds = array();
         $coverage = is_array($metadata['coverage'] ?? null) ? $metadata['coverage'] : array();
         foreach ($coverage as $entry) {
-            if (!is_array($entry)) {
+            if (!is_array($entry) || !empty($entry['presentation_copy'])) {
                 continue;
             }
             $sectionId = (int)($entry['section_id'] ?? 0);

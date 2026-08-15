@@ -61,6 +61,11 @@ function renderDocument(search = '') {
     .replace(
       'id="cpbEditorRoot"',
       'id="cpbEditorRoot" data-api-base="/mock/editor" data-document-type="manual"',
+    )
+    .replace(
+      '<div class="cpb-canvas-scroll" id="cpbCanvas">',
+      '<button type="button" id="cpbViewPaginated">Exact paginated view</button>'
+        + '<div class="cpb-canvas-scroll" id="cpbCanvas">',
     );
   const base = `http://phase-c.test/${search ? `?${search}` : ''}`;
   return {
@@ -562,6 +567,13 @@ test('mixed-section stored preview renders every authoritative page returned for
       { page: '90', primarySection: '11' },
     ]);
     assert.match(await page.locator('#cpbProjectionStatus').textContent(), /2 pages · Current/);
+    await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }), initial);
+    await page.locator('#cpbViewPaginated').click();
+    await page.waitForFunction(() =>
+      /Page 89 · 1 of 2 in this section/.test(
+        document.querySelector('.cpb-pagination-page-navigation strong')?.textContent || ''
+      )
+    );
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();
