@@ -40,11 +40,10 @@ if (!str_contains($markup, '<select id="cpbListStart"')
 
 foreach (array(
     '.cpb-toolbar-row--primary',
-    '.cpb-toolbar-row--table-structure',
-    '.cpb-toolbar-row--table-cells',
-    'min-height: 160px',
-    'height: 159px',
-    'flex: 0 0 128px',
+    '.cpb-toolbar-row--table',
+    'min-height: 70px',
+    'height: 69px',
+    'flex: 0 0 46px',
     'overflow-x: hidden',
     'width: 38px !important',
     'height: 22px !important',
@@ -81,6 +80,6 @@ if (!str_contains($css, '.cpb-table-toolbar')) {
 }
 
 echo "Controlled publishing toolbar layout: PASS\n";
-echo "Rows: formatting / insertion and table / rows, cells and calculations\n";
+echo "Rows: formatting / insertion and table / structure, cells and calculations\n";
 echo "List start selector: compact 38 x 22px\n";
-echo "Table controls: always visible across three table rows\n";
+echo "Toolbar: three compact rows matching the reference layout\n";

@@ -378,7 +378,7 @@ test('paragraph control bar stays above paragraph content', async (browser) => {
 test('table controls stay in the second toolbar row and replace floating tools', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
-    await page.setViewportSize({ width: 1180, height: 900 });
+    await page.setViewportSize({ width: 1024, height: 768 });
     const toolbar = page.locator('#cpbTableToolbar');
     await toolbar.waitFor();
     assert.equal(await toolbar.isVisible(), true);
@@ -391,10 +391,25 @@ test('table controls stay in the second toolbar row and replace floating tools',
       tableLines: new Set(Array.from(
         main.querySelectorAll('[data-table-action]')
       ).map((control) => control.closest('.cpb-toolbar-row'))).size,
+      toolbarHeight: Math.round(main.closest('.cpb-toolbar').getBoundingClientRect().height),
+      rowHeights: Array.from(main.querySelectorAll('.cpb-toolbar-row')).map((row) =>
+        Math.round(row.getBoundingClientRect().height)
+      ),
+      buttonHeight: Math.round(
+        main.querySelector('button.cpb-tool-btn').getBoundingClientRect().height
+      ),
+      primaryRight: Math.max(...Array.from(
+        main.querySelectorAll('.cpb-toolbar-row--primary button, .cpb-toolbar-row--primary select, .cpb-toolbar-row--primary input')
+      ).map((control) => control.getBoundingClientRect().right)),
+      sharedLeft: document.querySelector('#cpbToolbarShared').getBoundingClientRect().left,
     }));
-    assert.equal(toolbarLayout.rows, 5);
-    assert.equal(toolbarLayout.tableLines, 3);
-    assert.deepEqual(toolbarLayout.overflow, [0, 0, 0, 0, 0]);
+    assert.equal(toolbarLayout.rows, 3);
+    assert.equal(toolbarLayout.tableLines, 2);
+    assert.deepEqual(toolbarLayout.overflow, [0, 0, 0]);
+    assert.equal(toolbarLayout.toolbarHeight, 70);
+    assert.deepEqual(toolbarLayout.rowHeights, [23, 23, 23]);
+    assert.equal(toolbarLayout.buttonHeight, 18);
+    assert.ok(toolbarLayout.primaryRight <= toolbarLayout.sharedLeft);
     assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isDisabled(), true);
 
     const clickedCell = page.locator(

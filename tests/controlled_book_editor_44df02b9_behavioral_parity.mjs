@@ -237,9 +237,7 @@ async function exerciseRow(page, row) {
             .map((e) => e.id || e.dataset.cmd || e.dataset.align || e.dataset.addBlock),
           rows: qa(
             '#cpbToolbarMain .cpb-toolbar-row'
-              + ':not(.cpb-toolbar-row--table-identity)'
-              + ':not(.cpb-toolbar-row--table-structure)'
-              + ':not(.cpb-toolbar-row--table-cells)'
+              + ':not(.cpb-toolbar-row--table)'
           ).length,
           visibility: {
             main: style('#cpbToolbarMain').display,

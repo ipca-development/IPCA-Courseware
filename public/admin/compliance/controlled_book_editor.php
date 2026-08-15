@@ -204,8 +204,6 @@ compliance_page_open(array(
             <option value="annex_refs_all">Annex (all)</option>
           </select>
         </div>
-        </div>
-        <div class="cpb-toolbar-row cpb-toolbar-row--table-identity">
         <div class="cpb-toolbar-group" aria-label="Table">
             <span class="cpb-toolbar-table-label">Table</span>
             <button type="button" class="cpb-tool-btn" data-table-action="table-align-left" title="Align table left" disabled>Left</button>
@@ -217,7 +215,7 @@ compliance_page_open(array(
             <button type="button" class="cpb-tool-btn" data-table-action="paste-table" title="Paste copied table below the selected table" disabled>Paste table</button>
         </div>
         </div>
-        <div class="cpb-toolbar-row cpb-toolbar-row--table-structure">
+        <div class="cpb-toolbar-row cpb-toolbar-row--table">
           <div class="cpb-toolbar-group" aria-label="Rows and columns">
             <button type="button" class="cpb-tool-btn" data-table-action="move-row-up" title="Move selected row up" disabled>↑ Row</button>
             <button type="button" class="cpb-tool-btn" data-table-action="move-row-down" title="Move selected row down" disabled>↓ Row</button>
@@ -235,8 +233,6 @@ compliance_page_open(array(
             <button type="button" class="cpb-tool-btn" data-table-action="formula-avg" title="Insert AVG formula" disabled>AVG</button>
             <button type="button" class="cpb-tool-btn" data-table-action="formula-custom" title="Insert custom formula" disabled>fx</button>
           </div>
-        </div>
-        <div class="cpb-toolbar-row cpb-toolbar-row--table-cells">
           <div class="cpb-toolbar-group" aria-label="Cells">
             <button type="button" class="cpb-tool-btn" data-table-action="merge-cells-right" title="Merge selected cell horizontally" disabled>Merge H</button>
             <button type="button" class="cpb-tool-btn" data-table-action="unmerge-cells" title="Unmerge selected cell horizontally" disabled>Unmerge H</button>
