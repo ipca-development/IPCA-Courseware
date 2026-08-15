@@ -1334,22 +1334,27 @@
       const descendants = Array.from(region.querySelectorAll("*"));
       const overflow = descendants.reduce((maximum, node) => {
         const rect = node.getBoundingClientRect();
-        return {
-          horizontal: Math.max(
-            maximum.horizontal,
-            bounds.left - rect.left,
-            rect.right - bounds.right
-          ),
-          vertical: Math.max(
-            maximum.vertical,
-            bounds.top - rect.top,
-            rect.bottom - bounds.bottom
-          )
+        const horizontal = Math.max(bounds.left - rect.left, rect.right - bounds.right);
+        const vertical = Math.max(bounds.top - rect.top, rect.bottom - bounds.bottom);
+        const descriptor = {
+          tag: String(node.tagName || "").toLowerCase(),
+          className: String(node.className || ""),
+          top: rect.top - bounds.top,
+          bottom: rect.bottom - bounds.top,
+          height: rect.height
         };
-      }, { horizontal: 0, vertical: 0 });
+        return {
+          horizontal: Math.max(maximum.horizontal, horizontal),
+          vertical: Math.max(maximum.vertical, vertical),
+          horizontalNode: horizontal > maximum.horizontal ? descriptor : maximum.horizontalNode,
+          verticalNode: vertical > maximum.vertical ? descriptor : maximum.verticalNode
+        };
+      }, { horizontal: 0, vertical: 0, horizontalNode: null, verticalNode: null });
       return {
         horizontal: Math.max(0, overflow.horizontal) * scale,
-        vertical: Math.max(0, overflow.vertical) * scale
+        vertical: Math.max(0, overflow.vertical) * scale,
+        horizontalNode: overflow.horizontalNode,
+        verticalNode: overflow.verticalNode
       };
     };
     const headerOverflow = regionOverflow(header);

@@ -121,6 +121,7 @@ $contracts = array(
         'main_title_section_start',
         'HEADING_PARAGRAPH_STYLE_LEVELS',
         'section_id: Number(value.fragment.section',
+        'verticalNode: overflow.verticalNode',
         'reader-generated-page',
         'reader-page-header-region',
         'reader-page-body',
