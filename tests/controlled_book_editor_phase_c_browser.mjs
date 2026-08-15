@@ -449,6 +449,100 @@ test('a slower prior section response cannot replace the newest selected section
   }
 });
 
+test('long paragraphs and table rows never enter repeated header or footer bands', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    await page.evaluate(() => {
+      document.querySelectorAll('#cpbCanvas .cpb-block').forEach((block) => {
+        block.style.minHeight = '0';
+      });
+      const paragraph = document.querySelector('#cpbCanvas [data-block-id="1"] .cpb-paragraph');
+      paragraph.innerHTML = Array.from(
+        { length: 70 },
+        (_, index) => `<div>Long paragraph continuation line ${index + 1}</div>`,
+      ).join('');
+      const tbody = document.querySelector('#cpbCanvas [data-block-id="3"] tbody');
+      const template = tbody.querySelector('tr:not([data-auto-page-break="1"])');
+      const initialRows = tbody.querySelectorAll('tr:not([data-auto-page-break="1"])').length;
+      for (let index = initialRows; index < 14; index += 1) {
+        const row = template.cloneNode(true);
+        row.removeAttribute('data-auto-page-break');
+        row.removeAttribute('data-editor-only');
+        row.classList.remove('cpb-table-page-spacer');
+        row.querySelectorAll('td').forEach((cell, cellIndex) => {
+          cell.textContent = `Continuation row ${index + 1}, cell ${cellIndex + 1}`;
+          cell.style.height = '62px';
+        });
+        tbody.appendChild(row);
+      }
+      paragraph.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      tbody.querySelector(
+        'tr:not([data-auto-page-break="1"]) td'
+      ).dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    await page.waitForTimeout(1800);
+    const geometry = await page.evaluate(() => {
+      const sheet = document.querySelector('#cpbCanvas .cpb-sheet');
+      const body = sheet.querySelector('[data-blocks-root="1"]');
+      const sheetTop = sheet.getBoundingClientRect().top;
+      const stride = 1056 + 28;
+      const contentTop = 152;
+      const contentBottom = 152 + 744;
+      const violations = [];
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        const owner = node.parentElement;
+        if (
+          node.nodeValue.trim()
+          && !owner.closest('[data-editor-only="1"]')
+        ) {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          Array.from(range.getClientRects()).forEach((rect) => {
+            if (rect.width <= 0 && rect.height <= 0) return;
+            const y = rect.top - sheetTop;
+            const pageIndex = Math.max(0, Math.floor(y / stride));
+            const localTop = y - pageIndex * stride;
+            const localBottom = rect.bottom - sheetTop - pageIndex * stride;
+            if (
+              pageIndex > 0
+              && (localTop < contentTop - 1 || localBottom > contentBottom + 1)
+            ) {
+              violations.push({
+                text: node.nodeValue.trim().slice(0, 40),
+                pageIndex,
+                localTop,
+                localBottom,
+              });
+            }
+          });
+        }
+        node = walker.nextNode();
+      }
+      const saves = window.__phaseC.requests.filter((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      );
+      return {
+        inlineSpacers: body.querySelectorAll('span.cpb-flow-page-break--automatic').length,
+        tableSpacers: body.querySelectorAll('tr.cpb-table-page-spacer').length,
+        sourceRows: body.querySelectorAll(
+          '[data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
+        ).length,
+        savedRows: saves.at(-1)?.payload.payload.rows.length,
+        violations,
+      };
+    });
+    assert.ok(geometry.inlineSpacers >= 1, JSON.stringify(geometry));
+    assert.ok(geometry.tableSpacers >= 1, JSON.stringify(geometry));
+    assert.equal(geometry.savedRows, geometry.sourceRows);
+    assert.deepEqual(geometry.violations, []);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
 test('enabled creates #cpbProjection alongside unchanged #cpbCanvas and source stays editable', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser);
   try {
@@ -533,8 +627,8 @@ test('table controls stay in the second toolbar row and replace floating tools',
     assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isDisabled(), true);
 
     const clickedCell = page.locator(
-      '#cpbCanvas [data-block-id="3"] tbody tr:nth-child(2) td:nth-child(2)'
-    );
+      '#cpbCanvas [data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
+    ).nth(1).locator('td').nth(1);
     await clickedCell.evaluate((cell) => {
       cell.addEventListener('click', () => {
         cell.closest('table').querySelector('[data-title-row] td').focus();
@@ -551,7 +645,9 @@ test('table controls stay in the second toolbar row and replace floating tools',
     await page.keyboard.type(' after-save');
     const clickFocus = await page.evaluate(() => {
       const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
-      const target = block.querySelector('tbody tr:nth-child(2) td:nth-child(2)');
+      const target = block.querySelectorAll(
+        'tbody tr:not([data-auto-page-break="1"])'
+      )[1].querySelectorAll('td')[1];
       return {
         activeTarget: document.activeElement === target,
         targetText: target.textContent,
@@ -591,7 +687,9 @@ test('table controls stay in the second toolbar row and replace floating tools',
     await page.waitForTimeout(1000);
     const colorAfterSave = await page.evaluate(() => {
       const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
-      const target = block.querySelector('tbody tr:nth-child(2) td:nth-child(2)');
+      const target = block.querySelectorAll(
+        'tbody tr:not([data-auto-page-break="1"])'
+      )[1].querySelectorAll('td')[1];
       const fill = document.querySelector('#cpbTableToolbar [data-table-action="cell-bg"]');
       return {
         activeFill: document.activeElement === fill,
@@ -605,7 +703,9 @@ test('table controls stay in the second toolbar row and replace floating tools',
     assert.equal(colorAfterSave.cellFill, '#123456');
     assert.equal(colorAfterSave.saves, savesBeforeColor + 1, 'color commit must issue exactly one save');
 
-    await page.locator('#cpbCanvas [data-block-id="3"] tbody tr:first-child td:first-child').click();
+    await page.locator(
+      '#cpbCanvas [data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
+    ).first().locator('td').first().click();
     assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isEnabled(), true);
     await toolbar.locator('[data-table-action="table-align-center"]').click();
     const alignment = await page.evaluate(() => ({
@@ -620,8 +720,11 @@ test('table controls stay in the second toolbar row and replace floating tools',
     await toolbar.locator('[data-table-action="merge-cells-down"]').click();
     const merged = await page.evaluate(() => {
       const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
-      const first = block.querySelector('tbody tr:first-child td:first-child');
-      const covered = block.querySelector('tbody tr:nth-child(2) td:first-child');
+      const sourceRows = block.querySelectorAll(
+        'tbody tr:not([data-auto-page-break="1"])'
+      );
+      const first = sourceRows[0].querySelector('td:first-child');
+      const covered = sourceRows[1].querySelector('td:first-child');
       const saves = window.__phaseC.requests.filter((request) =>
         request.action === 'update_block' && Number(request.payload.block_id) === 3
       );

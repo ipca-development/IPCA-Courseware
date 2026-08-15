@@ -1032,8 +1032,51 @@
     spacer.setAttribute('data-auto-page-break', '1');
     spacer.setAttribute('data-editor-only', '1');
     spacer.setAttribute('contenteditable', 'false');
-    spacer.style.height = Math.max(1, targetContentTop - printY(target, sheet)) + 'px';
+    var lineHeight = parseFloat(window.getComputedStyle(target).lineHeight || '0') || 20;
+    spacer.style.height = Math.max(
+      1,
+      targetContentTop - printY(target, sheet) + Math.min(32, Math.max(8, lineHeight))
+    ) + 'px';
     target.parentNode.insertBefore(spacer, target);
+  }
+
+  function insertTableRowPageBreak(block, sheet) {
+    var tbody = tableBody(block);
+    if (!tbody) return false;
+    var rows = tableSourceRows(tbody);
+    var stride = PRINT_PAGE.height + PRINT_PAGE.gap;
+    for (var index = 0; index < rows.length; index++) {
+      var row = rows[index];
+      var top = printY(row, sheet);
+      var bottom = printBottom(row, sheet);
+      var rowHeight = Math.max(1, bottom - top);
+      if (rowHeight > PRINT_PAGE.contentHeight) continue;
+      var pageIndex = Math.max(0, Math.floor(top / stride));
+      var contentTop = pageIndex * stride + PRINT_PAGE.contentTop;
+      var contentBottom = contentTop + PRINT_PAGE.contentHeight;
+      var target = 0;
+      if (pageIndex > 0 && top < contentTop - 1) {
+        target = contentTop;
+      } else if (top > contentBottom - 1 || bottom > contentBottom + 0.5) {
+        target = (pageIndex + 1) * stride + PRINT_PAGE.contentTop;
+      }
+      if (!target || target <= top + 1) continue;
+      var spacerRow = document.createElement('tr');
+      spacerRow.className = 'cpb-table-page-spacer';
+      spacerRow.setAttribute('data-auto-page-break', '1');
+      spacerRow.setAttribute('data-editor-only', '1');
+      spacerRow.setAttribute('contenteditable', 'false');
+      var spacerCell = document.createElement('td');
+      spacerCell.colSpan = Math.max(1, tableColCount(block));
+      spacerCell.setAttribute('contenteditable', 'false');
+      spacerCell.style.cssText = 'height:' + Math.max(1, target - top)
+        + 'px!important;padding:0!important;border:0!important;line-height:0!important;'
+        + 'background:transparent!important;';
+      spacerRow.appendChild(spacerCell);
+      tbody.insertBefore(spacerRow, row);
+      return true;
+    }
+    return false;
   }
 
   function paragraphBreak(field, sheet, pageIndex) {
@@ -1081,7 +1124,11 @@
     var spacerTop = printY(spacer, sheet);
     var nextContentTop = (pageIndex + 1) * (PRINT_PAGE.height + PRINT_PAGE.gap)
       + PRINT_PAGE.contentTop;
-    spacer.style.height = Math.max(1, nextContentTop - spacerTop) + 'px';
+    var lineHeight = parseFloat(window.getComputedStyle(field).lineHeight || '0') || 20;
+    spacer.style.height = Math.max(
+      1,
+      nextContentTop - spacerTop + Math.min(32, Math.max(8, lineHeight))
+    ) + 'px';
     return true;
   }
 
@@ -1198,6 +1245,13 @@
           : 0;
         if (isHeading && nextBlock && top > contentTop + 1 && nextMeaningfulBottom > contentBottom) {
           automaticBreakBefore(body, block, sheet, pageIndex, false);
+          inserted = true;
+          break;
+        }
+        if (
+          (block.getAttribute('data-block-type') || '') === 'table'
+          && insertTableRowPageBreak(block, sheet)
+        ) {
           inserted = true;
           break;
         }
@@ -2759,8 +2813,13 @@
         return nextAnimationFrame().then(function () {
           if (loadSequence !== state.sectionLoadSequence) return false;
           applyUnifiedPrintLayout();
-          setSectionAssembly(true, 'Finalizing page geometry…', 94);
+          setSectionAssembly(true, 'Stabilizing page geometry…', 91);
           return nextAnimationFrame().then(function () {
+            if (loadSequence !== state.sectionLoadSequence) return false;
+            applyUnifiedPrintLayout();
+            setSectionAssembly(true, 'Finalizing page geometry…', 96);
+            return nextAnimationFrame();
+          }).then(function () {
             if (loadSequence !== state.sectionLoadSequence) return false;
             if (state.pendingScrollRef) {
               var target = canvasEl.querySelector(
@@ -6191,7 +6250,8 @@
 
   function structuredTableAddRow(container) {
     var tbody = tableBody(container);
-    var template = tbody && tbody.querySelector('tr:last-child');
+    var sourceRows = tableSourceRows(tbody);
+    var template = sourceRows.length ? sourceRows[sourceRows.length - 1] : null;
     if (!tbody || !template) return false;
     var row = template.cloneNode(true);
     row.classList.add('cpb-part0-row--empty');
@@ -6286,7 +6346,7 @@
     var selectedRow = selectedCell ? selectedCell.closest('tr') : null;
     var body = tableBody(blockEl);
     var isBodyRow = !!(selectedRow && body && body.contains(selectedRow));
-    var bodyRows = body ? Array.prototype.slice.call(body.rows) : [];
+    var bodyRows = tableSourceRows(body);
     var bodyRowIndex = isBodyRow ? bodyRows.indexOf(selectedRow) : -1;
     var hasVerticalMerge = !!blockEl.querySelector(
       'tbody[data-table-part="body"] td[rowspan]:not([rowspan="1"]),'
@@ -6729,7 +6789,7 @@
         titleFontSize = extractCellFontSize(titleCell);
         titleTextColor = extractCellTextColor(titleCell);
       }
-      table.querySelectorAll('tbody[data-table-part="body"] tr').forEach(function (tr) {
+      tableSourceRows(table.querySelector('tbody[data-table-part="body"]')).forEach(function (tr) {
         var line = [];
         var bgLine = [];
         var alignLine = [];
@@ -6839,6 +6899,13 @@
     return table ? table.querySelector('tbody[data-table-part="body"]') : null;
   }
 
+  function tableSourceRows(tbody) {
+    if (!tbody) return [];
+    return Array.prototype.slice.call(tbody.rows).filter(function (row) {
+      return row.getAttribute('data-auto-page-break') !== '1';
+    });
+  }
+
   function tableHeaderRow(blockEl) {
     var table = blockEl.querySelector('table');
     return table ? table.querySelector('thead tr.cpb-table-header-row') : null;
@@ -6942,7 +7009,7 @@
     var tbody = tableBody(blockEl);
     if (!tbody || !tbody.contains(cell)) return null;
     var tr = cell.parentElement;
-    var row = Array.prototype.indexOf.call(tbody.querySelectorAll('tr'), tr);
+    var row = tableSourceRows(tbody).indexOf(tr);
     return { row: row, col: cell.cellIndex, ref: colLetter(cell.cellIndex) + String(row + 1) };
   }
 
@@ -6958,14 +7025,14 @@
       var head = tableHeaderRow(blockEl);
       if (head) lines.push(head.cells[coords.col].textContent.trim());
       if (tbody) {
-        tbody.querySelectorAll('tr').forEach(function (tr) {
+        tableSourceRows(tbody).forEach(function (tr) {
           if (tr.cells[coords.col]) lines.push(tr.cells[coords.col].textContent.trim());
         });
       }
       return lines.join('\n');
     }
     if (tbody) {
-      var tr = tbody.querySelectorAll('tr')[coords.row];
+      var tr = tableSourceRows(tbody)[coords.row];
       if (tr) {
         tr.querySelectorAll('td').forEach(function (td) {
           lines.push(td.textContent.trim());
@@ -6997,14 +7064,14 @@
       var head = tableHeaderRow(blockEl);
       if (head && head.cells[coords.col]) styles.push([cellStyleSnapshot(head.cells[coords.col])]);
       if (tbody) {
-        tbody.querySelectorAll('tr').forEach(function (tr) {
+        tableSourceRows(tbody).forEach(function (tr) {
           if (tr.cells[coords.col]) styles.push([cellStyleSnapshot(tr.cells[coords.col])]);
         });
       }
       return styles;
     }
     if (tbody) {
-      var tr = tbody.querySelectorAll('tr')[coords.row];
+      var tr = tableSourceRows(tbody)[coords.row];
       if (tr) {
         var line = [];
         tr.querySelectorAll('td').forEach(function (td) {
@@ -7088,10 +7155,10 @@
         });
         return;
       }
-      while (tbody && targetRow >= tbody.querySelectorAll('tr').length) {
+      while (tbody && targetRow >= tableSourceRows(tbody).length) {
         tableAddRow(blockEl);
       }
-      var tr = tbody ? tbody.querySelectorAll('tr')[targetRow] : null;
+      var tr = tbody ? tableSourceRows(tbody)[targetRow] : null;
       if (!tr) return;
       cells.forEach(function (val, cIndex) {
         var col = coords.col + cIndex;
@@ -7243,7 +7310,7 @@
       setStatus('Click a row cell first', 'error');
       return false;
     }
-    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    var rows = tableSourceRows(tbody);
     var idx = rows.indexOf(tr);
     if (idx < 0) return false;
     if (direction === 'up') {
@@ -7293,7 +7360,7 @@
     var tbody = tableBody(blockEl);
     var row = cell.parentElement;
     if (!tbody || !row || !tbody.contains(row)) return false;
-    var rows = Array.prototype.slice.call(tbody.rows);
+    var rows = tableSourceRows(tbody);
     var rowIndex = rows.indexOf(row);
     var rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1);
     var targetRow = rows[rowIndex + rowspan];
@@ -7312,7 +7379,7 @@
       return false;
     }
     var tbody = tableBody(blockEl);
-    var rows = Array.prototype.slice.call(tbody.rows);
+    var rows = tableSourceRows(tbody);
     var rowIndex = rows.indexOf(cell.parentElement);
     var rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1);
     var logicalStart = tableCellLogicalStart(cell);
@@ -7341,7 +7408,7 @@
       return false;
     }
     var tbody = tableBody(blockEl);
-    var rows = Array.prototype.slice.call(tbody.rows);
+    var rows = tableSourceRows(tbody);
     var rowIndex = rows.indexOf(cell.parentElement);
     var logicalStart = tableCellLogicalStart(cell);
     for (var offset = 1; offset < rowspan; offset++) {
@@ -7446,7 +7513,7 @@
       return true;
     }
 
-    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    var rows = tableSourceRows(tbody);
     if (rows.length <= 1) {
       setStatus('Table must keep at least one row', 'error');
       return false;
@@ -7503,7 +7570,7 @@
       headRow.appendChild(th);
     }
 
-    table.querySelectorAll('tbody[data-table-part="body"] tr').forEach(function (tr) {
+    tableSourceRows(table.querySelector('tbody[data-table-part="body"]')).forEach(function (tr) {
       var td = document.createElement('td');
       td.contentEditable = 'true';
       td.textContent = '';
@@ -7529,7 +7596,7 @@
 
     removeLogicalColumnFromRow(tableHeaderRow(blockEl), colIndex);
 
-    table.querySelectorAll('tbody[data-table-part="body"] tr').forEach(function (tr) {
+    tableSourceRows(table.querySelector('tbody[data-table-part="body"]')).forEach(function (tr) {
       removeLogicalColumnFromRow(tr, colIndex);
     });
 

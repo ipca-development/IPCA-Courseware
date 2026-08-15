@@ -1350,6 +1350,12 @@ span.cpb-flow-page-break {
   display: block;
 }
 
+.cpb-table-page-spacer,
+.cpb-table-page-spacer > td {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
 .cpb-flow-page-break--manual {
   display: flex;
   align-items: flex-start;
