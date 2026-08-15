@@ -16,7 +16,7 @@ foreach ($protected as $relative => $hash) {
 
 $contracts = array(
     'src/publishing/ControlledPublishingAuthoritativePaginationService.php' => array(
-        'manual-segments-v1',
+        'live-authoritative-flow-v1',
         'MANUAL_BREAK_REQUIRED',
         'There is deliberately no heuristic fallback',
         'validation',
@@ -100,7 +100,9 @@ $contracts = array(
     ),
     'ipca-manual-reader-ios/IPCAManualReader/Services/ReaderPaginationCore.js' => array(
         'MANUAL_BREAK_REQUIRED',
-        'manual-segments-v1',
+        'live-authoritative-flow-v1',
+        'automatic_author_flow',
+        'heading_keep_with_following',
         'reader-generated-page',
         'reader-page-header-region',
         'reader-page-body',

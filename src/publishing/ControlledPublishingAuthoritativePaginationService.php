@@ -39,7 +39,7 @@ final class ControlledPublishingPaginationValidationException extends RuntimeExc
  */
 final class ControlledPublishingAuthoritativePaginationService
 {
-    public const ENGINE_VERSION = 'manual-segments-v1';
+    public const ENGINE_VERSION = 'live-authoritative-flow-v1';
 
     private string $root;
 

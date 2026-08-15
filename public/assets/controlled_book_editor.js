@@ -54,6 +54,12 @@
   var pageBreakBtn = document.getElementById('cpbInsertPageBreak');
   var paginationStatusEl = document.getElementById('cpbPaginationStatus');
   var publicationCssEl = document.getElementById('cpbPublicationCss');
+  var liveProjectionEnabled = (
+    new URLSearchParams(window.location.search).get('live_projection') === '1'
+  ) && new URLSearchParams(window.location.search).get('continuous_editor') !== '1';
+  var liveProjectionEl = null;
+  var liveProjectionPagesEl = null;
+  var liveProjectionStatusEl = null;
 
   var FONT_CLASSES = [
     'cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial',
@@ -189,6 +195,16 @@
       status: 'current',
       lastError: '',
       retryAvailable: false,
+    },
+    liveProjection: {
+      enabled: liveProjectionEnabled,
+      loading: false,
+      requestSequence: 0,
+      acceptedSequence: 0,
+      sectionId: 0,
+      pageCount: 0,
+      freshness: 'unknown',
+      error: '',
     },
   };
 
@@ -1156,6 +1172,208 @@
     paginationStatusEl.hidden = false;
     paginationStatusEl.textContent = text;
     paginationStatusEl.classList.toggle('is-stale', !!stale);
+  }
+
+  function installLiveProjectionSurface() {
+    if (!state.liveProjection.enabled || liveProjectionEl) return;
+    var workspace = canvasEl.parentElement;
+    if (!workspace) return;
+    var stage = document.createElement('div');
+    stage.className = 'cpb-editor-stage';
+    stage.id = 'cpbEditorStage';
+    workspace.insertBefore(stage, canvasEl);
+    stage.appendChild(canvasEl);
+
+    liveProjectionEl = document.createElement('aside');
+    liveProjectionEl.className = 'cpb-live-projection';
+    liveProjectionEl.id = 'cpbProjection';
+    liveProjectionEl.setAttribute('aria-label', 'Read-only authoritative page projection');
+    var heading = document.createElement('div');
+    heading.className = 'cpb-live-projection__head';
+    heading.innerHTML = '<strong>Authoritative pages</strong>'
+      + '<span class="cpb-live-projection__readonly">Read-only</span>';
+    liveProjectionStatusEl = document.createElement('span');
+    liveProjectionStatusEl.id = 'cpbProjectionStatus';
+    liveProjectionStatusEl.className = 'cpb-live-projection__status';
+    liveProjectionStatusEl.textContent = 'Loading stored page map…';
+    heading.appendChild(liveProjectionStatusEl);
+    liveProjectionPagesEl = document.createElement('div');
+    liveProjectionPagesEl.id = 'cpbProjectionPages';
+    liveProjectionPagesEl.className = 'cpb-live-projection__pages';
+    liveProjectionEl.appendChild(heading);
+    liveProjectionEl.appendChild(liveProjectionPagesEl);
+    stage.appendChild(liveProjectionEl);
+    root.classList.add('cpb-editor-live-projection');
+  }
+
+  function setLiveProjectionStatus(text, stateName) {
+    if (!liveProjectionStatusEl) return;
+    liveProjectionStatusEl.textContent = String(text || '');
+    liveProjectionStatusEl.setAttribute('data-state', String(stateName || ''));
+  }
+
+  function readOnlyPageHtml(pageHtml) {
+    var doc = document.implementation.createHTMLDocument('');
+    var holder = doc.createElement('div');
+    holder.innerHTML = String(pageHtml || '');
+    holder.querySelectorAll('script,iframe,object,embed').forEach(function (node) {
+      node.remove();
+    });
+    holder.querySelectorAll('[contenteditable]').forEach(function (node) {
+      node.setAttribute('contenteditable', 'false');
+    });
+    holder.querySelectorAll('input,textarea,select,button,a[href]').forEach(function (node) {
+      node.setAttribute('tabindex', '-1');
+      if ('disabled' in node) node.disabled = true;
+    });
+    holder.querySelectorAll('*').forEach(function (node) {
+      Array.prototype.slice.call(node.attributes || []).forEach(function (attribute) {
+        if (/^on/i.test(attribute.name)) node.removeAttribute(attribute.name);
+      });
+    });
+    return holder.innerHTML;
+  }
+
+  function projectionPageGeometry(pageHtml) {
+    var doc = document.implementation.createHTMLDocument('');
+    var holder = doc.createElement('div');
+    holder.innerHTML = String(pageHtml || '');
+    var generated = holder.querySelector('.reader-generated-page');
+    var width = generated && /^\d+(?:\.\d+)?px$/.test(generated.style.width)
+      ? generated.style.width
+      : '816px';
+    var height = generated && /^\d+(?:\.\d+)?px$/.test(generated.style.height)
+      ? generated.style.height
+      : '1056px';
+    return { width: width, height: height };
+  }
+
+  function projectionFrameDocument(pageHtml, bookStyleCss) {
+    var safeCss = String(bookStyleCss || '').replace(/<\/style/gi, '<\\/style');
+    var base = window.location.origin.replace(/"/g, '&quot;') + '/';
+    return '<!doctype html><html><head><meta charset="utf-8">'
+      + '<base href="' + base + '"><style>'
+      + 'html,body{margin:0;padding:0;background:#fff;overflow:hidden;}'
+      + safeCss
+      + '</style></head><body>' + readOnlyPageHtml(pageHtml) + '</body></html>';
+  }
+
+  function renderLiveProjection(result, requestSequence, sectionId) {
+    if (
+      !state.liveProjection.enabled
+      || !liveProjectionPagesEl
+      || requestSequence < state.liveProjection.acceptedSequence
+      || sectionId !== state.sectionId
+    ) return false;
+    state.liveProjection.acceptedSequence = requestSequence;
+    state.liveProjection.sectionId = sectionId;
+    var pages = Array.isArray(result.pages) ? result.pages : [];
+    var fragment = document.createDocumentFragment();
+    pages.forEach(function (page) {
+      var geometry = projectionPageGeometry(page.page_html);
+      var frame = document.createElement('section');
+      frame.className = 'cpb-live-projection__page';
+      frame.setAttribute('data-page-number', String(page.page_number || 0));
+      frame.setAttribute('data-section-id', String(page.section_id || 0));
+      frame.style.width = geometry.width;
+      frame.style.height = geometry.height;
+      var label = document.createElement('span');
+      label.className = 'cpb-live-projection__page-label';
+      label.textContent = 'Page ' + String(page.page_number || '');
+      var iframe = document.createElement('iframe');
+      iframe.className = 'cpb-live-projection__frame';
+      iframe.setAttribute('sandbox', '');
+      iframe.setAttribute('aria-hidden', 'true');
+      iframe.setAttribute('tabindex', '-1');
+      iframe.title = 'Read-only authoritative page ' + String(page.page_number || '');
+      iframe.style.width = geometry.width;
+      iframe.style.height = geometry.height;
+      iframe.srcdoc = projectionFrameDocument(page.page_html, result.book_style_css);
+      frame.appendChild(label);
+      frame.appendChild(iframe);
+      fragment.appendChild(frame);
+    });
+    liveProjectionPagesEl.replaceChildren(fragment);
+    state.liveProjection.pageCount = pages.length;
+    state.liveProjection.freshness = result.freshness && result.freshness.is_current
+      ? 'current'
+      : 'stale';
+    state.liveProjection.error = '';
+    if (!pages.length) {
+      var empty = document.createElement('p');
+      empty.className = 'cpb-live-projection__empty';
+      empty.textContent = 'No authoritative pages are stored for this section yet.';
+      liveProjectionPagesEl.appendChild(empty);
+      setLiveProjectionStatus('Waiting for the first valid page map', 'empty');
+    } else if (state.liveProjection.freshness === 'current') {
+      setLiveProjectionStatus(
+        pages.length + (pages.length === 1 ? ' page · Current' : ' pages · Current'),
+        'current'
+      );
+    } else {
+      setLiveProjectionStatus(
+        pages.length + (pages.length === 1 ? ' page · Last valid map' : ' pages · Last valid map'),
+        'stale'
+      );
+    }
+    root.dispatchEvent(new CustomEvent('cpb:live-projection-rendered', {
+      detail: {
+        section_id: sectionId,
+        page_count: pages.length,
+        freshness: state.liveProjection.freshness,
+        request_sequence: requestSequence,
+      },
+    }));
+    return true;
+  }
+
+  function refreshLiveProjection() {
+    if (!state.liveProjection.enabled || !liveProjectionPagesEl || !state.sectionId) {
+      return Promise.resolve(false);
+    }
+    var requestSequence = ++state.liveProjection.requestSequence;
+    var sectionId = state.sectionId;
+    state.liveProjection.loading = true;
+    setLiveProjectionStatus('Loading authoritative pages…', 'loading');
+    var url = '/admin/api/controlled_book_page_map_api.php?action=stored_preview'
+      + '&book_version_id=' + state.versionId
+      + '&section_id=' + sectionId
+      + '&include_style=1&check_freshness=1';
+    return paginationRequest(url).then(function (payload) {
+      return renderLiveProjection(payload.result || {}, requestSequence, sectionId);
+    }).catch(function (error) {
+      if (requestSequence >= state.liveProjection.acceptedSequence) {
+        state.liveProjection.error = normalizeLivePaginationError(error);
+        setLiveProjectionStatus('Projection unavailable · source editor unaffected', 'failed');
+      }
+      return false;
+    }).finally(function () {
+      if (requestSequence === state.liveProjection.requestSequence) {
+        state.liveProjection.loading = false;
+      }
+    });
+  }
+
+  function observeLiveProjectionState(event) {
+    if (!state.liveProjection.enabled) return;
+    var detail = event && event.detail ? event.detail : {};
+    var status = String(detail.status || '');
+    if (status === 'current') {
+      refreshLiveProjection();
+      return;
+    }
+    if (status === 'pending' || status === 'generating' || status === 'stale') {
+      setLiveProjectionStatus('Updating authoritative pages…', status);
+      return;
+    }
+    if (status === 'failed') {
+      setLiveProjectionStatus(
+        state.liveProjection.pageCount
+          ? 'Update failed · showing last valid map'
+          : 'Update failed · no valid page map yet',
+        'failed'
+      );
+    }
   }
 
   function updateViewModeControls() {
@@ -2197,6 +2415,9 @@
       updateAddSubsection(res.section);
       if (res.prior_version_label) {
         setStatus('Ready · changes vs ' + res.prior_version_label, 'saved');
+      }
+      if (state.liveProjection.enabled) {
+        refreshLiveProjection();
       }
     }).catch(showError);
   }
@@ -7122,6 +7343,9 @@
         sheet.style.setProperty('--cpb-sheet-zoom', String(state.canvasZoom / 100));
       }
     }
+    if (liveProjectionPagesEl) {
+      liveProjectionPagesEl.style.setProperty('--cpb-projection-zoom', String(state.canvasZoom / 100));
+    }
     if (zoomLabelEl) zoomLabelEl.textContent = state.canvasZoom + '%';
     if (persist !== false) {
       try {
@@ -9253,6 +9477,11 @@
   wireTreeToggleAll();
   initCrossRefAnnexSelects();
 
+  if (state.liveProjection.enabled) {
+    installLiveProjectionSurface();
+    root.addEventListener('cpb:live-pagination-state', observeLiveProjectionState);
+  }
+
   root.__cpbPhaseB = {
     sourceLocation: semanticSourceLocation,
     captureSelection: captureSemanticSelectionBookmark,
@@ -9267,6 +9496,23 @@
         activeRequest: !!state.livePagination.activeRequest,
         debounceTimer: !!state.livePagination.debounceTimer,
       });
+    },
+    refreshLiveProjection: refreshLiveProjection,
+    liveProjectionState: function () {
+      return Object.assign({}, state.liveProjection);
+    },
+    projectionRoot: function () {
+      return liveProjectionEl;
+    },
+  };
+  root.__cpbPhaseC = {
+    enabled: state.liveProjection.enabled,
+    refresh: refreshLiveProjection,
+    state: function () {
+      return Object.assign({}, state.liveProjection);
+    },
+    root: function () {
+      return liveProjectionEl;
     },
   };
   root.addEventListener('cpb:live-pagination-retry', function () {

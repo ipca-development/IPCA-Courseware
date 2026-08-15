@@ -7,7 +7,7 @@
   }
 
   const NORMALIZER_VERSION = "reader-normalizer-v1";
-  const ENGINE_VERSION = "manual-segments-v1";
+  const ENGINE_VERSION = "live-authoritative-flow-v1";
   const VALIDATOR_VERSION = "pagination-validator-v2";
   const VALIDATION_TOLERANCE = 0.75;
   const source = input.source;
@@ -1746,6 +1746,32 @@
       begin(fragmentValue, { breakReason: kind + "_continuation" });
     }
 
+    function headingKeepChain(startIndex) {
+      const first = normalized.fragments[startIndex];
+      if (!first || first.type !== "heading") return [];
+      const sectionID = Number(first.section && first.section.section_id || 0);
+      const pieces = [];
+      let index = startIndex;
+      while (index < normalized.fragments.length) {
+        const candidate = normalized.fragments[index];
+        const candidateSectionID = Number(candidate.section && candidate.section.section_id || 0);
+        if (
+          candidateSectionID !== sectionID
+          || (index > startIndex && candidate.forceBreakBefore)
+        ) {
+          return [];
+        }
+        if (candidate.type !== "heading") {
+          const following = meaningfulFollowingPiece(candidate);
+          if (following) pieces.push(following);
+          return pieces;
+        }
+        pieces.push(piece(candidate, candidate.html, 0, candidate.textLength, false));
+        index++;
+      }
+      return [];
+    }
+
     for (let index = 0; index < normalized.fragments.length; index++) {
       const sourceFragment = normalized.fragments[index];
       if (sourceFragment.type === "cover") {
@@ -1765,13 +1791,9 @@
       }
 
       if (continuation && !allowedOnContinuation(sourceFragment)) {
-        if (isGeneratedFragment(sourceFragment)) {
-          finish();
-          continuation = null;
-          current = null;
-        } else {
-          throw manualBreakRequiredError(sourceFragment);
-        }
+        finish();
+        continuation = null;
+        current = null;
       }
 
       if (!current) {
@@ -1790,6 +1812,25 @@
       }
 
       const whole = piece(sourceFragment, sourceFragment.html, 0, sourceFragment.textLength, false);
+      if (sourceFragment.type === "heading" && hasSourceContent(current)) {
+        const keepChain = headingKeepChain(index);
+        if (keepChain.length > 1) {
+          const currentChain = pageWith(current.section, current.pieces.concat(keepChain), {});
+          const freshChain = pageWith(sourceFragment.section, keepChain, {});
+          const headingOnly = pageWith(current.section, current.pieces.concat([whole]), {});
+          if (
+            measurePage(headingOnly).fits
+            && !measurePage(currentChain).fits
+            && measurePage(freshChain).fits
+          ) {
+            finish();
+            continuation = null;
+            begin(sourceFragment, { breakReason: "heading_keep_with_following" });
+            current.pieces.push(whole);
+            continue;
+          }
+        }
+      }
       let trial = pageWith(current.section, current.pieces.concat([whole]), {});
       if (measurePage(trial).fits) {
         current.pieces.push(whole);
@@ -1873,7 +1914,14 @@
           }
           throw unlayoutableFragmentError(sourceFragment, measurePage(trial), "");
         }
-        throw manualBreakRequiredError(sourceFragment);
+        finish();
+        continuation = null;
+        begin(sourceFragment, { breakReason: "automatic_author_flow" });
+        trial = pageWith(current.section, current.pieces.concat([whole]), {});
+        if (measurePage(trial).fits) {
+          current.pieces.push(whole);
+          continue;
+        }
       }
 
       if (!pageEmpty && onlyThisBlock) {
@@ -2009,7 +2057,7 @@
         diagnostic(
           "ORPHAN_HEADING",
           "info",
-          `Heading ${last.fragment.id} ends page ${pageNumber}; ordinary page boundaries are author-controlled.`,
+          `Heading ${last.fragment.id} ends page ${pageNumber}; no meaningful following fragment fits the same frame.`,
           last.fragment,
           pageNumber
         );

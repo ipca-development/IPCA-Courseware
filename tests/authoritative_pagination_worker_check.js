@@ -283,7 +283,7 @@ cases.push(["A. one ordinary segment fits one page", () => {
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
   assert.strictEqual(result.error, undefined);
   assert.strictEqual(result.pages.length, 1);
-  assert.strictEqual(result.engine_version, "manual-segments-v1");
+  assert.strictEqual(result.engine_version, "live-authoritative-flow-v1");
   assertHeaderFooter(result.pages);
 }]);
 
@@ -295,10 +295,11 @@ cases.push(["B. multiple ordinary blocks exceed intended page", () => {
     ])
   ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
-  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
-  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
-  assert.ok(String(result.error.before_block_title || result.error.message).includes("6.1.8"));
-  assert.strictEqual(result.error.before_block_anchor, "block-two");
+  assert.strictEqual(result.error, undefined);
+  assert.ok(result.pages.length >= 2, "ordinary author blocks must flow to a later page");
+  const firstPage = result.pages.find((page) => page.page_html.includes("6.1.7"));
+  const secondPage = result.pages.find((page) => page.page_html.includes("6.1.8"));
+  assert.ok(firstPage && secondPage && secondPage.page_number > firstPage.page_number);
 }]);
 
 cases.push(["C. persisted manual break starts the next page", () => {
@@ -412,9 +413,15 @@ cases.push(["long table continuation does not absorb following ordinary blocks",
     ])
   ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
-  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
-  assert.strictEqual(result.error.before_block_anchor, "block-after");
-  assert.ok((result.pages || []).length === 0, "no partial page map may be produced");
+  assert.strictEqual(result.error, undefined);
+  const finalTablePage = Math.max(...result.pages.filter((page) =>
+    page.coverage.some((item) =>
+      item.source_fragment_id.includes("/block-table/table-row-")
+      && item.presentation_copy === false
+    )
+  ).map((page) => page.page_number));
+  const followingPage = result.pages.find((page) => page.page_html.includes("Following ordinary paragraph"));
+  assert.ok(followingPage && followingPage.page_number > finalTablePage);
 }]);
 
 cases.push(["J. oversized single block may split", () => {
@@ -621,7 +628,7 @@ cases.push(["T. editable Part 0 content auto-paginates without Manual Page Break
   assertHeaderFooter(result.pages);
 }]);
 
-cases.push(["U. MANUAL_BREAK_REQUIRED title uses a clean heading, not concatenated labels", () => {
+cases.push(["U. ordinary structural content flows without a manual-break error", () => {
   const { execution, result } = runWorker(sourceWith([
     section(4, "section-one", "Section One", {}, [
       unit(
@@ -645,10 +652,9 @@ cases.push(["U. MANUAL_BREAK_REQUIRED title uses a clean heading, not concatenat
     ])
   ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
-  assert.strictEqual(result.error && result.error.code, "MANUAL_BREAK_REQUIRED");
-  const title = String(result.error.before_block_title || "");
-  assert.ok(!/[A-Za-z]0\./.test(title), `concatenated structural title leaked: ${title}`);
-  assert.strictEqual(title, "0.1 List of effective Parts");
+  assert.strictEqual(result.error, undefined);
+  assert.ok(result.pages.length >= 2, "ordinary structural content must auto-flow");
+  assert.ok(result.pages.some((page) => page.page_html.includes("0.1 List of effective Parts")));
 }]);
 
 cases.push(["V. generated 0.1.1 Effective Parts spans pages automatically", () => {
@@ -870,6 +876,126 @@ cases.push(["AF. long-table rows remain correct under the content-fragment model
   assertContentFragmentGeometry(result.pages, "block-table");
 }]);
 
+cases.push(["AG. heading chain stays with meaningful following content", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "heading-flow", "Heading flow", {}, [
+      unit("lead", "paragraph",
+        '<article data-block-id="71" data-stable-anchor="lead"><p style="min-height:680px">Page-filling lead.</p></article>',
+        { block_id: 71 }),
+      unit("heading-a", "heading",
+        '<article data-block-id="72" data-stable-anchor="heading-a"><h2>Kept heading A</h2></article>',
+        { block_id: 72 }),
+      unit("heading-b", "heading",
+        '<article data-block-id="73" data-stable-anchor="heading-b"><h3>Kept heading B</h3></article>',
+        { block_id: 73 }),
+      unit("following", "paragraph",
+        '<article data-block-id="74" data-stable-anchor="following"><p>Meaningful following paragraph.</p></article>',
+        { block_id: 74 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined);
+  const headingPage = result.pages.find((page) => page.page_html.includes("Kept heading A"));
+  assert.ok(headingPage && headingPage.page_html.includes("Kept heading B"));
+  assert.ok(headingPage.page_html.includes("Meaningful following paragraph"));
+  assert.ok(!result.pages[0].page_html.includes("Kept heading A"));
+}]);
+
+cases.push(["AH. callout moves intact when it fits a fresh page", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "callout-flow", "Callout flow", {}, [
+      unit("lead", "paragraph",
+        '<article data-block-id="81" data-stable-anchor="lead"><p style="min-height:560px">Lead before note.</p></article>',
+        { block_id: 81 }),
+      unit("note", "note",
+        '<article class="cpb-callout" data-block-id="82" data-stable-anchor="note"><aside style="min-height:300px"><strong>NOTE</strong><p>Atomic note body.</p></aside></article>',
+        { block_id: 82 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined);
+  const entries = sourceCoverage(result).filter((item) =>
+    item.source_fragment_id.includes("/note/")
+  );
+  assert.strictEqual(entries.length, 1, "fresh-page callout must not split");
+  assert.strictEqual(entries[0].range_start, 0);
+  assert.strictEqual(entries[0].range_end, entries[0].source_length);
+  const notePage = result.pages.find((page) => page.page_html.includes("Atomic note body"));
+  assert.ok(notePage && notePage.page_number > 1);
+}]);
+
+cases.push(["AI. author paragraph splits semantically after earlier blocks", () => {
+  const longText = Array.from({ length: 240 }, (_, index) =>
+    `Semantic sentence ${index + 1}.`
+  ).join(" ");
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "paragraph-flow", "Paragraph flow", {}, [
+      unit("lead", "paragraph",
+        '<article data-block-id="91" data-stable-anchor="lead"><p style="min-height:420px">Lead block.</p></article>',
+        { block_id: 91 }),
+      unit("long-paragraph", "paragraph",
+        `<article data-block-id="92" data-stable-anchor="long-paragraph"><p>${longText}</p></article>`,
+        { block_id: 92 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined);
+  const entries = sourceCoverage(result).filter((item) =>
+    item.source_fragment_id.includes("/long-paragraph/")
+  ).sort((a, b) => a.range_start - b.range_start);
+  assert.ok(entries.length > 1, "long author paragraph must split across pages");
+  entries.forEach((entry, index) => {
+    if (index > 0) assert.strictEqual(entry.range_start, entries[index - 1].range_end);
+  });
+  assert.strictEqual(entries[0].range_start, 0);
+  assert.strictEqual(entries[entries.length - 1].range_end, entries[0].source_length);
+}]);
+
+cases.push(["AJ. list items continue naturally after another block", () => {
+  const items = Array.from({ length: 8 }, (_, index) => `<li>Flow item ${index + 1}</li>`).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "list-flow", "List flow", {}, [
+      unit("lead", "paragraph",
+        '<article data-block-id="101" data-stable-anchor="lead"><p style="min-height:560px">Lead before list.</p></article>',
+        { block_id: 101 }),
+      unit("flow-list", "list",
+        `<article data-block-id="102" data-stable-anchor="flow-list"><ol class="cpb-list">${items}</ol></article>`,
+        { block_id: 102 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined);
+  const entries = sourceCoverage(result).filter((item) =>
+    item.source_fragment_id.includes("/flow-list/li-")
+  );
+  assert.strictEqual(entries.length, 8);
+  assert.ok(result.pages.length >= 2);
+}]);
+
+cases.push(["AK. deletion backflow reduces pages and pulls following content back", () => {
+  const longText = Array.from({ length: 260 }, (_, index) => `Backflow text ${index + 1}.`).join(" ");
+  const makeSource = (text) => sourceWith([
+    section(1, "backflow", "Backflow", {}, [
+      unit("editable", "paragraph",
+        `<article data-block-id="111" data-stable-anchor="editable"><p>${text}</p></article>`,
+        { block_id: 111 }),
+      unit("following", "paragraph",
+        '<article data-block-id="112" data-stable-anchor="following"><p>Following backflow marker.</p></article>',
+        { block_id: 112 })
+    ])
+  ]);
+  const longRun = runWorker(makeSource(longText));
+  const shortRun = runWorker(makeSource("Short replacement."));
+  assert.strictEqual(longRun.execution.status, 0, longRun.execution.stderr || longRun.execution.stdout);
+  assert.strictEqual(shortRun.execution.status, 0, shortRun.execution.stderr || shortRun.execution.stdout);
+  assert.strictEqual(longRun.result.error, undefined);
+  assert.strictEqual(shortRun.result.error, undefined);
+  assert.ok(longRun.result.pages.length > shortRun.result.pages.length);
+  const longMarker = longRun.result.pages.find((page) => page.page_html.includes("Following backflow marker"));
+  const shortMarker = shortRun.result.pages.find((page) => page.page_html.includes("Following backflow marker"));
+  assert.ok(longMarker && shortMarker && shortMarker.page_number < longMarker.page_number);
+}]);
+
 let failed = 0;
 for (const [name, run] of cases) {
   try {
@@ -882,7 +1008,7 @@ for (const [name, run] of cases) {
 }
 
 if (failed) {
-  process.stderr.write(`manual_segments_v1 worker check: FAIL ${failed}/${cases.length}\n`);
+  process.stderr.write(`live_authoritative_flow_v1 worker check: FAIL ${failed}/${cases.length}\n`);
   process.exit(1);
 }
 process.stdout.write(`AUTHORITATIVE_PAGINATION_WORKER_PASS cases=${cases.length}\n`);
