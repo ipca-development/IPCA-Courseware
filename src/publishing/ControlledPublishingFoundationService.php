@@ -594,6 +594,147 @@ final class ControlledPublishingFoundationService
         );
     }
 
+    /**
+     * Create an independent controlled manual using an existing version as its
+     * structure and visual template.
+     *
+     * @return array{book_id:int,version_id:int,book_key:string,version_label:string,copy_content:bool}
+     */
+    public function createManualFromVersion(
+        int $sourceVersionId,
+        string $bookKey,
+        string $title,
+        string $versionLabel,
+        bool $copyContent = false,
+        ?int $actorUserId = null
+    ): array {
+        require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
+        require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
+
+        $source = $this->getVersion($sourceVersionId);
+        if ($source === null) {
+            throw new RuntimeException('Template manual version not found.');
+        }
+
+        $bookKey = strtoupper(trim($bookKey));
+        $title = trim($title);
+        $versionLabel = trim($versionLabel);
+        if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,31}$/', $bookKey)) {
+            throw new RuntimeException(
+                'Manual code must be 2–32 uppercase letters, numbers, underscores, or hyphens.'
+            );
+        }
+        if ($title === '' || mb_strlen($title) > 255) {
+            throw new RuntimeException('Manual title is required and must not exceed 255 characters.');
+        }
+        if ($versionLabel === '' || mb_strlen($versionLabel) > 128) {
+            throw new RuntimeException('Initial revision is required and must not exceed 128 characters.');
+        }
+
+        $exists = $this->pdo->prepare(
+            'SELECT id FROM ipca_publishing_books WHERE book_key = :book_key LIMIT 1'
+        );
+        $exists->execute(array(':book_key' => $bookKey));
+        if ($exists->fetchColumn()) {
+            throw new RuntimeException("Manual {$bookKey} already exists.");
+        }
+
+        $oldBookKey = (string)($source['book_key'] ?? '');
+        $oldVersionLabel = (string)($source['version_label'] ?? '');
+        $sourceMeta = $this->decodeVersionMetadata($source);
+
+        $this->pdo->beginTransaction();
+        try {
+            $bookIns = $this->pdo->prepare("
+                INSERT INTO ipca_publishing_books
+                    (book_key, title, book_type, manual_code, status, created_by)
+                VALUES
+                    (:book_key, :title, 'manual', :manual_code, 'active', :created_by)
+            ");
+            $bookIns->execute(array(
+                ':book_key' => $bookKey,
+                ':title' => $title,
+                ':manual_code' => $bookKey,
+                ':created_by' => $actorUserId,
+            ));
+            $bookId = (int)$this->pdo->lastInsertId();
+            $versionId = $this->createDraftVersion($bookId, $versionLabel, $actorUserId);
+
+            if (!empty($source['template_id'])) {
+                $this->attachTemplateToVersion($versionId, (int)$source['template_id']);
+            }
+            if ($copyContent) {
+                $metaUpdate = $this->pdo->prepare("
+                    UPDATE ipca_publishing_book_versions
+                    SET metadata_json = :metadata_json, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                ");
+                $metaUpdate->execute(array(
+                    ':metadata_json' => json_encode(
+                        $sourceMeta,
+                        JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR
+                    ),
+                    ':id' => $versionId,
+                ));
+            }
+
+            $sectionMap = $this->copyVersionSections(
+                $sourceVersionId,
+                $versionId,
+                $bookKey,
+                $oldVersionLabel,
+                $versionLabel,
+                $actorUserId
+            );
+            $this->copyVersionBlocks(
+                $sourceVersionId,
+                $versionId,
+                $sectionMap,
+                $oldVersionLabel,
+                $versionLabel,
+                $actorUserId,
+                $oldBookKey,
+                $bookKey,
+                !$copyContent
+            );
+            $this->ensureManualImportSourceSet(
+                $versionId,
+                $bookKey,
+                $title,
+                $versionLabel,
+                $actorUserId
+            );
+
+            // A structure-only clone still receives independent copies of the
+            // source manual's visual styles and publication furniture.
+            if (!$copyContent) {
+                (new ControlledPublishingBookStyleService($this->pdo))->copyStylesFromVersion(
+                    $versionId,
+                    $sourceVersionId,
+                    $actorUserId
+                );
+            }
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        (new ControlledPublishingPart0PageService($this->pdo))
+            ->ensureAmendmentListForVersion($versionId, $actorUserId);
+
+        return array(
+            'book_id' => $bookId,
+            'version_id' => $versionId,
+            'book_key' => $bookKey,
+            'version_label' => $versionLabel,
+            'copy_content' => $copyContent,
+        );
+    }
+
     public function freezeSourceBaseline(int $versionId, ?int $actorUserId = null): int
     {
         $validation = $this->validateVersionReleaseFoundation($versionId);
@@ -1117,6 +1258,104 @@ final class ControlledPublishingFoundationService
         return is_array($row) ? $row : null;
     }
 
+    private function ensureManualImportSourceSet(
+        int $versionId,
+        string $manualCode,
+        string $title,
+        string $versionLabel,
+        ?int $actorUserId
+    ): int {
+        $sourceKey = 'controlled_book_imports';
+        $sourceStmt = $this->pdo->prepare("
+            INSERT INTO ipca_canonical_sources
+                (source_key, source_type, display_name, authority, status)
+            VALUES
+                (:source_key, 'internal_db', 'Controlled Book Imports', 'INTERNAL', 'active')
+            ON DUPLICATE KEY UPDATE
+                display_name = VALUES(display_name),
+                status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+        ");
+        $sourceStmt->execute(array(':source_key' => $sourceKey));
+        $sourceIdStmt = $this->pdo->prepare(
+            'SELECT id FROM ipca_canonical_sources WHERE source_key = :source_key LIMIT 1'
+        );
+        $sourceIdStmt->execute(array(':source_key' => $sourceKey));
+        $sourceId = (int)$sourceIdStmt->fetchColumn();
+        if ($sourceId <= 0) {
+            throw new RuntimeException('Unable to create the manual import source.');
+        }
+
+        $revisionKey = strtoupper((string)preg_replace('/[^A-Z0-9]+/i', '_', $versionLabel));
+        $sourceSetKey = 'MANUAL:' . $manualCode . ':' . trim($revisionKey, '_');
+        $sourceSetStmt = $this->pdo->prepare("
+            INSERT INTO ipca_canonical_source_sets
+                (source_id, source_set_key, source_family, authority, title, revision_label, status)
+            VALUES
+                (:source_id, :source_set_key, 'manual', 'INTERNAL', :title, :revision_label, 'active')
+            ON DUPLICATE KEY UPDATE
+                title = VALUES(title),
+                revision_label = VALUES(revision_label),
+                status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+        ");
+        $sourceSetStmt->execute(array(
+            ':source_id' => $sourceId,
+            ':source_set_key' => $sourceSetKey,
+            ':title' => $title . ' ' . $versionLabel,
+            ':revision_label' => $versionLabel,
+        ));
+        $sourceSetIdStmt = $this->pdo->prepare(
+            'SELECT id FROM ipca_canonical_source_sets WHERE source_set_key = :source_set_key LIMIT 1'
+        );
+        $sourceSetIdStmt->execute(array(':source_set_key' => $sourceSetKey));
+        $sourceSetId = (int)$sourceSetIdStmt->fetchColumn();
+        if ($sourceSetId <= 0) {
+            throw new RuntimeException('Unable to create the manual source set.');
+        }
+
+        $documentKey = 'MANUAL:' . $manualCode . ':' . $versionLabel;
+        $documentStmt = $this->pdo->prepare("
+            INSERT INTO ipca_canonical_documents
+                (source_id, source_set_id, document_key, document_type, authority,
+                 manual_code, revision_code, title, status, source_database, source_table)
+            VALUES
+                (:source_id, :source_set_id, :document_key, 'manual', 'INTERNAL',
+                 :manual_code, :revision_code, :title, 'active', DATABASE(), 'controlled_book_docx_import')
+            ON DUPLICATE KEY UPDATE
+                manual_code = VALUES(manual_code),
+                revision_code = VALUES(revision_code),
+                title = VALUES(title),
+                status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+        ");
+        $documentStmt->execute(array(
+            ':source_id' => $sourceId,
+            ':source_set_id' => $sourceSetId,
+            ':document_key' => $documentKey,
+            ':manual_code' => $manualCode,
+            ':revision_code' => $versionLabel,
+            ':title' => $title . ' ' . $versionLabel,
+        ));
+
+        $selectionStmt = $this->pdo->prepare("
+            INSERT INTO ipca_publishing_book_version_source_sets
+                (book_version_id, source_set_id, selection_role, is_required_for_release, selected_by)
+            VALUES
+                (:version_id, :source_set_id, 'manual_source', 1, :selected_by)
+            ON DUPLICATE KEY UPDATE
+                is_required_for_release = 1,
+                selected_by = VALUES(selected_by),
+                selected_at = CURRENT_TIMESTAMP
+        ");
+        $selectionStmt->execute(array(
+            ':version_id' => $versionId,
+            ':source_set_id' => $sourceSetId,
+            ':selected_by' => $actorUserId,
+        ));
+        return $sourceSetId;
+    }
+
     private function sourceSetIdByKey(string $sourceSetKey): int
     {
         $stmt = $this->pdo->prepare('SELECT id FROM ipca_canonical_source_sets WHERE source_set_key = :key LIMIT 1');
@@ -1274,7 +1513,10 @@ final class ControlledPublishingFoundationService
         array $sectionMap,
         string $oldVersionLabel,
         string $newVersionLabel,
-        ?int $actorUserId
+        ?int $actorUserId,
+        ?string $oldBookKey = null,
+        ?string $newBookKey = null,
+        bool $systemManagedOnly = false
     ): void {
         $stmt = $this->pdo->prepare("
             SELECT *
@@ -1298,6 +1540,9 @@ final class ControlledPublishingFoundationService
             if (!is_array($row)) {
                 continue;
             }
+            if ($systemManagedOnly && empty($row['is_system_managed'])) {
+                continue;
+            }
             $oldSectionId = (int)($row['section_id'] ?? 0);
             if ($oldSectionId <= 0 || !isset($sectionMap[$oldSectionId])) {
                 continue;
@@ -1305,7 +1550,9 @@ final class ControlledPublishingFoundationService
             $stableAnchor = $this->remapVersionAnchor(
                 (string)($row['stable_anchor'] ?? ''),
                 $oldVersionLabel,
-                $newVersionLabel
+                $newVersionLabel,
+                $oldBookKey,
+                $newBookKey
             );
             $ins->execute(array(
                 ':book_version_id' => $targetVersionId,
@@ -1323,17 +1570,31 @@ final class ControlledPublishingFoundationService
         }
     }
 
-    private function remapVersionAnchor(string $anchor, string $oldVersionLabel, string $newVersionLabel): string
-    {
+    private function remapVersionAnchor(
+        string $anchor,
+        string $oldVersionLabel,
+        string $newVersionLabel,
+        ?string $oldBookKey = null,
+        ?string $newBookKey = null
+    ): string {
         if ($anchor === '') {
             return '';
         }
         $oldNorm = str_replace('.', '_', $oldVersionLabel);
         $newNorm = str_replace('.', '_', $newVersionLabel);
-        if ($oldNorm === $newNorm) {
-            return $anchor;
+        if ($oldNorm !== $newNorm) {
+            $anchor = str_replace($oldNorm, $newNorm, $anchor);
         }
-        return str_replace($oldNorm, $newNorm, $anchor);
+        $oldBookKey = trim((string)$oldBookKey);
+        $newBookKey = trim((string)$newBookKey);
+        if ($oldBookKey !== '' && $newBookKey !== '' && $oldBookKey !== $newBookKey) {
+            $anchor = preg_replace(
+                '/^' . preg_quote($oldBookKey, '/') . '(?=-)/',
+                $newBookKey,
+                $anchor
+            ) ?? $anchor;
+        }
+        return $anchor;
     }
 
     /**
