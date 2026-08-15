@@ -831,6 +831,21 @@ final class ControlledPublishingDocxImportService
                     continue;
                 }
 
+                if (preg_match('/^Revision\s+\d+\s+Changes\s*:?\s*$/iu', $text) === 1) {
+                    $flushAll();
+                    $headingText = rtrim($text, " \t\n\r\0\x0B:");
+                    $this->blocks->createBlock($versionId, $sectionId, 'paragraph', array(
+                        'html' => '<p>' . htmlspecialchars(
+                            $headingText,
+                            ENT_QUOTES | ENT_SUBSTITUTE,
+                            'UTF-8'
+                        ) . '</p>',
+                        'paragraph_style' => 'subtitle_2',
+                    ), $actorUserId);
+                    $blocksCreated++;
+                    continue;
+                }
+
                 if (($node['section_ref'] ?? '') !== '') {
                     if (!$emitSectionHeadings) {
                         continue;

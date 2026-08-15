@@ -1491,8 +1491,14 @@ function cp_editor_handle_save_lep_page(
     if (array_key_exists('empty_rows', $lepIn)) {
         $payload['empty_rows'] = (int)$lepIn['empty_rows'];
     }
+    if (is_array($lepIn['column_widths'] ?? null)) {
+        $payload['column_widths'] = $lepIn['column_widths'];
+    }
     if (is_array($lepIn['signatories'] ?? null)) {
         $payload['signatories'] = $lepIn['signatories'];
+    }
+    if (is_array($lepIn['effective_parts'] ?? null)) {
+        $payload['effective_parts'] = $lepIn['effective_parts'];
     }
 
     if (is_array($lepIn['headings'] ?? null)) {

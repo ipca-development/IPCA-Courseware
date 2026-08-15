@@ -23,6 +23,7 @@ final class ControlledPublishingLepService
             'on_behalf_text' => 'On behalf of EuroPilot Center: (name and function)',
             'table_title' => '0.1.1 Effective Parts',
             'empty_rows' => 10,
+            'column_widths' => array(18, 28, 27, 27),
             'headings' => $this->defaultLepHeadings(),
             'signatories' => $this->defaultSignatories(),
             'effective_parts' => array(),
@@ -468,6 +469,10 @@ final class ControlledPublishingLepService
             'on_behalf_text' => $this->truncate(trim((string)($raw['on_behalf_text'] ?? $defaults['on_behalf_text'])), 500),
             'table_title' => $this->truncate(trim((string)($raw['table_title'] ?? $defaults['table_title'])), 200),
             'empty_rows' => max(0, min(20, (int)($raw['empty_rows'] ?? $defaults['empty_rows']))),
+            'column_widths' => $this->normalizeColumnWidths(
+                $raw['column_widths'] ?? null,
+                $defaults['column_widths']
+            ),
             'headings' => $this->normalizeLepHeadings(
                 is_array($raw['headings'] ?? null) ? $raw['headings'] : array(),
                 $defaults['headings'],
@@ -475,6 +480,30 @@ final class ControlledPublishingLepService
             ),
             'signatories' => $normalizedSignatories,
             'effective_parts' => $normalizedParts,
+        );
+    }
+
+    /**
+     * @param mixed $raw
+     * @param list<int|float> $defaults
+     * @return list<float>
+     */
+    private function normalizeColumnWidths(mixed $raw, array $defaults): array
+    {
+        if (!is_array($raw) || count($raw) !== count($defaults)) {
+            return array_map('floatval', $defaults);
+        }
+        $widths = array_map(
+            static fn(mixed $width): float => max(4.0, min(92.0, (float)$width)),
+            array_values($raw)
+        );
+        $total = array_sum($widths);
+        if ($total <= 0.0) {
+            return array_map('floatval', $defaults);
+        }
+        return array_map(
+            static fn(float $width): float => round(($width / $total) * 100, 3),
+            $widths
         );
     }
 

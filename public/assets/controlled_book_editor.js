@@ -3171,7 +3171,10 @@
       if (!handle || !state.editable) return;
       e.preventDefault();
       e.stopPropagation();
-      var blockEl = handle.closest('.cpb-block--table');
+      var part0Resize = handle.getAttribute('data-part0-column-resize') === '1';
+      var blockEl = part0Resize
+        ? handle.closest('.cpb-table-wrap')
+        : handle.closest('.cpb-block--table');
       if (!blockEl) return;
       pushUndo();
       var colIndex = parseInt(handle.getAttribute('data-col-index') || '0', 10);
@@ -3182,8 +3185,10 @@
       if (!col) return;
       var nextCol = cols[colIndex + 1] || null;
       var startX = e.clientX;
-      var startW = colWidthPx(col);
-      var startNextW = nextCol ? colWidthPx(nextCol) : 0;
+      var startW = part0Resize ? col.getBoundingClientRect().width : colWidthPx(col);
+      var startNextW = nextCol
+        ? (part0Resize ? nextCol.getBoundingClientRect().width : colWidthPx(nextCol))
+        : 0;
       var zoomScale = Math.max(0.1, state.canvasZoom / 100);
       var hint = ensureResizeHint();
 
@@ -3198,7 +3203,7 @@
           w = clampColWidth(blockEl, colIndex, desired);
         }
         col.style.width = w + 'px';
-        syncTableWidth(blockEl);
+        if (!part0Resize) syncTableWidth(blockEl);
         hint.textContent = w + 'px';
         hint.style.display = 'block';
         hint.style.left = (ev.clientX + 12) + 'px';
@@ -3209,9 +3214,32 @@
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
         hint.style.display = 'none';
-        syncTableWidth(blockEl);
-        scheduleSave(blockEl);
-        flushSave(blockEl);
+        if (part0Resize) {
+          var totalWidth = Math.max(1, table.getBoundingClientRect().width);
+          cols.forEach(function (item) {
+            var width = item.getBoundingClientRect().width;
+            item.style.width = ((width / totalWidth) * 100).toFixed(3) + '%';
+          });
+          table.style.width = '100%';
+          if (state.isLepSection) {
+            var lepWidths = extractTableColumnWidths(table);
+            apiPost('save_lep_page', {
+              version_id: state.versionId,
+              lep_page: { column_widths: lepWidths },
+            }).then(function (res) {
+              if (!res.ok) throw new Error(res.error || 'LEP table layout save failed');
+              state.lepPage = res.lep_page || state.lepPage;
+              setStatus('LEP table layout saved', 'saved');
+            }).catch(showError);
+          } else {
+            schedulePart0Save();
+            flushPart0Save();
+          }
+        } else {
+          syncTableWidth(blockEl);
+          scheduleSave(blockEl);
+          flushSave(blockEl);
+        }
       }
 
       document.addEventListener('mousemove', onMove);
@@ -4122,6 +4150,7 @@
         + '<div class="cpb-toolbar-group">'
         + '<button type="button" class="cpb-tool-btn cpb-lep-regenerate" title="Regenerate effective parts from manual structure">Regenerate parts</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepSave" title="Save LEP text and signatory details">Save</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbLepOpenStyles" title="Edit paragraph and table styles">Styles</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepOpenHeader" title="Page header editor">Header</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepApprovalLink" title="Open authority approval page">Approval page</button>'
         + '</div>';
@@ -4140,6 +4169,7 @@
       toolbarLepEl.querySelector('#cpbLepOpenHeader').addEventListener('click', function () {
         openHeaderEditor();
       });
+      toolbarLepEl.querySelector('#cpbLepOpenStyles').addEventListener('click', openStyleEditor);
       toolbarLepEl.querySelector('#cpbLepApprovalLink').addEventListener('click', function () {
         openLepApprovalPage();
       });
@@ -4164,6 +4194,27 @@
       return;
     }
     window.open(state.lepApprovalUrl, '_blank', 'noopener');
+  }
+
+  function extractTableColumnWidths(table) {
+    if (!table) return [];
+    var cols = Array.prototype.slice.call(table.querySelectorAll('colgroup col'));
+    if (!cols.length) return [];
+    var allPercent = cols.every(function (col) {
+      return /%$/.test(col.style.width || '');
+    });
+    var widths = cols.map(function (col) {
+      var raw = parseFloat(col.style.width || '');
+      if (allPercent && !isNaN(raw)) return raw;
+      return col.getBoundingClientRect().width;
+    });
+    if (!allPercent) {
+      var total = widths.reduce(function (sum, width) { return sum + width; }, 0);
+      if (total > 0) {
+        widths = widths.map(function (width) { return (width / total) * 100; });
+      }
+    }
+    return widths.map(function (width) { return Math.round(width * 1000) / 1000; });
   }
 
   function extractLepPageFromCanvas() {
@@ -4214,6 +4265,19 @@
       });
     });
     if (signatories.length) lep.signatories = signatories;
+    var effectiveParts = [];
+    sheet.querySelectorAll('[data-lep-part-row]').forEach(function (rowEl, rowIndex) {
+      var row = {};
+      rowEl.querySelectorAll('[data-lep-part-col]').forEach(function (cell) {
+        row[cell.getAttribute('data-lep-part-col')] = cell.textContent.replace(/\u00a0/g, ' ').trim();
+      });
+      if (!Object.keys(row).some(function (key) { return row[key]; })) return;
+      var existing = Array.isArray(lep.effective_parts) ? lep.effective_parts[rowIndex] : null;
+      row.label = existing && existing.label ? existing.label : '';
+      row.section_id = existing && existing.section_id ? existing.section_id : 0;
+      effectiveParts.push(row);
+    });
+    lep.effective_parts = effectiveParts;
     return lep;
   }
 
@@ -4269,6 +4333,7 @@
         + regenBtn
         + importBtn
         + '<button type="button" class="cpb-tool-btn" id="cpbPart0Save" title="Save page">Save</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenStyles" title="Edit paragraph and table styles">Styles</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenHeader" title="Page header editor">Header</button>'
         + '</div>';
       toolbarPart0El.setAttribute('data-part0-wired', '1');
@@ -4289,6 +4354,7 @@
       toolbarPart0El.querySelector('#cpbPart0OpenHeader').addEventListener('click', function () {
         openHeaderEditor();
       });
+      toolbarPart0El.querySelector('#cpbPart0OpenStyles').addEventListener('click', openStyleEditor);
       wireDefinitionsImportButton();
     } else {
       var labelEl = toolbarPart0El.querySelector('[data-part0-toolbar-label="1"]');
@@ -4421,6 +4487,9 @@
       return {
         rows: amendRows,
         empty_rows: emptyRows,
+        column_widths: extractTableColumnWidths(
+          sheet.querySelector('[data-part0-table="amendment_list"]')
+        ),
       };
     }
     if (key === 'distribution_list') {
@@ -4432,7 +4501,13 @@
         });
         if (Object.keys(row).some(function (k) { return row[k]; })) distRows.push(row);
       });
-      return { rows: distRows, empty_rows: emptyRows };
+      return {
+        rows: distRows,
+        empty_rows: emptyRows,
+        column_widths: extractTableColumnWidths(
+          sheet.querySelector('[data-part0-table="distribution_list"]')
+        ),
+      };
     }
     if (key === 'abbreviations') {
       var abbrEntries = [];
@@ -4833,7 +4908,7 @@
     if (!sheet || sheet.getAttribute('data-lep-wired') === '1') return;
     sheet.setAttribute('data-lep-wired', '1');
 
-    sheet.querySelectorAll('[data-lep-field]').forEach(function (field) {
+    sheet.querySelectorAll('[data-lep-field], [data-lep-part-col]').forEach(function (field) {
       if (!state.editable || field.getAttribute('data-lep-field-wired') === '1') return;
       field.setAttribute('data-lep-field-wired', '1');
       field.addEventListener('input', scheduleLepSave);

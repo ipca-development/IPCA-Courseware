@@ -232,6 +232,7 @@ final class ControlledPublishingPart0PageService
                 array('revision_nr' => 'Rev 6', 'reason' => '', 'revision_date' => '09/01/23', 'effective_date' => '09/01/23', 'date_incorp' => '09/01/23', 'incorp_by' => 'KVM'),
             ),
             'empty_rows' => 8,
+            'column_widths' => array(14, 26, 16, 17, 15, 12),
         );
     }
 
@@ -246,6 +247,7 @@ final class ControlledPublishingPart0PageService
                 array('copy_nr' => '1', 'issue_to' => 'BCAA - Training Department (Signed Digital PDF file)'),
             ),
             'empty_rows' => 0,
+            'column_widths' => array(18, 82),
         );
     }
 
@@ -2432,6 +2434,10 @@ final class ControlledPublishingPart0PageService
         $out = array(
             'rows' => $rows,
             'empty_rows' => max(0, min(30, (int)($raw['empty_rows'] ?? $defaults['empty_rows']))),
+            'column_widths' => $this->normalizeColumnWidths(
+                $raw['column_widths'] ?? null,
+                $defaults['column_widths']
+            ),
         );
         $syncedFrom = trim((string)($raw['synced_from'] ?? ''));
         if ($syncedFrom !== '') {
@@ -2678,6 +2684,34 @@ final class ControlledPublishingPart0PageService
         return array(
             'rows' => $rows,
             'empty_rows' => max(0, min(30, (int)($raw['empty_rows'] ?? $defaults['empty_rows']))),
+            'column_widths' => $this->normalizeColumnWidths(
+                $raw['column_widths'] ?? null,
+                $defaults['column_widths']
+            ),
+        );
+    }
+
+    /**
+     * @param mixed $raw
+     * @param list<int|float> $defaults
+     * @return list<float>
+     */
+    private function normalizeColumnWidths(mixed $raw, array $defaults): array
+    {
+        if (!is_array($raw) || count($raw) !== count($defaults)) {
+            return array_map('floatval', $defaults);
+        }
+        $widths = array_map(
+            static fn(mixed $width): float => max(4.0, min(92.0, (float)$width)),
+            array_values($raw)
+        );
+        $total = array_sum($widths);
+        if ($total <= 0.0) {
+            return array_map('floatval', $defaults);
+        }
+        return array_map(
+            static fn(float $width): float => round(($width / $total) * 100, 3),
+            $widths
         );
     }
 

@@ -437,12 +437,22 @@ final class ControlledPublishingPaginationService
         }
 
         $units = array();
+        $part0HeadingTexts = array();
+        $part0HeadingPattern = '/<div class="[^"]*\bcpb-part0-heading\b[^"]*"[^>]*>.*?<\/div>/s';
         if (preg_match_all(
-            '/<div class="[^"]*\bcpb-part0-heading\b[^"]*"[^>]*>.*?<\/div>/s',
+            $part0HeadingPattern,
             $bodyHtml,
             $headingMatches
         ) >= 1) {
             foreach ($headingMatches[0] as $headingIndex => $headingHtml) {
+                $headingText = mb_strtolower(trim(preg_replace(
+                    '/\s+/u',
+                    ' ',
+                    html_entity_decode(strip_tags($headingHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                ) ?? ''));
+                if ($headingText !== '') {
+                    $part0HeadingTexts[$headingText] = ($part0HeadingTexts[$headingText] ?? 0) + 1;
+                }
                 $paragraphStyle = 'subtitle_1';
                 if (preg_match('/\bdata-paragraph-style="([^"]+)"/', $headingHtml, $styleMatch) === 1) {
                     $paragraphStyle = strtolower(trim(html_entity_decode(
@@ -477,9 +487,23 @@ final class ControlledPublishingPaginationService
                 );
             }
         }
+        // Part 0 headings are authoritative units in their own right. Leaving
+        // them inside the generated body unit renders the same title twice.
+        $bodyWithoutPart0Headings = trim(
+            preg_replace($part0HeadingPattern, '', $bodyHtml) ?? $bodyHtml
+        );
         if (preg_match_all('/<article class="cpb-block[^"]*"[^>]*>.*?<\/article>/s', $bodyHtml, $matches) >= 1) {
             $idx = 0;
             foreach ($matches[0] as $articleHtml) {
+                $articleText = mb_strtolower(trim(preg_replace(
+                    '/\s+/u',
+                    ' ',
+                    html_entity_decode(strip_tags($articleHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                ) ?? ''));
+                if ($articleText !== '' && ($part0HeadingTexts[$articleText] ?? 0) > 0) {
+                    $part0HeadingTexts[$articleText]--;
+                    continue;
+                }
                 $type = 'paragraph';
                 if (preg_match('/cpb-block--([a-z_]+)/', $articleHtml, $tm) === 1) {
                     $type = $tm[1];
@@ -544,11 +568,14 @@ final class ControlledPublishingPaginationService
         }
 
         $authority = $this->paginationAuthority($section);
+        if ($bodyWithoutPart0Headings === '' || trim(strip_tags($bodyWithoutPart0Headings)) === '') {
+            return $units;
+        }
         $units[] = array(
             'unit_key' => 's' . $sectionId . '_0',
             'block_id' => 0,
             'block_type' => $authority === 'generated' ? 'generated' : 'shell',
-            'html' => $bodyHtml,
+            'html' => $bodyWithoutPart0Headings,
             'splittable' => false,
             'atomic' => $authority !== 'generated',
             'force_break_before' => false,

@@ -576,6 +576,9 @@ final class ControlledPublishingBookRenderer
         $borderWidth = (string)$tableStyle['border_width'];
         $borderColor = (string)$tableStyle['border_color'];
         $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        $columnWidths = is_array($page['column_widths'] ?? null)
+            ? $page['column_widths']
+            : array(14, 26, 16, 17, 15, 12);
 
         $bodyHtml = '';
         $rowIdx = 0;
@@ -609,16 +612,14 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
             . '<table class="cpb-table cpb-part0-table" data-part0-table="amendment_list">'
-            . '<colgroup><col style="width:14%"><col style="width:26%">'
-            . '<col style="width:16%"><col style="width:17%">'
-            . '<col style="width:15%"><col style="width:12%"></colgroup>'
+            . $this->renderColumnGroup($columnWidths)
             . '<thead><tr class="cpb-table-header-row">'
-            . '<th' . $headerVisual . '>REVISION NR</th>'
-            . '<th' . $headerVisual . '>REASON</th>'
-            . '<th' . $headerVisual . '>REVISION DATE</th>'
-            . '<th' . $headerVisual . '>EFFECTIVE DATE</th>'
-            . '<th' . $headerVisual . '>DATE INCORP.</th>'
-            . '<th' . $headerVisual . '>INCORP. BY</th>'
+            . '<th' . $headerVisual . '>REVISION NR' . $this->renderColumnResizeHandle($editable, 0) . '</th>'
+            . '<th' . $headerVisual . '>REASON' . $this->renderColumnResizeHandle($editable, 1) . '</th>'
+            . '<th' . $headerVisual . '>REVISION DATE' . $this->renderColumnResizeHandle($editable, 2) . '</th>'
+            . '<th' . $headerVisual . '>EFFECTIVE DATE' . $this->renderColumnResizeHandle($editable, 3) . '</th>'
+            . '<th' . $headerVisual . '>DATE INCORP.' . $this->renderColumnResizeHandle($editable, 4) . '</th>'
+            . '<th' . $headerVisual . '>INCORP. BY' . $this->renderColumnResizeHandle($editable, 5) . '</th>'
             . '</tr></thead><tbody>' . $bodyHtml . '</tbody></table>'
             . '</div>';
     }
@@ -638,6 +639,9 @@ final class ControlledPublishingBookRenderer
         $borderWidth = (string)$tableStyle['border_width'];
         $borderColor = (string)$tableStyle['border_color'];
         $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        $columnWidths = is_array($page['column_widths'] ?? null)
+            ? $page['column_widths']
+            : array(18, 82);
 
         $bodyHtml = '';
         $rowIdx = 0;
@@ -663,10 +667,10 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
             . '<table class="cpb-table cpb-part0-table" data-part0-table="distribution_list">'
-            . '<colgroup><col style="width:18%"><col style="width:82%"></colgroup>'
+            . $this->renderColumnGroup($columnWidths)
             . '<thead><tr class="cpb-table-header-row">'
-            . '<th' . $headerVisual . '>COPY NR</th>'
-            . '<th' . $headerVisual . '>ISSUE TO</th>'
+            . '<th' . $headerVisual . '>COPY NR' . $this->renderColumnResizeHandle($editable, 0) . '</th>'
+            . '<th' . $headerVisual . '>ISSUE TO' . $this->renderColumnResizeHandle($editable, 1) . '</th>'
             . '</tr></thead><tbody>' . $bodyHtml . '</tbody></table>'
             . '</div>';
     }
@@ -698,16 +702,16 @@ final class ControlledPublishingBookRenderer
             }
 
             $rowClass = 'cpb-part0-abbr-row';
-            if ($status === 'needs_review') {
+            if ($editable && $status === 'needs_review') {
                 $rowClass .= ' cpb-part0-abbr-row--review';
-            } elseif ($status === 'ai_suggested') {
+            } elseif ($editable && $status === 'ai_suggested') {
                 $rowClass .= ' cpb-part0-abbr-row--ai';
             }
 
             $badge = '';
-            if ($status === 'needs_review') {
+            if ($editable && $status === 'needs_review') {
                 $badge = '<span class="cpb-part0-abbr-flag" title="Meaning not confirmed — please review">Review</span>';
-            } elseif ($status === 'ai_suggested') {
+            } elseif ($editable && $status === 'ai_suggested') {
                 $badge = '<span class="cpb-part0-abbr-flag cpb-part0-abbr-flag--ai" title="AI-suggested expansion — please verify">AI</span>';
             }
 
@@ -725,8 +729,8 @@ final class ControlledPublishingBookRenderer
                 $defClass .= ' cpb-part0-abbr-def--empty';
             }
 
-            $rowsHtml .= '<div class="' . $rowClass . '" data-part0-row="' . $rowIdx . '"'
-                . ' data-definition-status="' . h($status) . '">'
+            $statusAttr = $editable ? ' data-definition-status="' . h($status) . '"' : '';
+            $rowsHtml .= '<div class="' . $rowClass . '" data-part0-row="' . $rowIdx . '"' . $statusAttr . '>'
                 . '<span class="cpb-part0-abbr-term ' . $bodyStyle['class'] . '" data-part0-col="abbreviation"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . '>' . $abbr . '</span>'
                 . '<span class="cpb-part0-abbr-sep" aria-hidden="true">–</span>'
@@ -795,6 +799,27 @@ final class ControlledPublishingBookRenderer
 
         return '<div class="cpb-part0-definitions" data-part0-table="definitions" contenteditable="false">'
             . $rowsHtml . '</div>';
+    }
+
+    /**
+     * @param list<int|float|string> $widths
+     */
+    private function renderColumnGroup(array $widths): string
+    {
+        $html = '<colgroup>';
+        foreach ($widths as $width) {
+            $html .= '<col style="width:' . h(rtrim(rtrim(number_format((float)$width, 3, '.', ''), '0'), '.')) . '%">';
+        }
+        return $html . '</colgroup>';
+    }
+
+    private function renderColumnResizeHandle(bool $editable, int $columnIndex): string
+    {
+        if (!$editable) {
+            return '';
+        }
+        return '<span class="cpb-col-resize" data-col-index="' . $columnIndex
+            . '" data-part0-column-resize="1" title="Resize column"></span>';
     }
 
     private function renderPart0TableCell(
@@ -1014,8 +1039,13 @@ final class ControlledPublishingBookRenderer
         $bodyVisual = $this->tableRowVisualAttr($bodyRow, 'center');
         $borderWidth = (string)$tableStyle['border_width'];
         $borderColor = (string)$tableStyle['border_color'];
+        $fieldEdit = $editable ? ' contenteditable="true"' : ' contenteditable="false"';
+        $columnWidths = is_array($lep['column_widths'] ?? null)
+            ? $lep['column_widths']
+            : array(18, 28, 27, 27);
 
         $rows = '';
+        $rowIndex = 0;
         foreach ($parts as $row) {
             if (!is_array($row)) {
                 continue;
@@ -1031,19 +1061,21 @@ final class ControlledPublishingBookRenderer
             ) {
                 continue;
             }
-            $rows .= '<tr class="cpb-lep-part-row" data-lep-part-generated="1">'
-                . '<td' . $bodyVisual . '>' . h((string)($row['part'] ?? '')) . '</td>'
-                . '<td' . $bodyVisual . '>' . h((string)($row['pages'] ?? '—')) . '</td>'
-                . '<td' . $bodyVisual . '>' . h((string)($row['date'] ?? '')) . '</td>'
-                . '<td' . $bodyVisual . '>' . h((string)($row['revision'] ?? '')) . '</td>'
+            $rows .= '<tr class="cpb-lep-part-row" data-lep-part-generated="1" data-lep-part-row="' . $rowIndex . '">'
+                . '<td data-lep-part-col="part"' . $bodyVisual . $fieldEdit . '>' . h((string)($row['part'] ?? '')) . '</td>'
+                . '<td data-lep-part-col="pages"' . $bodyVisual . $fieldEdit . '>' . h((string)($row['pages'] ?? '—')) . '</td>'
+                . '<td data-lep-part-col="date"' . $bodyVisual . $fieldEdit . '>' . h((string)($row['date'] ?? '')) . '</td>'
+                . '<td data-lep-part-col="revision"' . $bodyVisual . $fieldEdit . '>' . h((string)($row['revision'] ?? '')) . '</td>'
                 . '</tr>';
+            $rowIndex++;
         }
         for ($i = 0; $i < $emptyRows; $i++) {
-            $rows .= '<tr class="cpb-lep-part-row cpb-lep-part-row--empty">'
-                . '<td' . $bodyVisual . '>&nbsp;</td>'
-                . '<td' . $bodyVisual . '></td>'
-                . '<td' . $bodyVisual . '></td>'
-                . '<td' . $bodyVisual . '></td></tr>';
+            $rows .= '<tr class="cpb-lep-part-row cpb-lep-part-row--empty" data-lep-part-row="' . $rowIndex . '">'
+                . '<td data-lep-part-col="part"' . $bodyVisual . $fieldEdit . '>&nbsp;</td>'
+                . '<td data-lep-part-col="pages"' . $bodyVisual . $fieldEdit . '></td>'
+                . '<td data-lep-part-col="date"' . $bodyVisual . $fieldEdit . '></td>'
+                . '<td data-lep-part-col="revision"' . $bodyVisual . $fieldEdit . '></td></tr>';
+            $rowIndex++;
         }
         if ($rows === '' && $editable) {
             $rows = '<tr class="cpb-lep-part-row cpb-lep-part-row--empty"><td colspan="4"'
@@ -1055,13 +1087,12 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
             . '<table class="cpb-table cpb-lep-table" data-lep-parts-table="1">'
-            . '<colgroup><col style="width:17%"><col style="width:22%">'
-            . '<col style="width:34%"><col style="width:27%"></colgroup>'
+            . $this->renderColumnGroup($columnWidths)
             . '<thead><tr class="cpb-table-header-row">'
-            . '<th' . $headerVisual . '>Part</th>'
-            . '<th' . $headerVisual . '>Pages</th>'
-            . '<th' . $headerVisual . '>Date</th>'
-            . '<th' . $headerVisual . '>Revision</th>'
+            . '<th' . $headerVisual . '>Part' . $this->renderColumnResizeHandle($editable, 0) . '</th>'
+            . '<th' . $headerVisual . '>Pages' . $this->renderColumnResizeHandle($editable, 1) . '</th>'
+            . '<th' . $headerVisual . '>Date' . $this->renderColumnResizeHandle($editable, 2) . '</th>'
+            . '<th' . $headerVisual . '>Revision' . $this->renderColumnResizeHandle($editable, 3) . '</th>'
             . '</tr></thead>'
             . '<tbody>' . $rows . '</tbody>'
             . '</table></div>';
