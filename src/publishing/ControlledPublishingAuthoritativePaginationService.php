@@ -302,6 +302,10 @@ final class ControlledPublishingAuthoritativePaginationService
         if ($handle === false) {
             throw new RuntimeException('Unable to allocate the authoritative pagination lock.');
         }
+        // Regeneration may be started by either an administrator CLI (root)
+        // or the live PHP worker (www-data). Keep the shared lock writable by
+        // both identities so a root-created lock file cannot disable live flow.
+        @chmod($path, 0666);
         if (!flock($handle, LOCK_EX | LOCK_NB)) {
             fclose($handle);
             throw new RuntimeException(
