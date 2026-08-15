@@ -996,6 +996,66 @@ cases.push(["AK. deletion backflow reduces pages and pulls following content bac
   assert.ok(longMarker && shortMarker && shortMarker.page_number < longMarker.page_number);
 }]);
 
+cases.push(["AL. styled paragraph is recognized as a heading", () => {
+  const source = sourceWith([
+    section(1, "styled-heading", "Styled heading", {}, [
+      unit("lead", "paragraph",
+        '<article data-block-id="121" data-stable-anchor="lead"><p style="min-height:650px">Lead before styled heading.</p></article>',
+        { block_id: 121 }),
+      unit("styled-title", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="122" data-stable-anchor="styled-title"><p class="cpb-paragraph cpb-ps-title" data-paragraph-style="title">2. Styled Chapter</p></article>',
+        { block_id: 122, paragraph_style: "title" }),
+      unit("styled-body", "paragraph",
+        '<article data-block-id="123" data-stable-anchor="styled-body"><p style="min-height:120px">Meaningful chapter content.</p></article>',
+        { block_id: 123 })
+    ])
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined);
+  const headingPage = result.pages.find((page) => page.page_html.includes("2. Styled Chapter"));
+  assert.ok(headingPage && headingPage.page_number === 2);
+  assert.ok(headingPage.page_html.includes("Meaningful chapter content"));
+  assert.strictEqual(headingPage.metrics.break_reason, "heading_keep_with_following");
+  assert.strictEqual(result.validation.is_valid, true);
+}]);
+
+cases.push(["AM. consecutive styled heading chain moves without a manual break", () => {
+  const source = sourceWith([
+    section(1, "styled-chain", "Styled chain", {}, [
+      unit("lead", "paragraph",
+        '<article data-block-id="131" data-stable-anchor="lead"><p style="min-height:650px">Lead before styled chain.</p></article>',
+        { block_id: 131 }),
+      unit("chapter-title", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="132" data-stable-anchor="chapter-title"><p class="cpb-paragraph cpb-ps-title" data-paragraph-style="title">2. ORGANIZATION AND RESPONSIBILITIES</p></article>',
+        { block_id: 132 }),
+      unit("subsection-title", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="133" data-stable-anchor="subsection-title"><p class="cpb-paragraph cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">2.1 Structure of the ATO</p></article>',
+        { block_id: 133 }),
+      unit("chapter-body", "paragraph",
+        '<article data-block-id="134" data-stable-anchor="chapter-body"><p>EuroPilot Center organization content.</p></article>',
+        { block_id: 134 })
+    ])
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.error, undefined);
+  assert.strictEqual(result.validation.is_valid, true);
+  assert.ok(!(source.manual_page_breaks || []).length, "automatic heading movement must not create a manual break");
+  const chainPage = result.pages.find((page) =>
+    page.page_html.includes("2. ORGANIZATION AND RESPONSIBILITIES")
+  );
+  assert.ok(chainPage && chainPage.page_number === 2);
+  assert.ok(chainPage.page_html.includes("2.1 Structure of the ATO"));
+  assert.ok(chainPage.page_html.includes("EuroPilot Center organization content"));
+  assert.strictEqual(chainPage.metrics.break_reason, "heading_keep_with_following");
+  assert.strictEqual(chainPage.metrics.forced_break_before, false);
+  const sourceOrder = result.pages.flatMap((page) => page.coverage)
+    .filter((entry) => !entry.presentation_copy)
+    .map((entry) => entry.source_order);
+  assert.deepStrictEqual(sourceOrder, sourceOrder.slice().sort((a, b) => a - b));
+}]);
+
 let failed = 0;
 for (const [name, run] of cases) {
   try {

@@ -527,6 +527,66 @@ test('stale response for prior section/request cannot replace current projection
   }
 });
 
+test('mixed-section stored preview renders every authoritative page returned for the selected section', async (browser) => {
+  const initial = {
+    ok: true,
+    result: {
+      pages: [
+        {
+          ...storedPage(9, 89, 'mixed-page'),
+          metadata: {
+            coverage: [
+              { source_fragment_id: 'section-9/block-a/root', section_id: 9 },
+              { source_fragment_id: 'section-11/block-b/root', section_id: 11 },
+            ],
+          },
+        },
+        storedPage(11, 90, 'primary-page'),
+      ],
+      page_count: 277,
+      returned_page_count: 2,
+      book_style_css: '.proof-book-style{color:rgb(12, 34, 56)}',
+      freshness: { is_current: true },
+    },
+  };
+  const { page, browserErrors } = await newEditorPage(browser, 'live_projection=1', initial);
+  try {
+    const pages = await page.locator('#cpbProjection .cpb-live-projection__page').evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        page: node.dataset.pageNumber,
+        primarySection: node.dataset.sectionId,
+      }))
+    );
+    assert.deepEqual(pages, [
+      { page: '89', primarySection: '9' },
+      { page: '90', primarySection: '11' },
+    ]);
+    assert.match(await page.locator('#cpbProjectionStatus').textContent(), /2 pages · Current/);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('source canvas labels its page furniture as approximate editing layout', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser);
+  try {
+    await page.waitForFunction(() =>
+      document.querySelector('#cpbCanvas .cpb-print-page[data-page-identity="editing-layout-approximate"]')
+    );
+    const sourceFurniture = await page.locator('#cpbCanvas .cpb-print-page').first().innerText();
+    assert.match(sourceFurniture, /Page:\s*Editing layout/);
+    assert.doesNotMatch(sourceFurniture, /Page:\s*\d+/);
+    assert.equal(
+      await page.locator('#cpbProjection .cpb-live-projection__page-label').first().textContent(),
+      'Page 41',
+    );
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
 test('zoom applies to projection', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser);
   try {

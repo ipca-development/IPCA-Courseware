@@ -296,26 +296,17 @@ final class ControlledPublishingReaderPageMapStore
         ?int $sectionId = null
     ): array
     {
-        $sectionFilter = $sectionId !== null && $sectionId > 0
-            ? ' AND section_id = ?'
-            : '';
         $stmt = $this->pdo->prepare(
             'SELECT page_number, section_id, stable_anchor, page_type,
                     is_cover, is_section_start, is_major_section_start,
                     page_html, thumbnail_html, metadata_json
                FROM ipca_publishing_reader_page_maps
-              WHERE book_version_id = ? AND layout_profile = ?'
-              . $sectionFilter .
-             '
+              WHERE book_version_id = ? AND layout_profile = ?
               ORDER BY page_number ASC'
         );
-        $params = array($bookVersionId, $layoutProfile);
-        if ($sectionFilter !== '') {
-            $params[] = $sectionId;
-        }
-        $stmt->execute($params);
+        $stmt->execute(array($bookVersionId, $layoutProfile));
 
-        return array_map(static function (array $row): array {
+        $pages = array_map(static function (array $row): array {
             $metadata = json_decode((string)($row['metadata_json'] ?? '{}'), true);
             if (!is_array($metadata)) {
                 $metadata = array();
@@ -335,6 +326,14 @@ final class ControlledPublishingReaderPageMapStore
                 'metadata' => $metadata,
             );
         }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array());
+        if ($sectionId === null || $sectionId <= 0) {
+            return $pages;
+        }
+
+        return array_values(array_filter(
+            $pages,
+            static fn(array $page): bool => self::pageContainsSection($page, $sectionId)
+        ));
     }
 
     /**
@@ -343,18 +342,59 @@ final class ControlledPublishingReaderPageMapStore
     public function sectionPageIndex(int $bookVersionId, string $layoutProfile): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT section_id, MIN(page_number) AS first_page
+            'SELECT page_number, section_id, metadata_json
                FROM ipca_publishing_reader_page_maps
-              WHERE book_version_id = ? AND layout_profile = ? AND section_id IS NOT NULL
-              GROUP BY section_id'
+              WHERE book_version_id = ? AND layout_profile = ?
+              ORDER BY page_number ASC'
         );
         $stmt->execute(array($bookVersionId, $layoutProfile));
         $map = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $map[(int)$row['section_id']] = (int)$row['first_page'];
+            $metadata = json_decode((string)($row['metadata_json'] ?? '{}'), true);
+            $sectionIds = self::coverageSectionIds(is_array($metadata) ? $metadata : array());
+            if ($row['section_id'] !== null) {
+                $sectionIds[] = (int)$row['section_id'];
+            }
+            foreach (array_unique($sectionIds) as $sectionId) {
+                if ($sectionId > 0 && !isset($map[$sectionId])) {
+                    $map[$sectionId] = (int)$row['page_number'];
+                }
+            }
         }
 
         return $map;
+    }
+
+    /**
+     * @param array<string,mixed> $page
+     */
+    private static function pageContainsSection(array $page, int $sectionId): bool
+    {
+        if ((int)($page['section_id'] ?? 0) === $sectionId) {
+            return true;
+        }
+        $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+        return in_array($sectionId, self::coverageSectionIds($metadata), true);
+    }
+
+    /**
+     * @param array<string,mixed> $metadata
+     * @return list<int>
+     */
+    private static function coverageSectionIds(array $metadata): array
+    {
+        $sectionIds = array();
+        $coverage = is_array($metadata['coverage'] ?? null) ? $metadata['coverage'] : array();
+        foreach ($coverage as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $sectionId = (int)($entry['section_id'] ?? 0);
+            if ($sectionId > 0) {
+                $sectionIds[] = $sectionId;
+            }
+        }
+        return $sectionIds;
     }
 
     /**

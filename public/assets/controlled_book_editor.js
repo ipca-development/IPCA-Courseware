@@ -947,15 +947,21 @@
       var page = document.createElement('div');
       page.className = 'cpb-print-page';
       page.style.top = (index * (PRINT_PAGE.height + PRINT_PAGE.gap)) + 'px';
+      page.setAttribute(
+        'data-page-identity',
+        state.liveProjection.enabled ? 'editing-layout-approximate' : 'advisory-page-number'
+      );
+      var pageNumber = parseInt(state.sectionPageStarts[state.sectionId] || '1', 10) + index;
+      var pageTotal = Math.max(
+        state.authoritativePageCount,
+        parseInt(state.sectionPageStarts[state.sectionId] || '1', 10) + pageCount - 1
+      );
       var preview = document.createElement('div');
       preview.innerHTML = previewHeaderHtml(
         state.pageHeader,
         state.pageFooter,
-        (parseInt(state.sectionPageStarts[state.sectionId] || '1', 10) + index),
-        Math.max(
-          state.authoritativePageCount,
-          parseInt(state.sectionPageStarts[state.sectionId] || '1', 10) + pageCount - 1
-        )
+        state.liveProjection.enabled ? 'Editing layout' : pageNumber,
+        state.liveProjection.enabled ? 'Approximate' : pageTotal
       );
       var header = preview.querySelector('.cpb-page-header');
       var footer = preview.querySelector('.cpb-page-footer');

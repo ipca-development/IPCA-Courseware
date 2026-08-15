@@ -436,7 +436,28 @@ final class ControlledPublishingPaginationService
                 if (preg_match('/cpb-block--([a-z_]+)/', $articleHtml, $tm) === 1) {
                     $type = $tm[1];
                 }
-                $isHeading = $type === 'heading';
+                $paragraphStyle = '';
+                if (preg_match('/\bdata-paragraph-style="([^"]+)"/', $articleHtml, $styleMatch) === 1) {
+                    $paragraphStyle = strtolower(trim(html_entity_decode(
+                        (string)$styleMatch[1],
+                        ENT_QUOTES | ENT_HTML5,
+                        'UTF-8'
+                    )));
+                } elseif (preg_match('/\bcpb-ps-([a-z0-9_]+)/i', $articleHtml, $styleClassMatch) === 1) {
+                    $paragraphStyle = strtolower((string)$styleClassMatch[1]);
+                }
+                $headingLevels = array(
+                    'part_title' => 1,
+                    'title' => 1,
+                    'subtitle_1' => 2,
+                    'subtitle_2' => 3,
+                    'subtitle_3' => 4,
+                    'subtitle_4' => 5,
+                    'heading_1' => 3,
+                    'heading_2' => 4,
+                );
+                $headingLevel = (int)($headingLevels[$paragraphStyle] ?? 0);
+                $isHeading = $type === 'heading' || $headingLevel > 0;
                 $stableAnchor = '';
                 if (preg_match('/\bdata-stable-anchor="([^"]+)"/', $articleHtml, $anchorMatch) === 1) {
                     $stableAnchor = html_entity_decode(
@@ -455,6 +476,8 @@ final class ControlledPublishingPaginationService
                     'block_id' => $blockId,
                     'stable_anchor' => $stableAnchor,
                     'block_type' => $type,
+                    'paragraph_style' => $paragraphStyle,
+                    'heading_level' => $headingLevel,
                     'html' => $articleHtml,
                     'splittable' => in_array($type, self::SPLITTABLE_BLOCK_TYPES, true),
                     'atomic' => in_array($type, self::ATOMIC_BLOCK_TYPES, true) || $isHeading,

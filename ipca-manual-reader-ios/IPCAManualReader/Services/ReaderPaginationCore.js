@@ -63,13 +63,62 @@
     return `${sectionIdentity}/${unitIdentity}/${suffix}`;
   }
 
+  const HEADING_PARAGRAPH_STYLE_LEVELS = {
+    part_title: 1,
+    title: 1,
+    subtitle_1: 2,
+    subtitle_2: 3,
+    subtitle_3: 4,
+    subtitle_4: 5,
+    heading_1: 3,
+    heading_2: 4
+  };
+
+  function paragraphStyleFromRoot(root) {
+    if (!root) return "";
+    const styled = root.matches("[data-paragraph-style]")
+      ? root
+      : root.querySelector("[data-paragraph-style]");
+    if (styled) {
+      return String(styled.getAttribute("data-paragraph-style") || "").trim().toLowerCase();
+    }
+    const classNodes = [root, ...Array.from(root.querySelectorAll("[class*='cpb-ps-']"))];
+    for (const node of classNodes) {
+      const match = String(node.className || "").match(/(?:^|\s)cpb-ps-([a-z0-9_]+)/i);
+      if (match) return match[1].toLowerCase();
+    }
+    return "";
+  }
+
+  function headingSemantics(unit, root) {
+    const explicitLevel = Number(unit.heading_level || unit.outline_level || 0);
+    const declaredStyle = String(
+      unit.paragraph_style || unit.paragraphStyle || unit.style || ""
+    ).trim().toLowerCase();
+    const paragraphStyle = declaredStyle || paragraphStyleFromRoot(root);
+    const styleLevel = Number(HEADING_PARAGRAPH_STYLE_LEVELS[paragraphStyle] || 0);
+    const heading = root.matches("h1,h2,h3,h4,h5,h6")
+      ? root
+      : root.querySelector("h1,h2,h3,h4,h5,h6");
+    const tagLevel = heading ? Number(heading.tagName.substring(1)) : 0;
+    const declaredHeading = String(unit.block_type || "").toLowerCase() === "heading"
+      || unit.is_heading === true
+      || unit.is_heading === 1
+      || unit.is_heading === "1";
+    return {
+      isHeading: declaredHeading || explicitLevel > 0 || styleLevel > 0 || tagLevel > 0,
+      level: explicitLevel || styleLevel || tagLevel || 0,
+      element: heading
+    };
+  }
+
   function semanticType(unit, root) {
     const declared = String(unit.block_type || "").toLowerCase();
     if (declared === "shell") return "shell";
     if (declared === "toc") return "toc";
     if (declared === "lep") return "lep";
     if (root.querySelector("table.cpb-lep-table, [data-lep-parts-table], tr.cpb-lep-part-row")) return "lep";
-    if (declared === "heading" || root.matches("h1,h2,h3,h4") || root.querySelector("h1,h2,h3,h4")) return "heading";
+    if (headingSemantics(unit, root).isHeading) return "heading";
     if (declared === "list" || root.matches("ol,ul") || root.querySelector("ol,ul")) return "list";
     if (declared === "table" || root.matches("table") || root.querySelector("table")) return "table";
     if (declared === "image" || root.matches("figure,img") || root.querySelector("figure,img")) return "figure";
@@ -791,11 +840,9 @@
       const historical = normalizeHistoricalContainer(section, unit, root, forceBreakBefore);
       if (historical.length) return historical;
     }
-    const heading = root.matches("h1,h2,h3,h4")
-      ? root
-      : root.querySelector("h1,h2,h3,h4");
+    const heading = headingSemantics(unit, root);
     const anchor = root.getAttribute("data-stable-anchor")
-      || (heading && heading.getAttribute("id"))
+      || (heading.element && heading.element.getAttribute("id"))
       || section.stable_anchor;
     const supported = [
       "heading", "paragraph", "note", "warning", "caution", "figure", "toc", "lep", "shell", "generated"
@@ -805,7 +852,7 @@
       atomic: ["heading", "note", "warning", "caution", "figure", "toc", "lep", "shell", "generated"].includes(type),
       splittable: ["paragraph", "note", "warning", "caution"].includes(type),
       forceBreakBefore,
-      headingLevel: heading ? Number(heading.tagName.substring(1)) : 0,
+      headingLevel: heading.level,
       unsupported: !supported,
       paginationAuthority: authority
     })];
@@ -1998,6 +2045,7 @@
     return page.pieces.map((value) => ({
       source_fragment_id: value.fragment.id,
       source_order: value.fragment.sourceOrder,
+      section_id: Number(value.fragment.section && value.fragment.section.section_id || 0) || null,
       range_start: value.rangeStart,
       range_end: value.rangeEnd,
       source_length: value.fragment.textLength,
