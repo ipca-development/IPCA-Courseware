@@ -19,9 +19,10 @@ $tableToolbar = strpos($markup, 'id="cpbTableToolbar"');
 if ($primary === false || $listStart === false || $secondary === false || $outdent === false
     || $tableToolbar === false
     || !($primary < $listStart
-        && $listStart < $secondary
+        && $listStart < $tableToolbar
+        && $tableToolbar < $secondary
         && $secondary < $outdent
-        && $outdent < $tableToolbar)) {
+    )) {
     fwrite(STDERR, "Toolbar controls are not split into the expected two rows.\n");
     exit(1);
 }
@@ -39,7 +40,12 @@ if (!str_contains($markup, '<select id="cpbListStart"')
 
 foreach (array(
     '.cpb-toolbar-row--primary',
-    'min-height: 64px',
+    '.cpb-toolbar-row--table-structure',
+    '.cpb-toolbar-row--table-cells',
+    'min-height: 160px',
+    'height: 159px',
+    'flex: 0 0 128px',
+    'overflow-x: hidden',
     'width: 38px !important',
     'height: 22px !important',
 ) as $marker) {
@@ -75,6 +81,6 @@ if (!str_contains($css, '.cpb-table-toolbar')) {
 }
 
 echo "Controlled publishing toolbar layout: PASS\n";
-echo "Rows: formatting through lists / indentation and insertion tools\n";
+echo "Rows: formatting / insertion and table / rows, cells and calculations\n";
 echo "List start selector: compact 38 x 22px\n";
-echo "Table controls: always visible on row two\n";
+echo "Table controls: always visible across three table rows\n";

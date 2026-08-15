@@ -233,9 +233,14 @@ async function exerciseRow(page, row) {
         const style = (selector) => getComputedStyle(q(selector));
         return observe({
           order: qa('#cpbToolbarMain button,#cpbToolbarMain select,#cpbToolbarMain input')
-            .filter((e) => !e.closest('#cpbTableToolbar'))
+            .filter((e) => !e.hasAttribute('data-table-action'))
             .map((e) => e.id || e.dataset.cmd || e.dataset.align || e.dataset.addBlock),
-          rows: qa('#cpbToolbarMain > .cpb-toolbar-row').length,
+          rows: qa(
+            '#cpbToolbarMain .cpb-toolbar-row'
+              + ':not(.cpb-toolbar-row--table-identity)'
+              + ':not(.cpb-toolbar-row--table-structure)'
+              + ':not(.cpb-toolbar-row--table-cells)'
+          ).length,
           visibility: {
             main: style('#cpbToolbarMain').display,
             toc: style('#cpbToolbarToc').display,
@@ -244,8 +249,6 @@ async function exerciseRow(page, row) {
           },
           layout: {
             toolbarDisplay: style('#cpbToolbar').display,
-            toolbarMinHeight: style('#cpbToolbar').minHeight,
-            toolbarMaxHeight: style('#cpbToolbar').maxHeight,
             mainDirection: style('#cpbToolbarMain').flexDirection,
             canvasOverflowY: style('#cpbCanvas').overflowY,
             canvasPaddingTop: style('#cpbCanvas').paddingTop,
@@ -525,8 +528,7 @@ function validateObservation(row, observation) {
       'cpbPickImage', 'cpbCalloutSelect', 'cpbDetectSelect',
     ]) && v.rows === 2 && v.visibility.main === 'flex'
       && v.visibility.toc === 'none' && v.visibility.lep === 'none' && v.visibility.part0 === 'none'
-      && v.layout.toolbarDisplay === 'flex' && v.layout.toolbarMinHeight === '64px'
-      && v.layout.toolbarMaxHeight === '64px' && v.layout.mainDirection === 'column'
+      && v.layout.toolbarDisplay === 'flex' && v.layout.mainDirection === 'column'
       && v.layout.canvasOverflowY === 'auto' && v.layout.canvasPaddingTop === '28px'
       && v.layout.sheetWidth === '816px' && v.layout.rotatePosition === 'absolute'
       && v.layout.rotateWidth === '22px' && v.layout.resizePosition === 'absolute'

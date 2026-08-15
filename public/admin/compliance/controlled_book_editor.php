@@ -173,6 +173,7 @@ compliance_page_open(array(
           </select>
         </div>
         </div>
+        <div class="cpb-table-toolbar" id="cpbTableToolbar" aria-label="Table editing controls">
         <div class="cpb-toolbar-row cpb-toolbar-row--secondary">
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbOutdent" title="Decrease indent (Shift+Tab)">⇤</button>
@@ -203,8 +204,9 @@ compliance_page_open(array(
             <option value="annex_refs_all">Annex (all)</option>
           </select>
         </div>
-        <div class="cpb-table-toolbar" id="cpbTableToolbar" aria-label="Table editing controls">
-          <div class="cpb-toolbar-group" aria-label="Table">
+        </div>
+        <div class="cpb-toolbar-row cpb-toolbar-row--table-identity">
+        <div class="cpb-toolbar-group" aria-label="Table">
             <span class="cpb-toolbar-table-label">Table</span>
             <button type="button" class="cpb-tool-btn" data-table-action="table-align-left" title="Align table left" disabled>Left</button>
             <button type="button" class="cpb-tool-btn" data-table-action="table-align-center" title="Align table center" disabled>Center</button>
@@ -213,7 +215,9 @@ compliance_page_open(array(
             <button type="button" class="cpb-tool-btn cpb-tool-btn--danger" data-table-action="delete-table" title="Delete table" disabled>Delete table</button>
             <button type="button" class="cpb-tool-btn" data-table-action="copy-table" title="Copy entire table" disabled>Copy table</button>
             <button type="button" class="cpb-tool-btn" data-table-action="paste-table" title="Paste copied table below the selected table" disabled>Paste table</button>
-          </div>
+        </div>
+        </div>
+        <div class="cpb-toolbar-row cpb-toolbar-row--table-structure">
           <div class="cpb-toolbar-group" aria-label="Rows and columns">
             <button type="button" class="cpb-tool-btn" data-table-action="move-row-up" title="Move selected row up" disabled>↑ Row</button>
             <button type="button" class="cpb-tool-btn" data-table-action="move-row-down" title="Move selected row down" disabled>↓ Row</button>
@@ -221,16 +225,6 @@ compliance_page_open(array(
             <button type="button" class="cpb-tool-btn" data-table-action="del-row" title="Delete selected row" disabled>− Row</button>
             <button type="button" class="cpb-tool-btn" data-table-action="add-col" title="Add column at right" disabled>+ Col</button>
             <button type="button" class="cpb-tool-btn" data-table-action="del-col" title="Remove rightmost column" disabled>− Col</button>
-          </div>
-          <div class="cpb-toolbar-group" aria-label="Cells">
-            <button type="button" class="cpb-tool-btn" data-table-action="merge-cells-right" title="Merge selected cell horizontally" disabled>Merge H</button>
-            <button type="button" class="cpb-tool-btn" data-table-action="unmerge-cells" title="Unmerge selected cell horizontally" disabled>Unmerge H</button>
-            <button type="button" class="cpb-tool-btn" data-table-action="merge-cells-down" title="Merge selected cell vertically" disabled>Merge V</button>
-            <button type="button" class="cpb-tool-btn" data-table-action="unmerge-cells-down" title="Unmerge selected cell vertically" disabled>Unmerge V</button>
-            <label class="cpb-table-toolbar__color">Fill <input type="color" class="cpb-tool-color" data-table-action="cell-bg" value="#ffffff" title="Cell background" disabled></label>
-            <button type="button" class="cpb-tool-btn" data-table-action="cell-bg-clear" title="Clear cell fill" disabled>Clear fill</button>
-            <button type="button" class="cpb-tool-btn" data-table-action="copy-cells" title="Copy selected cell text" disabled>Copy cell</button>
-            <button type="button" class="cpb-tool-btn" data-table-action="paste-cells" title="Paste copied cell text" disabled>Paste cell</button>
           </div>
           <div class="cpb-toolbar-group" aria-label="Borders and formulas">
             <button type="button" class="cpb-tool-btn" data-table-action="border-thin" title="Thin table border" disabled>─</button>
@@ -240,6 +234,18 @@ compliance_page_open(array(
             <button type="button" class="cpb-tool-btn" data-table-action="formula-sum" title="Insert SUM formula" disabled>SUM</button>
             <button type="button" class="cpb-tool-btn" data-table-action="formula-avg" title="Insert AVG formula" disabled>AVG</button>
             <button type="button" class="cpb-tool-btn" data-table-action="formula-custom" title="Insert custom formula" disabled>fx</button>
+          </div>
+        </div>
+        <div class="cpb-toolbar-row cpb-toolbar-row--table-cells">
+          <div class="cpb-toolbar-group" aria-label="Cells">
+            <button type="button" class="cpb-tool-btn" data-table-action="merge-cells-right" title="Merge selected cell horizontally" disabled>Merge H</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="unmerge-cells" title="Unmerge selected cell horizontally" disabled>Unmerge H</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="merge-cells-down" title="Merge selected cell vertically" disabled>Merge V</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="unmerge-cells-down" title="Unmerge selected cell vertically" disabled>Unmerge V</button>
+            <label class="cpb-table-toolbar__color">Fill <input type="color" class="cpb-tool-color" data-table-action="cell-bg" value="#ffffff" title="Cell background" disabled></label>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-bg-clear" title="Clear cell fill" disabled>Clear fill</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="copy-cells" title="Copy selected cell text" disabled>Copy cell</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="paste-cells" title="Paste copied cell text" disabled>Paste cell</button>
           </div>
         </div>
         </div>

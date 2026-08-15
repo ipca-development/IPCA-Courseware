@@ -357,10 +357,23 @@ test('enabled creates #cpbProjection alongside unchanged #cpbCanvas and source s
 test('table controls stay in the second toolbar row and replace floating tools', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
+    await page.setViewportSize({ width: 1180, height: 900 });
     const toolbar = page.locator('#cpbTableToolbar');
     await toolbar.waitFor();
     assert.equal(await toolbar.isVisible(), true);
     assert.equal(await page.locator('#cpbCanvas .cpb-table-tools').count(), 0);
+    const toolbarLayout = await page.locator('#cpbToolbarMain').evaluate((main) => ({
+      rows: main.querySelectorAll('.cpb-toolbar-row').length,
+      overflow: Array.from(main.querySelectorAll('.cpb-toolbar-row')).map((row) =>
+        Math.max(0, row.scrollWidth - row.clientWidth)
+      ),
+      tableLines: new Set(Array.from(
+        main.querySelectorAll('[data-table-action]')
+      ).map((control) => control.closest('.cpb-toolbar-row'))).size,
+    }));
+    assert.equal(toolbarLayout.rows, 5);
+    assert.equal(toolbarLayout.tableLines, 3);
+    assert.deepEqual(toolbarLayout.overflow, [0, 0, 0, 0, 0]);
     assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isDisabled(), true);
 
     await page.locator('#cpbCanvas [data-block-id="3"] tbody tr:first-child td:first-child').click();
