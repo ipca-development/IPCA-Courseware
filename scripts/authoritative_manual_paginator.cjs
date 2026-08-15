@@ -150,7 +150,10 @@ async function main() {
           .reader-page-body:not(.reader-page-cover){overflow:hidden}
           .reader-page-header-measurement .cpb-page-header-logo,
           .reader-page-header-region .cpb-page-header-logo{
-            max-height:${headerLogoMaxHeight}px!important
+            max-width:85%!important;max-height:${headerLogoMaxHeight}px!important
+          }
+          .reader-page-header-region>.cpb-page-header>.cpb-page-header-table{
+            height:100%!important;max-height:100%;table-layout:fixed
           }
           .reader-page-header-region>.cpb-page-header,
           .reader-page-footer-region>.cpb-page-footer{
