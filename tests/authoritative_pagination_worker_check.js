@@ -1369,6 +1369,37 @@ cases.push(["AU. complete Part 0 golden publication remains structurally correct
   });
 }]);
 
+cases.push(["AV. every generated definition row renders and paginates", () => {
+  const rows = Array.from({ length: 24 }, (_, index) =>
+    `<div class="cpb-part0-def-row" data-row="${index}" style="min-height:60px">`
+    + `<strong>Defined term ${index + 1}</strong><span>Unique definition ${index + 1}</span></div>`
+  ).join("");
+  const source = sourceWith([
+    section(108, "definitions", "0.6 Definitions and Terms", {
+      is_part0: true,
+      force_page_break_before: true,
+      pagination_authority: "generated"
+    }, [
+      unit("definitions-all-rows", "generated",
+        `<div class="cpb-part0">${rows}</div>`,
+        { force_break_before: true, pagination_authority: "generated" })
+    ], { pagination_authority: "generated" })
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.validation.is_valid, true);
+  assert.ok(result.pages.length > 1, "definition rows did not continue onto another page");
+  const html = result.pages.map((page) => page.page_html).join("");
+  assert.strictEqual((html.match(/cpb-part0-def-row/g) || []).length, 24);
+  for (let index = 1; index <= 24; index++) {
+    assert.strictEqual(
+      (html.match(new RegExp(`Unique definition ${index}(?!\\d)`, "g")) || []).length,
+      1,
+      `definition ${index} was missing or duplicated`
+    );
+  }
+}]);
+
 let failed = 0;
 for (const [name, run] of cases) {
   try {

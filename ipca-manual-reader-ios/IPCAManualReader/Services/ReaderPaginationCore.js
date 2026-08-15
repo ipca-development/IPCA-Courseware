@@ -1202,7 +1202,10 @@
     existing.forEach((node) => node.remove());
     values.forEach((value) => {
       const sourceRoot = contentRootFromHTML(value.html);
-      sourceRoot.querySelectorAll(selector).forEach((node) => {
+      const sourceItems = sourceRoot.matches(selector)
+        ? [sourceRoot]
+        : Array.from(sourceRoot.querySelectorAll(selector));
+      sourceItems.forEach((node) => {
         const clone = node.cloneNode(true);
         annotateCoverage(clone, value);
         parent.appendChild(clone);
