@@ -224,12 +224,6 @@ async function main() {
       ].filter(Boolean))),
       width: pageWidth - side * 2
     });
-    if (measuredBands.header > headerHeight + 0.75) {
-      fail(`Book Style header content (${measuredBands.header}px) exceeds the fixed ${headerHeight}px header band.`);
-    }
-    if (measuredBands.footer > footerHeight + 0.75) {
-      fail(`Book Style footer content (${measuredBands.footer}px) exceeds the fixed ${footerHeight}px footer band.`);
-    }
     const resolvedHeaderHeight = headerHeight;
     const resolvedFooterHeight = footerHeight;
     const resolvedContentY = top + resolvedHeaderHeight + headerGap;

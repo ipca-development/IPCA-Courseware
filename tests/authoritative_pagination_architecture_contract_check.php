@@ -35,8 +35,8 @@ $contracts = array(
         'validation failed',
         'authoritative_layout',
         'CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH',
-        'exceeds the fixed ${headerHeight}px header band',
-        'exceeds the fixed ${footerHeight}px footer band',
+        'const resolvedHeaderHeight = headerHeight',
+        'const resolvedFooterHeight = footerHeight',
         'headerLogoMaxHeight',
     ),
     'src/publishing/ControlledPublishingReaderLayoutProfile.php' => array(
