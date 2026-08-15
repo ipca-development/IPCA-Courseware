@@ -155,6 +155,9 @@ async function main() {
           .reader-page-header-region>.cpb-page-header>.cpb-page-header-table{
             height:100%!important;max-height:100%;table-layout:fixed
           }
+          .reader-page-header-region .cpb-page-header-table td{
+            padding-top:4px!important;padding-bottom:4px!important;line-height:1.2!important
+          }
           .reader-page-header-region>.cpb-page-header,
           .reader-page-footer-region>.cpb-page-footer{
             position:static!important;inset:auto!important;width:100%!important;

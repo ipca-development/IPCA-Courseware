@@ -126,6 +126,7 @@ final class ControlledPublishingBookStyleManifestService
         $rules[] = '.reader-page-header-region>.cpb-page-header,.reader-page-footer-region>.cpb-page-footer{position:static;inset:auto;width:100%;height:100%;margin:0;box-sizing:border-box;}';
         $rules[] = '.reader-page-header-region .cpb-page-header-logo{max-width:85%!important;max-height:64px!important;}';
         $rules[] = '.reader-page-header-region>.cpb-page-header>.cpb-page-header-table{height:100%!important;max-height:100%;table-layout:fixed;}';
+        $rules[] = '.reader-page-header-region .cpb-page-header-table td{padding-top:4px!important;padding-bottom:4px!important;line-height:1.2!important;}';
 
         foreach ($paragraphs as $key => $style) {
             if (!is_array($style)) {
