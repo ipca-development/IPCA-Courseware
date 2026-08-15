@@ -5090,6 +5090,18 @@
     };
   }
 
+  function mergedTableStyle(base, override) {
+    var merged = JSON.parse(JSON.stringify(base || defaultTableStyleDef()));
+    override = override && typeof override === 'object' ? override : {};
+    ['border_width', 'border_color', 'cell_bg'].forEach(function (field) {
+      if (override[field] !== undefined) merged[field] = override[field];
+    });
+    ['title_row', 'header_row', 'body_row'].forEach(function (rowKey) {
+      merged[rowKey] = Object.assign({}, merged[rowKey] || {}, override[rowKey] || {});
+    });
+    return merged;
+  }
+
   function paragraphStyleDef(styleKey) {
     var styles = state.bookStyles || defaultBookStyles();
     styleKey = canonicalParagraphStyleKey(styleKey || 'body') || 'body';
@@ -8531,10 +8543,29 @@
 
   function openStyleEditor() {
     var styles = JSON.parse(JSON.stringify(state.bookStyles || defaultBookStyles()));
+    var localTablePage = state.isLepSection
+      ? state.lepPage
+      : (
+          state.part0Structured
+          && (state.part0SectionKey === 'amendment_list' || state.part0SectionKey === 'distribution_list')
+            ? state.part0Page
+            : null
+        );
+    var localTableOnly = !!localTablePage;
+    if (localTableOnly) {
+      styles.table_styles.standard = mergedTableStyle(
+        styles.table_styles.standard || defaultTableStyleDef(),
+        localTablePage.table_style || {}
+      );
+    }
     var overlay = document.createElement('div');
     overlay.className = 'cpb-style-overlay';
-    var styleEditorTitle = documentType === 'form' ? 'Form Style Editor' : 'Book style editor';
-    var styleSavedStatus = documentType === 'form' ? 'Form styles saved' : 'Book styles saved';
+    var styleEditorTitle = localTableOnly
+      ? 'Page table style'
+      : (documentType === 'form' ? 'Form Style Editor' : 'Book style editor');
+    var styleSavedStatus = localTableOnly
+      ? 'Page table style saved'
+      : (documentType === 'form' ? 'Form styles saved' : 'Book styles saved');
 
     var paragraphRows = PARAGRAPH_STYLE_KEYS.map(function (key) {
       var def = styles.paragraph_styles[key] || {};
@@ -8571,6 +8602,11 @@
           + '<input class="cpb-style-input cpb-style-input--num" type="number" min="8" max="32" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.font_size" value="' + (row.font_size || 10) + '">'
           + '<input class="cpb-style-input cpb-style-input--color" type="color" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.color" value="' + escapeAttr(row.color || '#0f172a') + '">'
           + '<input class="cpb-style-input cpb-style-input--color" type="color" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.bg" value="' + escapeAttr(row.bg || '#ffffff') + '" title="Background">'
+          + '<span class="cpb-style-format">'
+          + '<label title="Bold"><input type="checkbox" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.font_bold"' + (row.font_bold ? ' checked' : '') + '>B</label>'
+          + '<label title="Italic"><input type="checkbox" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.font_italic"' + (row.font_italic ? ' checked' : '') + '>I</label>'
+          + '<label title="Underline"><input type="checkbox" data-table-kind="' + kind + '" data-table-field="' + rowKey + '.font_underline"' + (row.font_underline ? ' checked' : '') + '>U</label>'
+          + '</span>'
           + '</div>';
       }
       return ''
@@ -8618,8 +8654,19 @@
         + '</div></section>';
     }
 
-    overlay.innerHTML = ''
-      + '<div class="cpb-style-dialog" role="dialog" aria-label="' + escapeAttr(styleEditorTitle) + '">'
+    if (localTableOnly) {
+      overlay.innerHTML = ''
+        + '<div class="cpb-style-dialog" role="dialog" aria-label="' + escapeAttr(styleEditorTitle) + '">'
+        + '<h3>' + escapeHtml(styleEditorTitle) + '</h3>'
+        + '<p class="cpb-style-lead">These settings apply only to the table on this Part 0 page.</p>'
+        + tableSection('standard', 'Table appearance')
+        + '<div class="cpb-style-dialog-actions">'
+        + '<button type="button" class="cpb-style-cancel">Cancel</button>'
+        + '<button type="button" class="cpb-style-save">Save table style</button>'
+        + '</div></div>';
+    } else {
+      overlay.innerHTML = ''
+        + '<div class="cpb-style-dialog" role="dialog" aria-label="' + escapeAttr(styleEditorTitle) + '">'
       + '<h3>' + escapeHtml(styleEditorTitle) + '</h3>'
       + '<p class="cpb-style-lead">Paragraph styles drive the Table of Contents and automatic section numbering '
       + '(Title 1. · Subtitle 1 1.1 · Subtitle 2 1.1.1 · …). '
@@ -8647,7 +8694,8 @@
       + '<div class="cpb-style-dialog-actions">'
       + '<button type="button" class="cpb-style-cancel">Cancel</button>'
       + '<button type="button" class="cpb-style-save">Save styles</button>'
-      + '</div></div>';
+        + '</div></div>';
+    }
 
     function readStylesFromDialog() {
       var next = defaultBookStyles();
@@ -8676,7 +8724,9 @@
           if (!field) return;
           if (field.indexOf('.') > -1) {
             var parts = field.split('.');
-            base[parts[0]][parts[1]] = input.value;
+            base[parts[0]][parts[1]] = input.type === 'checkbox'
+              ? !!input.checked
+              : (parts[1] === 'font_size' ? (parseInt(input.value, 10) || 10) : input.value);
           } else {
             base[field] = input.value;
           }
@@ -8749,6 +8799,39 @@
     }
     overlay.querySelector('.cpb-style-save').addEventListener('click', function () {
       var payload = readStylesFromDialog();
+      if (localTableOnly) {
+        var tableStyle = payload.table_styles.standard;
+        var request;
+        if (state.isLepSection) {
+          var lepPage = extractLepPageFromCanvas();
+          lepPage.table_style = tableStyle;
+          request = apiPost('save_lep_page', {
+            version_id: state.versionId,
+            lep_page: lepPage,
+          }).then(function (res) {
+            if (!res.ok) throw new Error(res.error || 'Table style save failed');
+            state.lepPage = res.lep_page || lepPage;
+          });
+        } else {
+          var part0Page = extractPart0PageFromCanvas();
+          part0Page.table_style = tableStyle;
+          request = apiPost('save_part0_page', {
+            version_id: state.versionId,
+            section_key: state.part0SectionKey,
+            part0_page: part0Page,
+            headings: extractPart0HeadingsFromCanvas(),
+          }).then(function (res) {
+            if (!res.ok) throw new Error(res.error || 'Table style save failed');
+            state.part0Page = res.part0_page || part0Page;
+          });
+        }
+        request.then(function () {
+          close();
+          setStatus(styleSavedStatus, 'saved');
+          return loadSection(state.sectionId);
+        }).catch(showError);
+        return;
+      }
       apiPost('save_book_styles', { version_id: state.versionId, book_styles: payload })
         .then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Save failed');

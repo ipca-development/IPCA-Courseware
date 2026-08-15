@@ -3192,7 +3192,7 @@ ol.cpb-list > li[data-indent-level="8"] {
 
 .cpb-style-table-row {
   display: grid;
-  grid-template-columns: 90px 100px 56px 44px 44px;
+  grid-template-columns: 90px 100px 56px 44px 44px minmax(120px, auto);
   gap: 8px;
   align-items: center;
   margin-bottom: 6px;

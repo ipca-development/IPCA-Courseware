@@ -25,9 +25,18 @@ $amendment = $renderer->renderAmendmentListContent(array(
     )),
     'empty_rows' => 0,
     'column_widths' => array(10, 30, 15, 15, 15, 15),
+    'table_style' => array(
+        'border_width' => 'thick',
+        'border_color' => '#123456',
+        'header_row' => array('bg' => '#112233', 'color' => '#ffffff'),
+        'body_row' => array('bg' => '#f0f0f0', 'color' => '#101010'),
+    ),
 ), true);
 part0_assert(substr_count($amendment, 'data-part0-column-resize="1"') === 6, 'Amendment columns are not resizable.');
 part0_assert(str_contains($amendment, '<col style="width:30%">'), 'Saved amendment widths are not rendered.');
+part0_assert(str_contains($amendment, 'cpb-table-border-thick'), 'Page-specific table border is not rendered.');
+part0_assert(str_contains($amendment, '--cpb-table-border-color:#123456'), 'Page-specific border color is not rendered.');
+part0_assert(str_contains($amendment, 'data-cell-bg="#112233"'), 'Page-specific header style is not rendered.');
 
 $distribution = $renderer->renderDistributionListContent(array(
     'rows' => array(array('copy_nr' => '1', 'issue_to' => 'Authority')),

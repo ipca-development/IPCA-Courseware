@@ -464,7 +464,7 @@ final class ControlledPublishingLepService
             );
         }
 
-        return array(
+        $out = array(
             'certification_text' => $this->truncate(trim((string)($raw['certification_text'] ?? $defaults['certification_text'])), 2000),
             'on_behalf_text' => $this->truncate(trim((string)($raw['on_behalf_text'] ?? $defaults['on_behalf_text'])), 500),
             'table_title' => $this->truncate(trim((string)($raw['table_title'] ?? $defaults['table_title'])), 200),
@@ -481,6 +481,10 @@ final class ControlledPublishingLepService
             'signatories' => $normalizedSignatories,
             'effective_parts' => $normalizedParts,
         );
+        if (is_array($raw['table_style'] ?? null)) {
+            $out['table_style'] = $this->normalizeTableStyleOverride($raw['table_style']);
+        }
+        return $out;
     }
 
     /**
@@ -504,6 +508,47 @@ final class ControlledPublishingLepService
         return array_map(
             static fn(float $width): float => round(($width / $total) * 100, 3),
             $widths
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $raw
+     * @return array<string,mixed>
+     */
+    private function normalizeTableStyleOverride(array $raw): array
+    {
+        $color = static function (mixed $value, string $fallback): string {
+            $value = strtolower(trim((string)$value));
+            return preg_match('/^#[0-9a-f]{6}$/', $value) === 1 ? $value : $fallback;
+        };
+        $row = static function (mixed $value, array $defaults) use ($color): array {
+            $value = is_array($value) ? $value : array();
+            $font = strtolower(trim((string)($value['font_family'] ?? $defaults['font_family'])));
+            if (!in_array($font, array('serif', 'sans', 'mono', 'arial'), true)) {
+                $font = $defaults['font_family'];
+            }
+            return array(
+                'font_family' => $font,
+                'font_size' => max(8, min(32, (int)($value['font_size'] ?? $defaults['font_size']))),
+                'color' => $color($value['color'] ?? null, $defaults['color']),
+                'bg' => $color($value['bg'] ?? null, $defaults['bg']),
+                'font_bold' => filter_var($value['font_bold'] ?? $defaults['font_bold'], FILTER_VALIDATE_BOOL),
+                'font_italic' => filter_var($value['font_italic'] ?? $defaults['font_italic'], FILTER_VALIDATE_BOOL),
+                'font_underline' => filter_var($value['font_underline'] ?? $defaults['font_underline'], FILTER_VALIDATE_BOOL),
+            );
+        };
+        $headerDefaults = array('font_family' => 'sans', 'font_size' => 10, 'color' => '#0f172a', 'bg' => '#f1f5f9', 'font_bold' => true, 'font_italic' => false, 'font_underline' => false);
+        $bodyDefaults = array('font_family' => 'sans', 'font_size' => 10, 'color' => '#0f172a', 'bg' => '#ffffff', 'font_bold' => false, 'font_italic' => false, 'font_underline' => false);
+        $borderWidth = strtolower(trim((string)($raw['border_width'] ?? 'thin')));
+        if (!in_array($borderWidth, array('none', 'thin', 'medium', 'thick'), true)) {
+            $borderWidth = 'thin';
+        }
+        return array(
+            'border_width' => $borderWidth,
+            'border_color' => $color($raw['border_color'] ?? null, '#94a3b8'),
+            'cell_bg' => $color($raw['cell_bg'] ?? null, '#ffffff'),
+            'header_row' => $row($raw['header_row'] ?? null, $headerDefaults),
+            'body_row' => $row($raw['body_row'] ?? null, $bodyDefaults),
         );
     }
 

@@ -568,7 +568,7 @@ final class ControlledPublishingBookRenderer
     {
         $rows = is_array($page['rows'] ?? null) ? $page['rows'] : array();
         $emptyRows = max(0, min(30, (int)($page['empty_rows'] ?? 8)));
-        $tableStyle = $this->resolveStandardTableStyle();
+        $tableStyle = $this->resolvePageTableStyle($page);
         $headerRow = $tableStyle['header_row'];
         $bodyRow = $tableStyle['body_row'];
         $headerVisual = $this->tableRowVisualAttr($headerRow, 'center');
@@ -631,7 +631,7 @@ final class ControlledPublishingBookRenderer
     {
         $rows = is_array($page['rows'] ?? null) ? $page['rows'] : array();
         $emptyRows = max(0, min(30, (int)($page['empty_rows'] ?? 10)));
-        $tableStyle = $this->resolveStandardTableStyle();
+        $tableStyle = $this->resolvePageTableStyle($page);
         $headerRow = $tableStyle['header_row'];
         $bodyRow = $tableStyle['body_row'];
         $headerVisual = $this->tableRowVisualAttr($headerRow, 'center');
@@ -918,6 +918,30 @@ final class ControlledPublishingBookRenderer
     }
 
     /**
+     * @param array<string,mixed> $page
+     * @return array<string,mixed>
+     */
+    private function resolvePageTableStyle(array $page): array
+    {
+        $style = $this->resolveStandardTableStyle();
+        $override = is_array($page['table_style'] ?? null) ? $page['table_style'] : array();
+        foreach (array('border_width', 'border_color', 'cell_bg') as $field) {
+            if (array_key_exists($field, $override)) {
+                $style[$field] = $override[$field];
+            }
+        }
+        foreach (array('title_row', 'header_row', 'body_row') as $rowKey) {
+            if (is_array($override[$rowKey] ?? null)) {
+                $style[$rowKey] = array_merge(
+                    is_array($style[$rowKey] ?? null) ? $style[$rowKey] : array(),
+                    $override[$rowKey]
+                );
+            }
+        }
+        return $style;
+    }
+
+    /**
      * @param array<string,mixed> $rowStyle
      */
     private function tableRowVisualAttr(array $rowStyle, string $align = 'center', string $bgOverride = ''): string
@@ -1032,7 +1056,7 @@ final class ControlledPublishingBookRenderer
     {
         $parts = is_array($lep['effective_parts'] ?? null) ? $lep['effective_parts'] : array();
         $emptyRows = $editable ? max(0, min(20, (int)($lep['empty_rows'] ?? 10))) : 0;
-        $tableStyle = $this->resolveStandardTableStyle();
+        $tableStyle = $this->resolvePageTableStyle($lep);
         $headerRow = $tableStyle['header_row'];
         $bodyRow = $tableStyle['body_row'];
         $headerVisual = $this->tableRowVisualAttr($headerRow, 'center');

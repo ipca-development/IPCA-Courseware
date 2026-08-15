@@ -1494,6 +1494,9 @@ function cp_editor_handle_save_lep_page(
     if (is_array($lepIn['column_widths'] ?? null)) {
         $payload['column_widths'] = $lepIn['column_widths'];
     }
+    if (is_array($lepIn['table_style'] ?? null)) {
+        $payload['table_style'] = $lepIn['table_style'];
+    }
     if (is_array($lepIn['signatories'] ?? null)) {
         $payload['signatories'] = $lepIn['signatories'];
     }
