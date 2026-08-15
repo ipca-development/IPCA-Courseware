@@ -122,14 +122,15 @@ part0_assert(substr_count($revisionHtml, $revisionTitle) === 1, 'Matching author
 part0_assert(str_contains($revisionHtml, 'Revision body.'), 'Part 0 body content was removed with its duplicate title.');
 
 $editorJs = file_get_contents(__DIR__ . '/../public/assets/controlled_book_editor.js') ?: '';
+$editorMarkup = file_get_contents(__DIR__ . '/../public/admin/compliance/controlled_book_editor.php') ?: '';
 part0_assert(str_contains($editorJs, 'extractTableColumnWidths'), 'Editor does not persist structured table widths.');
 part0_assert(str_contains($editorJs, 'data-part0-column-resize'), 'Editor does not handle structured table resizing.');
 part0_assert(
-    substr_count($editorJs, '>Table Editor</button>') >= 2
-        && str_contains($editorJs, "styleEditorTitle = localTableOnly"),
-    'Page-specific Table Editor controls are missing.'
+    !str_contains($editorJs, '>Table Editor</button>')
+        && str_contains($editorMarkup, 'id="cpbTableToolbar"'),
+    'Structured tables still depend on a modal instead of the main table toolbar.'
 );
-part0_assert(str_contains($editorJs, 'ensureStructuredTableEditor'), 'Cell-click Table Editor wiring is missing.');
+part0_assert(str_contains($editorJs, 'ensureStructuredTableEditor'), 'Structured table toolbar wiring is missing.');
 part0_assert(str_contains($editorJs, 'handleStructuredTableAction'), 'Structured row operations are missing.');
 
 $editorCss = file_get_contents(__DIR__ . '/../public/assets/controlled_book_editor.css') ?: '';

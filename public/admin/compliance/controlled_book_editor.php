@@ -203,6 +203,45 @@ compliance_page_open(array(
             <option value="annex_refs_all">Annex (all)</option>
           </select>
         </div>
+        <div class="cpb-table-toolbar" id="cpbTableToolbar" aria-label="Table editing controls">
+          <div class="cpb-toolbar-group" aria-label="Table">
+            <span class="cpb-toolbar-table-label">Table</span>
+            <button type="button" class="cpb-tool-btn" data-table-action="table-align-left" title="Align table left" disabled>Left</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="table-align-center" title="Align table center" disabled>Center</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="table-align-right" title="Align table right" disabled>Right</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="toggle-title" title="Add or remove table title row" disabled>Title row</button>
+            <button type="button" class="cpb-tool-btn cpb-tool-btn--danger" data-table-action="delete-table" title="Delete table" disabled>Delete table</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="copy-table" title="Copy entire table" disabled>Copy table</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="paste-table" title="Paste copied table below the selected table" disabled>Paste table</button>
+          </div>
+          <div class="cpb-toolbar-group" aria-label="Rows and columns">
+            <button type="button" class="cpb-tool-btn" data-table-action="move-row-up" title="Move selected row up" disabled>↑ Row</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="move-row-down" title="Move selected row down" disabled>↓ Row</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="add-row" title="Add row at bottom" disabled>+ Row</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="del-row" title="Delete selected row" disabled>− Row</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="add-col" title="Add column at right" disabled>+ Col</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="del-col" title="Remove rightmost column" disabled>− Col</button>
+          </div>
+          <div class="cpb-toolbar-group" aria-label="Cells">
+            <button type="button" class="cpb-tool-btn" data-table-action="merge-cells-right" title="Merge selected cell horizontally" disabled>Merge H</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="unmerge-cells" title="Unmerge selected cell horizontally" disabled>Unmerge H</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="merge-cells-down" title="Merge selected cell vertically" disabled>Merge V</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="unmerge-cells-down" title="Unmerge selected cell vertically" disabled>Unmerge V</button>
+            <label class="cpb-table-toolbar__color">Fill <input type="color" class="cpb-tool-color" data-table-action="cell-bg" value="#ffffff" title="Cell background" disabled></label>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-bg-clear" title="Clear cell fill" disabled>Clear fill</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="copy-cells" title="Copy selected cell text" disabled>Copy cell</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="paste-cells" title="Paste copied cell text" disabled>Paste cell</button>
+          </div>
+          <div class="cpb-toolbar-group" aria-label="Borders and formulas">
+            <button type="button" class="cpb-tool-btn" data-table-action="border-thin" title="Thin table border" disabled>─</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="border-medium" title="Medium table border" disabled>━</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="border-thick" title="Thick table border" disabled>▬</button>
+            <input type="color" class="cpb-tool-color" data-table-action="border-color" value="#94a3b8" title="Table border color" disabled>
+            <button type="button" class="cpb-tool-btn" data-table-action="formula-sum" title="Insert SUM formula" disabled>SUM</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="formula-avg" title="Insert AVG formula" disabled>AVG</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="formula-custom" title="Insert custom formula" disabled>fx</button>
+          </div>
+        </div>
         </div>
         </div>
         <div class="cpb-toolbar-toc" id="cpbToolbarToc" hidden aria-hidden="true"></div>

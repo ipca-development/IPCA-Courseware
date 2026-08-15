@@ -6,7 +6,7 @@ $failures = array();
 
 $protected = array(
     'src/publishing/ControlledPublishingBlockService.php'
-        => 'd63175aa9e0292b9137f27a38eeb913337e6af8ab5e6086cdf4207385474f265',
+        => '4561ff4a647e95f43b335bac28f750090bcc5f3a6bfa18b8b621e3a2ab002f51',
 );
 foreach ($protected as $relative => $hash) {
     if (!is_file($root . '/' . $relative) || hash_file('sha256', $root . '/' . $relative) !== $hash) {

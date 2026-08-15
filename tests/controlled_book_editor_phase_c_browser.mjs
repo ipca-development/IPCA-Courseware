@@ -24,6 +24,18 @@ const sourceBlocks = `
   <div class="cpb-block cpb-block--paragraph" data-block-id="2" data-block-type="paragraph" data-stable-anchor="paragraph-2">
     <div class="cpb-block-chrome" contenteditable="false"></div>
     <div class="cpb-paragraph-row"><div class="cpb-paragraph" contenteditable="true" data-field="html" data-paragraph-style="body">Second editable source block</div></div>
+  </div>
+  <div class="cpb-block cpb-block--table" data-block-id="3" data-block-type="table" data-stable-anchor="table-3">
+    <div class="cpb-block-chrome" contenteditable="false"></div>
+    <div class="cpb-table-block cpb-table-block--align-left" data-table-align="left" data-table-style-kind="standard">
+      <div class="cpb-table-wrap cpb-table-border-medium" data-border-width="medium" data-border-color="#94a3b8" style="width:280px;max-width:100%;--cpb-table-border-color:#94a3b8">
+        <table class="cpb-table" data-field="table" style="width:280px">
+          <colgroup><col style="width:140px"><col style="width:140px"></colgroup>
+          <thead><tr class="cpb-table-header-row"><th contenteditable="true"><span class="cpb-th-text">A</span></th><th contenteditable="true"><span class="cpb-th-text">B</span></th></tr></thead>
+          <tbody data-table-part="body"><tr><td contenteditable="true">A1</td><td contenteditable="true">B1</td></tr><tr><td contenteditable="true">A2</td><td contenteditable="true">B2</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </div>`;
 
 function storedPage(sectionId, pageNumber, marker, width = 640, height = 900) {
@@ -226,6 +238,14 @@ async function installMock(page, initialPreview = previewResult()) {
         return jsonResponse({ ok: true, section_page_index: {}, page_count: 1 });
       }
       if (action === 'update_block') return jsonResponse({ ok: true });
+      if (action === 'create_block' && payload.block_type === 'table') {
+        const holder = document.createElement('div');
+        holder.innerHTML = sourceBlocks;
+        const tableBlock = holder.querySelector('[data-block-type="table"]');
+        tableBlock.setAttribute('data-block-id', '100');
+        tableBlock.setAttribute('data-stable-anchor', 'table-100');
+        return jsonResponse({ ok: true, block_html: tableBlock.outerHTML });
+      }
       return jsonResponse({ ok: true });
     };
   }, { sourceBlocks, initialPreview });
@@ -328,6 +348,105 @@ test('enabled creates #cpbProjection alongside unchanged #cpbCanvas and source s
       sourceParent: 'cpbEditorStage',
       sourceText: 'Alpha beta gamma delta',
     });
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('table controls stay in the second toolbar row and replace floating tools', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    const toolbar = page.locator('#cpbTableToolbar');
+    await toolbar.waitFor();
+    assert.equal(await toolbar.isVisible(), true);
+    assert.equal(await page.locator('#cpbCanvas .cpb-table-tools').count(), 0);
+    assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isDisabled(), true);
+
+    await page.locator('#cpbCanvas [data-block-id="3"] tbody tr:first-child td:first-child').click();
+    assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isEnabled(), true);
+    await toolbar.locator('[data-table-action="table-align-center"]').click();
+    const alignment = await page.evaluate(() => ({
+      value: document.querySelector('#cpbCanvas [data-block-id="3"] .cpb-table-block')
+        .getAttribute('data-table-align'),
+      disabled: document.querySelector('#cpbTableToolbar [data-table-action="table-align-center"]').disabled,
+      activeElement: document.activeElement?.getAttribute('data-table-action') || document.activeElement?.tagName,
+      updates: window.__phaseC.requests.filter((request) => request.action === 'update_block'),
+    }));
+    assert.equal(alignment.value, 'center', JSON.stringify(alignment));
+
+    await toolbar.locator('[data-table-action="merge-cells-down"]').click();
+    const merged = await page.evaluate(() => {
+      const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
+      const first = block.querySelector('tbody tr:first-child td:first-child');
+      const covered = block.querySelector('tbody tr:nth-child(2) td:first-child');
+      const saves = window.__phaseC.requests.filter((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      );
+      return {
+        rowspan: first.rowSpan,
+        covered: covered.dataset.rowspanCovered,
+        payload: saves.at(-1)?.payload.payload,
+      };
+    });
+    assert.equal(merged.rowspan, 2);
+    assert.equal(merged.covered, '1');
+    assert.deepEqual(merged.payload.row_rowspans, [[2, 1], [0, 1]]);
+
+    await toolbar.locator('[data-table-action="copy-table"]').click();
+    await toolbar.locator('[data-table-action="paste-table"]').click();
+    await page.waitForFunction(() =>
+      document.querySelectorAll('#cpbCanvas [data-block-type="table"]').length === 2
+    );
+    const create = await page.evaluate(() =>
+      window.__phaseC.requests.find((request) =>
+        request.action === 'create_block' && request.payload.block_type === 'table'
+      )
+    );
+    assert.equal(create.payload.insert_after_block_id, 3);
+    assert.deepEqual(create.payload.payload.row_rowspans, [[2, 1], [0, 1]]);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('Enter caret stays on the new paragraph through layout and autosave', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    const field = page.locator('#cpbCanvas [data-block-id="1"] .cpb-paragraph');
+    await field.evaluate((element) => {
+      element.focus();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(1100);
+    const afterSave = await field.evaluate((element) => {
+      const selection = getSelection();
+      const node = selection.anchorNode;
+      return {
+        active: document.activeElement === element,
+        inField: !!node && (node === element || element.contains(node)),
+        html: element.innerHTML,
+      };
+    });
+    assert.equal(afterSave.active, true);
+    assert.equal(afterSave.inField, true);
+    await page.keyboard.type('New line');
+    await page.waitForTimeout(800);
+    assert.match(await field.innerText(), /New line$/);
+    const saved = await page.evaluate(() => {
+      const requests = window.__phaseC.requests.filter((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 1
+      );
+      return requests.at(-1)?.payload.payload.html || '';
+    });
+    assert.match(saved, /New line/);
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

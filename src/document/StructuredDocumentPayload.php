@@ -239,6 +239,7 @@ final class StructuredDocumentPayload
             'cell_text_color' => is_array($payload['cell_text_color'] ?? null) ? $payload['cell_text_color'] : array(),
             'header_colspans' => is_array($payload['header_colspans'] ?? null) ? $payload['header_colspans'] : array(),
             'row_colspans' => is_array($payload['row_colspans'] ?? null) ? $payload['row_colspans'] : array(),
+            'row_rowspans' => is_array($payload['row_rowspans'] ?? null) ? $payload['row_rowspans'] : array(),
             'has_title_row' => !empty($payload['has_title_row']),
             'has_header_row' => !array_key_exists('has_header_row', $payload)
                 || !empty($payload['has_header_row']),

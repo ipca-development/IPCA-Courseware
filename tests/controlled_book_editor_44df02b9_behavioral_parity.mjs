@@ -232,7 +232,9 @@ async function exerciseRow(page, row) {
       case 'toolbar.structure_and_order': {
         const style = (selector) => getComputedStyle(q(selector));
         return observe({
-          order: qa('#cpbToolbarMain button,#cpbToolbarMain select,#cpbToolbarMain input').map((e) => e.id || e.dataset.cmd || e.dataset.align || e.dataset.addBlock),
+          order: qa('#cpbToolbarMain button,#cpbToolbarMain select,#cpbToolbarMain input')
+            .filter((e) => !e.closest('#cpbTableToolbar'))
+            .map((e) => e.id || e.dataset.cmd || e.dataset.align || e.dataset.addBlock),
           rows: qa('#cpbToolbarMain > .cpb-toolbar-row').length,
           visibility: {
             main: style('#cpbToolbarMain').display,

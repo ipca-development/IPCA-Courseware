@@ -425,6 +425,40 @@ cases.push(["H/I. long table row-paginates with presentation-only headers", () =
   assertContentFragmentGeometry(result.pages, "block-table");
 }]);
 
+cases.push(["H2. vertically merged table rows stay in one pagination fragment", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "vertical-table", "Vertical table", {}, [
+      unit("lead", "paragraph",
+        '<article class="cpb-block" data-block-id="6" data-block-type="paragraph" data-stable-anchor="lead"><p style="min-height:620px">Lead content</p></article>',
+        { block_id: 6 }),
+      unit("vertical-table-block", "table",
+        '<article class="cpb-block" data-block-id="7" data-block-type="table" data-stable-anchor="vertical-table-block">'
+          + '<table class="cpb-table"><thead><tr><th>Item</th><th>Description</th></tr></thead><tbody>'
+          + '<tr style="height:100px"><td rowspan="2">Merged value</td><td>Upper value</td></tr>'
+          + '<tr style="height:100px"><td>Lower value</td></tr>'
+          + '<tr><td>Following row</td><td>After merge</td></tr>'
+          + '</tbody></table></article>',
+        { block_id: 7 }),
+    ]),
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  const mergedPages = result.pages.filter((page) =>
+    page.page_html.includes("Merged value")
+      || page.page_html.includes("Lower value")
+  );
+  assert.strictEqual(mergedPages.length, 1, "a vertical rowspan group must not split between pages");
+  assert.ok(
+    mergedPages[0].page_html.includes('rowspan="2"')
+      && mergedPages[0].page_html.includes("Upper value")
+      && mergedPages[0].page_html.includes("Lower value"),
+    "the complete vertically merged row group must render together"
+  );
+  const mergedCoverage = sourceCoverage(result).filter((item) =>
+    item.source_fragment_id.includes("/vertical-table-block/table-row-0")
+  );
+  assert.strictEqual(mergedCoverage.length, 1, "the rowspan group must have one source fragment");
+}]);
+
 cases.push(["long table continuation does not absorb following ordinary blocks", () => {
   const tableRows = Array.from({ length: 18 }, (_, index) =>
     `<tr><td>Row ${index + 1}</td><td>Controlled table row content</td></tr>`

@@ -19,6 +19,7 @@
   var toolbarTocEl = document.getElementById('cpbToolbarToc');
   var toolbarLepEl = document.getElementById('cpbToolbarLep');
   var toolbarPart0El = document.getElementById('cpbToolbarPart0');
+  var tableToolbarEl = document.getElementById('cpbTableToolbar');
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
   var imageInput = document.getElementById('cpbImageInput');
@@ -137,6 +138,7 @@
     canvasEventsWired: false,
     resizeHintEl: null,
     tableClipboard: '',
+    tableBlockClipboard: null,
     canvasZoom: 100,
     lastStyleTarget: null,
     activeOrderedList: null,
@@ -811,6 +813,7 @@
       field: field.getAttribute('data-field') || '',
       className: field.classList.length ? field.classList[0] : '',
       offset: prefix.toString().length,
+      domRange: range.cloneRange(),
     };
   }
 
@@ -823,11 +826,25 @@
       : null;
     if (!field && caret.className) field = block.querySelector('.' + caret.className);
     if (!field) return;
+    var selection = window.getSelection();
+    if (
+      caret.domRange
+      && caret.domRange.startContainer
+      && caret.domRange.startContainer.isConnected
+      && field.contains(
+        caret.domRange.startContainer.nodeType === Node.ELEMENT_NODE
+          ? caret.domRange.startContainer
+          : caret.domRange.startContainer.parentElement
+      )
+    ) {
+      selection.removeAllRanges();
+      selection.addRange(caret.domRange);
+      return;
+    }
     var boundary = textBoundary(field, caret.offset);
     var range = document.createRange();
     range.setStart(boundary.node, boundary.offset);
     range.collapse(true);
-    var selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
   }
@@ -2923,6 +2940,146 @@
     });
   }
 
+  function handleCanonicalTableAction(blockEl, action) {
+    if (!blockEl || !action || !state.editable) return;
+    if (action === 'delete-table') {
+      if (!confirm('Delete this entire table?')) return;
+      var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+      flushAllPendingSaves().then(function () {
+        return apiPost('delete_block', { version_id: state.versionId, block_id: blockId });
+      }).then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Delete failed');
+        clearPendingForBlock(blockId);
+        clearStyleTargetForBlock(blockEl);
+        closeTableTools();
+        blockEl.remove();
+        setStatus('Table deleted', 'saved');
+        markPaginationChanged();
+        return recomputeSectionNumbers();
+      }).catch(showError);
+      return;
+    }
+    if (action === 'copy-table') {
+      copyEntireTable(blockEl);
+      return;
+    }
+    if (action === 'paste-table') {
+      pasteEntireTable(blockEl);
+      return;
+    }
+    pushUndo();
+    if (action === 'add-row') tableAddRow(blockEl);
+    else if (action === 'del-row') {
+      if (!tableDelRow(blockEl)) return;
+    } else if (action === 'move-row-up') {
+      if (!tableMoveRow(blockEl, 'up')) return;
+    } else if (action === 'move-row-down') {
+      if (!tableMoveRow(blockEl, 'down')) return;
+    } else if (action === 'merge-cells-right') {
+      if (!tableMergeCellRight(blockEl)) return;
+    } else if (action === 'unmerge-cells') {
+      if (!tableUnmergeCell(blockEl)) return;
+    } else if (action === 'merge-cells-down') {
+      if (!tableMergeCellDown(blockEl)) return;
+    } else if (action === 'unmerge-cells-down') {
+      if (!tableUnmergeCellDown(blockEl)) return;
+    } else if (action === 'add-col') tableAddColumn(blockEl);
+    else if (action === 'del-col') tableDelColumn(blockEl);
+    else if (action === 'toggle-title') tableToggleTitle(blockEl);
+    else if (action === 'border-thin' || action === 'border-medium' || action === 'border-thick') {
+      applyTableBorderWidth(blockEl, action.replace('border-', ''));
+    } else if (action === 'cell-bg-clear') {
+      if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+        setStatus('Click a table cell first', 'error');
+        return;
+      }
+      getTableCellsForStyle({
+        block: blockEl,
+        el: state.focusedTableCell,
+        type: 'table-cell',
+      }).forEach(function (cell) {
+        applyTableCellBg(blockEl, cell, '');
+      });
+    } else if (action === 'copy-cells') {
+      copyTableCells(blockEl);
+      return;
+    } else if (action === 'paste-cells') {
+      pasteTableCells(blockEl);
+      return;
+    } else if (action === 'formula-sum') insertTableFormula(blockEl, 'SUM');
+    else if (action === 'formula-avg') insertTableFormula(blockEl, 'AVG');
+    else if (action === 'formula-custom') insertTableFormula(blockEl, 'CUSTOM');
+    else if (action === 'cell-align-left' || action === 'cell-align-center' || action === 'cell-align-right') {
+      var alignmentCell = resolveSelectedTableCell(blockEl);
+      if (!alignmentCell) return;
+      var cellAlign = action.replace('cell-align-', '');
+      getTableCellsForStyle({
+        block: blockEl,
+        el: alignmentCell,
+        type: 'table-cell',
+      }).forEach(function (cell) {
+        applyStyleToTableCell(cell, { align: cellAlign });
+      });
+    }
+    else if (action === 'table-align-left' || action === 'table-align-center' || action === 'table-align-right') {
+      applyTableBlockAlign(blockEl, action.replace('table-align-', ''));
+    }
+    wireTableResize(blockEl);
+    syncTableWidth(blockEl);
+    syncTableToolsContext(blockEl);
+    scheduleSave(blockEl);
+    flushSave(blockEl);
+  }
+
+  function wireTableToolbar() {
+    if (!tableToolbarEl || tableToolbarEl.getAttribute('data-wired') === '1') return;
+    tableToolbarEl.setAttribute('data-wired', '1');
+    tableToolbarEl.addEventListener('mousedown', function (event) {
+      if (event.target.closest('button[data-table-action]')) event.preventDefault();
+    });
+    tableToolbarEl.addEventListener('click', function (event) {
+      var control = event.target.closest('button[data-table-action]');
+      if (!control || control.disabled || !state.editable) return;
+      event.preventDefault();
+      var blockEl = state.activeTableToolsBlock;
+      if (!blockEl || !isConnectedEl(blockEl)) {
+        syncTableToolsContext(null);
+        return;
+      }
+      var action = control.getAttribute('data-table-action') || '';
+      if (blockEl.getAttribute('data-structured-table-editor') === '1') {
+        handleStructuredTableAction(blockEl, action);
+      } else {
+        handleCanonicalTableAction(blockEl, action);
+      }
+    });
+    tableToolbarEl.addEventListener('input', function (event) {
+      var input = event.target.closest('input[data-table-action]');
+      var blockEl = state.activeTableToolsBlock;
+      if (!input || input.disabled || !blockEl || !isConnectedEl(blockEl)) return;
+      if (blockEl.getAttribute('data-structured-table-editor') === '1') return;
+      var action = input.getAttribute('data-table-action') || '';
+      pushUndo();
+      if (action === 'border-color') {
+        applyTableBorderColor(blockEl, input.value);
+      } else if (action === 'cell-bg') {
+        var selectedCell = resolveSelectedTableCell(blockEl);
+        if (!selectedCell) return;
+        getTableCellsForStyle({
+          block: blockEl,
+          el: selectedCell,
+          type: 'table-cell',
+        }).forEach(function (cell) {
+          applyTableCellBg(blockEl, cell, input.value);
+        });
+      }
+      scheduleSave(blockEl);
+      flushSave(blockEl);
+      syncTableToolsContext(blockEl);
+    });
+    syncTableToolsContext(null);
+  }
+
   function initCanvasEvents() {
     if (state.canvasEventsWired) return;
     state.canvasEventsWired = true;
@@ -3004,6 +3161,7 @@
     document.addEventListener('pointerdown', function (e) {
       var activeBlock = state.activeTableToolsBlock;
       if (!activeBlock || !isConnectedEl(activeBlock)) return;
+      if (tableToolbarEl && tableToolbarEl.contains(e.target)) return;
       if (!activeBlock.contains(e.target)) closeTableTools();
     }, true);
 
@@ -3042,75 +3200,7 @@
         handleStructuredTableAction(blockEl, action);
         return;
       }
-      if (action === 'delete-table') {
-        if (!confirm('Delete this entire table?')) return;
-        var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
-        flushAllPendingSaves().then(function () {
-          return apiPost('delete_block', { version_id: state.versionId, block_id: blockId });
-        }).then(function (res) {
-          if (!res.ok) throw new Error(res.error || 'Delete failed');
-          clearPendingForBlock(blockId);
-          clearStyleTargetForBlock(blockEl);
-          if (state.activeTableToolsBlock === blockEl) closeTableTools();
-          blockEl.remove();
-          setStatus('Table deleted', 'saved');
-          return recomputeSectionNumbers();
-        }).catch(showError);
-        return;
-      }
-      pushUndo();
-      if (action === 'add-row') tableAddRow(blockEl);
-      else if (action === 'del-row') {
-        if (!tableDelRow(blockEl)) return;
-      } else if (action === 'move-row-up') {
-        if (!tableMoveRow(blockEl, 'up')) return;
-      } else if (action === 'move-row-down') {
-        if (!tableMoveRow(blockEl, 'down')) return;
-      } else if (action === 'merge-cells-right') {
-        if (!tableMergeCellRight(blockEl)) return;
-      } else if (action === 'unmerge-cells') {
-        if (!tableUnmergeCell(blockEl)) return;
-      } else if (action === 'add-col') tableAddColumn(blockEl);
-      else if (action === 'del-col') tableDelColumn(blockEl);
-      else if (action === 'toggle-title') tableToggleTitle(blockEl);
-      else if (action === 'border-thin' || action === 'border-medium' || action === 'border-thick') {
-        applyTableBorderWidth(blockEl, action.replace('border-', ''));
-      } else if (action === 'cell-bg-clear') {
-        if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
-          setStatus('Click a table cell first', 'error');
-          return;
-        }
-        getTableCellsForStyle({
-          block: blockEl,
-          el: state.focusedTableCell,
-          type: 'table-cell',
-        }).forEach(function (cell) {
-          applyTableCellBg(blockEl, cell, '');
-        });
-      } else if (action === 'copy-cells') copyTableCells(blockEl);
-      else if (action === 'paste-cells') pasteTableCells(blockEl);
-      else if (action === 'formula-sum') insertTableFormula(blockEl, 'SUM');
-      else if (action === 'formula-avg') insertTableFormula(blockEl, 'AVG');
-      else if (action === 'formula-custom') insertTableFormula(blockEl, 'CUSTOM');
-      else if (action === 'cell-align-left' || action === 'cell-align-center' || action === 'cell-align-right') {
-        var alignmentCell = resolveSelectedTableCell(blockEl);
-        if (!alignmentCell) return;
-        var cellAlign = action.replace('cell-align-', '');
-        getTableCellsForStyle({
-          block: blockEl,
-          el: alignmentCell,
-          type: 'table-cell',
-        }).forEach(function (cell) {
-          applyStyleToTableCell(cell, { align: cellAlign });
-        });
-      } else if (action === 'table-align-left' || action === 'table-align-center' || action === 'table-align-right') {
-        applyTableBlockAlign(blockEl, action.replace('table-align-', ''));
-      }
-      wireTableResize(blockEl);
-      syncTableToolsContext(blockEl);
-      positionTableTools(blockEl, state.activeTableToolsAnchor);
-      scheduleSave(blockEl);
-      flushSave(blockEl);
+      handleCanonicalTableAction(blockEl, action);
     });
 
     canvasEl.addEventListener('input', function (e) {
@@ -4156,7 +4246,6 @@
         + '<div class="cpb-toolbar-group">'
         + '<button type="button" class="cpb-tool-btn cpb-lep-regenerate" title="Regenerate effective parts from manual structure">Regenerate parts</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepSave" title="Save LEP text and signatory details">Save</button>'
-        + '<button type="button" class="cpb-tool-btn" id="cpbLepOpenStyles" title="Edit this table layout and appearance">Table Editor</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepOpenHeader" title="Page header editor">Header</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepApprovalLink" title="Open authority approval page">Approval page</button>'
         + '</div>';
@@ -4175,7 +4264,6 @@
       toolbarLepEl.querySelector('#cpbLepOpenHeader').addEventListener('click', function () {
         openHeaderEditor();
       });
-      toolbarLepEl.querySelector('#cpbLepOpenStyles').addEventListener('click', openStyleEditor);
       toolbarLepEl.querySelector('#cpbLepApprovalLink').addEventListener('click', function () {
         openLepApprovalPage();
       });
@@ -4341,7 +4429,6 @@
         + regenBtn
         + importBtn
         + '<button type="button" class="cpb-tool-btn" id="cpbPart0Save" title="Save page">Save</button>'
-        + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenStyles" title="Edit this table layout and appearance">Table Editor</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenHeader" title="Page header editor">Header</button>'
         + '</div>';
       toolbarPart0El.setAttribute('data-part0-wired', '1');
@@ -4362,7 +4449,6 @@
       toolbarPart0El.querySelector('#cpbPart0OpenHeader').addEventListener('click', function () {
         openHeaderEditor();
       });
-      toolbarPart0El.querySelector('#cpbPart0OpenStyles').addEventListener('click', openStyleEditor);
       wireDefinitionsImportButton();
     } else {
       var labelEl = toolbarPart0El.querySelector('[data-part0-toolbar-label="1"]');
@@ -5789,34 +5875,6 @@
   function ensureStructuredTableEditor(container) {
     if (!container || container.getAttribute('data-structured-table-editor') === '1') return;
     container.setAttribute('data-structured-table-editor', '1');
-    var tools = document.createElement('div');
-    tools.className = 'cpb-table-tools cpb-table-tools--structured';
-    tools.setAttribute('contenteditable', 'false');
-    tools.setAttribute('role', 'dialog');
-    tools.setAttribute('aria-label', 'Table Editor');
-    tools.setAttribute('aria-hidden', 'true');
-    tools.innerHTML = ''
-      + '<div class="cpb-table-tools__header">'
-      + '<div><strong>Table Editor</strong><span class="cpb-table-tools__selection">Table selected</span></div>'
-      + '<button type="button" class="cpb-table-tools__close" data-table-tools-close aria-label="Close Table Editor">×</button>'
-      + '</div>'
-      + '<div class="cpb-table-tools__body">'
-      + '<section class="cpb-table-tools__group" aria-label="Rows">'
-      + '<span class="cpb-table-style-label">Rows</span>'
-      + '<div class="cpb-table-tools__controls">'
-      + '<button type="button" class="cpb-mini-btn" data-table-action="move-row-up">↑ Row</button>'
-      + '<button type="button" class="cpb-mini-btn" data-table-action="move-row-down">↓ Row</button>'
-      + '<button type="button" class="cpb-mini-btn" data-table-action="add-row">+ Row</button>'
-      + '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="del-row">Delete row</button>'
-      + '</div></section>'
-      + '<section class="cpb-table-tools__group" aria-label="Appearance">'
-      + '<span class="cpb-table-style-label">Appearance &amp; layout</span>'
-      + '<div class="cpb-table-tools__controls">'
-      + '<button type="button" class="cpb-mini-btn" data-table-action="structured-appearance">Table style…</button>'
-      + '<span class="cpb-toolbar-part0-label">Drag column dividers to resize</span>'
-      + '</div></section>'
-      + '</div>';
-    container.appendChild(tools);
   }
 
   function wireStructuredTableCell(cell, isLep) {
@@ -5895,24 +5953,13 @@
   }
 
   function closeTableTools() {
-    var activeBlock = state.activeTableToolsBlock;
-    if (activeBlock && isConnectedEl(activeBlock)) {
-      var activeTools = activeBlock.querySelector('.cpb-table-tools');
-      if (activeTools) {
-        activeTools.classList.remove('is-open');
-        activeTools.setAttribute('aria-hidden', 'true');
-        activeTools.style.left = '';
-        activeTools.style.top = '';
-      }
-    }
     state.activeTableToolsBlock = null;
     state.activeTableToolsAnchor = null;
+    syncTableToolsContext(null);
   }
 
   function openTableTools(blockEl, anchorEl) {
     if (!state.editable || !blockEl || !isConnectedEl(blockEl)) return;
-    var tools = blockEl.querySelector('.cpb-table-tools');
-    if (!tools) return;
     if (state.activeTableToolsBlock && state.activeTableToolsBlock !== blockEl) {
       closeTableTools();
     }
@@ -5920,58 +5967,61 @@
     state.activeTableToolsAnchor = anchorEl && blockEl.contains(anchorEl)
       ? anchorEl
       : blockEl.querySelector('.cpb-table-wrap');
-    tools.classList.add('is-open');
-    tools.setAttribute('aria-hidden', 'false');
     syncTableToolsContext(blockEl);
-    positionTableTools(blockEl, state.activeTableToolsAnchor);
   }
 
   function setTableToolDisabled(blockEl, actions, disabled) {
+    if (!tableToolbarEl) return;
     actions.forEach(function (action) {
-      var control = blockEl.querySelector('[data-table-action="' + action + '"]');
+      var control = tableToolbarEl.querySelector('[data-table-action="' + action + '"]');
       if (control) control.disabled = !!disabled;
     });
   }
 
   function syncTableToolsContext(blockEl) {
-    if (!blockEl || !isConnectedEl(blockEl)) return;
-    var tools = blockEl.querySelector('.cpb-table-tools');
-    if (!tools) return;
+    if (!tableToolbarEl) return;
+    var active = !!(blockEl && isConnectedEl(blockEl));
+    tableToolbarEl.querySelectorAll('[data-table-action]').forEach(function (control) {
+      control.disabled = !active;
+      control.classList.remove('is-active');
+    });
+    if (!active) return;
+    var structured = blockEl.getAttribute('data-structured-table-editor') === '1';
     var selected = state.selectedTableCells.filter(function (cell) {
       return blockEl.contains(cell);
     });
     var selectedCell = resolveSelectedTableCell(blockEl);
-    var selectionLabel = tools.querySelector('.cpb-table-tools__selection');
-    if (selectionLabel) {
-      if (selected.length > 1) {
-        selectionLabel.textContent = selected.length + ' cells selected';
-      } else if (selectedCell) {
-        var row = selectedCell.closest('tr');
-        var rowIndex = row && row.parentElement
-          ? Array.prototype.indexOf.call(row.parentElement.children, row) + 1
-          : 0;
-        var cellIndex = selectedCell.cellIndex + 1;
-        selectionLabel.textContent = 'Row ' + rowIndex + ', cell ' + cellIndex;
-      } else {
-        selectionLabel.textContent = 'Table selected';
-      }
-    }
 
     var selectedRow = selectedCell ? selectedCell.closest('tr') : null;
     var body = tableBody(blockEl);
     var isBodyRow = !!(selectedRow && body && body.contains(selectedRow));
     var bodyRows = body ? Array.prototype.slice.call(body.rows) : [];
     var bodyRowIndex = isBodyRow ? bodyRows.indexOf(selectedRow) : -1;
-    setTableToolDisabled(blockEl, ['move-row-up'], !isBodyRow || bodyRowIndex <= 0);
+    var hasVerticalMerge = !!blockEl.querySelector(
+      'tbody[data-table-part="body"] td[rowspan]:not([rowspan="1"]),'
+      + 'tbody[data-table-part="body"] td[data-rowspan-covered="1"]'
+    );
+    setTableToolDisabled(
+      blockEl,
+      ['move-row-up'],
+      hasVerticalMerge || !isBodyRow || bodyRowIndex <= 0
+    );
     setTableToolDisabled(
       blockEl,
       ['move-row-down'],
-      !isBodyRow || bodyRowIndex < 0 || bodyRowIndex >= bodyRows.length - 1
+      hasVerticalMerge || !isBodyRow || bodyRowIndex < 0 || bodyRowIndex >= bodyRows.length - 1
     );
     var canDeleteSelectedRow = !!selectedRow
       && (!isBodyRow || bodyRows.length > 1);
-    setTableToolDisabled(blockEl, ['del-row'], !canDeleteSelectedRow);
+    setTableToolDisabled(blockEl, ['del-row'], hasVerticalMerge || !canDeleteSelectedRow);
     setTableToolDisabled(blockEl, ['del-col'], tableColCount(blockEl) <= 1);
+    setTableToolDisabled(blockEl, ['paste-table'], !state.tableBlockClipboard);
+    var titleButton = tableToolbarEl.querySelector('[data-table-action="toggle-title"]');
+    if (titleButton) {
+      titleButton.textContent = blockEl.querySelector('tr[data-title-row]')
+        ? 'Remove title'
+        : '+ Title';
+    }
 
     var selectedCount = selected.length > 1 ? selected.length : (selectedCell ? 1 : 0);
     var isTitleCell = !!(selectedCell && selectedCell.closest('[data-title-row]'));
@@ -5985,59 +6035,46 @@
       ? Math.max(1, parseInt(selectedCell.getAttribute('colspan') || '1', 10) || 1)
       : 1;
     setTableToolDisabled(blockEl, ['unmerge-cells'], !selectedCell || colspan <= 1);
+    var rowspan = selectedCell
+      ? Math.max(1, parseInt(selectedCell.getAttribute('rowspan') || '1', 10) || 1)
+      : 1;
+    setTableToolDisabled(
+      blockEl,
+      ['merge-cells-down'],
+      !selectedCell || !canMergeCellDown(blockEl, selectedCell)
+    );
+    setTableToolDisabled(blockEl, ['unmerge-cells-down'], !selectedCell || rowspan <= 1);
     setTableToolDisabled(
       blockEl,
       [
-        'cell-align-left',
-        'cell-align-center',
-        'cell-align-right',
         'cell-bg',
         'cell-bg-clear',
-        'cell-text-color',
         'copy-cells',
         'paste-cells',
       ],
       selectedCount === 0
     );
-    var alignmentCells = selected.length > 1
-      ? selected
-      : (selectedCell ? [selectedCell] : []);
-    blockEl.querySelectorAll('[data-table-action^="cell-align-"]').forEach(function (btn) {
-      var align = btn.getAttribute('data-table-action').replace('cell-align-', '');
-      var allMatch = alignmentCells.length > 0 && alignmentCells.every(function (cell) {
-        return extractCellAlign(cell) === align;
-      });
-      btn.classList.toggle('is-active', allMatch);
-    });
     setTableToolDisabled(
       blockEl,
       ['formula-sum', 'formula-avg', 'formula-custom'],
       !selectedCell || !isBodyRow
     );
+    if (structured) {
+      setTableToolDisabled(blockEl, [
+        'table-align-left', 'table-align-center', 'table-align-right',
+        'toggle-title', 'delete-table', 'copy-table', 'paste-table',
+        'add-col', 'del-col', 'merge-cells-right', 'unmerge-cells',
+        'merge-cells-down', 'unmerge-cells-down',
+        'cell-bg', 'cell-bg-clear', 'copy-cells', 'paste-cells',
+        'border-thin', 'border-medium', 'border-thick', 'border-color',
+        'formula-sum', 'formula-avg', 'formula-custom',
+      ], true);
+    }
+    syncTableStyleControls(blockEl);
   }
 
   function positionTableTools(blockEl, anchorEl) {
-    if (!blockEl || state.activeTableToolsBlock !== blockEl) return;
-    var tools = blockEl.querySelector('.cpb-table-tools');
-    if (!tools || !tools.classList.contains('is-open')) return;
-    var anchor = anchorEl && isConnectedEl(anchorEl)
-      ? anchorEl
-      : blockEl.querySelector('.cpb-table-wrap');
-    if (!anchor) return;
-    var zoomScale = Math.max(0.1, state.canvasZoom / 100);
-    var blockRect = blockEl.getBoundingClientRect();
-    var anchorRect = anchor.getBoundingClientRect();
-    var toolsWidth = tools.offsetWidth;
-    var toolsHeight = tools.offsetHeight;
-    var maxLeft = Math.max(0, blockEl.clientWidth - toolsWidth);
-    var left = (anchorRect.left - blockRect.left) / zoomScale;
-    left = Math.max(0, Math.min(maxLeft, left));
-    var top = (anchorRect.bottom - blockRect.top) / zoomScale + 8;
-    if (anchorRect.bottom + (toolsHeight * zoomScale) + 16 > window.innerHeight) {
-      top = (anchorRect.top - blockRect.top) / zoomScale - toolsHeight - 8;
-    }
-    tools.style.left = Math.round(left) + 'px';
-    tools.style.top = Math.round(Math.max(0, top)) + 'px';
+    if (blockEl && state.activeTableToolsBlock === blockEl) syncTableToolsContext(blockEl);
   }
 
   function syncTableStyleControls(blockEl) {
@@ -6045,17 +6082,18 @@
     if (!wrap) return;
     var width = normalizeBorderWidth(wrap.getAttribute('data-border-width') || 'medium');
     var color = wrap.getAttribute('data-border-color') || '#94a3b8';
-    blockEl.querySelectorAll('[data-table-action^="border-"]').forEach(function (btn) {
+    if (!tableToolbarEl || state.activeTableToolsBlock !== blockEl) return;
+    tableToolbarEl.querySelectorAll('[data-table-action^="border-"]').forEach(function (btn) {
       var action = btn.getAttribute('data-table-action');
       if (action === 'border-thin' || action === 'border-medium' || action === 'border-thick') {
         btn.classList.toggle('is-active', action === 'border-' + width);
       }
     });
-    var borderColorInput = blockEl.querySelector('[data-table-action="border-color"]');
+    var borderColorInput = tableToolbarEl.querySelector('[data-table-action="border-color"]');
     if (borderColorInput) borderColorInput.value = color;
     var tableBlock = blockEl.querySelector('.cpb-table-block');
     var tableAlign = tableBlock ? (tableBlock.getAttribute('data-table-align') || 'left') : 'left';
-    blockEl.querySelectorAll('[data-table-action^="table-align-"]').forEach(function (btn) {
+    tableToolbarEl.querySelectorAll('[data-table-action^="table-align-"]').forEach(function (btn) {
       btn.classList.toggle('is-active', btn.getAttribute('data-table-action') === 'table-align-' + tableAlign);
     });
   }
@@ -6073,7 +6111,10 @@
       cell.addEventListener('focus', function () {
         state.focusedTableCell = cell;
         rememberStyleTarget();
-        var bgInput = blockEl.querySelector('[data-table-action="cell-bg"]');
+        openTableTools(blockEl, cell);
+        var bgInput = tableToolbarEl
+          ? tableToolbarEl.querySelector('[data-table-action="cell-bg"]')
+          : null;
         if (bgInput) {
           bgInput.value = cell.getAttribute('data-cell-bg') || '#ffffff';
         }
@@ -6370,6 +6411,7 @@
     var cellTextColor = [];
     var headerColspans = [];
     var rowColspans = [];
+    var rowRowspans = [];
     var titleAlign = 'center';
     var titleFontFamily = '';
     var titleFontSize = 0;
@@ -6405,9 +6447,15 @@
         var sizeLine = [];
         var colorLine = [];
         var spanLine = [];
+        var rowSpanLine = [];
         tr.querySelectorAll('td').forEach(function (td) {
           line.push(extractCellHtml(td));
           spanLine.push(parseInt(td.getAttribute('colspan') || '1', 10) || 1);
+          rowSpanLine.push(
+            td.getAttribute('data-rowspan-covered') === '1'
+              ? 0
+              : (parseInt(td.getAttribute('rowspan') || '1', 10) || 1)
+          );
           bgLine.push(extractCellBg(td));
           alignLine.push(extractCellAlign(td));
           fontLine.push(extractCellFontFamily(td));
@@ -6417,6 +6465,7 @@
         if (line.length) {
           rows.push(line);
           rowColspans.push(spanLine);
+          rowRowspans.push(rowSpanLine);
           cellBg.push(bgLine);
           cellAlign.push(alignLine);
           cellFontFamily.push(fontLine);
@@ -6430,7 +6479,7 @@
       });
     }
 
-    return {
+    var extracted = {
       title: title,
       has_title_row: !!blockEl.querySelector('tr[data-title-row]'),
       has_header_row: !!tableHeaderRow(blockEl),
@@ -6459,6 +6508,40 @@
       table_align: tableAlign,
       table_style_kind: tableBlock ? (tableBlock.getAttribute('data-table-style-kind') || 'text') : 'text',
     };
+    var hasVerticalMerge = rowRowspans.some(function (spans) {
+      return spans.some(function (span) { return span !== 1; });
+    });
+    if (hasVerticalMerge) extracted.row_rowspans = rowRowspans;
+    return extracted;
+  }
+
+  function copyEntireTable(blockEl) {
+    if (!blockEl || blockEl.getAttribute('data-block-type') !== 'table') {
+      setStatus('Select an editable table first', 'error');
+      return;
+    }
+    state.tableBlockClipboard = JSON.parse(JSON.stringify(extractTablePayload(blockEl)));
+    var table = blockEl.querySelector('table');
+    var plainText = table ? table.innerText.trim() : '';
+    if (navigator.clipboard && navigator.clipboard.writeText && plainText) {
+      navigator.clipboard.writeText(plainText).catch(function () {});
+    }
+    setStatus('Entire table copied', 'saved');
+    syncTableToolsContext(blockEl);
+  }
+
+  function pasteEntireTable(afterBlock) {
+    if (!state.tableBlockClipboard) {
+      setStatus('Copy a table first', 'error');
+      return;
+    }
+    var payload = JSON.parse(JSON.stringify(state.tableBlockClipboard));
+    setStatus('Pasting table…', 'saving');
+    flushAllPendingSaves().then(function () {
+      return createBlock('table', payload, afterBlock);
+    }).then(function () {
+      setStatus('Entire table pasted', 'saved');
+    }).catch(showError);
   }
 
   function tableBody(blockEl) {
@@ -6611,6 +6694,7 @@
       font_size: extractCellFontSize(cell),
       text_color: extractCellTextColor(cell),
       colspan: parseInt(cell.getAttribute('colspan') || '1', 10) || 1,
+      rowspan: parseInt(cell.getAttribute('rowspan') || '1', 10) || 1,
     };
   }
 
@@ -6653,6 +6737,7 @@
     }
     if (style.text_color) applyColorToTableCell(cell, style.text_color);
     if (style.colspan && style.colspan > 1) cell.setAttribute('colspan', String(style.colspan));
+    if (style.rowspan && style.rowspan > 1) cell.setAttribute('rowspan', String(style.rowspan));
   }
 
   function copyTableCells(blockEl) {
@@ -6886,6 +6971,102 @@
     }
     tbody.insertBefore(rows[idx + 1], tr);
     setStatus('Row moved down', 'saved');
+    return true;
+  }
+
+  function tableCellLogicalStart(cell) {
+    if (!cell || !cell.parentElement) return -1;
+    var start = 0;
+    for (var index = 0; index < cell.parentElement.cells.length; index++) {
+      var candidate = cell.parentElement.cells[index];
+      if (candidate === cell) return start;
+      start += Math.max(1, parseInt(candidate.getAttribute('colspan') || '1', 10) || 1);
+    }
+    return -1;
+  }
+
+  function tableCellAtLogicalStart(row, logicalStart) {
+    if (!row || logicalStart < 0) return null;
+    var start = 0;
+    for (var index = 0; index < row.cells.length; index++) {
+      var candidate = row.cells[index];
+      if (start === logicalStart) return candidate;
+      start += Math.max(1, parseInt(candidate.getAttribute('colspan') || '1', 10) || 1);
+    }
+    return null;
+  }
+
+  function canMergeCellDown(blockEl, cell) {
+    if (!cell || cell.tagName !== 'TD' || cell.getAttribute('data-rowspan-covered') === '1') {
+      return false;
+    }
+    var tbody = tableBody(blockEl);
+    var row = cell.parentElement;
+    if (!tbody || !row || !tbody.contains(row)) return false;
+    var rows = Array.prototype.slice.call(tbody.rows);
+    var rowIndex = rows.indexOf(row);
+    var rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1);
+    var targetRow = rows[rowIndex + rowspan];
+    if (!targetRow) return false;
+    var target = tableCellAtLogicalStart(targetRow, tableCellLogicalStart(cell));
+    if (!target || target.getAttribute('data-rowspan-covered') === '1') return false;
+    var colspan = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
+    var targetColspan = Math.max(1, parseInt(target.getAttribute('colspan') || '1', 10) || 1);
+    return colspan === targetColspan;
+  }
+
+  function tableMergeCellDown(blockEl) {
+    var cell = resolveSelectedTableCell(blockEl);
+    if (!canMergeCellDown(blockEl, cell)) {
+      setStatus('No matching cell below to merge', 'error');
+      return false;
+    }
+    var tbody = tableBody(blockEl);
+    var rows = Array.prototype.slice.call(tbody.rows);
+    var rowIndex = rows.indexOf(cell.parentElement);
+    var rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1);
+    var logicalStart = tableCellLogicalStart(cell);
+    var target = tableCellAtLogicalStart(rows[rowIndex + rowspan], logicalStart);
+    setCellHtml(cell, mergeCellHtml(extractCellHtml(cell), extractCellHtml(target)));
+    cell.rowSpan = rowspan + 1;
+    target.setAttribute('data-rowspan-covered', '1');
+    target.setAttribute('contenteditable', 'false');
+    target.hidden = true;
+    target.style.display = 'none';
+    setCellHtml(target, '');
+    wireTableCellFocus(blockEl);
+    setStatus('Cells merged vertically', 'saved');
+    return true;
+  }
+
+  function tableUnmergeCellDown(blockEl) {
+    var cell = resolveSelectedTableCell(blockEl);
+    if (!cell || cell.tagName !== 'TD') {
+      setStatus('Click a vertically merged cell first', 'error');
+      return false;
+    }
+    var rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1);
+    if (rowspan <= 1) {
+      setStatus('This cell is not vertically merged', 'error');
+      return false;
+    }
+    var tbody = tableBody(blockEl);
+    var rows = Array.prototype.slice.call(tbody.rows);
+    var rowIndex = rows.indexOf(cell.parentElement);
+    var logicalStart = tableCellLogicalStart(cell);
+    for (var offset = 1; offset < rowspan; offset++) {
+      var targetRow = rows[rowIndex + offset];
+      var target = tableCellAtLogicalStart(targetRow, logicalStart);
+      if (!target) continue;
+      target.removeAttribute('data-rowspan-covered');
+      target.setAttribute('contenteditable', 'true');
+      target.hidden = false;
+      target.style.removeProperty('display');
+      setCellHtml(target, '');
+    }
+    cell.rowSpan = 1;
+    wireTableCellFocus(blockEl);
+    setStatus('Vertical merge removed', 'saved');
     return true;
   }
 
@@ -7172,9 +7353,15 @@
     if (!table) return;
     var total = tableTotalWidth(blockEl);
     var maxTable = tableContentMaxWidth(blockEl);
-    table.style.width = Math.min(total, maxTable) + 'px';
+    var renderedWidth = Math.min(total, maxTable);
+    table.style.width = renderedWidth + 'px';
     table.style.maxWidth = '100%';
     table.style.minWidth = '0';
+    var wrap = tableWrap(blockEl);
+    if (wrap && blockEl.getAttribute('data-structured-table-editor') !== '1') {
+      wrap.style.width = renderedWidth + 'px';
+      wrap.style.maxWidth = '100%';
+    }
   }
 
   function fitTableToPage(blockEl) {
@@ -9964,6 +10151,7 @@
     retryLivePagination();
   });
 
+  wireTableToolbar();
   loadCalloutPresets()
     .then(function () { return loadSection(initialSectionId || 0); })
     .then(function () {

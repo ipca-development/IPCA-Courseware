@@ -460,24 +460,35 @@
       ));
     }
 
-    rows.forEach((row, index) => {
+    for (let index = 0; index < rows.length;) {
+      let groupEnd = index;
+      for (let scan = index; scan <= groupEnd; scan++) {
+        Array.from(rows[scan].cells || []).forEach((cell) => {
+          const rowspan = Math.max(1, parseInt(cell.getAttribute("rowspan") || "1", 10) || 1);
+          groupEnd = Math.min(rows.length - 1, Math.max(groupEnd, scan + rowspan - 1));
+        });
+      }
+      const rowGroup = rows.slice(index, groupEnd + 1);
+      const rowHTML = rowGroup.map((row) => row.outerHTML).join("");
+      const rowText = rowGroup.map((row) => row.textContent).join(" ");
       output.push(fragment(
         section,
         unit,
         `table-row-${index}`,
         "tableRow",
-        `${prefix}<tbody>${row.outerHTML}</tbody></table>`,
-        row.textContent,
+        `${prefix}<tbody>${rowHTML}</tbody></table>`,
+        rowText,
         {
-          anchor: row.getAttribute("data-stable-anchor") || root.getAttribute("data-stable-anchor"),
+          anchor: rowGroup[0].getAttribute("data-stable-anchor") || root.getAttribute("data-stable-anchor"),
           atomic: true,
-          splittable: true,
+          splittable: rowGroup.length === 1,
           forceBreakBefore: !header && forceBreakBefore && index === 0,
           tableHeaderHTML: headerHTML ? `${prefix}${headerHTML}</table>` : "",
           tableShellHTML: root.outerHTML
         }
       ));
-    });
+      index = groupEnd + 1;
+    }
 
     if (!header && rows.length === 0) {
       output.push(fragment(section, unit, "table", "table", root.outerHTML, root.textContent, {

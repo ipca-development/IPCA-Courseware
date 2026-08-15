@@ -447,6 +447,7 @@ final class ControlledPublishingBlockService
         $colWidths = array();
         $headerColspans = array();
         $rowColspans = array();
+        $rowRowspans = array();
 
         if (is_array($payload['headers'] ?? null)) {
             foreach ($payload['headers'] as $cell) {
@@ -486,11 +487,24 @@ final class ControlledPublishingBlockService
                 );
             }
         }
+        if (is_array($payload['row_rowspans'] ?? null)) {
+            foreach ($payload['row_rowspans'] as $spans) {
+                if (!is_array($spans)) {
+                    $rowRowspans[] = array();
+                    continue;
+                }
+                $rowRowspans[] = array_map(
+                    static fn (mixed $span): int => max(0, (int)$span),
+                    array_values($spans)
+                );
+            }
+        }
 
         // Legacy tables stored everything in rows[] with first row as header.
         if ($hasHeaderRow && $headers === array() && $rows !== array()) {
             $headers = array_shift($rows) ?: array();
             $headerColspans = array_shift($rowColspans) ?: array();
+            array_shift($rowRowspans);
         }
 
         $logicalWidth = static function (array $cells, array $spans): int {
@@ -518,11 +532,17 @@ final class ControlledPublishingBlockService
         if ($rows === array()) {
             $rows = array(array_fill(0, $colCount, ''));
             $rowColspans = array(array_fill(0, $colCount, 1));
+            $rowRowspans = array(array_fill(0, $colCount, 1));
         }
 
-        $normalizeRow = static function (array $cells, array $spans) use ($colCount): array {
+        $normalizeRow = static function (
+            array $cells,
+            array $spans,
+            array $verticalSpans = array()
+        ) use ($colCount): array {
             $normalizedCells = array();
             $normalizedSpans = array();
+            $normalizedVerticalSpans = array();
             $coveredColumns = 0;
             foreach ($cells as $index => $cell) {
                 if ($coveredColumns >= $colCount) {
@@ -534,28 +554,37 @@ final class ControlledPublishingBlockService
                 );
                 $normalizedCells[] = $cell;
                 $normalizedSpans[] = $span;
+                $normalizedVerticalSpans[] = max(0, (int)($verticalSpans[$index] ?? 1));
                 $coveredColumns += $span;
             }
             while ($coveredColumns < $colCount) {
                 $normalizedCells[] = '';
                 $normalizedSpans[] = 1;
+                $normalizedVerticalSpans[] = 1;
                 $coveredColumns++;
             }
-            return array($normalizedCells, $normalizedSpans);
+            return array($normalizedCells, $normalizedSpans, $normalizedVerticalSpans);
         };
 
         [$headers, $headerColspans] = $normalizeRow($headers, $headerColspans);
         $normalizedRows = array();
         $normalizedRowColspans = array();
+        $normalizedRowRowspans = array();
         foreach ($rows as $rowIndex => $row) {
-            [$normalizedRow, $normalizedSpans] = $normalizeRow(
+            [$normalizedRow, $normalizedSpans, $normalizedVerticalSpans] = $normalizeRow(
                 $row,
-                $rowColspans[$rowIndex] ?? array()
+                $rowColspans[$rowIndex] ?? array(),
+                $rowRowspans[$rowIndex] ?? array()
             );
             $normalizedRows[] = $normalizedRow;
             $normalizedRowColspans[] = $normalizedSpans;
+            $normalizedRowRowspans[] = array_map(
+                static fn (int $span): int => min($span, count($rows) - $rowIndex),
+                $normalizedVerticalSpans
+            );
         }
         $rowColspans = $normalizedRowColspans;
+        $rowRowspans = $normalizedRowRowspans;
 
         if (is_array($payload['col_widths'] ?? null)) {
             foreach ($payload['col_widths'] as $width) {
@@ -647,6 +676,7 @@ final class ControlledPublishingBlockService
             'header_colspans' => $headerColspans,
             'rows' => $normalizedRows,
             'row_colspans' => $rowColspans,
+            'row_rowspans' => $rowRowspans,
             'col_widths' => $colWidths,
             'border_width' => $borderWidth,
             'border_color' => $borderColor,

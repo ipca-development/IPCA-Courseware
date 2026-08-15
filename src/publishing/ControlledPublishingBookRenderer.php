@@ -1767,6 +1767,7 @@ final class ControlledPublishingBookRenderer
         $cellTextColors = $table['cell_text_color'];
         $headerColspans = $table['header_colspans'];
         $rowColspans = $table['row_colspans'];
+        $rowRowspans = $table['row_rowspans'];
         $hasTitleRow = !empty($table['has_title_row']);
         $hasHeaderRow = !empty($table['has_header_row']);
         $tableAlign = (string)$table['table_align'];
@@ -1783,11 +1784,12 @@ final class ControlledPublishingBookRenderer
         $html = '<div class="cpb-table-block cpb-table-block--align-' . h($tableAlign) . '"'
             . ' data-table-align="' . h($tableAlign) . '"'
             . ' data-table-style-kind="' . h($tableStyleKind) . '">';
+        $totalWidth = max(1, array_sum($colWidths));
         $html .= '<div class="cpb-table-wrap cpb-table-border-' . h($borderWidth) . '"'
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' data-border-color="' . h($borderColor) . '"'
-            . ' style="--cpb-table-border-color:' . h($borderColor) . '">';
-        $totalWidth = max(1, array_sum($colWidths));
+            . ' style="--cpb-table-border-color:' . h($borderColor) . ';'
+            . 'width:' . $totalWidth . 'px;max-width:100%">';
         if ($edit) {
             $html .= '<table class="cpb-table" data-field="table" style="width:' . $totalWidth . 'px">';
             $html .= '<colgroup>';
@@ -1882,9 +1884,21 @@ final class ControlledPublishingBookRenderer
             $html .= '<tr>';
             $cellIndex = 0;
             $spans = $rowColspans[$rowIndex] ?? array();
+            $verticalSpans = $rowRowspans[$rowIndex] ?? array();
             foreach ($row as $cellPos => $cell) {
                 $colspan = max(1, (int)($spans[$cellPos] ?? 1));
-                $cellEdit = $edit ? ' contenteditable="true" spellcheck="true"' : '';
+                $rowspan = max(0, (int)($verticalSpans[$cellPos] ?? 1));
+                if ($rowspan === 0 && !$edit) {
+                    $cellIndex += $colspan;
+                    continue;
+                }
+                $cellEdit = $edit && $rowspan !== 0
+                    ? ' contenteditable="true" spellcheck="true"'
+                    : '';
+                $rowspanAttr = $rowspan > 1 ? ' rowspan="' . $rowspan . '"' : '';
+                $coveredAttr = $rowspan === 0
+                    ? ' data-rowspan-covered="1" contenteditable="false" hidden'
+                    : '';
                 $bg = (string)($cellBgs[$rowIndex][$cellPos] ?? '');
                 $align = (string)($cellAligns[$rowIndex][$cellPos] ?? 'left');
                 $cellFont = (string)($cellFontFamilies[$rowIndex][$cellPos] ?? '');
@@ -1906,7 +1920,7 @@ final class ControlledPublishingBookRenderer
                 $formulaAttr = (!$edit && str_starts_with($rawCell, '='))
                     ? ' data-formula="' . h($rawCell) . '" title="' . h($rawCell) . '"'
                     : '';
-                $html .= '<td colspan="' . $colspan . '"' . $cellEdit . $this->tableCellVisualAttr(
+                $html .= '<td colspan="' . $colspan . '"' . $rowspanAttr . $cellEdit . $coveredAttr . $this->tableCellVisualAttr(
                     $bg,
                     $align,
                     $effectiveCellFont,
@@ -1924,61 +1938,6 @@ final class ControlledPublishingBookRenderer
         }
         $html .= '</tbody></table></div>';
 
-        if ($edit) {
-            $html .= '<div class="cpb-table-tools" contenteditable="false" role="dialog" aria-label="Table tools" aria-hidden="true">';
-            $html .= '<div class="cpb-table-tools__header">'
-                . '<div><strong>Table tools</strong><span class="cpb-table-tools__selection">Table selected</span></div>'
-                . '<button type="button" class="cpb-table-tools__close" data-table-tools-close aria-label="Close table tools">×</button>'
-                . '</div>';
-            $html .= '<div class="cpb-table-tools__body">';
-            $html .= '<section class="cpb-table-tools__group" aria-label="Table">'
-                . '<span class="cpb-table-style-label">Table</span>'
-                . '<div class="cpb-table-tools__controls">'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'left' ? ' is-active' : '') . '" data-table-action="table-align-left" title="Align table left">Table left</button>'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'center' ? ' is-active' : '') . '" data-table-action="table-align-center" title="Align table center">Table center</button>'
-                . '<button type="button" class="cpb-mini-btn' . ($tableAlign === 'right' ? ' is-active' : '') . '" data-table-action="table-align-right" title="Align table right">Table right</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="toggle-title">'
-                . ($hasTitleRow ? 'Remove title' : '+ Title')
-                . '</button>'
-                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="delete-table" title="Delete table">Delete table</button>'
-                . '</div></section>';
-            $html .= '<section class="cpb-table-tools__group" aria-label="Rows and columns">'
-                . '<span class="cpb-table-style-label">Rows &amp; columns</span>'
-                . '<div class="cpb-table-tools__controls">'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="move-row-up" title="Move selected row up">↑ Row</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="move-row-down" title="Move selected row down">↓ Row</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="add-row" title="Add row at bottom">+ Row</button>'
-                . '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="del-row" title="Delete selected row">Delete row</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="add-col" title="Add column at right">+ Column</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="del-col" title="Remove rightmost column">− Column</button>'
-                . '</div></section>';
-            $html .= '<section class="cpb-table-tools__group" aria-label="Cells">'
-                . '<span class="cpb-table-style-label">Cells</span>'
-                . '<div class="cpb-table-tools__controls">'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="merge-cells-right" title="Merge with cell to the right">Merge →</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="unmerge-cells" title="Split merged cell into columns">Unmerge</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-left" title="Align selected cell text left">Text left</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-center" title="Center selected cell text">Text center</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-align-right" title="Align selected cell text right">Text right</button>'
-                . '<label class="cpb-table-tools__color-label">Fill <input type="color" class="cpb-table-color" data-table-action="cell-bg" value="#ffffff" title="Cell background"></label>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="cell-bg-clear" title="Clear cell fill">Clear fill</button>'
-                . '<label class="cpb-table-tools__color-label">Text <input type="color" class="cpb-table-color" data-table-action="cell-text-color" value="#0f172a" title="Text color"></label>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="copy-cells" title="Copy column or selection">Copy</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="paste-cells" title="Paste TSV column or grid">Paste</button>'
-                . '</div></section>';
-            $html .= '<section class="cpb-table-tools__group" aria-label="Border and calculations">'
-                . '<span class="cpb-table-style-label">Border &amp; calculations</span>'
-                . '<div class="cpb-table-tools__controls">'
-                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'thin' ? ' is-active' : '') . '" data-table-action="border-thin" title="Thin border">─</button>'
-                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'medium' ? ' is-active' : '') . '" data-table-action="border-medium" title="Medium border">━</button>'
-                . '<button type="button" class="cpb-mini-btn' . ($borderWidth === 'thick' ? ' is-active' : '') . '" data-table-action="border-thick" title="Thick border">▬</button>'
-                . '<input type="color" class="cpb-table-color" data-table-action="border-color" value="' . h($borderColor) . '" title="Border color">'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-sum" title="Insert SUM formula">SUM</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-avg" title="Insert AVG formula">AVG</button>'
-                . '<button type="button" class="cpb-mini-btn" data-table-action="formula-custom" title="Insert custom formula">fx</button>'
-                . '</div></section>';
-            $html .= '</div></div>';
-        }
         $html .= '</div>';
         return $html;
     }
@@ -1998,6 +1957,7 @@ final class ControlledPublishingBookRenderer
         $colWidths = array();
         $headerColspans = array();
         $rowColspans = array();
+        $rowRowspans = array();
 
         if (is_array($payload['headers'] ?? null)) {
             foreach ($payload['headers'] as $cell) {
@@ -2033,9 +1993,22 @@ final class ControlledPublishingBookRenderer
                 );
             }
         }
+        if (is_array($payload['row_rowspans'] ?? null)) {
+            foreach ($payload['row_rowspans'] as $spans) {
+                if (!is_array($spans)) {
+                    $rowRowspans[] = array();
+                    continue;
+                }
+                $rowRowspans[] = array_map(
+                    static fn (mixed $span): int => max(0, (int)$span),
+                    array_values($spans)
+                );
+            }
+        }
         if ($hasHeaderRow && $headers === array() && $rows !== array()) {
             $headers = array_shift($rows) ?: array('Column 1', 'Column 2');
             $headerColspans = array_shift($rowColspans) ?: array();
+            array_shift($rowRowspans);
         }
 
         $logicalWidth = static function (array $cells, array $spans): int {
@@ -2065,9 +2038,14 @@ final class ControlledPublishingBookRenderer
             $rowColspans = array(array_fill(0, $colCount, 1));
         }
 
-        $normalizeRow = static function (array $cells, array $spans) use ($colCount): array {
+        $normalizeRow = static function (
+            array $cells,
+            array $spans,
+            array $verticalSpans = array()
+        ) use ($colCount): array {
             $normalizedCells = array();
             $normalizedSpans = array();
+            $normalizedVerticalSpans = array();
             $coveredColumns = 0;
             foreach ($cells as $index => $cell) {
                 if ($coveredColumns >= $colCount) {
@@ -2079,28 +2057,37 @@ final class ControlledPublishingBookRenderer
                 );
                 $normalizedCells[] = $cell;
                 $normalizedSpans[] = $span;
+                $normalizedVerticalSpans[] = max(0, (int)($verticalSpans[$index] ?? 1));
                 $coveredColumns += $span;
             }
             while ($coveredColumns < $colCount) {
                 $normalizedCells[] = '';
                 $normalizedSpans[] = 1;
+                $normalizedVerticalSpans[] = 1;
                 $coveredColumns++;
             }
-            return array($normalizedCells, $normalizedSpans);
+            return array($normalizedCells, $normalizedSpans, $normalizedVerticalSpans);
         };
 
         [$headers, $headerColspans] = $normalizeRow($headers, $headerColspans);
         $normalizedRows = array();
         $normalizedRowColspans = array();
+        $normalizedRowRowspans = array();
         foreach ($rows as $rowIndex => $row) {
-            [$normalizedRow, $normalizedSpans] = $normalizeRow(
+            [$normalizedRow, $normalizedSpans, $normalizedVerticalSpans] = $normalizeRow(
                 $row,
-                $rowColspans[$rowIndex] ?? array()
+                $rowColspans[$rowIndex] ?? array(),
+                $rowRowspans[$rowIndex] ?? array()
             );
             $normalizedRows[] = $normalizedRow;
             $normalizedRowColspans[] = $normalizedSpans;
+            $normalizedRowRowspans[] = array_map(
+                static fn (int $span): int => min($span, count($rows) - $rowIndex),
+                $normalizedVerticalSpans
+            );
         }
         $rowColspans = $normalizedRowColspans;
+        $rowRowspans = $normalizedRowRowspans;
         if (is_array($payload['col_widths'] ?? null)) {
             foreach ($payload['col_widths'] as $width) {
                 $colWidths[] = max(60, min(600, (int)$width));
@@ -2199,6 +2186,7 @@ final class ControlledPublishingBookRenderer
             'header_colspans' => $headerColspans,
             'rows' => $normalizedRows,
             'row_colspans' => $rowColspans,
+            'row_rowspans' => $rowRowspans,
             'col_widths' => $colWidths,
             'border_width' => $borderWidth,
             'border_color' => $borderColor,

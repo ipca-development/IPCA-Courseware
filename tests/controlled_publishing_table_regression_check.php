@@ -71,6 +71,47 @@ foreach (array(3, 4, 2) as $columnCount) {
     }
 }
 
+$verticalPayload = table_payload(2);
+$verticalPayload['rows'] = array(
+    array('Merged top', 'Right 1'),
+    array('', 'Right 2'),
+);
+$verticalPayload['row_colspans'] = array(array(1, 1), array(1, 1));
+$verticalPayload['row_rowspans'] = array(array(2, 1), array(0, 1));
+$verticalEditHtml = $renderer->renderBlock(
+    array(
+        'id' => 2,
+        'block_type' => 'table',
+        'stable_anchor' => 'vertical-table-edit',
+        'payload_json' => json_encode($verticalPayload, JSON_THROW_ON_ERROR),
+    ),
+    ControlledPublishingBookRenderer::MODE_EDIT
+);
+$verticalReadHtml = $renderer->renderBlock(
+    array(
+        'id' => 2,
+        'block_type' => 'table',
+        'stable_anchor' => 'vertical-table-read',
+        'payload_json' => json_encode($verticalPayload, JSON_THROW_ON_ERROR),
+    ),
+    ControlledPublishingBookRenderer::MODE_READ
+);
+if (!str_contains($verticalEditHtml, 'rowspan="2"')
+    || !str_contains($verticalEditHtml, 'data-rowspan-covered="1"')) {
+    $failures[] = 'Edit rendering does not preserve vertical merge metadata.';
+}
+if (!str_contains($verticalReadHtml, 'rowspan="2"')
+    || str_contains($verticalReadHtml, 'data-rowspan-covered="1"')) {
+    $failures[] = 'Published rendering does not emit a valid vertical rowspan.';
+}
+if (str_contains($verticalEditHtml, 'cpb-table-tools')) {
+    $failures[] = 'Floating table tools still render inside the source table.';
+}
+if (!str_contains($verticalEditHtml, 'cpb-table-block--align-left')
+    || !str_contains($verticalEditHtml, 'width:280px;max-width:100%')) {
+    $failures[] = 'Table alignment frame does not retain the authored table width.';
+}
+
 $editorPath = dirname(__DIR__) . '/public/assets/controlled_book_editor.js';
 $editorSource = (string)file_get_contents($editorPath);
 $requiredMarkers = array(
@@ -81,6 +122,11 @@ $requiredMarkers = array(
     'if (span > 1) cell.colSpan = span - 1;',
     'function shouldUseNativeTableCellClipboard(cell)',
     'if (shouldUseNativeTableCellClipboard(cell)) return;',
+    'function copyEntireTable(blockEl)',
+    'function pasteEntireTable(afterBlock)',
+    'function tableMergeCellDown(blockEl)',
+    'function tableUnmergeCellDown(blockEl)',
+    'domRange: range.cloneRange()',
 );
 foreach ($requiredMarkers as $marker) {
     if (!str_contains($editorSource, $marker)) {

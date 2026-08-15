@@ -512,6 +512,32 @@
   border-bottom: 1px solid #eef2f7;
 }
 
+.cpb-table-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.cpb-toolbar-table-label,
+.cpb-table-toolbar__color {
+  color: #64748b;
+  font: 600 9px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  white-space: nowrap;
+}
+
+.cpb-table-toolbar__color {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cpb-table-toolbar button:disabled,
+.cpb-table-toolbar input:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.38 !important;
+}
+
 .cpb-form-editor-root .cpb-toolbar-main {
   flex-direction: row;
   align-items: center;
@@ -2080,6 +2106,10 @@ ol.cpb-list > li[data-indent-level="8"] {
 
 .cpb-table-block--align-center {
   align-items: center;
+}
+
+.cpb-table-block--align-left {
+  align-items: flex-start;
 }
 
 .cpb-table-block--align-right {

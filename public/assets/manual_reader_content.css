@@ -536,6 +536,10 @@ ol.cpb-list > li[data-indent-level="8"] {
   align-items: center;
 }
 
+.cpb-table-block--align-left {
+  align-items: flex-start;
+}
+
 .cpb-table-block--align-right {
   align-items: flex-end;
 }
