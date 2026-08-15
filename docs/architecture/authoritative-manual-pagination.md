@@ -16,6 +16,7 @@ Canonical controlled-manual flow:
 - Ordinary author-editable blocks flow in source order as the Book Style body fills.
 - Paragraphs and long callouts may split semantically when they cannot fit a fresh page. A callout that fits a fresh page moves intact.
 - Headings stay with a meaningful portion of the following heading chain or content when that chain fits a fresh page. Heading semantics include canonical paragraph styles (`title`, `subtitle_1` through `subtitle_4`) and are not inferred only from HTML heading tags.
+- A canonical `title` paragraph style is the publishing model's Main Title / section title. It always begins an authoritative page unless it is already the first source body block on the current page. This closes the preceding section's page without persisting a Manual Page Break. `subtitle_1` through `subtitle_4` do not force page starts and retain normal keep-with-following flow.
 - Lists continue by item. Long tables continue by row with presentation-only repeated headers.
 - Manual Page Breaks remain explicit overrides that force the following content to a new page.
 - `pagination_authority` is `generated` or `author`. Part 0 always has generated/automatic pagination authority, including author-editable sections such as 0.2 Revision System. Outside Part 0, authority is derived from the publishing model (`is_generated`, `is_system_managed`, `allow_author_blocks`, and per-block `is_system_managed`), not from section titles.

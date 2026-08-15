@@ -108,6 +108,7 @@
     return {
       isHeading: declaredHeading || explicitLevel > 0 || styleLevel > 0 || tagLevel > 0,
       level: explicitLevel || styleLevel || tagLevel || 0,
+      isMainTitle: paragraphStyle === "title",
       element: heading
     };
   }
@@ -155,6 +156,7 @@
       splittable: Boolean(options.splittable),
       forceBreakBefore: Boolean(options.forceBreakBefore),
       headingLevel: Number(options.headingLevel || 0),
+      mainTitle: Boolean(options.mainTitle),
       tableHeaderHTML: String(options.tableHeaderHTML || ""),
       tableShellHTML: String(options.tableShellHTML || ""),
       orderedStart: Number(options.orderedStart || 0),
@@ -818,6 +820,7 @@
       return normalizeGeneratedLep(section, unit, root, forceBreakBefore);
     }
     if (authority === "generated") {
+      const heading = headingSemantics(unit, root);
       const items = generatedRepeatableItems(root);
       if (items) return normalizeGeneratedRepeatable(section, unit, root, forceBreakBefore, items);
       if (type === "list") return normalizeList(section, unit, root, forceBreakBefore);
@@ -827,6 +830,8 @@
         atomic: true,
         splittable: type === "paragraph",
         forceBreakBefore,
+        headingLevel: heading.level,
+        mainTitle: heading.isMainTitle,
         paginationAuthority: "generated"
       })];
     }
@@ -853,6 +858,7 @@
       splittable: ["paragraph", "note", "warning", "caution"].includes(type),
       forceBreakBefore,
       headingLevel: heading.level,
+      mainTitle: heading.isMainTitle,
       unsupported: !supported,
       paginationAuthority: authority
     })];
@@ -1843,13 +1849,21 @@
         current = null;
       }
 
+      if (sourceFragment.mainTitle && hasSourceContent(current)) {
+        finish();
+        continuation = null;
+        current = null;
+      }
+
       if (!current) {
         begin(sourceFragment, {
           isSectionStart: true,
           isMajorSectionStart: Boolean(
             sourceFragment.section.flags && sourceFragment.section.flags.is_major_section_start
           ),
-          breakReason: sourceFragment.forceBreakBefore ? "forced_source_break" : ""
+          breakReason: sourceFragment.forceBreakBefore
+            ? "forced_source_break"
+            : (sourceFragment.mainTitle ? "main_title_section_start" : "")
         });
       }
 

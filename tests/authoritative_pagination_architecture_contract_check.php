@@ -106,6 +106,7 @@ $contracts = array(
         'live-authoritative-flow-v1',
         'automatic_author_flow',
         'heading_keep_with_following',
+        'main_title_section_start',
         'HEADING_PARAGRAPH_STYLE_LEVELS',
         'section_id: Number(value.fragment.section',
         'reader-generated-page',

@@ -1003,8 +1003,8 @@ cases.push(["AL. styled paragraph is recognized as a heading", () => {
         '<article data-block-id="121" data-stable-anchor="lead"><p style="min-height:650px">Lead before styled heading.</p></article>',
         { block_id: 121 }),
       unit("styled-title", "paragraph",
-        '<article class="cpb-block cpb-block--paragraph" data-block-id="122" data-stable-anchor="styled-title"><p class="cpb-paragraph cpb-ps-title" data-paragraph-style="title">2. Styled Chapter</p></article>',
-        { block_id: 122, paragraph_style: "title" }),
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="122" data-stable-anchor="styled-title"><p class="cpb-paragraph cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">2. Styled Subsection</p></article>',
+        { block_id: 122, paragraph_style: "subtitle_1" }),
       unit("styled-body", "paragraph",
         '<article data-block-id="123" data-stable-anchor="styled-body"><p style="min-height:120px">Meaningful chapter content.</p></article>',
         { block_id: 123 })
@@ -1013,7 +1013,7 @@ cases.push(["AL. styled paragraph is recognized as a heading", () => {
   const { execution, result } = runWorker(source);
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
   assert.strictEqual(result.error, undefined);
-  const headingPage = result.pages.find((page) => page.page_html.includes("2. Styled Chapter"));
+  const headingPage = result.pages.find((page) => page.page_html.includes("2. Styled Subsection"));
   assert.ok(headingPage && headingPage.page_number === 2);
   assert.ok(headingPage.page_html.includes("Meaningful chapter content"));
   assert.strictEqual(headingPage.metrics.break_reason, "heading_keep_with_following");
@@ -1027,10 +1027,10 @@ cases.push(["AM. consecutive styled heading chain moves without a manual break",
         '<article data-block-id="131" data-stable-anchor="lead"><p style="min-height:650px">Lead before styled chain.</p></article>',
         { block_id: 131 }),
       unit("chapter-title", "paragraph",
-        '<article class="cpb-block cpb-block--paragraph" data-block-id="132" data-stable-anchor="chapter-title"><p class="cpb-paragraph cpb-ps-title" data-paragraph-style="title">2. ORGANIZATION AND RESPONSIBILITIES</p></article>',
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="132" data-stable-anchor="chapter-title"><p class="cpb-paragraph cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">2.1 ORGANIZATION STRUCTURE</p></article>',
         { block_id: 132 }),
       unit("subsection-title", "paragraph",
-        '<article class="cpb-block cpb-block--paragraph" data-block-id="133" data-stable-anchor="subsection-title"><p class="cpb-paragraph cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">2.1 Structure of the ATO</p></article>',
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="133" data-stable-anchor="subsection-title"><p class="cpb-paragraph cpb-ps-subtitle_2" data-paragraph-style="subtitle_2">2.1.1 Structure of the ATO</p></article>',
         { block_id: 133 }),
       unit("chapter-body", "paragraph",
         '<article data-block-id="134" data-stable-anchor="chapter-body"><p>EuroPilot Center organization content.</p></article>',
@@ -1043,10 +1043,10 @@ cases.push(["AM. consecutive styled heading chain moves without a manual break",
   assert.strictEqual(result.validation.is_valid, true);
   assert.ok(!(source.manual_page_breaks || []).length, "automatic heading movement must not create a manual break");
   const chainPage = result.pages.find((page) =>
-    page.page_html.includes("2. ORGANIZATION AND RESPONSIBILITIES")
+    page.page_html.includes("2.1 ORGANIZATION STRUCTURE")
   );
   assert.ok(chainPage && chainPage.page_number === 2);
-  assert.ok(chainPage.page_html.includes("2.1 Structure of the ATO"));
+  assert.ok(chainPage.page_html.includes("2.1.1 Structure of the ATO"));
   assert.ok(chainPage.page_html.includes("EuroPilot Center organization content"));
   assert.strictEqual(chainPage.metrics.break_reason, "heading_keep_with_following");
   assert.strictEqual(chainPage.metrics.forced_break_before, false);
@@ -1054,6 +1054,153 @@ cases.push(["AM. consecutive styled heading chain moves without a manual break",
     .filter((entry) => !entry.presentation_copy)
     .map((entry) => entry.source_order);
   assert.deepStrictEqual(sourceOrder, sourceOrder.slice().sort((a, b) => a - b));
+}]);
+
+cases.push(["AN. main title starts a new page after a nearly empty prior section", () => {
+  const source = sourceWith([
+    section(1, "section-two", "Section Two", {}, [
+      unit("section-two-end", "paragraph",
+        '<article data-block-id="141" data-stable-anchor="section-two-end"><p>2.2.15 Subcontracted Training</p></article>',
+        { block_id: 141 })
+    ]),
+    section(2, "section-three", "Section Three", {}, [
+      unit("section-three-title", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="142" data-stable-anchor="section-three-title"><p class="cpb-paragraph cpb-ps-title" data-paragraph-style="title">3. STUDENT DISCIPLINE</p></article>',
+        { block_id: 142, paragraph_style: "title" }),
+      unit("section-three-subtitle", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="143" data-stable-anchor="section-three-subtitle"><p class="cpb-paragraph cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">3.1 General</p></article>',
+        { block_id: 143, paragraph_style: "subtitle_1" }),
+      unit("section-three-body", "paragraph",
+        '<article data-block-id="144" data-stable-anchor="section-three-body"><p>Following student discipline content.</p></article>',
+        { block_id: 144 })
+    ])
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 2);
+  assert.ok(result.pages[0].page_html.includes("2.2.15 Subcontracted Training"));
+  assert.ok(!result.pages[0].page_html.includes("3. STUDENT DISCIPLINE"));
+  assert.ok(pageBodyHtml(result.pages[1]).indexOf("3. STUDENT DISCIPLINE")
+    < pageBodyHtml(result.pages[1]).indexOf("3.1 General"));
+  assert.strictEqual(result.pages[1].metrics.break_reason, "main_title_section_start");
+  assert.strictEqual(result.validation.is_valid, true);
+  assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["AO. main title starts a new page after a nearly full prior section", () => {
+  const source = sourceWith([
+    section(1, "prior-full", "Prior full section", {}, [
+      unit("prior-full-body", "paragraph",
+        '<article data-block-id="151" data-stable-anchor="prior-full-body"><p style="min-height:680px">Nearly full preceding section.</p></article>',
+        { block_id: 151 })
+    ]),
+    section(2, "next-main", "Next main section", {}, [
+      unit("next-main-title", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="152" data-stable-anchor="next-main-title"><p data-paragraph-style="title">3. STUDENT DISCIPLINE</p></article>',
+        { block_id: 152, paragraph_style: "title" }),
+      unit("next-main-body", "paragraph",
+        '<article data-block-id="153" data-stable-anchor="next-main-body"><p>First section content.</p></article>',
+        { block_id: 153 })
+    ])
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 2);
+  assert.strictEqual(result.pages[1].coverage[0].source_fragment_id, "next-main/next-main-title/root");
+  assert.strictEqual(result.pages[1].metrics.break_reason, "main_title_section_start");
+  assert.strictEqual(result.validation.is_valid, true);
+}]);
+
+cases.push(["AP. main title already first on a page creates no blank page", () => {
+  const source = sourceWith([
+    section(1, "first-main", "First main section", {}, [
+      unit("first-main-title", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="161" data-stable-anchor="first-main-title"><p data-paragraph-style="title">1. INTRODUCTION</p></article>',
+        { block_id: 161, paragraph_style: "title" }),
+      unit("first-main-body", "paragraph",
+        '<article data-block-id="162" data-stable-anchor="first-main-body"><p>Opening content.</p></article>',
+        { block_id: 162 })
+    ])
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 1);
+  assert.strictEqual(result.pages[0].coverage[0].source_fragment_id, "first-main/first-main-title/root");
+  assert.strictEqual(result.pages[0].metrics.break_reason, "main_title_section_start");
+  assert.strictEqual(result.validation.is_valid, true);
+}]);
+
+cases.push(["AQ. subtitle remains in normal automatic flow", () => {
+  const source = sourceWith([
+    section(1, "subtitle-flow", "Subtitle flow", {}, [
+      unit("subtitle-lead", "paragraph",
+        '<article data-block-id="171" data-stable-anchor="subtitle-lead"><p>Preceding content on the same page.</p></article>',
+        { block_id: 171 }),
+      unit("flow-subtitle", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="172" data-stable-anchor="flow-subtitle"><p data-paragraph-style="subtitle_1">3.1 General</p></article>',
+        { block_id: 172, paragraph_style: "subtitle_1" }),
+      unit("subtitle-body", "paragraph",
+        '<article data-block-id="173" data-stable-anchor="subtitle-body"><p>Subtitle content.</p></article>',
+        { block_id: 173 })
+    ])
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 1);
+  assert.ok(result.pages[0].page_html.includes("Preceding content"));
+  assert.ok(result.pages[0].page_html.includes("3.1 General"));
+  assert.notStrictEqual(result.pages[0].metrics.break_reason, "main_title_section_start");
+}]);
+
+cases.push(["AR. heading keep-with-following remains active inside a main-title section", () => {
+  const source = sourceWith([
+    section(1, "main-with-subtitle", "Main with subtitle", {}, [
+      unit("main-title", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="181" data-stable-anchor="main-title"><p data-paragraph-style="title">3. STUDENT DISCIPLINE</p></article>',
+        { block_id: 181, paragraph_style: "title" }),
+      unit("main-fill", "paragraph",
+        '<article data-block-id="182" data-stable-anchor="main-fill"><p style="min-height:620px">Section content before a subsection.</p></article>',
+        { block_id: 182 }),
+      unit("kept-subtitle", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="183" data-stable-anchor="kept-subtitle"><p data-paragraph-style="subtitle_1">3.2 Conduct</p></article>',
+        { block_id: 183, paragraph_style: "subtitle_1" }),
+      unit("kept-subtitle-body", "paragraph",
+        '<article data-block-id="184" data-stable-anchor="kept-subtitle-body"><p style="min-height:120px">Meaningful conduct content.</p></article>',
+        { block_id: 184 })
+    ])
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  const subtitlePage = result.pages.find((page) => page.page_html.includes("3.2 Conduct"));
+  assert.ok(subtitlePage && subtitlePage.page_number === 2);
+  assert.ok(subtitlePage.page_html.includes("Meaningful conduct content"));
+  assert.strictEqual(subtitlePage.metrics.break_reason, "heading_keep_with_following");
+  assert.strictEqual(result.validation.is_valid, true);
+}]);
+
+cases.push(["AS. manual break before main title creates no duplicate blank page", () => {
+  const source = sourceWith([
+    section(1, "manual-prior", "Manual prior", {}, [
+      unit("manual-prior-body", "paragraph",
+        '<article data-block-id="191" data-stable-anchor="manual-prior-body"><p>Previous section.</p></article>',
+        { block_id: 191 })
+    ]),
+    section(2, "manual-main", "Manual main", {}, [
+      unit("manual-main-title", "paragraph",
+        '<article class="cpb-block cpb-block--paragraph" data-block-id="192" data-stable-anchor="manual-main-title"><p data-paragraph-style="title">3. STUDENT DISCIPLINE</p></article>',
+        { block_id: 192, paragraph_style: "title", force_break_before: true }),
+      unit("manual-main-body", "paragraph",
+        '<article data-block-id="193" data-stable-anchor="manual-main-body"><p>First section content.</p></article>',
+        { block_id: 193 })
+    ])
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 2);
+  assert.strictEqual(result.pages[1].coverage[0].source_fragment_id, "manual-main/manual-main-title/root");
+  assert.strictEqual(result.pages[1].metrics.break_reason, "forced_source_break");
+  assert.strictEqual(result.validation.is_valid, true);
+  assertHeaderFooter(result.pages);
 }]);
 
 let failed = 0;
