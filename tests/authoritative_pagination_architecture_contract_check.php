@@ -45,7 +45,7 @@ $contracts = array(
         "'body_capacity_px' => 782",
     ),
     'src/publishing/ControlledPublishingBookStyleManifestService.php' => array(
-        '.reader-page-header-region .cpb-page-header-logo{max-height:72px!important;}',
+        '.reader-page-header-region .cpb-page-header-logo{max-height:64px!important;}',
     ),
     'src/publishing/ControlledPublishingManualPageBreakService.php' => array(
         'before_block_anchor',

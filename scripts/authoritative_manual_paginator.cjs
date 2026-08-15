@@ -59,7 +59,7 @@ async function main() {
   const top = Number(profile.sheet_padding_top_px || 48);
   const bottom = Number(profile.sheet_padding_bottom_px || 64);
   const headerHeight = Number(profile.header_band_px || 84);
-  const headerLogoMaxHeight = Math.max(16, headerHeight - 12);
+  const headerLogoMaxHeight = Math.max(16, headerHeight - 20);
   const headerGap = Number(profile.header_margin_bottom_px || 20);
   const footerGap = Number(profile.footer_margin_top_px || 24);
   const footerHeight = Number(profile.footer_band_px || 34);
