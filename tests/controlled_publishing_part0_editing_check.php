@@ -111,7 +111,11 @@ part0_assert(str_contains($revisionHtml, 'Revision body.'), 'Part 0 body content
 $editorJs = file_get_contents(__DIR__ . '/../public/assets/controlled_book_editor.js') ?: '';
 part0_assert(str_contains($editorJs, 'extractTableColumnWidths'), 'Editor does not persist structured table widths.');
 part0_assert(str_contains($editorJs, 'data-part0-column-resize'), 'Editor does not handle structured table resizing.');
-part0_assert(str_contains($editorJs, 'Page table style'), 'Page-specific table style editor is missing.');
+part0_assert(
+    substr_count($editorJs, '>Table Editor</button>') >= 2
+        && str_contains($editorJs, "styleEditorTitle = localTableOnly"),
+    'Page-specific Table Editor controls are missing.'
+);
 
 $editorCss = file_get_contents(__DIR__ . '/../public/assets/controlled_book_editor.css') ?: '';
 part0_assert(

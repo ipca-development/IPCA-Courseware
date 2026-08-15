@@ -4150,7 +4150,7 @@
         + '<div class="cpb-toolbar-group">'
         + '<button type="button" class="cpb-tool-btn cpb-lep-regenerate" title="Regenerate effective parts from manual structure">Regenerate parts</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepSave" title="Save LEP text and signatory details">Save</button>'
-        + '<button type="button" class="cpb-tool-btn" id="cpbLepOpenStyles" title="Edit paragraph and table styles">Styles</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbLepOpenStyles" title="Edit this table layout and appearance">Table Editor</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepOpenHeader" title="Page header editor">Header</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbLepApprovalLink" title="Open authority approval page">Approval page</button>'
         + '</div>';
@@ -4333,7 +4333,7 @@
         + regenBtn
         + importBtn
         + '<button type="button" class="cpb-tool-btn" id="cpbPart0Save" title="Save page">Save</button>'
-        + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenStyles" title="Edit paragraph and table styles">Styles</button>'
+        + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenStyles" title="Edit this table layout and appearance">Table Editor</button>'
         + '<button type="button" class="cpb-tool-btn" id="cpbPart0OpenHeader" title="Page header editor">Header</button>'
         + '</div>';
       toolbarPart0El.setAttribute('data-part0-wired', '1');
@@ -8561,7 +8561,7 @@
     var overlay = document.createElement('div');
     overlay.className = 'cpb-style-overlay';
     var styleEditorTitle = localTableOnly
-      ? 'Page table style'
+      ? 'Table Editor'
       : (documentType === 'form' ? 'Form Style Editor' : 'Book style editor');
     var styleSavedStatus = localTableOnly
       ? 'Page table style saved'
@@ -8658,7 +8658,7 @@
       overlay.innerHTML = ''
         + '<div class="cpb-style-dialog" role="dialog" aria-label="' + escapeAttr(styleEditorTitle) + '">'
         + '<h3>' + escapeHtml(styleEditorTitle) + '</h3>'
-        + '<p class="cpb-style-lead">These settings apply only to the table on this Part 0 page.</p>'
+        + '<p class="cpb-style-lead">Edit this Part 0 table independently from the global book table style.</p>'
         + tableSection('standard', 'Table appearance')
         + '<div class="cpb-style-dialog-actions">'
         + '<button type="button" class="cpb-style-cancel">Cancel</button>'
