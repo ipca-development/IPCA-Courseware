@@ -34,9 +34,14 @@ $amendment = $renderer->renderAmendmentListContent(array(
 ), true);
 part0_assert(substr_count($amendment, 'data-part0-column-resize="1"') === 6, 'Amendment columns are not resizable.');
 part0_assert(str_contains($amendment, '<col style="width:30%">'), 'Saved amendment widths are not rendered.');
+part0_assert(
+    str_contains($amendment, 'style="width:100%;max-width:100%;table-layout:fixed"'),
+    'Amendment table does not render at full body width.'
+);
 part0_assert(str_contains($amendment, 'cpb-table-border-thick'), 'Page-specific table border is not rendered.');
 part0_assert(str_contains($amendment, '--cpb-table-border-color:#123456'), 'Page-specific border color is not rendered.');
 part0_assert(str_contains($amendment, 'data-cell-bg="#112233"'), 'Page-specific header style is not rendered.');
+part0_assert(str_contains($amendment, 'tbody data-table-part="body"'), 'Amendment rows are not exposed to the Table Editor.');
 
 $distribution = $renderer->renderDistributionListContent(array(
     'rows' => array(array('copy_nr' => '1', 'issue_to' => 'Authority')),
@@ -45,6 +50,10 @@ $distribution = $renderer->renderDistributionListContent(array(
 ), true);
 part0_assert(substr_count($distribution, 'data-part0-column-resize="1"') === 2, 'Distribution columns are not resizable.');
 part0_assert(str_contains($distribution, '<col style="width:76%">'), 'Saved distribution widths are not rendered.');
+part0_assert(
+    str_contains($distribution, 'style="width:100%;max-width:100%;table-layout:fixed"'),
+    'Distribution table does not render at full body width.'
+);
 
 $lepMethod = (new ReflectionClass(ControlledPublishingBookRenderer::class))->getMethod('renderLepPartsTable');
 $lepTable = $lepMethod->invoke($renderer, array(
@@ -60,6 +69,10 @@ $lepTable = $lepMethod->invoke($renderer, array(
 part0_assert(substr_count($lepTable, 'data-part0-column-resize="1"') === 4, 'LEP columns are not resizable.');
 part0_assert(substr_count($lepTable, 'data-lep-part-col=') === 4, 'LEP cells are not editable structured fields.');
 part0_assert(str_contains($lepTable, '<col style="width:30%">'), 'Saved LEP widths are not rendered.');
+part0_assert(
+    str_contains($lepTable, 'style="width:100%;max-width:100%;table-layout:fixed"'),
+    'LEP table does not render at full body width.'
+);
 
 $publishedAbbreviations = $renderer->renderAbbreviationsIndexContent(array(
     'entries' => array(
@@ -116,8 +129,18 @@ part0_assert(
         && str_contains($editorJs, "styleEditorTitle = localTableOnly"),
     'Page-specific Table Editor controls are missing.'
 );
+part0_assert(str_contains($editorJs, 'ensureStructuredTableEditor'), 'Cell-click Table Editor wiring is missing.');
+part0_assert(str_contains($editorJs, 'handleStructuredTableAction'), 'Structured row operations are missing.');
 
 $editorCss = file_get_contents(__DIR__ . '/../public/assets/controlled_book_editor.css') ?: '';
+$genericTableRule = strrpos($editorCss, '.cpb-table-wrap .cpb-table {');
+$structuredWidthRule = strrpos($editorCss, '.cpb-lep-parts-wrap > .cpb-lep-table,');
+part0_assert(
+    $genericTableRule !== false
+        && $structuredWidthRule !== false
+        && $structuredWidthRule > $genericTableRule,
+    'Structured Part 0 full-width sizing is overridden by generic table sizing.'
+);
 part0_assert(
     preg_match('/cpb-editor-lep-mode \\.cpb-toolbar-main\\s*\\{\\s*display:\\s*flex/s', $editorCss) === 1,
     'LEP mode hides the standard editing toolbar.'

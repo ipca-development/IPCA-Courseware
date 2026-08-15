@@ -1400,9 +1400,14 @@ span.cpb-flow-page-break {
 .cpb-lep-parts-wrap,
 .cpb-part0-amendment,
 .cpb-part0-distribution {
+  position: relative;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+.cpb-editor-root [data-structured-table-editor="1"] {
+  overflow: visible;
 }
 
 .cpb-lep-parts-wrap > .cpb-lep-table,
@@ -2123,6 +2128,17 @@ ol.cpb-list > li[data-indent-level="8"] {
   border: 0;
   margin: 0;
   background: transparent;
+  table-layout: fixed;
+}
+
+/* Structured Part 0 tables always occupy the complete publication body width.
+   Keep this after the generic author-table sizing rule so reload matches resize. */
+.cpb-lep-parts-wrap > .cpb-lep-table,
+.cpb-part0-amendment > .cpb-part0-table,
+.cpb-part0-distribution > .cpb-part0-table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 100%;
   table-layout: fixed;
 }
 

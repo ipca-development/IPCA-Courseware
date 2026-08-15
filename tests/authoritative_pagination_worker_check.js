@@ -243,6 +243,7 @@ function lepHtml(rowCount) {
     + '<div class="cpb-lep-heading">0.1.1 Effective Parts</div>'
     + '<div class="cpb-lep-cert-wrap"><div class="cpb-lep-cert-text">Certification statement.</div></div>'
     + '<table class="cpb-lep-table cpb-table" data-lep-parts-table="1">'
+    + '<colgroup><col style="width:18%"><col style="width:28%"><col style="width:27%"><col style="width:27%"></colgroup>'
     + '<thead><tr class="cpb-table-header-row"><th>Part</th><th>Pages</th><th>Date</th><th>Revision</th></tr></thead>'
     + `<tbody>${rows}</tbody></table></div>`,
     "cpb-sheet--lep"
@@ -564,6 +565,13 @@ cases.push(["P. generated LEP spans multiple pages automatically", () => {
   assert.ok(result.pages.slice(1).every((page) =>
     String(page.metrics && page.metrics.break_reason || "") === "lep_continuation"
   ), "LEP continuation pages must not persist as manual breaks");
+  result.pages.forEach((page) => {
+    assert.ok(
+      page.page_html.includes('<col style="width:18%">')
+        && page.page_html.includes('<col style="width:28%">'),
+      "every LEP page must preserve the saved colgroup widths"
+    );
+  });
   assertHeaderFooter(result.pages);
   assertContentFragmentGeometry(result.pages, "/lep-row-");
 }]);

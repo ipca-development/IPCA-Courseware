@@ -629,6 +629,8 @@
           clone.setAttribute(attr.name, attr.value);
         });
       }
+      const colgroup = table && table.querySelector("colgroup");
+      if (colgroup) clone.appendChild(colgroup.cloneNode(true));
       const thead = table && table.querySelector("thead");
       if (thead) clone.appendChild(thead.cloneNode(true));
       const tbody = document.createElement("tbody");
@@ -716,6 +718,8 @@
     } else {
       clone.className = "cpb-table cpb-lep-table";
     }
+    const colgroup = table && table.querySelector("colgroup");
+    if (colgroup) clone.appendChild(colgroup.cloneNode(true));
     const thead = table && table.querySelector("thead");
     if (thead) clone.appendChild(thead.cloneNode(true));
     const tbody = document.createElement("tbody");

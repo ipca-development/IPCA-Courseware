@@ -135,17 +135,10 @@
   display: block;
 }
 
-.cpb-page-header-logo-placeholder {
-  display: inline-block;
-  font-family: system-ui, sans-serif;
-  font-size: 9pt;
-  color: #94a3b8;
-  font-style: italic;
-}
-
 .cpb-lep-parts-wrap,
 .cpb-part0-amendment,
 .cpb-part0-distribution {
+  position: relative;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -157,6 +150,14 @@
   width: 100%;
   max-width: 100%;
   table-layout: fixed;
+}
+
+.cpb-page-header-logo-placeholder {
+  display: inline-block;
+  font-family: system-ui, sans-serif;
+  font-size: 9pt;
+  color: #94a3b8;
+  font-style: italic;
 }
 
 .cpb-header-preview .cpb-page-header {
@@ -581,6 +582,15 @@ ol.cpb-list > li[data-indent-level="8"] {
   border: 0;
   margin: 0;
   background: transparent;
+  table-layout: fixed;
+}
+
+.cpb-lep-parts-wrap > .cpb-lep-table,
+.cpb-part0-amendment > .cpb-part0-table,
+.cpb-part0-distribution > .cpb-part0-table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 100%;
   table-layout: fixed;
 }
 

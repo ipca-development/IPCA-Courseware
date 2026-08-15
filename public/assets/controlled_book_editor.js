@@ -2973,13 +2973,15 @@
     canvasEl.addEventListener('pointerdown', function (e) {
       var tableCell = e.target.closest('.cpb-table th, .cpb-table td');
       var tableTools = e.target.closest('.cpb-table-tools');
-      var clickedTableBlock = e.target.closest('.cpb-block--table');
+      var clickedTableBlock = e.target.closest(
+        '.cpb-block--table, [data-structured-table-editor="1"]'
+      );
       if (tableCell && tableCell.isContentEditable && canvasEl.contains(tableCell)) {
         var toggleCell = e.metaKey || e.ctrlKey;
         if (toggleCell) e.preventDefault();
         selectTableCell(tableCell, e.shiftKey, toggleCell);
         state.focusedTableCell = tableCell;
-        var tableBlock = tableCell.closest('.cpb-block');
+        var tableBlock = tableCell.closest('.cpb-block, [data-structured-table-editor="1"]');
         if (tableBlock) {
           state.lastStyleTarget = { block: tableBlock, el: tableCell, type: 'table-cell' };
         }
@@ -3033,9 +3035,13 @@
       var btn = e.target.closest('button[data-table-action]');
       if (!btn || !state.editable) return;
       e.preventDefault();
-      var blockEl = btn.closest('.cpb-block');
+      var blockEl = btn.closest('.cpb-block, [data-structured-table-editor="1"]');
       if (!blockEl) return;
       var action = btn.getAttribute('data-table-action');
+      if (blockEl.getAttribute('data-structured-table-editor') === '1') {
+        handleStructuredTableAction(blockEl, action);
+        return;
+      }
       if (action === 'delete-table') {
         if (!confirm('Delete this entire table?')) return;
         var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
@@ -4273,8 +4279,10 @@
       });
       if (!Object.keys(row).some(function (key) { return row[key]; })) return;
       var existing = Array.isArray(lep.effective_parts) ? lep.effective_parts[rowIndex] : null;
-      row.label = existing && existing.label ? existing.label : '';
-      row.section_id = existing && existing.section_id ? existing.section_id : 0;
+      row.label = rowEl.getAttribute('data-lep-label')
+        || (existing && existing.label ? existing.label : '');
+      row.section_id = parseInt(rowEl.getAttribute('data-lep-section-id') || '0', 10)
+        || (existing && existing.section_id ? existing.section_id : 0);
       effectiveParts.push(row);
     });
     lep.effective_parts = effectiveParts;
@@ -4620,6 +4628,11 @@
     var sheet = canvasEl.querySelector('.cpb-sheet--part0');
     if (!sheet || sheet.getAttribute('data-part0-wired') === '1') return;
     sheet.setAttribute('data-part0-wired', '1');
+    if (state.part0SectionKey === 'amendment_list' || state.part0SectionKey === 'distribution_list') {
+      ensureStructuredTableEditor(
+        sheet.querySelector('.cpb-part0-amendment, .cpb-part0-distribution')
+      );
+    }
 
     sheet.querySelectorAll('[data-part0-field], [data-part0-col]').forEach(function (field) {
       if (!state.editable || field.getAttribute('contenteditable') !== 'true') return;
@@ -4907,6 +4920,7 @@
     var sheet = canvasEl.querySelector('.cpb-sheet--lep');
     if (!sheet || sheet.getAttribute('data-lep-wired') === '1') return;
     sheet.setAttribute('data-lep-wired', '1');
+    ensureStructuredTableEditor(sheet.querySelector('.cpb-lep-parts-wrap'));
 
     sheet.querySelectorAll('[data-lep-field], [data-lep-part-col]').forEach(function (field) {
       if (!state.editable || field.getAttribute('data-lep-field-wired') === '1') return;
@@ -5770,6 +5784,114 @@
       cell.style.backgroundColor = '';
       cell.removeAttribute('data-cell-bg');
     }
+  }
+
+  function ensureStructuredTableEditor(container) {
+    if (!container || container.getAttribute('data-structured-table-editor') === '1') return;
+    container.setAttribute('data-structured-table-editor', '1');
+    var tools = document.createElement('div');
+    tools.className = 'cpb-table-tools cpb-table-tools--structured';
+    tools.setAttribute('contenteditable', 'false');
+    tools.setAttribute('role', 'dialog');
+    tools.setAttribute('aria-label', 'Table Editor');
+    tools.setAttribute('aria-hidden', 'true');
+    tools.innerHTML = ''
+      + '<div class="cpb-table-tools__header">'
+      + '<div><strong>Table Editor</strong><span class="cpb-table-tools__selection">Table selected</span></div>'
+      + '<button type="button" class="cpb-table-tools__close" data-table-tools-close aria-label="Close Table Editor">×</button>'
+      + '</div>'
+      + '<div class="cpb-table-tools__body">'
+      + '<section class="cpb-table-tools__group" aria-label="Rows">'
+      + '<span class="cpb-table-style-label">Rows</span>'
+      + '<div class="cpb-table-tools__controls">'
+      + '<button type="button" class="cpb-mini-btn" data-table-action="move-row-up">↑ Row</button>'
+      + '<button type="button" class="cpb-mini-btn" data-table-action="move-row-down">↓ Row</button>'
+      + '<button type="button" class="cpb-mini-btn" data-table-action="add-row">+ Row</button>'
+      + '<button type="button" class="cpb-mini-btn cpb-mini-btn--danger" data-table-action="del-row">Delete row</button>'
+      + '</div></section>'
+      + '<section class="cpb-table-tools__group" aria-label="Appearance">'
+      + '<span class="cpb-table-style-label">Appearance &amp; layout</span>'
+      + '<div class="cpb-table-tools__controls">'
+      + '<button type="button" class="cpb-mini-btn" data-table-action="structured-appearance">Table style…</button>'
+      + '<span class="cpb-toolbar-part0-label">Drag column dividers to resize</span>'
+      + '</div></section>'
+      + '</div>';
+    container.appendChild(tools);
+  }
+
+  function wireStructuredTableCell(cell, isLep) {
+    if (!cell || cell.getAttribute('data-structured-cell-wired') === '1') return;
+    cell.setAttribute('data-structured-cell-wired', '1');
+    cell.addEventListener('input', isLep ? scheduleLepSave : schedulePart0Save);
+    cell.addEventListener('blur', function () {
+      if (isLep) {
+        if (state.lepSaveTimer) {
+          clearTimeout(state.lepSaveTimer);
+          state.lepSaveTimer = null;
+        }
+        flushLepSave();
+      } else {
+        if (state.part0SaveTimer) {
+          clearTimeout(state.part0SaveTimer);
+          state.part0SaveTimer = null;
+        }
+        flushPart0Save();
+      }
+    });
+  }
+
+  function structuredTableAddRow(container) {
+    var tbody = tableBody(container);
+    var template = tbody && tbody.querySelector('tr:last-child');
+    if (!tbody || !template) return false;
+    var row = template.cloneNode(true);
+    row.classList.add('cpb-part0-row--empty');
+    row.removeAttribute('data-lep-label');
+    row.removeAttribute('data-lep-section-id');
+    row.querySelectorAll('td, th').forEach(function (cell) {
+      cell.innerHTML = '&nbsp;';
+      cell.classList.remove('is-cell-selected');
+      cell.removeAttribute('data-structured-cell-wired');
+      wireStructuredTableCell(cell, !!state.isLepSection);
+    });
+    tbody.appendChild(row);
+    var firstCell = row.querySelector('td, th');
+    if (firstCell) {
+      clearTableCellSelection();
+      addTableCellToSelection(firstCell);
+      state.focusedTableCell = firstCell;
+      state.lastStyleTarget = { block: container, el: firstCell, type: 'table-cell' };
+      firstCell.focus();
+    }
+    return true;
+  }
+
+  function saveStructuredTable(container) {
+    if (!container) return;
+    if (state.isLepSection) {
+      flushLepSave();
+    } else {
+      flushPart0Save();
+    }
+  }
+
+  function handleStructuredTableAction(container, action) {
+    if (!container || !action) return;
+    if (action === 'structured-appearance') {
+      closeTableTools();
+      openStyleEditor();
+      return;
+    }
+    pushUndo();
+    var changed = false;
+    if (action === 'add-row') changed = structuredTableAddRow(container);
+    else if (action === 'del-row') changed = tableDelRow(container);
+    else if (action === 'move-row-up') changed = tableMoveRow(container, 'up');
+    else if (action === 'move-row-down') changed = tableMoveRow(container, 'down');
+    if (!changed) return;
+    syncTableToolsContext(container);
+    positionTableTools(container, state.activeTableToolsAnchor);
+    saveStructuredTable(container);
   }
 
   function closeTableTools() {
