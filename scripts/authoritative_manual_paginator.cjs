@@ -56,10 +56,31 @@ async function remoteImageAssets(htmlValues) {
     }
     assets.set(url, {
       body,
-      contentType: response.headers.get("content-type") || "application/octet-stream"
+      contentType: response.headers.get("content-type") || "application/octet-stream",
+      dataUrl: `data:${response.headers.get("content-type") || "application/octet-stream"};base64,${body.toString("base64")}`
     });
   }));
   return assets;
+}
+
+function replacePublicationImages(value, assets, restore = false) {
+  if (Array.isArray(value)) {
+    return value.map((item) => replacePublicationImages(item, assets, restore));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      key,
+      replacePublicationImages(item, assets, restore)
+    ]));
+  }
+  if (typeof value !== "string") return value;
+  let output = value;
+  assets.forEach((asset, url) => {
+    output = restore
+      ? output.split(asset.dataUrl).join(url)
+      : output.split(url).join(asset.dataUrl);
+  });
+  return output;
 }
 
 async function main() {
@@ -139,6 +160,9 @@ async function main() {
     ...source.sections.map((section) => String(section?.footer_template || ""))
   ].filter(Boolean)));
   const publicationImages = await remoteImageAssets([...headerTemplates, ...footerTemplates]);
+  const hydratedSource = replacePublicationImages(source, publicationImages);
+  const hydratedHeaderTemplates = replacePublicationImages(headerTemplates, publicationImages);
+  const hydratedFooterTemplates = replacePublicationImages(footerTemplates, publicationImages);
   const browser = await launchChromium();
   try {
     const page = await browser.newPage({
@@ -254,8 +278,8 @@ async function main() {
         footer: Math.max(0, ...footerHeights)
       };
     }, {
-      headerTemplates,
-      footerTemplates,
+      headerTemplates: hydratedHeaderTemplates,
+      footerTemplates: hydratedFooterTemplates,
       width: pageWidth - side * 2
     });
     const resolvedHeaderHeight = measuredBands.header || headerHeight;
@@ -288,7 +312,7 @@ async function main() {
         };
       });
     }, {
-      sourceValue: source,
+      sourceValue: hydratedSource,
       layoutValue: layout,
       incrementalValue: input.incremental && typeof input.incremental === "object"
         ? input.incremental
@@ -296,6 +320,9 @@ async function main() {
     });
     await page.addScriptTag({ content: core });
     const result = await page.evaluate(() => window.__authoritativePagination);
+    if (result && Array.isArray(result.pages)) {
+      result.pages = replacePublicationImages(result.pages, publicationImages, true);
+    }
     if (
       result
       && result.error
