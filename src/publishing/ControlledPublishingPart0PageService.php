@@ -110,7 +110,7 @@ final class ControlledPublishingPart0PageService
     public const PAGE_REGISTRY = array(
         'lep' => array(
             'number' => '0.1',
-            'label' => 'List of effective Parts',
+            'label' => 'List of Effective Parts',
             'sidebar_title' => 'List of Effective Parts + E-Signature',
         ),
         'revision_system' => array(

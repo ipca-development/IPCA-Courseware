@@ -48,7 +48,7 @@ final class ControlledPublishingLepService
             array(
                 'key' => 'subtitle_1',
                 'style' => 'subtitle_1',
-                'text' => '0.1 List of effective Parts',
+                'text' => '0.1 List of Effective Parts',
             ),
             array(
                 'key' => 'subtitle_2',
@@ -507,6 +507,12 @@ final class ControlledPublishingLepService
             $text = $this->truncate(trim((string)($heading['text'] ?? '')), 500);
             if ($text === '') {
                 $text = (string)$defaultsByKey[$key]['text'];
+            }
+            if (
+                $key === 'subtitle_1'
+                && strcasecmp($text, '0.1 List of effective Parts') === 0
+            ) {
+                $text = '0.1 List of Effective Parts';
             }
             $normalized[$key] = array(
                 'key' => $key,
