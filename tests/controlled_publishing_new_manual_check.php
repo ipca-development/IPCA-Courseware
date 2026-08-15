@@ -60,11 +60,21 @@ foreach (array(
     "vss.selection_role = 'manual_source'",
     "ss.source_family = 'manual'",
     "CASE WHEN vss.selection_role = 'manual_source' THEN 0 ELSE 1 END",
+    '$this->listChaptersForPart($manualCode, $sourceSetId, $partIndex + 1)',
+    'private function listOmChapters(string $manualCode, int $sourceSetId, int $manualPart)',
+    'private function listOmmChapters(string $manualCode, int $sourceSetId, int $manualPart)',
+    'AND manual_code = :manual_code',
+    "\$manualCode === 'OM' && isset(self::OM_DEFAULT_CHAPTER_TITLES[\$number])",
 ) as $marker) {
     if (!str_contains($structure, $marker)) {
         fwrite(STDERR, "Missing resilient manual-source resolution marker: {$marker}\n");
         exit(1);
     }
+}
+
+if (str_contains($structure, "AND manual_code = 'OM'") || str_contains($structure, "AND manual_code = 'OMM'")) {
+    fwrite(STDERR, "Manual structure sync must query the imported manual code, not a template code.\n");
+    exit(1);
 }
 
 echo "Controlled publishing new manual workflow: PASS\n";

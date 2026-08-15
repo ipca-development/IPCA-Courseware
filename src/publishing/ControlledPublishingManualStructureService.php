@@ -99,7 +99,7 @@ final class ControlledPublishingManualStructureService
                 continue;
             }
 
-            $chapters = $this->listChaptersFromBookVersion($versionId, $partIndex + 1);
+            $chapters = $this->listChaptersForPart($manualCode, $sourceSetId, $partIndex + 1);
             if ($chapters === array()) {
                 continue;
             }
@@ -226,22 +226,22 @@ final class ControlledPublishingManualStructureService
     {
         $manualCode = strtoupper(trim($manualCode));
         if ($manualCode === 'OMM') {
-            return $this->listOmmChapters($sourceSetId, $manualPart);
+            return $this->listOmmChapters($manualCode, $sourceSetId, $manualPart);
         }
 
-        return $this->listOmChapters($sourceSetId, $manualPart);
+        return $this->listOmChapters($manualCode, $sourceSetId, $manualPart);
     }
 
     /**
      * @return list<array{chapter_number:int,title:string,nav_label:string}>
      */
-    private function listOmmChapters(int $sourceSetId, int $manualPart): array
+    private function listOmmChapters(string $manualCode, int $sourceSetId, int $manualPart): array
     {
         $stmt = $this->pdo->prepare("
             SELECT section_ref, title
             FROM ipca_canonical_excerpts
             WHERE source_set_id = :source_set_id
-              AND manual_code = 'OMM'
+              AND manual_code = :manual_code
               AND manual_part = :manual_part
               AND source_status = 'active'
               AND section_ref REGEXP '^[0-9]+$'
@@ -251,6 +251,7 @@ final class ControlledPublishingManualStructureService
         ");
         $stmt->execute(array(
             ':source_set_id' => $sourceSetId,
+            ':manual_code' => $manualCode,
             ':manual_part' => (string)$manualPart,
         ));
 
@@ -270,19 +271,20 @@ final class ControlledPublishingManualStructureService
     /**
      * @return list<array{chapter_number:int,title:string,nav_label:string}>
      */
-    private function listOmChapters(int $sourceSetId, int $manualPart): array
+    private function listOmChapters(string $manualCode, int $sourceSetId, int $manualPart): array
     {
         $stmt = $this->pdo->prepare("
             SELECT section_ref, title, body_text
             FROM ipca_canonical_excerpts
             WHERE source_set_id = :source_set_id
-              AND manual_code = 'OM'
+              AND manual_code = :manual_code
               AND manual_part = :manual_part
               AND source_status = 'active'
             ORDER BY section_ref, id
         ");
         $stmt->execute(array(
             ':source_set_id' => $sourceSetId,
+            ':manual_code' => $manualCode,
             ':manual_part' => (string)$manualPart,
         ));
 
@@ -347,12 +349,12 @@ final class ControlledPublishingManualStructureService
         $chapters = array();
         foreach (array_keys($chapterNumbers) as $number) {
             $number = (int)$number;
-            if (isset(self::OM_DEFAULT_CHAPTER_TITLES[$number])) {
-                $title = self::OM_DEFAULT_CHAPTER_TITLES[$number];
-            } elseif (isset($headingTitles[$number])) {
+            if (isset($headingTitles[$number])) {
                 $title = $headingTitles[$number];
             } elseif (isset($embeddedChapterTitles[$number])) {
                 $title = $embeddedChapterTitles[$number];
+            } elseif ($manualCode === 'OM' && isset(self::OM_DEFAULT_CHAPTER_TITLES[$number])) {
+                $title = self::OM_DEFAULT_CHAPTER_TITLES[$number];
             } else {
                 $title = $this->resolveOmChapterTitleFromRows($number, $rows);
             }
