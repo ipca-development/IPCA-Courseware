@@ -2531,9 +2531,9 @@
   async function ready(normalized) {
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
     const sources = new Map();
-    normalized.fragments.forEach((fragmentValue) => {
+    const registerImages = (html, fragmentValue = null) => {
       const holder = document.createElement("div");
-      holder.innerHTML = fragmentValue.html;
+      holder.innerHTML = String(html || "");
       holder.querySelectorAll("img[src]").forEach((image) => {
         if (!sources.has(image.src)) {
           sources.set(image.src, {
@@ -2543,6 +2543,13 @@
           });
         }
       });
+    };
+    normalized.fragments.forEach((fragmentValue) => {
+      registerImages(fragmentValue.html, fragmentValue);
+    });
+    normalized.sections.forEach((section) => {
+      registerImages(section.header_template);
+      registerImages(section.footer_template);
     });
     await Promise.all(Array.from(sources.entries()).map(([src, metadata]) => {
       const image = new Image();
