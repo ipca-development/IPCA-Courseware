@@ -35,6 +35,17 @@ $contracts = array(
         'validation failed',
         'authoritative_layout',
         'CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH',
+        'exceeds the fixed ${headerHeight}px header band',
+        'exceeds the fixed ${footerHeight}px footer band',
+        'headerLogoMaxHeight',
+    ),
+    'src/publishing/ControlledPublishingReaderLayoutProfile.php' => array(
+        "'header_band_px' => 84",
+        "'footer_band_px' => 34",
+        "'body_capacity_px' => 782",
+    ),
+    'src/publishing/ControlledPublishingBookStyleManifestService.php' => array(
+        '.reader-page-header-region .cpb-page-header-logo{max-height:72px!important;}',
     ),
     'src/publishing/ControlledPublishingManualPageBreakService.php' => array(
         'before_block_anchor',

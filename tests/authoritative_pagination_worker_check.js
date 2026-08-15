@@ -17,8 +17,8 @@ const layout = {
   header_band_px: 84,
   header_margin_bottom_px: 20,
   footer_margin_top_px: 24,
-  footer_band_px: 72,
-  body_capacity_px: 744
+  footer_band_px: 34,
+  body_capacity_px: 782
 };
 const bookStyleCSS = `
   * { box-sizing: border-box; }
@@ -29,7 +29,7 @@ const bookStyleCSS = `
   }
   .cpb-sheet { width: 816px; padding: 48px 56px 64px; min-height: 1056px; }
   .cpb-page-header { margin-bottom: 20px; }
-  .cpb-page-footer { margin-top: 24px; }
+  .cpb-page-footer { margin-top: 24px; padding: 4px; }
   .cpb-dropzone {
     margin-top: 24px; border: 2px dashed #94a3b8; padding: 20px;
     position: absolute; right: 62px; bottom: 76px;
@@ -69,7 +69,7 @@ function section(id, key, title, flags, units, extra) {
     manual_part: 1,
     part_title: "Part One",
     flags: flags || {},
-    header_template: '<header class="cpb-page-header"><div style="height:96px"><strong>Fixture Manual</strong></div></header>',
+    header_template: '<header class="cpb-page-header"><div style="height:60px"><strong>Fixture Manual</strong></div></header>',
     footer_template: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
     show_header_footer: true,
     units
@@ -93,7 +93,7 @@ function sourceWith(sections) {
     layout_profile: "IPCA_READER_CANONICAL_816x1056_v1",
     layout_hash: "fixture-layout",
     layout,
-    header_template_html: '<header class="cpb-page-header"><div style="height:96px"><strong>Fixture Manual</strong></div></header>',
+    header_template_html: '<header class="cpb-page-header"><div style="height:60px"><strong>Fixture Manual</strong></div></header>',
     footer_template_html: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
     sections
   };
@@ -128,6 +128,9 @@ function assertHeaderFooter(pages) {
     assert.ok(page.page_html.includes("reader-page-footer-region"), "footer region missing");
     assert.ok(page.page_html.includes("justify-content: flex-end"), "footer must bottom-align");
     assert.ok(page.metrics && page.metrics.validation_passed === true, "geometry validation must pass");
+    assert.strictEqual(page.metrics.header_frame.height, layout.header_band_px, "header band height drifted");
+    assert.strictEqual(page.metrics.footer_frame.height, layout.footer_band_px, "footer band height drifted");
+    assert.strictEqual(page.metrics.content_frame.height, layout.body_capacity_px, "body capacity drifted");
     assert.strictEqual(page.metrics.header_body_intersect, false, "body must not intersect header");
     assert.strictEqual(page.metrics.body_footer_intersect, false, "body must not intersect footer");
     const contentY = Number(page.metrics.content_frame.y);
@@ -1024,7 +1027,7 @@ cases.push(["AM. consecutive styled heading chain moves without a manual break",
   const source = sourceWith([
     section(1, "styled-chain", "Styled chain", {}, [
       unit("lead", "paragraph",
-        '<article data-block-id="131" data-stable-anchor="lead"><p style="min-height:650px">Lead before styled chain.</p></article>',
+        '<article data-block-id="131" data-stable-anchor="lead"><p style="min-height:700px">Lead before styled chain.</p></article>',
         { block_id: 131 }),
       unit("chapter-title", "paragraph",
         '<article class="cpb-block cpb-block--paragraph" data-block-id="132" data-stable-anchor="chapter-title"><p class="cpb-paragraph cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">2.1 ORGANIZATION STRUCTURE</p></article>',

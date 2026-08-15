@@ -59,9 +59,10 @@ async function main() {
   const top = Number(profile.sheet_padding_top_px || 48);
   const bottom = Number(profile.sheet_padding_bottom_px || 64);
   const headerHeight = Number(profile.header_band_px || 84);
+  const headerLogoMaxHeight = Math.max(16, headerHeight - 12);
   const headerGap = Number(profile.header_margin_bottom_px || 20);
   const footerGap = Number(profile.footer_margin_top_px || 24);
-  const footerHeight = Number(profile.footer_band_px || 72);
+  const footerHeight = Number(profile.footer_band_px || 34);
   const contentY = top + headerHeight + headerGap;
   const contentHeight = Number(profile.body_capacity_px || (
     pageHeight - contentY - footerGap - footerHeight - bottom
@@ -147,6 +148,10 @@ async function main() {
           .reader-page-header-region,
           .reader-page-footer-region,
           .reader-page-body:not(.reader-page-cover){overflow:hidden}
+          .reader-page-header-measurement .cpb-page-header-logo,
+          .reader-page-header-region .cpb-page-header-logo{
+            max-height:${headerLogoMaxHeight}px!important
+          }
           .reader-page-header-region>.cpb-page-header,
           .reader-page-footer-region>.cpb-page-footer{
             position:static!important;inset:auto!important;width:100%!important;
@@ -219,8 +224,14 @@ async function main() {
       ].filter(Boolean))),
       width: pageWidth - side * 2
     });
-    const resolvedHeaderHeight = Math.max(headerHeight, Math.ceil(measuredBands.header));
-    const resolvedFooterHeight = Math.max(footerHeight, Math.ceil(measuredBands.footer));
+    if (measuredBands.header > headerHeight + 0.75) {
+      fail(`Book Style header content (${measuredBands.header}px) exceeds the fixed ${headerHeight}px header band.`);
+    }
+    if (measuredBands.footer > footerHeight + 0.75) {
+      fail(`Book Style footer content (${measuredBands.footer}px) exceeds the fixed ${footerHeight}px footer band.`);
+    }
+    const resolvedHeaderHeight = headerHeight;
+    const resolvedFooterHeight = footerHeight;
     const resolvedContentY = top + resolvedHeaderHeight + headerGap;
     const resolvedFooterY = pageHeight - bottom - resolvedFooterHeight;
     const resolvedContentHeight = resolvedFooterY - footerGap - resolvedContentY;
