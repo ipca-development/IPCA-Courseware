@@ -185,6 +185,7 @@ async function mutateAndBlur(page, html, blockId = 2) {
     );
     field.focus();
     field.innerHTML = html;
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
     field.blur();
   }, { html, blockId });
 }

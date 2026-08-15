@@ -854,6 +854,8 @@
     var field = node && node.closest ? node.closest('[contenteditable="true"]') : null;
     var block = field ? field.closest('.cpb-block') : null;
     if (!field || !block || !canvasEl.contains(field)) return null;
+    var active = document.activeElement;
+    if (active !== field && !field.contains(active)) return null;
     var prefix = document.createRange();
     prefix.selectNodeContents(field);
     prefix.setEnd(range.startContainer, range.startOffset);
@@ -864,7 +866,7 @@
       fieldIdentity: sourceFieldIdentity(field, block),
       offset: prefix.toString().length,
       domRange: range.cloneRange(),
-      hadFocus: document.activeElement === field || field.contains(document.activeElement),
+      hadFocus: true,
     };
   }
 
@@ -2024,11 +2026,15 @@
               scheduleSave(blockEl);
             }
           });
-          field.addEventListener('blur', function () {
+          field.addEventListener('blur', function (event) {
+            if (isDeferredSaveControl(event.relatedTarget)) {
+              pausePendingSaveTimer();
+              return;
+            }
             if (splitParagraph) {
               flushPaginatedParagraphFragment(blockEl, piece, field);
             } else {
-              flushSave(blockEl);
+              flushPendingSave(blockEl);
             }
           });
         });
@@ -2971,6 +2977,10 @@
 
   function saveLayout() {
     if (!state.editable) return Promise.resolve();
+    if (state.layoutTimer) {
+      clearTimeout(state.layoutTimer);
+      state.layoutTimer = null;
+    }
     var layout = extractLayout();
     setStatus('Saving layout…', 'saving');
     return apiPost('save_section_layout', {
@@ -3128,6 +3138,18 @@
     tableToolbarEl.setAttribute('data-wired', '1');
     tableToolbarEl.addEventListener('mousedown', function (event) {
       if (event.target.closest('button[data-table-action]')) event.preventDefault();
+      if (event.target.closest('input[type="color"][data-table-action]')) {
+        pausePendingSaveTimer();
+      }
+    });
+    tableToolbarEl.addEventListener('focusin', function (event) {
+      if (!event.target.matches('input[type="color"][data-table-action]')) return;
+      pausePendingSaveTimer();
+    });
+    tableToolbarEl.addEventListener('focusout', function (event) {
+      if (!event.target.matches('input[type="color"][data-table-action]')) return;
+      var blockEl = state.activeTableToolsBlock;
+      if (blockEl && isConnectedEl(blockEl)) resumePendingSave(blockEl);
     });
     tableToolbarEl.addEventListener('click', function (event) {
       var control = event.target.closest('button[data-table-action]');
@@ -3149,6 +3171,7 @@
       var input = event.target.closest('input[data-table-action]');
       var blockEl = state.activeTableToolsBlock;
       if (!input || input.disabled || !blockEl || !isConnectedEl(blockEl)) return;
+      if (document.activeElement === input && input.getAttribute('data-color-commit') !== '1') return;
       if (blockEl.getAttribute('data-structured-table-editor') === '1') return;
       var action = input.getAttribute('data-table-action') || '';
       pushUndo();
@@ -3165,9 +3188,15 @@
           applyTableCellBg(blockEl, cell, input.value);
         });
       }
-      scheduleSave(blockEl);
       flushSave(blockEl);
       syncTableToolsContext(blockEl);
+    });
+    tableToolbarEl.addEventListener('change', function (event) {
+      var input = event.target.closest('input[type="color"][data-table-action]');
+      if (!input) return;
+      input.setAttribute('data-color-commit', '1');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.removeAttribute('data-color-commit');
     });
     syncTableToolsContext(null);
   }
@@ -3311,6 +3340,7 @@
     canvasEl.addEventListener('input', function (e) {
       var input = e.target.closest('input[data-table-action="border-color"], input[data-table-action="cell-bg"], input[data-table-action="cell-text-color"]');
       if (!input || !state.editable) return;
+      if (document.activeElement === input && input.getAttribute('data-color-commit') !== '1') return;
       var blockEl = input.closest('.cpb-block');
       if (!blockEl) return;
       pushUndo();
@@ -3345,8 +3375,14 @@
           applyTableCellBg(blockEl, cell, input.value);
         });
       }
-      scheduleSave(blockEl);
       flushSave(blockEl);
+    });
+    canvasEl.addEventListener('change', function (e) {
+      var input = e.target.closest('input[type="color"][data-table-action]');
+      if (!input) return;
+      input.setAttribute('data-color-commit', '1');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.removeAttribute('data-color-commit');
     });
 
     canvasEl.addEventListener('copy', function (e) {
@@ -3529,8 +3565,12 @@
           scheduleSave(blockEl);
           scheduleUnifiedPrintLayout(300);
         });
-        field.addEventListener('blur', function () {
-          flushSave(blockEl);
+        field.addEventListener('blur', function (event) {
+          if (isDeferredSaveControl(event.relatedTarget)) {
+            pausePendingSaveTimer();
+            return;
+          }
+          flushPendingSave(blockEl);
         });
       });
     });
@@ -3872,10 +3912,44 @@
     setStatus('Editing…', 'saving');
   }
 
+  function pausePendingSaveTimer() {
+    if (!state.saveTimer) return;
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
+  }
+
+  function isDeferredSaveControl(element) {
+    return !!(
+      element
+      && element.matches
+      && element.matches('input[type="color"]')
+      && root.contains(element)
+    );
+  }
+
+  function resumePendingSave(blockEl) {
+    if (!blockEl || !isConnectedEl(blockEl)) return;
+    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+    if (!blockId || !state.pending[blockId]) return;
+    scheduleSave(blockEl);
+  }
+
+  function flushPendingSave(blockEl) {
+    if (!blockEl || !isConnectedEl(blockEl)) return;
+    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+    if (!blockId || !state.pending[blockId]) return;
+    return flushSave(blockEl);
+  }
+
   function flushSave(blockEl, refreshNumbering) {
     if (!state.editable || !blockEl || !isConnectedEl(blockEl)) return;
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
     var blockType = blockEl.getAttribute('data-block-type') || '';
+    clearPendingForBlock(blockId);
+    if (Object.keys(state.pending).length === 0 && state.saveTimer) {
+      clearTimeout(state.saveTimer);
+      state.saveTimer = null;
+    }
     var payload = extractPayload(blockEl, blockType);
     setStatus('Saving…', 'saving');
     return apiPost('update_block', { version_id: state.versionId, block_id: blockId, payload: payload }).then(function (res) {
@@ -4236,6 +4310,10 @@
 
   function flushCoverSave() {
     if (!state.editable || !state.isCoverSection) return;
+    if (state.coverSaveTimer) {
+      clearTimeout(state.coverSaveTimer);
+      state.coverSaveTimer = null;
+    }
     var payload = extractCoverPageFromCanvas();
     setStatus('Saving cover…', 'saving');
     apiPost('save_cover_page', {
@@ -4281,11 +4359,7 @@
       field.setAttribute('data-cover-field-wired', '1');
       field.addEventListener('input', scheduleCoverSave);
       field.addEventListener('blur', function () {
-        if (state.coverSaveTimer) {
-          clearTimeout(state.coverSaveTimer);
-          state.coverSaveTimer = null;
-        }
-        flushCoverSave();
+        if (state.coverSaveTimer) flushCoverSave();
       });
     });
 
@@ -4493,6 +4567,10 @@
 
   function flushLepSave() {
     if (!state.editable || !state.isLepSection) return;
+    if (state.lepSaveTimer) {
+      clearTimeout(state.lepSaveTimer);
+      state.lepSaveTimer = null;
+    }
     var payload = extractLepPageFromCanvas();
     setStatus('Saving LEP…', 'saving');
     apiPost('save_lep_page', {
@@ -4755,6 +4833,10 @@
 
   function flushPart0Save() {
     if (!state.editable || !state.part0Structured) return;
+    if (state.part0SaveTimer) {
+      clearTimeout(state.part0SaveTimer);
+      state.part0SaveTimer = null;
+    }
     var page = extractPart0PageFromCanvas();
     if (!page) return;
     setStatus('Saving…', 'saving');
@@ -4831,11 +4913,7 @@
       field.setAttribute('data-part0-field-wired', '1');
       field.addEventListener('input', schedulePart0Save);
       field.addEventListener('blur', function () {
-        if (state.part0SaveTimer) {
-          clearTimeout(state.part0SaveTimer);
-          state.part0SaveTimer = null;
-        }
-        flushPart0Save();
+        if (state.part0SaveTimer) flushPart0Save();
       });
     });
 
@@ -5118,11 +5196,7 @@
       field.setAttribute('data-lep-field-wired', '1');
       field.addEventListener('input', scheduleLepSave);
       field.addEventListener('blur', function () {
-        if (state.lepSaveTimer) {
-          clearTimeout(state.lepSaveTimer);
-          state.lepSaveTimer = null;
-        }
-        flushLepSave();
+        if (state.lepSaveTimer) flushLepSave();
       });
     });
 
@@ -5988,17 +6062,9 @@
     cell.addEventListener('input', isLep ? scheduleLepSave : schedulePart0Save);
     cell.addEventListener('blur', function () {
       if (isLep) {
-        if (state.lepSaveTimer) {
-          clearTimeout(state.lepSaveTimer);
-          state.lepSaveTimer = null;
-        }
-        flushLepSave();
+        if (state.lepSaveTimer) flushLepSave();
       } else {
-        if (state.part0SaveTimer) {
-          clearTimeout(state.part0SaveTimer);
-          state.part0SaveTimer = null;
-        }
-        flushPart0Save();
+        if (state.part0SaveTimer) flushPart0Save();
       }
     });
   }
@@ -9714,8 +9780,20 @@
       var tableTarget = resolveTableCellForStyle();
       if (tableTarget) state.lastStyleTarget = tableTarget;
     });
-    textColorInput.addEventListener('focus', rememberStyleTarget);
+    textColorInput.addEventListener('focus', function () {
+      pausePendingSaveTimer();
+      rememberStyleTarget();
+    });
+    textColorInput.addEventListener('blur', function () {
+      if (isLiveStyleTarget(state.lastStyleTarget)) {
+        resumePendingSave(state.lastStyleTarget.block);
+      }
+    });
     textColorInput.addEventListener('input', function () {
+      if (
+        document.activeElement === textColorInput
+        && textColorInput.getAttribute('data-color-commit') !== '1'
+      ) return;
       var color = textColorInput.value;
       var tableTarget = resolveTableCellForStyle();
       if (tableTarget) {
@@ -9724,7 +9802,6 @@
           applyTableCellTextColor(cell, color);
           updateParagraphStyleSelectForElement(cell);
         });
-        scheduleSave(tableTarget.block);
         flushSave(tableTarget.block);
         return;
       }
@@ -9736,7 +9813,6 @@
           target.el.setAttribute('data-text-color', color);
         });
         updateParagraphStyleSelectForElement(target.el);
-        scheduleSave(target.block);
         flushSave(target.block);
         return;
       }
@@ -9750,11 +9826,15 @@
           }
         });
         updateParagraphStyleSelectForElement(target.el);
-        scheduleSave(target.block);
         flushSave(target.block);
         return;
       }
       execFormat('foreColor', color);
+    });
+    textColorInput.addEventListener('change', function () {
+      textColorInput.setAttribute('data-color-commit', '1');
+      textColorInput.dispatchEvent(new Event('input', { bubbles: true }));
+      textColorInput.removeAttribute('data-color-commit');
     });
   }
 

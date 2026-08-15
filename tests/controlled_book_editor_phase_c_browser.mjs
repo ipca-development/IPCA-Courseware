@@ -404,7 +404,7 @@ test('table controls stay in the second toolbar row and replace floating tools',
       sharedLeft: document.querySelector('#cpbToolbarShared').getBoundingClientRect().left,
     }));
     assert.equal(toolbarLayout.rows, 3);
-    assert.equal(toolbarLayout.tableLines, 2);
+    assert.equal(toolbarLayout.tableLines, 2, 'table controls must occupy two toolbar rows');
     assert.deepEqual(toolbarLayout.overflow, [0, 0, 0]);
     assert.equal(toolbarLayout.toolbarHeight, 70);
     assert.deepEqual(toolbarLayout.rowHeights, [23, 23, 23]);
@@ -442,6 +442,49 @@ test('table controls stay in the second toolbar row and replace floating tools',
     assert.match(clickFocus.targetText, /typed after-save$/);
     assert.equal(clickFocus.titleText, 'Table title');
 
+    const fillControl = toolbar.locator('[data-table-action="cell-bg"]');
+    const savesBeforeColor = await page.evaluate(() =>
+      window.__phaseC.requests.filter((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      ).length
+    );
+    await fillControl.focus();
+    await fillControl.evaluate((input) => {
+      input.value = '#123456';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.waitForTimeout(850);
+    assert.equal(
+      await page.evaluate(() => window.__phaseC.requests.filter((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      ).length),
+      savesBeforeColor
+    );
+    await fillControl.evaluate((input) => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForFunction((before) =>
+      window.__phaseC.requests.filter((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      ).length === before + 1,
+    savesBeforeColor);
+    await page.waitForTimeout(1000);
+    const colorAfterSave = await page.evaluate(() => {
+      const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
+      const target = block.querySelector('tbody tr:nth-child(2) td:nth-child(2)');
+      const fill = document.querySelector('#cpbTableToolbar [data-table-action="cell-bg"]');
+      return {
+        activeFill: document.activeElement === fill,
+        cellFill: target.getAttribute('data-cell-bg'),
+        saves: window.__phaseC.requests.filter((request) =>
+          request.action === 'update_block' && Number(request.payload.block_id) === 3
+        ).length,
+      };
+    });
+    assert.equal(colorAfterSave.activeFill, true);
+    assert.equal(colorAfterSave.cellFill, '#123456');
+    assert.equal(colorAfterSave.saves, savesBeforeColor + 1, 'color commit must issue exactly one save');
+
     await page.locator('#cpbCanvas [data-block-id="3"] tbody tr:first-child td:first-child').click();
     assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isEnabled(), true);
     await toolbar.locator('[data-table-action="table-align-center"]').click();
@@ -468,7 +511,7 @@ test('table controls stay in the second toolbar row and replace floating tools',
         payload: saves.at(-1)?.payload.payload,
       };
     });
-    assert.equal(merged.rowspan, 2);
+    assert.equal(merged.rowspan, 2, 'vertical merge must span exactly two rows');
     assert.equal(merged.covered, '1');
     assert.deepEqual(merged.payload.row_rowspans, [[2, 1], [0, 1]]);
 
