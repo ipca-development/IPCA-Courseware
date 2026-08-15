@@ -30,7 +30,7 @@ final class ControlledPublishingLivePageMapService
     private $sourceLoader;
     /** @var callable(array<string,mixed>,array<string,mixed>,string):array<string,mixed> */
     private $fingerprintLoader;
-    /** @var callable(array<string,mixed>,array<string,mixed>,string):array{pages:list<array<string,mixed>>,generation:array<string,mixed>} */
+    /** @var callable(array<string,mixed>,array<string,mixed>,string,array<string,mixed>):array{pages:list<array<string,mixed>>,generation:array<string,mixed>} */
     private $generator;
     /** @var callable(int,string):void */
     private $spawner;
@@ -66,9 +66,9 @@ final class ControlledPublishingLivePageMapService
                     ->fingerprint($source, $version);
             };
         $this->generator = $seams['generator']
-            ?? function (array $source, array $version, string $profile): array {
+            ?? function (array $source, array $version, string $profile, array $options = array()): array {
                 return (new ControlledPublishingAuthoritativePaginationService($this->reader))
-                    ->generate($source, $version);
+                    ->generate($source, $version, $options);
             };
         $this->spawner = $seams['spawner'] ?? self::defaultSpawner(dirname(__DIR__, 2));
         $this->clock = $seams['clock']
@@ -86,10 +86,17 @@ final class ControlledPublishingLivePageMapService
     public function ensure(
         int $bookVersionId,
         int $requestedByUserId,
-        ?string $layoutProfile = null
+        ?string $layoutProfile = null,
+        array $mutationHint = array()
     ): array
     {
-        return $this->request($bookVersionId, $requestedByUserId, false, $layoutProfile);
+        return $this->request(
+            $bookVersionId,
+            $requestedByUserId,
+            false,
+            $layoutProfile,
+            $mutationHint
+        );
     }
 
     /**
@@ -100,10 +107,17 @@ final class ControlledPublishingLivePageMapService
     public function retry(
         int $bookVersionId,
         int $requestedByUserId,
-        ?string $layoutProfile = null
+        ?string $layoutProfile = null,
+        array $mutationHint = array()
     ): array
     {
-        return $this->request($bookVersionId, $requestedByUserId, true, $layoutProfile);
+        return $this->request(
+            $bookVersionId,
+            $requestedByUserId,
+            true,
+            $layoutProfile,
+            $mutationHint
+        );
     }
 
     /**
@@ -113,7 +127,8 @@ final class ControlledPublishingLivePageMapService
         int $bookVersionId,
         int $requestedByUserId,
         bool $force,
-        ?string $layoutProfile
+        ?string $layoutProfile,
+        array $mutationHint
     ): array
     {
         $version = $this->requireMutableVersion($bookVersionId);
@@ -121,6 +136,7 @@ final class ControlledPublishingLivePageMapService
         $fingerprint = $this->readFingerprint($version, $profile);
         $fingerprintJson = self::canonicalJson($fingerprint);
         $fingerprintHash = hash('sha256', $fingerprintJson);
+        $mutationJson = self::canonicalJson($this->normalizeMutationHint($mutationHint));
 
         $queued = $this->queueRequest(
             $bookVersionId,
@@ -129,7 +145,8 @@ final class ControlledPublishingLivePageMapService
             $fingerprintHash,
             $requestedByUserId,
             $force,
-            $this->productionMatches($bookVersionId, $profile, $fingerprint)
+            $this->productionMatches($bookVersionId, $profile, $fingerprint),
+            $mutationJson
         );
         if ($queued['spawn']) {
             ($this->spawner)($bookVersionId, $profile);
@@ -210,7 +227,14 @@ final class ControlledPublishingLivePageMapService
                 return $this->status($versionId, $profile);
             }
 
-            $result = ($this->generator)($source, $version, $profile);
+            $generationOptions = $this->incrementalGenerationOptions(
+                $versionId,
+                $profile,
+                $source,
+                $startFingerprint,
+                $claim
+            );
+            $result = ($this->generator)($source, $version, $profile, $generationOptions);
             $pages = is_array($result['pages'] ?? null) ? $result['pages'] : array();
             $generation = is_array($result['generation'] ?? null) ? $result['generation'] : array();
             $this->validateGeneratedResult($pages, $generation, $startFingerprint);
@@ -255,6 +279,165 @@ final class ControlledPublishingLivePageMapService
     }
 
     /**
+     * Reuse only a proven, unchanged prefix. The suffix starts one page before
+     * the earliest page containing the changed source object so deletion
+     * backflow and heading keep-with-following are re-evaluated.
+     *
+     * @param array<string,mixed> $source
+     * @param array<string,mixed> $fingerprint
+     * @param array<string,mixed> $claim
+     * @return array<string,mixed>
+     */
+    private function incrementalGenerationOptions(
+        int $versionId,
+        string $profile,
+        array $source,
+        array $fingerprint,
+        array $claim
+    ): array {
+        $hint = json_decode((string)($claim['requested_mutation_json'] ?? '{}'), true);
+        if (
+            !is_array($hint)
+            || (string)($hint['layout_impact'] ?? '') !== 'suffix'
+            || $this->store->pageCount($versionId, $profile) < 3
+        ) {
+            return array();
+        }
+        $anchor = trim((string)($hint['stable_anchor'] ?? ''));
+        $blockId = (int)($hint['block_id'] ?? 0);
+        if ($anchor === '' && $blockId <= 0) {
+            return array();
+        }
+        $sourceJson = self::canonicalJson($source);
+        if (str_contains($sourceJson, '{{page_total}}') || str_contains($sourceJson, '{page_total}')) {
+            return array();
+        }
+        $approval = $this->store->approvalMeta($versionId);
+        $prior = is_array($approval['generation'] ?? null) ? $approval['generation'] : array();
+        foreach (array(
+            'engine_version',
+            'style_hash',
+            'manifest_hash',
+            'layout_hash',
+            'manual_page_break_hash',
+            'header_footer_hash',
+        ) as $key) {
+            if (
+                !isset($prior[$key], $fingerprint[$key])
+                || !hash_equals((string)$prior[$key], (string)$fingerprint[$key])
+            ) {
+                return array();
+            }
+        }
+
+        $pages = $this->store->loadStoredPages($versionId, $profile);
+        $anchorPageIndex = null;
+        foreach ($pages as $index => $page) {
+            $html = (string)($page['page_html'] ?? '');
+            $anchorMatch = $anchor !== ''
+                && preg_match(
+                    '/data-stable-anchor=(["\'])' . preg_quote($anchor, '/') . '\1/',
+                    $html
+                ) === 1;
+            $blockMatch = $blockId > 0
+                && preg_match('/data-block-id=(["\'])' . $blockId . '\1/', $html) === 1;
+            if ($anchorMatch || $blockMatch) {
+                $anchorPageIndex = $index;
+                break;
+            }
+        }
+        if ($anchorPageIndex === null || $anchorPageIndex < 2) {
+            return array();
+        }
+
+        $cutIndex = $anchorPageIndex - 1;
+        while ($cutIndex > 0 && !$this->isSafeIncrementalBoundary($pages[$cutIndex])) {
+            $cutIndex--;
+        }
+        if ($cutIndex <= 0) {
+            return array();
+        }
+        $coverage = $this->sourceCoverage($pages[$cutIndex]);
+        $orders = array_map(
+            static fn(array $entry): int => (int)($entry['source_order'] ?? -1),
+            $coverage
+        );
+        $orders = array_values(array_filter($orders, static fn(int $order): bool => $order >= 0));
+        if ($orders === array()) {
+            return array();
+        }
+        $startSourceOrder = min($orders);
+        if ($startSourceOrder <= 0) {
+            return array();
+        }
+        $prefixPages = array_slice($pages, 0, $cutIndex);
+        $prefixFingerprints = array();
+        foreach ($prefixPages as $prefixPage) {
+            foreach ($this->sourceCoverage($prefixPage) as $entry) {
+                $order = (int)($entry['source_order'] ?? -1);
+                $sourceFingerprint = strtolower(trim((string)($entry['source_fingerprint'] ?? '')));
+                if ($order < 0 || preg_match('/^[a-f0-9]{64}$/', $sourceFingerprint) !== 1) {
+                    // Maps generated before source-fingerprint support receive
+                    // one full refresh before suffix reuse becomes eligible.
+                    return array();
+                }
+                if (
+                    isset($prefixFingerprints[(string)$order])
+                    && !hash_equals($prefixFingerprints[(string)$order], $sourceFingerprint)
+                ) {
+                    return array();
+                }
+                $prefixFingerprints[(string)$order] = $sourceFingerprint;
+            }
+        }
+        if ($prefixFingerprints === array()) {
+            return array();
+        }
+
+        return array(
+            'prefix_pages' => $prefixPages,
+            'incremental' => array(
+                'start_source_order' => $startSourceOrder,
+                'page_number_offset' => $cutIndex,
+                'prefix_source_fingerprints' => $prefixFingerprints,
+                'mutation_anchor' => $anchor !== '' ? $anchor : null,
+                'mutation_block_id' => $blockId > 0 ? $blockId : null,
+            ),
+        );
+    }
+
+    /** @param array<string,mixed> $page */
+    private function isSafeIncrementalBoundary(array $page): bool
+    {
+        $coverage = $this->sourceCoverage($page);
+        if ($coverage === array()) {
+            return false;
+        }
+        $first = $coverage[0];
+        if ((int)($first['range_start'] ?? 0) !== 0) {
+            return false;
+        }
+        $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+        $metrics = is_array($metadata['metrics'] ?? null) ? $metadata['metrics'] : array();
+        $reason = strtolower((string)($metrics['break_reason'] ?? ''));
+        return !str_contains($reason, 'continuation') && $reason !== 'oversized_block';
+    }
+
+    /**
+     * @param array<string,mixed> $page
+     * @return list<array<string,mixed>>
+     */
+    private function sourceCoverage(array $page): array
+    {
+        $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+        $coverage = is_array($metadata['coverage'] ?? null) ? $metadata['coverage'] : array();
+        return array_values(array_filter(
+            $coverage,
+            static fn($entry): bool => is_array($entry) && empty($entry['presentation_copy'])
+        ));
+    }
+
+    /**
      * @return array{row:array<string,mixed>,spawn:bool}
      */
     private function queueRequest(
@@ -264,7 +447,8 @@ final class ControlledPublishingLivePageMapService
         string $fingerprintHash,
         int $userId,
         bool $force,
-        bool $productionCurrent
+        bool $productionCurrent,
+        string $mutationJson
     ): array {
         $this->pdo->beginTransaction();
         try {
@@ -293,6 +477,7 @@ final class ControlledPublishingLivePageMapService
                                 SET pending_generation_seq = NULL,
                                     pending_fingerprint_hash = NULL,
                                     pending_fingerprint_json = NULL,
+                                    pending_mutation_json = NULL,
                                     pending_requested_by_user_id = NULL,
                                     updated_at = CURRENT_TIMESTAMP
                               WHERE book_version_id = ? AND layout_profile = ?
@@ -326,7 +511,8 @@ final class ControlledPublishingLivePageMapService
                 $this->pdo->prepare(
                     'UPDATE ipca_publishing_page_map_generation_state
                         SET pending_generation_seq = ?, pending_fingerprint_hash = ?,
-                            pending_fingerprint_json = ?, pending_requested_by_user_id = ?,
+                            pending_fingerprint_json = ?, pending_mutation_json = ?,
+                            pending_requested_by_user_id = ?,
                             updated_at = CURRENT_TIMESTAMP
                       WHERE book_version_id = ? AND layout_profile = ?
                         AND generation_seq = ? AND status = ?
@@ -335,6 +521,7 @@ final class ControlledPublishingLivePageMapService
                     $pendingSeq,
                     $fingerprintHash,
                     $fingerprintJson,
+                    $mutationJson,
                     $userId > 0 ? $userId : null,
                     $versionId,
                     $profile,
@@ -354,22 +541,37 @@ final class ControlledPublishingLivePageMapService
                         "INSERT INTO ipca_publishing_page_map_generation_state (
                             book_version_id, layout_profile, generation_seq, status,
                             requested_fingerprint_hash, requested_fingerprint_json,
+                            requested_mutation_json,
                             created_at, updated_at
-                         ) VALUES (?, ?, 0, 'current', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                    )->execute(array($versionId, $profile, $fingerprintHash, $fingerprintJson));
+                         ) VALUES (?, ?, 0, 'current', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    )->execute(array(
+                        $versionId,
+                        $profile,
+                        $fingerprintHash,
+                        $fingerprintJson,
+                        $mutationJson,
+                    ));
                 } else {
                     $this->pdo->prepare(
                         "UPDATE ipca_publishing_page_map_generation_state
                             SET status = 'current', requested_fingerprint_hash = ?,
-                                requested_fingerprint_json = ?, lease_token = NULL,
+                                requested_fingerprint_json = ?, requested_mutation_json = ?,
+                                lease_token = NULL,
                                 lease_expires_at = NULL, pending_generation_seq = NULL,
                                 pending_fingerprint_hash = NULL,
                                 pending_fingerprint_json = NULL,
+                                pending_mutation_json = NULL,
                                 pending_requested_by_user_id = NULL,
                                 last_error_code = NULL, last_error_message = NULL,
                                 updated_at = CURRENT_TIMESTAMP
                           WHERE book_version_id = ? AND layout_profile = ?"
-                    )->execute(array($fingerprintHash, $fingerprintJson, $versionId, $profile));
+                    )->execute(array(
+                        $fingerprintHash,
+                        $fingerprintJson,
+                        $mutationJson,
+                        $versionId,
+                        $profile,
+                    ));
                 }
                 $row = $this->loadState($versionId, $profile, false) ?? array();
                 $this->pdo->commit();
@@ -397,6 +599,7 @@ final class ControlledPublishingLivePageMapService
                 self::STATUS_PENDING,
                 $fingerprintHash,
                 $fingerprintJson,
+                $mutationJson,
                 $userId > 0 ? $userId : null,
                 $versionId,
                 $profile,
@@ -405,20 +608,23 @@ final class ControlledPublishingLivePageMapService
                 $insert = $this->pdo->prepare(
                     'INSERT INTO ipca_publishing_page_map_generation_state (
                         generation_seq, status, requested_fingerprint_hash,
-                        requested_fingerprint_json, requested_by_user_id,
+                        requested_fingerprint_json, requested_mutation_json,
+                        requested_by_user_id,
                         book_version_id, layout_profile, created_at, updated_at
-                     ) VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)'
+                     ) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)'
                 );
                 $insert->execute($params);
             } else {
                 $update = $this->pdo->prepare(
                     'UPDATE ipca_publishing_page_map_generation_state
                         SET generation_seq = ?, status = ?, requested_fingerprint_hash = ?,
-                            requested_fingerprint_json = ?, requested_by_user_id = ?,
+                            requested_fingerprint_json = ?, requested_mutation_json = ?,
+                            requested_by_user_id = ?,
                             lease_token = NULL, lease_expires_at = NULL,
                             pending_generation_seq = NULL,
                             pending_fingerprint_hash = NULL,
                             pending_fingerprint_json = NULL,
+                            pending_mutation_json = NULL,
                             pending_requested_by_user_id = NULL,
                             last_error_code = NULL, last_error_message = NULL,
                             updated_at = CURRENT_TIMESTAMP
@@ -640,6 +846,9 @@ final class ControlledPublishingLivePageMapService
                     requested_fingerprint_json = COALESCE(
                         pending_fingerprint_json, requested_fingerprint_json
                     ),
+                    requested_mutation_json = COALESCE(
+                        pending_mutation_json, requested_mutation_json
+                    ),
                     requested_by_user_id = COALESCE(
                         pending_requested_by_user_id, requested_by_user_id
                     ),
@@ -655,6 +864,7 @@ final class ControlledPublishingLivePageMapService
                     pending_generation_seq = NULL,
                     pending_fingerprint_hash = NULL,
                     pending_fingerprint_json = NULL,
+                    pending_mutation_json = NULL,
                     pending_requested_by_user_id = NULL,
                     updated_at = CURRENT_TIMESTAMP
               WHERE book_version_id = ? AND layout_profile = ?
@@ -844,6 +1054,26 @@ final class ControlledPublishingLivePageMapService
             throw new RuntimeException('Invalid pagination profile.');
         }
         return $profile;
+    }
+
+    /**
+     * @param array<string,mixed> $hint
+     * @return array<string,mixed>
+     */
+    private function normalizeMutationHint(array $hint): array
+    {
+        $impact = strtolower(trim((string)($hint['layout_impact'] ?? '')));
+        if (!in_array($impact, array('suffix', 'global'), true)) {
+            $impact = 'global';
+        }
+        return array(
+            'client_mutation_revision' => max(0, (int)($hint['client_mutation_revision'] ?? 0)),
+            'section_id' => max(0, (int)($hint['section_id'] ?? 0)),
+            'block_id' => max(0, (int)($hint['block_id'] ?? 0)),
+            'stable_anchor' => mb_substr(trim((string)($hint['stable_anchor'] ?? '')), 0, 255),
+            'mutation_kind' => mb_substr(trim((string)($hint['mutation_kind'] ?? '')), 0, 64),
+            'layout_impact' => $impact,
+        );
     }
 
     /**

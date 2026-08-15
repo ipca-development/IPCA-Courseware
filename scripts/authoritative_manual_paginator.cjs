@@ -59,7 +59,6 @@ async function main() {
   const top = Number(profile.sheet_padding_top_px || 48);
   const bottom = Number(profile.sheet_padding_bottom_px || 64);
   const headerHeight = Number(profile.header_band_px || 64);
-  const headerLogoMaxHeight = Math.max(16, headerHeight - 28);
   const headerGap = Number(profile.header_margin_bottom_px || 20);
   const footerGap = Number(profile.footer_margin_top_px || 24);
   const footerHeight = Number(profile.footer_band_px || 34);
@@ -148,22 +147,10 @@ async function main() {
           .reader-page-header-region,
           .reader-page-footer-region,
           .reader-page-body:not(.reader-page-cover){overflow:hidden}
-          .reader-page-header-measurement .cpb-page-header-logo,
-          .reader-page-header-region .cpb-page-header-logo{
-            max-width:60%!important;max-height:${headerLogoMaxHeight}px!important
-          }
-          .reader-page-header-region>.cpb-page-header>.cpb-page-header-table{
-            height:100%!important;max-height:100%;table-layout:fixed
-          }
-          .reader-page-header-region .cpb-page-header-table td{
-            padding-top:2px!important;padding-bottom:2px!important;line-height:1.15!important
-          }
-          .reader-page-header-region .cpb-page-header-cell--center{font-size:11pt!important}
-          .reader-page-header-region .cpb-page-header-cell--right{font-size:8pt!important}
           .reader-page-header-region>.cpb-page-header,
           .reader-page-footer-region>.cpb-page-footer{
             position:static!important;inset:auto!important;width:100%!important;
-            height:100%!important;margin:0!important;box-sizing:border-box!important
+            height:auto!important;margin:0!important;box-sizing:border-box!important
           }
         </style>
       </head><body><div id="pagination-measure-host"></div></body></html>`,
@@ -232,8 +219,8 @@ async function main() {
       ].filter(Boolean))),
       width: pageWidth - side * 2
     });
-    const resolvedHeaderHeight = headerHeight;
-    const resolvedFooterHeight = footerHeight;
+    const resolvedHeaderHeight = measuredBands.header || headerHeight;
+    const resolvedFooterHeight = measuredBands.footer || footerHeight;
     const resolvedContentY = top + resolvedHeaderHeight + headerGap;
     const resolvedFooterY = pageHeight - bottom - resolvedFooterHeight;
     const resolvedContentHeight = resolvedFooterY - footerGap - resolvedContentY;
@@ -245,10 +232,11 @@ async function main() {
     layout.contentFrame.height = resolvedContentHeight;
     layout.footerFrame.y = resolvedFooterY;
     layout.footerFrame.height = resolvedFooterHeight;
-    await page.evaluate(({ sourceValue, layoutValue }) => {
+    await page.evaluate(({ sourceValue, layoutValue, incrementalValue }) => {
       window.IPCAPaginationInput = {
         source: sourceValue,
         layout: layoutValue,
+        incremental: incrementalValue,
         officialPageByAnchor: {},
         officialPageBySection: {},
         officialPageTotal: null
@@ -260,10 +248,20 @@ async function main() {
           }
         };
       });
-    }, { sourceValue: source, layoutValue: layout });
+    }, {
+      sourceValue: source,
+      layoutValue: layout,
+      incrementalValue: input.incremental && typeof input.incremental === "object"
+        ? input.incremental
+        : null
+    });
     await page.addScriptTag({ content: core });
     const result = await page.evaluate(() => window.__authoritativePagination);
-    if (result && result.error && result.error.code === "MANUAL_BREAK_REQUIRED") {
+    if (
+      result
+      && result.error
+      && ["MANUAL_BREAK_REQUIRED", "INCREMENTAL_PREFIX_MISMATCH"].includes(result.error.code)
+    ) {
       fs.writeFileSync(outputPath, JSON.stringify({
         ok: false,
         error: result.error,

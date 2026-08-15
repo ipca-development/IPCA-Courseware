@@ -177,6 +177,14 @@ final class ControlledPublishingPaginationService
                     }
                 }
                 $entry['units'] = $this->unitsFromRenderedBody($parsed['body'], $section, $flags);
+                if (
+                    !empty($flags['force_page_break_before'])
+                    && isset($entry['units'][0])
+                    && is_array($entry['units'][0])
+                ) {
+                    $entry['units'][0]['force_break_before'] = true;
+                    $entry['units'][0]['generated_section_boundary'] = !empty($flags['is_part0']);
+                }
             }
 
             if ($entry['content_mode'] === 'cover' || ($entry['units'] ?? array()) !== array()) {
@@ -245,7 +253,7 @@ final class ControlledPublishingPaginationService
             }
         }
 
-        $pageBreakBefore = $isCover;
+        $pageBreakBefore = $isCover || $isPart0;
 
         return array(
             'is_cover' => $isCover,
@@ -429,6 +437,46 @@ final class ControlledPublishingPaginationService
         }
 
         $units = array();
+        if (preg_match_all(
+            '/<div class="[^"]*\bcpb-part0-heading\b[^"]*"[^>]*>.*?<\/div>/s',
+            $bodyHtml,
+            $headingMatches
+        ) >= 1) {
+            foreach ($headingMatches[0] as $headingIndex => $headingHtml) {
+                $paragraphStyle = 'subtitle_1';
+                if (preg_match('/\bdata-paragraph-style="([^"]+)"/', $headingHtml, $styleMatch) === 1) {
+                    $paragraphStyle = strtolower(trim(html_entity_decode(
+                        (string)$styleMatch[1],
+                        ENT_QUOTES | ENT_HTML5,
+                        'UTF-8'
+                    )));
+                }
+                $headingLevels = array(
+                    'part_title' => 1,
+                    'title' => 1,
+                    'subtitle_1' => 2,
+                    'subtitle_2' => 3,
+                    'subtitle_3' => 4,
+                    'subtitle_4' => 5,
+                );
+                $units[] = array(
+                    'unit_key' => 'part0_heading_' . $sectionId . '_' . $headingIndex,
+                    'block_id' => 0,
+                    'stable_anchor' => (string)($section['stable_anchor'] ?? '')
+                        . '-HEADING-' . ($headingIndex + 1),
+                    'block_type' => 'heading',
+                    'paragraph_style' => $paragraphStyle,
+                    'heading_level' => (int)($headingLevels[$paragraphStyle] ?? 2),
+                    'html' => $headingHtml,
+                    'splittable' => false,
+                    'atomic' => true,
+                    'force_break_before' => false,
+                    'is_heading' => true,
+                    'is_system_managed' => true,
+                    'pagination_authority' => 'generated',
+                );
+            }
+        }
         if (preg_match_all('/<article class="cpb-block[^"]*"[^>]*>.*?<\/article>/s', $bodyHtml, $matches) >= 1) {
             $idx = 0;
             foreach ($matches[0] as $articleHtml) {

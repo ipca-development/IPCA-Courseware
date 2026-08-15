@@ -10,10 +10,12 @@ CREATE TABLE IF NOT EXISTS ipca_publishing_page_map_generation_state (
                               COMMENT 'current | pending | generating | stale | failed | retry_available',
   requested_fingerprint_hash  CHAR(64) NOT NULL DEFAULT '',
   requested_fingerprint_json  JSON NULL,
+  requested_mutation_json     JSON NULL,
   pending_generation_seq      BIGINT UNSIGNED NULL
                               COMMENT 'Newest coalesced revision waiting behind the active lease',
   pending_fingerprint_hash    CHAR(64) NULL,
   pending_fingerprint_json    JSON NULL,
+  pending_mutation_json       JSON NULL,
   pending_requested_by_user_id INT UNSIGNED NULL,
   lease_token                 CHAR(64) NULL,
   lease_expires_at            DATETIME NULL,

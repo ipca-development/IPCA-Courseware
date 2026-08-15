@@ -15,6 +15,9 @@
   const officialPageByAnchor = input.officialPageByAnchor || {};
   const officialPageBySection = input.officialPageBySection || {};
   const officialPageTotal = Number(input.officialPageTotal || 0) || null;
+  const incremental = input.incremental && typeof input.incremental === "object"
+    ? input.incremental
+    : null;
   const host = document.getElementById("pagination-measure-host");
   const diagnostics = [];
   let sourceOrder = 0;
@@ -24,6 +27,74 @@
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+
+  function stableSourceFingerprint(value) {
+    const seeds = [
+      0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35,
+      0x27d4eb2f, 0x165667b1, 0xd3a2646c, 0xfd7046c5
+    ];
+    return seeds.map((seed) => {
+      let hash = seed >>> 0;
+      for (let index = 0; index < value.length; index++) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+      }
+      hash ^= hash >>> 16;
+      hash = Math.imul(hash, 0x85ebca6b) >>> 0;
+      hash ^= hash >>> 13;
+      return (hash >>> 0).toString(16).padStart(8, "0");
+    }).join("");
+  }
+
+  function attachSourceFingerprints(normalized) {
+    normalized.fragments.forEach((fragmentValue) => {
+      const payload = JSON.stringify({
+        id: fragmentValue.id,
+        type: fragmentValue.type,
+        html: fragmentValue.html,
+        textLength: fragmentValue.textLength,
+        forceBreakBefore: fragmentValue.forceBreakBefore,
+        mainTitle: fragmentValue.mainTitle,
+        paginationAuthority: fragmentValue.paginationAuthority,
+        section: {
+          section_id: fragmentValue.section && fragmentValue.section.section_id,
+          stable_anchor: fragmentValue.section && fragmentValue.section.stable_anchor,
+          section_type: fragmentValue.section && fragmentValue.section.section_type,
+          title: fragmentValue.section && fragmentValue.section.title,
+          show_header_footer: fragmentValue.section && fragmentValue.section.show_header_footer,
+          header_template: fragmentValue.section && fragmentValue.section.header_template,
+          footer_template: fragmentValue.section && fragmentValue.section.footer_template,
+          pagination_authority: fragmentValue.section && fragmentValue.section.pagination_authority,
+          flags: fragmentValue.section && fragmentValue.section.flags
+        }
+      });
+      fragmentValue.sourceFingerprint = stableSourceFingerprint(payload);
+    });
+  }
+
+  function validateIncrementalPrefix(normalized) {
+    if (!incremental || !incremental.prefix_source_fingerprints) return;
+    const expected = incremental.prefix_source_fingerprints;
+    const byOrder = new Map(normalized.fragments.map(
+      (fragmentValue) => [String(fragmentValue.sourceOrder), fragmentValue]
+    ));
+    for (const [order, fingerprint] of Object.entries(expected)) {
+      const fragmentValue = byOrder.get(String(order));
+      if (
+        !fragmentValue
+        || !fragmentValue.sourceFingerprint
+        || fragmentValue.sourceFingerprint !== String(fingerprint)
+      ) {
+        const error = new Error("Stored authoritative prefix no longer matches the current source.");
+        error.paginationError = {
+          code: "INCREMENTAL_PREFIX_MISMATCH",
+          message: error.message,
+          source_order: Number(order)
+        };
+        throw error;
+      }
+    }
+  }
 
   function diagnostic(code, severity, message, fragment, pageNumber) {
     diagnostics.push({
@@ -563,6 +634,12 @@
       const tbody = document.createElement("tbody");
       tbody.appendChild(node.cloneNode(true));
       clone.appendChild(tbody);
+      const sourceWrapper = table && table.closest(".cpb-table-wrap");
+      if (sourceWrapper) {
+        const wrapper = sourceWrapper.cloneNode(false);
+        wrapper.appendChild(clone);
+        return wrapper.outerHTML;
+      }
       return clone.outerHTML;
     }
     return node.outerHTML;
@@ -644,6 +721,12 @@
     const tbody = document.createElement("tbody");
     tbody.appendChild(row.cloneNode(true));
     clone.appendChild(tbody);
+    const sourceWrapper = table && table.closest(".cpb-table-wrap");
+    if (sourceWrapper) {
+      const wrapper = sourceWrapper.cloneNode(false);
+      wrapper.appendChild(clone);
+      return wrapper.outerHTML;
+    }
     return clone.outerHTML;
   }
 
@@ -2068,6 +2151,7 @@
       range_start: value.rangeStart,
       range_end: value.rangeEnd,
       source_length: value.fragment.textLength,
+      source_fingerprint: value.fragment.sourceFingerprint,
       presentation_copy: value.presentationCopy
     }));
   }
@@ -2371,6 +2455,31 @@
       ? Math.min(bodyRect.height, Math.max(0, lastRect.bottom - bodyRect.top))
       : 0;
     const utilization = bodyRect.height > 0 ? usedHeight / bodyRect.height : 0;
+    const pageRect = element.getBoundingClientRect();
+    const relativeFrame = (node) => {
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      return {
+        x: rect.left - pageRect.left,
+        y: rect.top - pageRect.top,
+        width: rect.width,
+        height: rect.height,
+        top: rect.top - pageRect.top,
+        bottom: rect.bottom - pageRect.top
+      };
+    };
+    const header = element.querySelector(".reader-page-header-region > .cpb-page-header");
+    const footer = element.querySelector(".reader-page-footer-region > .cpb-page-footer");
+    const logo = header && header.querySelector(".cpb-page-header-logo");
+    const cells = (node) => Array.from(node?.querySelectorAll("td") || []).map((cell) => ({
+      frame: relativeFrame(cell),
+      font_family: getComputedStyle(cell).fontFamily,
+      font_size: getComputedStyle(cell).fontSize,
+      line_height: getComputedStyle(cell).lineHeight,
+      padding_top: getComputedStyle(cell).paddingTop,
+      padding_bottom: getComputedStyle(cell).paddingBottom,
+      vertical_align: getComputedStyle(cell).verticalAlign
+    }));
     return {
       content_utilization: utilization,
       whitespace_ratio: Math.max(0, 1 - utilization),
@@ -2404,6 +2513,17 @@
       last_body_page_y: measurement.lastBodyPageY,
       header_body_intersect: Boolean(measurement.headerBodyIntersect),
       body_footer_intersect: Boolean(measurement.bodyFooterIntersect),
+      furniture_measurements: {
+        header: relativeFrame(header),
+        header_table: relativeFrame(header && header.querySelector("table")),
+        header_cells: cells(header),
+        footer: relativeFrame(footer),
+        footer_table: relativeFrame(footer && footer.querySelector("table")),
+        footer_cells: cells(footer),
+        logo: relativeFrame(logo),
+        logo_natural_width: logo ? Number(logo.naturalWidth || 0) : 0,
+        logo_natural_height: logo ? Number(logo.naturalHeight || 0) : 0
+      },
       block_measurements: blockMeasurements
     };
   }
@@ -2450,16 +2570,36 @@
   async function run() {
     validateLayoutContract();
     const normalized = normalizeDocument();
-    await ready(normalized);
-    const pages = paginate(normalized);
+    attachSourceFingerprints(normalized);
+    validateIncrementalPrefix(normalized);
+    const startSourceOrder = incremental
+      ? Math.max(0, Number(incremental.start_source_order || 0))
+      : 0;
+    const pageNumberOffset = incremental
+      ? Math.max(0, Number(incremental.page_number_offset || 0))
+      : 0;
+    const activeNormalized = startSourceOrder > 0
+      ? Object.assign({}, normalized, {
+        fragments: normalized.fragments.filter(
+          (fragmentValue) => Number(fragmentValue.sourceOrder) >= startSourceOrder
+        )
+      })
+      : normalized;
+    if (!activeNormalized.fragments.length) {
+      throw new Error("Incremental pagination has no source fragments at its requested boundary.");
+    }
+    await ready(activeNormalized);
+    const pages = paginate(activeNormalized);
     validatePageStructure(pages);
-    const validation = validateCoverage(normalized, pages);
-    const total = pages.length;
+    const validation = validateCoverage(activeNormalized, pages);
+    const total = pageNumberOffset + pages.length;
     const responsePages = pages.map((page, index) => {
-      const pageNumber = index + 1;
+      const pageNumber = pageNumberOffset + index + 1;
       const first = page.pieces.find((value) => !value.presentationCopy);
       const last = [...page.pieces].reverse().find((value) => !value.presentationCopy);
-      const pageDiagnostics = diagnostics.filter((item) => item.page_number === pageNumber);
+      const pageDiagnostics = diagnostics
+        .filter((item) => item.page_number === index + 1)
+        .map((item) => Object.assign({}, item, { page_number: pageNumber }));
       return {
         page_number: pageNumber,
         page_html: buildPageElement(page, pageNumber, total).outerHTML,
@@ -2473,14 +2613,27 @@
         official_locations: first ? [location(first.fragment, first.rangeStart).official_location] : [],
         coverage: coverageForPage(page),
         diagnostics: pageDiagnostics,
-        metrics: page.metrics || metricsForPage(page, pageNumber, total, null)
+        metrics: Object.assign(
+          {},
+          page.metrics || metricsForPage(page, index + 1, pages.length, null),
+          { page_number: pageNumber }
+        )
       };
+    });
+    const suffixSectionIndex = sectionIndex(pages);
+    Object.keys(suffixSectionIndex).forEach((key) => {
+      suffixSectionIndex[key] = Number(suffixSectionIndex[key]) + pageNumberOffset;
     });
     window.webkit.messageHandlers.pagination.postMessage({
       ok: true,
       pages: responsePages,
-      section_page_index: sectionIndex(pages),
+      section_page_index: suffixSectionIndex,
       validation,
+      incremental: incremental ? {
+        applied: startSourceOrder > 0 && pageNumberOffset > 0,
+        start_source_order: startSourceOrder,
+        page_number_offset: pageNumberOffset
+      } : null,
       normalizer_version: NORMALIZER_VERSION,
       engine_version: ENGINE_VERSION,
       validator_version: VALIDATOR_VERSION

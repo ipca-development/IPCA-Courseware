@@ -40,6 +40,8 @@ $upgradeColumns = array(
         => "BIGINT UNSIGNED NULL COMMENT 'Newest coalesced revision waiting behind the active lease'",
     'pending_fingerprint_hash' => 'CHAR(64) NULL',
     'pending_fingerprint_json' => 'JSON NULL',
+    'requested_mutation_json' => 'JSON NULL',
+    'pending_mutation_json' => 'JSON NULL',
     'pending_requested_by_user_id' => 'INT UNSIGNED NULL',
 );
 $columnExists = $pdo->prepare(
@@ -64,9 +66,11 @@ $requiredColumns = array(
         'status',
         'requested_fingerprint_hash',
         'requested_fingerprint_json',
+        'requested_mutation_json',
         'pending_generation_seq',
         'pending_fingerprint_hash',
         'pending_fingerprint_json',
+        'pending_mutation_json',
         'pending_requested_by_user_id',
         'lease_token',
         'lease_expires_at',

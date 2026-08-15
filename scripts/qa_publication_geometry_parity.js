@@ -87,14 +87,14 @@ const harnessCSS = `
     min-height:1056px!important;max-width:none!important;margin:0!important;padding:0!important;box-shadow:none!important;
     border-radius:0!important;background:#fff!important}
   .parity-page>.cpb-page-header{position:absolute!important;left:56px!important;top:48px!important;
-    width:704px!important;height:84px!important;margin:0!important}
-  .parity-page>.cpb-sheet-body{position:absolute!important;left:56px!important;top:152px!important;
-    width:704px!important;height:744px!important;margin:0!important;padding:0!important;align-content:start!important}
-  .parity-page>.cpb-page-footer{position:absolute!important;left:56px!important;top:920px!important;
-    width:704px!important;height:72px!important;margin:0!important}
+    width:704px!important;height:auto!important;margin:0!important}
+  .parity-page>.cpb-sheet-body{position:absolute!important;left:56px!important;
+    width:704px!important;margin:0!important;padding:0!important;align-content:start!important}
+  .parity-page>.cpb-page-footer{position:absolute!important;left:56px!important;bottom:64px!important;
+    width:704px!important;height:auto!important;margin:0!important}
   .reader-generated-page{margin:0!important;background:#fff!important}
   .reader-page-header-region>.cpb-page-header,.reader-page-footer-region>.cpb-page-footer{
-    position:static!important;inset:auto!important;width:100%!important;height:100%!important;
+    position:static!important;inset:auto!important;width:100%!important;height:auto!important;
     margin:0!important;box-sizing:border-box!important}
 `;
 
@@ -121,10 +121,21 @@ async function createOnlinePage(browser, fixture, editorCSS) {
   );
   await page.evaluate(() => document.querySelector(".cpb-sheet")?.classList.add("parity-page"));
   await waitForStablePage(page);
+  await page.evaluate(() => {
+    const root = document.querySelector(".parity-page");
+    const header = root.querySelector(":scope > .cpb-page-header");
+    const footer = root.querySelector(":scope > .cpb-page-footer");
+    const body = root.querySelector(":scope > .cpb-sheet-body");
+    const rootRect = root.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    const footerRect = footer.getBoundingClientRect();
+    body.style.setProperty("top", `${headerRect.bottom - rootRect.top + 20}px`, "important");
+    body.style.setProperty("height", `${footerRect.top - headerRect.bottom - 44}px`, "important");
+  });
   return page;
 }
 
-async function paginate(browser, fixture, core, readerCSS) {
+async function paginate(browser, fixture, core, readerCSS, resolvedLayout) {
   const page = await browser.newPage({ viewport: { width: 816, height: 1056 }, deviceScaleFactor: 1 });
   const engineHarnessCSS = `
     html,body{margin:0;padding:0;width:816px;min-height:1056px}
@@ -141,6 +152,7 @@ async function paginate(browser, fixture, core, readerCSS) {
   );
   const canonicalLayout = {
     ...fixture.layout,
+    ...resolvedLayout,
     viewportWidth: 816,
     viewportHeight: 1056,
     safeAreaInsets: { top: 0, leading: 0, bottom: 0, trailing: 0 },
@@ -336,7 +348,24 @@ async function main() {
     const editorCSS = fs.readFileSync(editorCSSPath, "utf8");
     const core = fs.readFileSync(corePath, "utf8");
     const onlinePage = await createOnlinePage(browser, fixture, editorCSS);
-    const generatedPageHTML = await paginate(browser, fixture, core, "");
+    const resolvedLayout = await onlinePage.evaluate(() => {
+      const page = document.querySelector(".parity-page").getBoundingClientRect();
+      const frame = (selector) => {
+        const rect = document.querySelector(selector).getBoundingClientRect();
+        return {
+          x: rect.left - page.left,
+          y: rect.top - page.top,
+          width: rect.width,
+          height: rect.height
+        };
+      };
+      return {
+        headerFrame: frame(".parity-page > .cpb-page-header"),
+        contentFrame: frame(".parity-page > .cpb-sheet-body"),
+        footerFrame: frame(".parity-page > .cpb-page-footer")
+      };
+    });
+    const generatedPageHTML = await paginate(browser, fixture, core, "", resolvedLayout);
     const iosPage = await createIOSPage(browser, fixture, generatedPageHTML, "");
     const [onlineMetrics, iosMetrics] = await Promise.all([collect(onlinePage), collect(iosPage)]);
     fs.mkdirSync(artifactsDirectory, { recursive: true });

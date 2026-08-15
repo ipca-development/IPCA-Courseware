@@ -55,11 +55,11 @@ final class ControlledPublishingAuthoritativePaginationService
      * @param array<string,mixed> $version
      * @return array{pages:list<array<string,mixed>>,generation:array<string,mixed>}
      */
-    public function generate(array $source, array $version): array
+    public function generate(array $source, array $version, array $options = array()): array
     {
         $generationLock = $this->acquireGenerationLock($version);
         try {
-            return $this->generateLocked($source, $version);
+            return $this->generateLocked($source, $version, $options);
         } finally {
             flock($generationLock, LOCK_UN);
             fclose($generationLock);
@@ -71,7 +71,7 @@ final class ControlledPublishingAuthoritativePaginationService
      * @param array<string,mixed> $version
      * @return array{pages:list<array<string,mixed>>,generation:array<string,mixed>}
      */
-    private function generateLocked(array $source, array $version): array
+    private function generateLocked(array $source, array $version, array $options = array()): array
     {
         $package = $this->reader->paginationPublicationPackage($version, $source);
         $css = (string)($package['css']['content'] ?? '');
@@ -90,6 +90,21 @@ final class ControlledPublishingAuthoritativePaginationService
                 'source' => $source,
                 'book_style_css' => $css,
             );
+            $incremental = is_array($options['incremental'] ?? null)
+                ? $options['incremental']
+                : array();
+            if (
+                (int)($incremental['start_source_order'] ?? 0) > 0
+                && (int)($incremental['page_number_offset'] ?? 0) > 0
+            ) {
+                $input['incremental'] = array(
+                    'start_source_order' => (int)$incremental['start_source_order'],
+                    'page_number_offset' => (int)$incremental['page_number_offset'],
+                    'prefix_source_fingerprints' => is_array(
+                        $incremental['prefix_source_fingerprints'] ?? null
+                    ) ? $incremental['prefix_source_fingerprints'] : array(),
+                );
+            }
             file_put_contents(
                 $inputPath,
                 json_encode($input, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
@@ -102,6 +117,13 @@ final class ControlledPublishingAuthoritativePaginationService
                 throw new RuntimeException('Pagination worker returned an invalid response.');
             }
             $error = is_array($result['error'] ?? null) ? $result['error'] : null;
+            if (
+                is_array($error)
+                && (string)($error['code'] ?? '') === 'INCREMENTAL_PREFIX_MISMATCH'
+                && isset($input['incremental'])
+            ) {
+                return $this->generateLocked($source, $version);
+            }
             if (is_array($error) && (string)($error['code'] ?? '') === 'MANUAL_BREAK_REQUIRED') {
                 throw $this->manualBreakRequired($error, $source, $version);
             }
@@ -113,23 +135,16 @@ final class ControlledPublishingAuthoritativePaginationService
                 throw new RuntimeException('Authoritative page validation failed.');
             }
 
-            $sectionIndex = is_array($result['section_page_index'] ?? null)
-                ? $result['section_page_index']
-                : array();
-            $pages = array();
+            $suffixPages = array();
             foreach ($result['pages'] as $page) {
                 if (!is_array($page)) {
                     continue;
                 }
-                $pageHtml = $this->injectTocPageNumbers(
-                    (string)($page['page_html'] ?? ''),
-                    $sectionIndex
-                );
                 $start = is_array($page['start_location'] ?? null) ? $page['start_location'] : array();
                 $official = is_array($start['official_location'] ?? null)
                     ? $start['official_location']
                     : array();
-                $pages[] = array(
+                $suffixPages[] = array(
                     'page_number' => (int)($page['page_number'] ?? 0),
                     'section_id' => isset($page['section_id']) ? (int)$page['section_id'] : null,
                     'stable_anchor' => (string)($official['stable_anchor'] ?? '') ?: null,
@@ -137,7 +152,7 @@ final class ControlledPublishingAuthoritativePaginationService
                     'is_cover' => !empty($page['is_cover']),
                     'is_section_start' => !empty($page['is_section_start']),
                     'is_major_section_start' => !empty($page['is_major_section_start']),
-                    'page_html' => $pageHtml,
+                    'page_html' => (string)($page['page_html'] ?? ''),
                     'thumbnail_html' => null,
                     'metadata' => array(
                         'section_title' => (string)($page['section_title'] ?? ''),
@@ -147,6 +162,14 @@ final class ControlledPublishingAuthoritativePaginationService
                     ),
                 );
             }
+            $prefixPages = is_array($options['prefix_pages'] ?? null)
+                ? array_values(array_filter($options['prefix_pages'], 'is_array'))
+                : array();
+            $appliedIncremental = !empty($result['incremental']['applied'])
+                && count($prefixPages) === (int)($incremental['page_number_offset'] ?? -1);
+            $pages = $appliedIncremental
+                ? array_merge($prefixPages, $suffixPages)
+                : $suffixPages;
             if ($pages === array()) {
                 throw new RuntimeException('Authoritative paginator generated no pages.');
             }
@@ -155,6 +178,15 @@ final class ControlledPublishingAuthoritativePaginationService
                     throw new RuntimeException('Authoritative page numbers are not sequential.');
                 }
             }
+            $this->validateMergedCoverageOrder($pages);
+            $sectionIndex = $this->sectionIndexFromPages($pages);
+            foreach ($pages as &$page) {
+                $page['page_html'] = $this->injectTocPageNumbers(
+                    (string)($page['page_html'] ?? ''),
+                    $sectionIndex
+                );
+            }
+            unset($page);
 
             $sourceJson = $this->canonicalJson($source);
             $pageMapHash = hash(
@@ -183,12 +215,69 @@ final class ControlledPublishingAuthoritativePaginationService
                     'page_map_hash' => $pageMapHash,
                     'page_count' => count($pages),
                     'validation' => $validation,
+                    'incremental' => array(
+                        'applied' => $appliedIncremental,
+                        'prefix_page_count' => $appliedIncremental ? count($prefixPages) : 0,
+                        'start_source_order' => $appliedIncremental
+                            ? (int)($incremental['start_source_order'] ?? 0)
+                            : 0,
+                    ),
                     'generated_at' => gmdate('c'),
                 ),
             );
         } finally {
             @unlink($inputPath);
             @unlink($outputPath);
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $pages
+     * @return array<string,int>
+     */
+    private function sectionIndexFromPages(array $pages): array
+    {
+        $index = array();
+        foreach ($pages as $page) {
+            $sectionId = (int)($page['section_id'] ?? 0);
+            if ($sectionId > 0 && !isset($index[(string)$sectionId])) {
+                $index[(string)$sectionId] = (int)($page['page_number'] ?? 0);
+            }
+        }
+        return $index;
+    }
+
+    /**
+     * Prefix reuse is accepted only when the merged map still contains every
+     * normalized source order exactly in one contiguous sequence. Split
+     * fragments may repeat an order; presentation copies do not count.
+     *
+     * @param list<array<string,mixed>> $pages
+     */
+    private function validateMergedCoverageOrder(array $pages): void
+    {
+        $orders = array();
+        foreach ($pages as $page) {
+            $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+            $coverage = is_array($metadata['coverage'] ?? null) ? $metadata['coverage'] : array();
+            foreach ($coverage as $entry) {
+                if (!is_array($entry) || !empty($entry['presentation_copy'])) {
+                    continue;
+                }
+                $order = (int)($entry['source_order'] ?? -1);
+                if ($order >= 0) {
+                    $orders[$order] = true;
+                }
+            }
+        }
+        if ($orders === array()) {
+            throw new RuntimeException('Authoritative page coverage is empty.');
+        }
+        ksort($orders, SORT_NUMERIC);
+        $actual = array_map('intval', array_keys($orders));
+        $expected = range(0, max($actual));
+        if ($actual !== $expected) {
+            throw new RuntimeException('Incremental authoritative page coverage is not contiguous.');
         }
     }
 

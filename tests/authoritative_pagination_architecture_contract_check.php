@@ -28,6 +28,8 @@ $contracts = array(
         'acquireGenerationLock',
         'LOCK_EX | LOCK_NB',
         'Authoritative pagination is already running for this manual version',
+        'INCREMENTAL_PREFIX_MISMATCH',
+        'validateMergedCoverageOrder',
     ),
     'scripts/authoritative_manual_paginator.cjs' => array(
         'ReaderPaginationCore.js',
@@ -35,9 +37,9 @@ $contracts = array(
         'validation failed',
         'authoritative_layout',
         'CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH',
-        'const resolvedHeaderHeight = headerHeight',
-        'const resolvedFooterHeight = footerHeight',
-        'headerLogoMaxHeight',
+        'const resolvedHeaderHeight = measuredBands.header || headerHeight',
+        'const resolvedFooterHeight = measuredBands.footer || footerHeight',
+        'INCREMENTAL_PREFIX_MISMATCH',
     ),
     'src/publishing/ControlledPublishingReaderLayoutProfile.php' => array(
         "'header_band_px' => 64",
@@ -45,11 +47,7 @@ $contracts = array(
         "'body_capacity_px' => 802",
     ),
     'src/publishing/ControlledPublishingBookStyleManifestService.php' => array(
-        '.reader-page-header-region .cpb-page-header-logo{max-width:60%!important;max-height:36px!important;}',
-        '.reader-page-header-region>.cpb-page-header>.cpb-page-header-table{height:100%!important;',
-        '.reader-page-header-region .cpb-page-header-table td{padding-top:2px!important;',
-        '.reader-page-header-region .cpb-page-header-cell--center{font-size:11pt!important;}',
-        '.reader-page-header-region .cpb-page-header-cell--right{font-size:8pt!important;}',
+        '.reader-page-header-region>.cpb-page-header,.reader-page-footer-region>.cpb-page-footer{position:static;inset:auto;width:100%;height:auto;',
     ),
     'src/publishing/ControlledPublishingManualPageBreakService.php' => array(
         'before_block_anchor',
@@ -66,6 +64,7 @@ $contracts = array(
         "case 'live_ensure':",
         "case 'live_status':",
         "case 'live_retry':",
+        'cp_pm_mutation_hint',
         "case 'generate':",
     ),
     'src/publishing/ControlledPublishingReaderPageMapStore.php' => array(
@@ -92,6 +91,8 @@ $contracts = array(
         "' --drain'",
         'CW_PAGINATION_PHP',
         'PHP_BINDIR',
+        'incrementalGenerationOptions',
+        'prefix_source_fingerprints',
     ),
     'scripts/controlled_publishing_page_map_worker.php' => array(
         "require_once __DIR__ . '/../src/helpers.php'",
@@ -106,10 +107,13 @@ $contracts = array(
         'generation_seq',
         'lease_token',
         'pending_generation_seq',
+        'requested_mutation_json',
+        'pending_mutation_json',
     ),
     'scripts/apply_publishing_live_page_map_generation.php' => array(
         'requiredColumns',
         'requested_fingerprint_hash',
+        "'requested_mutation_json'",
         "'lease_token'",
     ),
     'src/publishing/ControlledPublishingManualPageBreakService.php' => array(
@@ -144,6 +148,8 @@ $contracts = array(
         'paginationAuthority',
         'if (isPart0) return "generated"',
         'isGeneratedFragment',
+        'source_fingerprint',
+        'validateIncrementalPrefix',
     ),
     'public/admin/api/controlled_book_editor_api.php' => array(
         "case 'split_block_page_break':",

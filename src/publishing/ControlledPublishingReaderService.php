@@ -1207,9 +1207,13 @@ final class ControlledPublishingReaderService
      *
      * @return array<string,mixed>
      */
-    public function ensureLivePageMap(int $bookVersionId, int $requestedByUserId): array
+    public function ensureLivePageMap(
+        int $bookVersionId,
+        int $requestedByUserId,
+        array $mutationHint = array()
+    ): array
     {
-        return $this->livePageMapService()->ensure($bookVersionId, $requestedByUserId);
+        return $this->livePageMapService()->ensure($bookVersionId, $requestedByUserId, null, $mutationHint);
     }
 
     /**
@@ -1223,9 +1227,13 @@ final class ControlledPublishingReaderService
     /**
      * @return array<string,mixed>
      */
-    public function retryLivePageMap(int $bookVersionId, int $requestedByUserId): array
+    public function retryLivePageMap(
+        int $bookVersionId,
+        int $requestedByUserId,
+        array $mutationHint = array()
+    ): array
     {
-        return $this->livePageMapService()->retry($bookVersionId, $requestedByUserId);
+        return $this->livePageMapService()->retry($bookVersionId, $requestedByUserId, null, $mutationHint);
     }
 
     private function livePageMapService(): ControlledPublishingLivePageMapService

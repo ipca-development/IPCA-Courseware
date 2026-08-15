@@ -57,6 +57,13 @@ const bookStyleCSS = `
   .cpb-part0-table { width: 100%; border-collapse: collapse; }
   .cpb-part0-table th, .cpb-part0-table td { height: 42px; border: 1px solid #333; padding: 6px; }
   .cpb-part0-amend-row { min-height: 42px; }
+  .cpb-page-header-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+  .cpb-page-header-table td { border-left:1px solid #94a3b8; padding:4px 8px; vertical-align:middle; }
+  .cpb-page-header-table td:first-child { border-left:0; }
+  .cpb-page-header-cell--left { width:30%; }
+  .cpb-page-header-cell--center { width:40%; text-align:center; }
+  .cpb-page-header-cell--right { width:30%; }
+  .cpb-table-wrap { width:100%; max-width:100%; }
 `;
 
 function section(id, key, title, flags, units, extra) {
@@ -99,11 +106,15 @@ function sourceWith(sections) {
   };
 }
 
-function runWorker(source) {
+function runWorker(source, incremental = null) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ipca-manual-segments-"));
   const inputPath = path.join(directory, "input.json");
   const outputPath = path.join(directory, "output.json");
-  fs.writeFileSync(inputPath, JSON.stringify({ source, book_style_css: bookStyleCSS }));
+  fs.writeFileSync(inputPath, JSON.stringify({
+    source,
+    book_style_css: bookStyleCSS,
+    incremental
+  }));
   const execution = spawnSync(process.execPath, [
     path.join(root, "scripts/authoritative_manual_paginator.cjs"),
     "--input", inputPath,
@@ -128,9 +139,19 @@ function assertHeaderFooter(pages) {
     assert.ok(page.page_html.includes("reader-page-footer-region"), "footer region missing");
     assert.ok(page.page_html.includes("justify-content: flex-end"), "footer must bottom-align");
     assert.ok(page.metrics && page.metrics.validation_passed === true, "geometry validation must pass");
-    assert.strictEqual(page.metrics.header_frame.height, layout.header_band_px, "header band height drifted");
-    assert.strictEqual(page.metrics.footer_frame.height, layout.footer_band_px, "footer band height drifted");
-    assert.strictEqual(page.metrics.content_frame.height, layout.body_capacity_px, "body capacity drifted");
+    assert.ok(page.metrics.header_frame.height > 0, "resolved renderer header height missing");
+    assert.ok(page.metrics.footer_frame.height > 0, "resolved renderer footer height missing");
+    assert.strictEqual(
+      page.metrics.content_frame.height,
+      layout.page_height_px
+        - layout.sheet_padding_top_px
+        - page.metrics.header_frame.height
+        - layout.header_margin_bottom_px
+        - layout.footer_margin_top_px
+        - page.metrics.footer_frame.height
+        - layout.sheet_padding_bottom_px,
+      "body capacity does not follow resolved furniture geometry"
+    );
     assert.strictEqual(page.metrics.header_body_intersect, false, "body must not intersect header");
     assert.strictEqual(page.metrics.body_footer_intersect, false, "body must not intersect footer");
     const contentY = Number(page.metrics.content_frame.y);
@@ -1204,6 +1225,148 @@ cases.push(["AS. manual break before main title creates no duplicate blank page"
   assert.strictEqual(result.pages[1].metrics.break_reason, "forced_source_break");
   assert.strictEqual(result.validation.is_valid, true);
   assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["AT. incremental suffix matches full authoritative page HTML", () => {
+  const source = sourceWith([
+    section(1, "prefix", "Prefix", {}, [
+      unit("prefix-body", "paragraph",
+        '<article data-block-id="201" data-stable-anchor="prefix-body"><p style="min-height:700px">Stable prefix page.</p></article>',
+        { block_id: 201 })
+    ]),
+    section(2, "suffix", "Suffix", {}, [
+      unit("suffix-start", "paragraph",
+        '<article data-block-id="202" data-stable-anchor="suffix-start"><p style="min-height:500px">Suffix start.</p></article>',
+        { block_id: 202, force_break_before: true }),
+      unit("suffix-following", "paragraph",
+        '<article data-block-id="203" data-stable-anchor="suffix-following"><p style="min-height:500px">Suffix following.</p></article>',
+        { block_id: 203 })
+    ])
+  ]);
+  const full = runWorker(source);
+  assert.strictEqual(full.execution.status, 0, full.execution.stderr || full.execution.stdout);
+  assert.ok(full.result.pages.length >= 3);
+  const startSourceOrder = Math.min(...full.result.pages[1].coverage
+    .filter((entry) => !entry.presentation_copy)
+    .map((entry) => Number(entry.source_order)));
+  const incrementalResult = runWorker(source, {
+    start_source_order: startSourceOrder,
+    page_number_offset: 1,
+    prefix_source_fingerprints: Object.fromEntries(full.result.pages[0].coverage
+      .filter((entry) => !entry.presentation_copy)
+      .map((entry) => [String(entry.source_order), entry.source_fingerprint]))
+  });
+  assert.strictEqual(
+    incrementalResult.execution.status,
+    0,
+    incrementalResult.execution.stderr || incrementalResult.execution.stdout
+  );
+  assert.strictEqual(incrementalResult.result.incremental.applied, true);
+  assert.deepStrictEqual(
+    incrementalResult.result.pages.map((page) => page.page_html),
+    full.result.pages.slice(1).map((page) => page.page_html)
+  );
+  assert.deepStrictEqual(
+    incrementalResult.result.pages.map((page) => page.coverage),
+    full.result.pages.slice(1).map((page) => page.coverage)
+  );
+  assert.deepStrictEqual(
+    incrementalResult.result.section_page_index,
+    { "2": 2 }
+  );
+  const rejected = runWorker(source, {
+    start_source_order: startSourceOrder,
+    page_number_offset: 1,
+    prefix_source_fingerprints: { "0": "0".repeat(64) }
+  });
+  assert.strictEqual(rejected.execution.status, 0);
+  assert.strictEqual(rejected.result.error.code, "INCREMENTAL_PREFIX_MISMATCH");
+}]);
+
+cases.push(["AU. complete Part 0 golden publication remains structurally correct", () => {
+  const golden = JSON.parse(fs.readFileSync(
+    path.join(root, "tests/fixtures/authoritative_part0_golden.json"),
+    "utf8"
+  ));
+  const heading = (title) => `<div class="cpb-part0-heading" data-paragraph-style="subtitle_1">${title}</div>`;
+  const generated = (id, key, title, body) => section(id, key, title, {
+    is_part0: true,
+    is_section_start: true,
+    force_page_break_before: true,
+    pagination_authority: "generated"
+  }, [
+    unit(`${key}-root`, "generated", `<div class="cpb-part0">${heading(title)}${body}</div>`, {
+      force_break_before: true,
+      pagination_authority: "generated"
+    })
+  ], { pagination_authority: "generated" });
+  const lepRows = golden.lep_parts.map((part) =>
+    `<tr class="cpb-lep-part-row"><td>${part}</td><td>1-2</td><td>15/06/2026</td><td>Rev 6</td></tr>`
+  ).join("");
+  const source = sourceWith([
+    section(101, "lep", golden.titles[0], {
+      is_part0: true, is_section_start: true, force_page_break_before: true
+    }, [
+      unit("lep-golden", "lep",
+        `<div class="cpb-lep">${heading(golden.titles[0])}<div class="cpb-lep-parts-wrap cpb-table-wrap">`
+        + `<table class="cpb-table cpb-lep-table" data-lep-parts-table="1">`
+        + '<colgroup><col style="width:17%"><col style="width:22%"><col style="width:34%"><col style="width:27%"></colgroup>'
+        + `<thead><tr><th>Part</th><th>Pages</th><th>Date</th><th>Revision</th></tr></thead>`
+        + `<tbody>${lepRows}</tbody></table></div></div>`,
+        { force_break_before: true, pagination_authority: "generated" })
+    ], { pagination_authority: "generated" }),
+    generated(102, "revision_system", golden.titles[1],
+      '<p>The revision system describes controlled amendment handling.</p>'),
+    generated(103, "amendment_list", golden.titles[2],
+      '<div class="cpb-part0-amendment cpb-table-wrap"><table class="cpb-table cpb-part0-table" data-part0-table="amendment_list">'
+      + '<colgroup><col style="width:14%"><col style="width:26%"><col style="width:16%"><col style="width:17%"><col style="width:15%"><col style="width:12%"></colgroup>'
+      + '<thead><tr><th>Revision</th><th>Reason</th><th>Revision Date</th><th>Effective Date</th><th>Incorporated</th><th>By</th></tr></thead>'
+      + '<tbody><tr class="cpb-part0-amend-row"><td>Rev 6</td><td>CAA updates</td><td>09/01/23</td><td>19/01/23</td><td>19/01/23</td><td>STEF</td></tr></tbody></table></div>'),
+    generated(104, "distribution_list", golden.titles[3],
+      '<div class="cpb-part0-distribution cpb-table-wrap"><table class="cpb-table cpb-part0-table" data-part0-table="distribution_list">'
+      + '<colgroup><col style="width:18%"><col style="width:82%"></colgroup>'
+      + '<thead><tr><th>Copy Nr</th><th>Issue To</th></tr></thead>'
+      + '<tbody><tr class="cpb-part0-dist-row"><td>0</td><td>Master Copy</td></tr></tbody></table></div>'),
+    generated(105, "abbreviations", golden.titles[4],
+      '<div class="cpb-part0-abbr-row"><strong>ACAS</strong> — Airborne Collision Avoidance System</div>'),
+    generated(106, "definitions", golden.titles[5],
+      '<div class="cpb-part0-def-row"><strong>Aircraft</strong> — Any machine deriving support from the air.</div>'),
+    generated(107, "highlights", golden.titles[6],
+      '<h3>Revision 6 Changes:</h3><p>Part 2 — Technical — §6.1.9 Medication: Updated the medication policy and protective-equipment requirements.</p>')
+  ]);
+  const { execution, result } = runWorker(source);
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.validation.is_valid, true);
+  const allHtml = result.pages.map((page) => page.page_html).join("\n");
+  let priorPage = 0;
+  golden.titles.forEach((title, index) => {
+    const matching = result.pages.filter((page) => page.page_html.includes(title));
+    assert.strictEqual(matching.length, 1, `${title} must appear exactly once`);
+    assert.ok(matching[0].page_number > priorPage, `${title} is out of order`);
+    assert.strictEqual(matching[0].section_id, 101 + index, `${title} has wrong section ownership`);
+    priorPage = matching[0].page_number;
+  });
+  golden.lep_parts.forEach((part) => {
+    assert.ok(allHtml.includes(`<td>${part}</td>`), `LEP Part ${part} missing`);
+  });
+  assert.ok(!allHtml.includes("cpb-lep-part-row--empty"), "empty LEP row entered publication");
+  assert.ok(!allHtml.includes("Revision 2 Changes"), "content leaked into Distribution List");
+  const visibleText = allHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  golden.forbidden_change_tokens.forEach((token) => {
+    assert.ok(!visibleText.toLowerCase().includes(token.toLowerCase()), `internal token leaked: ${token}`);
+  });
+  result.pages.forEach((page) => {
+    const ownedSections = new Set(page.coverage
+      .filter((entry) => !entry.presentation_copy)
+      .map((entry) => Number(entry.section_id)));
+    assert.strictEqual(ownedSections.size, 1, `page ${page.page_number} leaks across Part 0 sections`);
+    assertHeaderFooter([page]);
+  });
+  [103, 104].forEach((sectionId) => {
+    const page = result.pages.find((candidate) => candidate.section_id === sectionId);
+    const table = page.metrics.block_measurements[0];
+    assert.ok(table && Math.abs(table.frame.width - page.metrics.content_frame.width) < 0.75);
+  });
 }]);
 
 let failed = 0;

@@ -24,6 +24,14 @@ final class ControlledPublishingPublicationFilter
         'cpb-orientation-toggle',
         'cpb-col-resize',
         'cpb-image--empty',
+        'cpb-change-marker',
+    );
+
+    /** @var list<string> */
+    private const PUBLICATION_ONLY_STRIP_CLASSES = array(
+        'cpb-block--changed',
+        'cpb-block--new',
+        'cpb-block--modified',
     );
 
     /** @var list<string> */
@@ -193,6 +201,18 @@ final class ControlledPublishingPublicationFilter
             }
             if ($element->hasAttribute('contenteditable')) {
                 $element->removeAttribute('contenteditable');
+            }
+            if ($element->hasAttribute('data-change-status')) {
+                $element->removeAttribute('data-change-status');
+            }
+            $classes = array_values(array_diff(
+                self::classTokens($element),
+                self::PUBLICATION_ONLY_STRIP_CLASSES
+            ));
+            if ($classes === array()) {
+                $element->removeAttribute('class');
+            } else {
+                $element->setAttribute('class', implode(' ', $classes));
             }
         }
         foreach ($remove as $element) {

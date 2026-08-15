@@ -27,6 +27,17 @@ final class ControlledPublishingRevisionService
         if (!is_array($current)) {
             return null;
         }
+        $supersedesId = (int)($current['supersedes_version_id'] ?? 0);
+        if ($supersedesId > 0) {
+            $stmt = $this->pdo->prepare(
+                'SELECT * FROM ipca_publishing_book_versions WHERE id = :id LIMIT 1'
+            );
+            $stmt->execute(array(':id' => $supersedesId));
+            $superseded = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (is_array($superseded)) {
+                return $superseded;
+            }
+        }
 
         $stmt = $this->pdo->prepare("
             SELECT bv.*
@@ -51,18 +62,18 @@ final class ControlledPublishingRevisionService
     public function annotateChangeStatus(int $versionId, array $blocks): array
     {
         $prior = $this->priorVersion($versionId);
-        $priorHashes = $prior !== null ? $this->blockHashesByAnchor((int)$prior['id']) : array();
+        $priorHashes = $prior !== null ? $this->blockHashesByKey((int)$prior['id']) : array();
 
         foreach ($blocks as $idx => $block) {
-            $anchor = (string)($block['stable_anchor'] ?? '');
+            $blockKey = (string)($block['block_key'] ?? '');
             $hash = (string)($block['content_hash'] ?? '');
-            if ($anchor === '') {
+            if ($blockKey === '') {
                 $blocks[$idx]['change_status'] = 'unchanged';
                 continue;
             }
-            if (!isset($priorHashes[$anchor])) {
+            if (!isset($priorHashes[$blockKey])) {
                 $blocks[$idx]['change_status'] = 'new';
-            } elseif ($priorHashes[$anchor] !== $hash) {
+            } elseif ($priorHashes[$blockKey] !== $hash) {
                 $blocks[$idx]['change_status'] = 'modified';
             } else {
                 $blocks[$idx]['change_status'] = 'unchanged';
@@ -72,19 +83,22 @@ final class ControlledPublishingRevisionService
     }
 
     /**
-     * @return array<string,string> stable_anchor => content_hash
+     * @return array<string,string> block_key => content_hash
      */
-    private function blockHashesByAnchor(int $versionId): array
+    private function blockHashesByKey(int $versionId): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT stable_anchor, content_hash
+            SELECT block_key, content_hash
             FROM ipca_publishing_book_blocks
             WHERE book_version_id = :version_id
         ");
         $stmt->execute(array(':version_id' => $versionId));
         $map = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-            $map[(string)$row['stable_anchor']] = (string)$row['content_hash'];
+            $key = trim((string)($row['block_key'] ?? ''));
+            if ($key !== '') {
+                $map[$key] = (string)$row['content_hash'];
+            }
         }
         return $map;
     }
@@ -112,15 +126,40 @@ final class ControlledPublishingRevisionService
         $stmt->execute(array(':version_id' => $versionId));
         $allBlocks = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         $annotated = $this->annotateChangeStatus($versionId, $allBlocks);
+        $prior = $this->priorVersion($versionId);
+        $priorBlocks = $prior !== null
+            ? $this->blocksByKeyWithSection((int)$prior['id'])
+            : array();
+        $currentContexts = $this->blockContexts($allBlocks);
+        $priorContexts = $this->blockContexts(array_values($priorBlocks));
 
         $changes = array();
+        $currentKeys = array();
         foreach ($annotated as $block) {
+            $blockKey = trim((string)($block['block_key'] ?? ''));
+            if ($blockKey !== '') {
+                $currentKeys[$blockKey] = true;
+            }
             $status = (string)($block['change_status'] ?? 'unchanged');
             if ($status === 'unchanged') {
                 continue;
             }
+            if ($status === 'modified' && isset($priorBlocks[$blockKey])) {
+                $block['prior_payload_json'] = $priorBlocks[$blockKey]['payload_json'] ?? null;
+            }
+            $block['change_context'] = $currentContexts[$blockKey] ?? array();
             $changes[] = $block;
         }
+        foreach ($priorBlocks as $blockKey => $priorBlock) {
+            if (isset($currentKeys[$blockKey])) {
+                continue;
+            }
+            $priorBlock['change_status'] = 'deleted';
+            $priorBlock['prior_payload_json'] = $priorBlock['payload_json'] ?? null;
+            $priorBlock['change_context'] = $priorContexts[$blockKey] ?? array();
+            $changes[] = $priorBlock;
+        }
+        $summaries = $this->humanChangeSummaries($changes);
 
         $this->pdo->prepare("
             DELETE FROM ipca_publishing_book_blocks
@@ -154,26 +193,22 @@ final class ControlledPublishingRevisionService
         $created++;
 
         $introPayload = array(
-            'html' => '<p>' . count($changes) . ' governed change(s) detected versus the prior book version.</p>',
+            'html' => '<p>' . count($summaries)
+                . ' governed section change(s) detected versus the prior book version.</p>',
         );
         $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, 'summary_intro', 'paragraph', $introPayload, $sort, $actorUserId);
         $sort += 10;
         $created++;
 
-        if ($changes === array()) {
+        if ($summaries === array()) {
             $para = array('html' => '<p>No content changes detected versus the prior version.</p>');
             $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, 'none', 'paragraph', $para, $sort, $actorUserId);
             return array('section_id' => $sectionId, 'blocks_created' => $created + 1, 'changes_count' => 0);
         }
 
-        foreach ($changes as $change) {
-            $status = (string)($change['change_status'] ?? 'modified');
-            $type = (string)($change['block_type'] ?? 'block');
-            $anchor = (string)($change['stable_anchor'] ?? '');
-            $sectionTitle = (string)($change['section_title'] ?? '');
-            $label = strtoupper($status) . ' · ' . $sectionTitle . ' · ' . $type . ' · ' . $anchor;
-            $para = array('html' => '<p>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</p>');
-            $key = 'change_' . substr(hash('sha256', $anchor), 0, 12);
+        foreach ($summaries as $summary) {
+            $para = array('html' => '<p>' . htmlspecialchars($summary['text'], ENT_QUOTES, 'UTF-8') . '</p>');
+            $key = 'change_' . substr(hash('sha256', $summary['key']), 0, 12);
             $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, $key, 'paragraph', $para, $sort, $actorUserId);
             $sort += 10;
             $created++;
@@ -182,8 +217,186 @@ final class ControlledPublishingRevisionService
         return array(
             'section_id' => $sectionId,
             'blocks_created' => $created,
-            'changes_count' => count($changes),
+            'changes_count' => count($summaries),
         );
+    }
+
+    /**
+     * @return array<string,array<string,mixed>>
+     */
+    private function blocksByKeyWithSection(int $versionId): array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT b.*, s.title AS section_title, s.section_key
+            FROM ipca_publishing_book_blocks b
+            INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
+            WHERE b.book_version_id = :version_id
+              AND s.section_key != 'highlights'
+            ORDER BY s.sort_order, b.sort_order, b.id
+        ");
+        $stmt->execute(array(':version_id' => $versionId));
+        $output = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $key = trim((string)($row['block_key'] ?? ''));
+            if ($key !== '') {
+                $output[$key] = $row;
+            }
+        }
+        return $output;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $blocks
+     * @return array<string,array{reference:string,title:string}>
+     */
+    private function blockContexts(array $blocks): array
+    {
+        $contexts = array();
+        $nearest = array();
+        foreach ($blocks as $block) {
+            $sectionId = (int)($block['section_id'] ?? 0);
+            $payload = $this->decodePayload($block['payload_json'] ?? null);
+            $text = $this->payloadText($payload);
+            $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+            $isHeading = (string)($block['block_type'] ?? '') === 'heading'
+                || in_array($style, array('title', 'subtitle_1', 'subtitle_2', 'subtitle_3', 'subtitle_4'), true);
+            if ($isHeading && $text !== '') {
+                $reference = trim((string)($payload['canonical_section_ref'] ?? ''));
+                if ($reference === '' && preg_match('/^(\d+(?:\.\d+)+)\b/u', $text, $match) === 1) {
+                    $reference = (string)$match[1];
+                }
+                $title = trim(preg_replace('/^\d+(?:\.\d+)*\.?\s*/u', '', $text) ?? $text);
+                $nearest[$sectionId] = array('reference' => $reference, 'title' => $title);
+            }
+            $key = trim((string)($block['block_key'] ?? ''));
+            if ($key === '') {
+                continue;
+            }
+            $context = $nearest[$sectionId] ?? array('reference' => '', 'title' => '');
+            $ownReference = trim((string)($payload['canonical_section_ref'] ?? ''));
+            if ($ownReference !== '') {
+                $context['reference'] = $ownReference;
+            }
+            $contexts[$key] = $context;
+        }
+        return $contexts;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $changes
+     * @return list<array{key:string,text:string}>
+     */
+    private function humanChangeSummaries(array $changes): array
+    {
+        $groups = array();
+        foreach ($changes as $change) {
+            $sectionKey = strtolower((string)($change['section_key'] ?? ''));
+            $part = $this->partLabel($sectionKey);
+            $context = is_array($change['change_context'] ?? null)
+                ? $change['change_context']
+                : array();
+            $reference = trim((string)($context['reference'] ?? ''));
+            $title = trim((string)($context['title'] ?? ''));
+            if ($title === '') {
+                $title = trim((string)($change['section_title'] ?? ''));
+            }
+            $groupKey = implode('|', array($part, $reference, $title));
+            if (!isset($groups[$groupKey])) {
+                $groups[$groupKey] = array(
+                    'part' => $part,
+                    'reference' => $reference,
+                    'title' => $title,
+                    'added' => array(),
+                    'modified' => array(),
+                    'deleted' => array(),
+                );
+            }
+            $status = (string)($change['change_status'] ?? 'modified');
+            $payload = $this->decodePayload($change['payload_json'] ?? null);
+            $currentText = $this->truncateText($this->payloadText($payload));
+            $priorText = $this->truncateText($this->payloadText(
+                $this->decodePayload($change['prior_payload_json'] ?? null)
+            ));
+            if ($status === 'new') {
+                $groups[$groupKey]['added'][] = $currentText;
+            } elseif ($status === 'deleted') {
+                $groups[$groupKey]['deleted'][] = $priorText;
+            } else {
+                $groups[$groupKey]['modified'][] = array($priorText, $currentText);
+            }
+        }
+
+        $output = array();
+        foreach ($groups as $key => $group) {
+            $location = $group['part'];
+            if ($group['reference'] !== '') {
+                $location .= ($location !== '' ? ' — ' : '') . '§' . $group['reference'];
+            }
+            if ($group['title'] !== '') {
+                $location .= ($location !== '' ? ' ' : '') . $group['title'];
+            }
+            $sentences = array();
+            if ($group['modified'] !== array()) {
+                $pair = $group['modified'][0];
+                $detail = $pair[0] !== '' && $pair[1] !== ''
+                    ? ' from “' . $pair[0] . '” to “' . $pair[1] . '”'
+                    : '';
+                $sentences[] = 'Updated ' . count($group['modified'])
+                    . ' content item' . (count($group['modified']) === 1 ? '' : 's') . $detail . '.';
+            }
+            if ($group['added'] !== array()) {
+                $example = $group['added'][0] !== '' ? ': “' . $group['added'][0] . '”' : '';
+                $sentences[] = 'Added ' . count($group['added'])
+                    . ' content item' . (count($group['added']) === 1 ? '' : 's') . $example . '.';
+            }
+            if ($group['deleted'] !== array()) {
+                $example = $group['deleted'][0] !== '' ? ': “' . $group['deleted'][0] . '”' : '';
+                $sentences[] = 'Removed ' . count($group['deleted'])
+                    . ' previous content item' . (count($group['deleted']) === 1 ? '' : 's') . $example . '.';
+            }
+            $output[] = array(
+                'key' => $key,
+                'text' => ($location !== '' ? $location . ': ' : '') . implode(' ', $sentences),
+            );
+        }
+        return $output;
+    }
+
+    private function partLabel(string $sectionKey): string
+    {
+        if (str_contains($sectionKey, 'part_2')) return 'Part 2 — Technical';
+        if (str_contains($sectionKey, 'part_3')) return 'Part 3 — Route';
+        if (str_contains($sectionKey, 'part_4')) return 'Part 4 — Training';
+        if (str_contains($sectionKey, 'part_1') || str_contains($sectionKey, 'main_content')) {
+            return 'Part 1 — General';
+        }
+        return str_contains($sectionKey, 'part0') ? 'Part 0 — Manual Administration' : '';
+    }
+
+    /** @return array<string,mixed> */
+    private function decodePayload(mixed $payload): array
+    {
+        if (is_array($payload)) {
+            return $payload;
+        }
+        $decoded = json_decode((string)$payload, true);
+        return is_array($decoded) ? $decoded : array();
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function payloadText(array $payload): string
+    {
+        $value = (string)($payload['text'] ?? $payload['html'] ?? $payload['caption'] ?? '');
+        $value = html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
+    }
+
+    private function truncateText(string $text): string
+    {
+        if (mb_strlen($text) <= 140) {
+            return $text;
+        }
+        return rtrim(mb_substr($text, 0, 137)) . '…';
     }
 
     private function highlightsSectionId(int $versionId): int

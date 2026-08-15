@@ -21,14 +21,14 @@
   ],
   "baseline": {
     "browser": "webkit",
-    "fixture_sha256": "90daa2603d43d9a8a532cc305308c4f5ad37e126b7dae930fbab72e8002e798f",
+    "fixture_sha256": "8386129dd4a89d4247ea7a1e58ad3f3fb27f97c9c5b508c56c2c547ab5f2db77",
     "metrics": {
       "figure": {
         "rect": {
           "height": 134.406,
           "width": 549.109,
           "x": 133.438,
-          "y": 610.875
+          "y": 634.875
         },
         "selector": "#golden-image-7 figure",
         "style": {
@@ -59,7 +59,7 @@
           "height": 18.594,
           "width": 549.109,
           "x": 133.438,
-          "y": 726.688
+          "y": 750.688
         },
         "selector": "#golden-image-7 figcaption",
         "style": {
@@ -90,7 +90,7 @@
           "height": 109.813,
           "width": 549.109,
           "x": 133.438,
-          "y": 610.875
+          "y": 634.875
         },
         "selector": "#golden-image-7 img",
         "style": {
@@ -118,10 +118,10 @@
       },
       "footer": {
         "rect": {
-          "height": 72,
+          "height": 31.391,
           "width": 704,
           "x": 56,
-          "y": 920
+          "y": 960.609
         },
         "selector": ".cpb-page-footer",
         "style": {
@@ -149,10 +149,10 @@
       },
       "footer.center": {
         "rect": {
-          "height": 31.391,
+          "height": 29.391,
           "width": 280.797,
           "x": 267.594,
-          "y": 921
+          "y": 961.609
         },
         "selector": ".cpb-page-footer .cpb-page-header-cell--center",
         "style": {
@@ -171,19 +171,19 @@
           "listStyleType": "disc",
           "marginBottom": "0px",
           "marginTop": "0px",
-          "paddingBottom": "7px",
+          "paddingBottom": "6px",
           "paddingLeft": "8px",
           "paddingRight": "8px",
-          "paddingTop": "7px",
+          "paddingTop": "6px",
           "textAlign": "center"
         }
       },
       "footer.left": {
         "rect": {
-          "height": 31.391,
+          "height": 29.391,
           "width": 210.594,
           "x": 57,
-          "y": 921
+          "y": 961.609
         },
         "selector": ".cpb-page-footer .cpb-page-header-cell--left",
         "style": {
@@ -202,19 +202,19 @@
           "listStyleType": "disc",
           "marginBottom": "0px",
           "marginTop": "0px",
-          "paddingBottom": "7px",
+          "paddingBottom": "6px",
           "paddingLeft": "8px",
           "paddingRight": "8px",
-          "paddingTop": "7px",
+          "paddingTop": "6px",
           "textAlign": "left"
         }
       },
       "footer.right": {
         "rect": {
-          "height": 31.391,
+          "height": 29.391,
           "width": 210.609,
           "x": 548.391,
-          "y": 921
+          "y": 961.609
         },
         "selector": ".cpb-page-footer .cpb-page-header-cell--right",
         "style": {
@@ -233,16 +233,16 @@
           "listStyleType": "disc",
           "marginBottom": "0px",
           "marginTop": "0px",
-          "paddingBottom": "7px",
+          "paddingBottom": "6px",
           "paddingLeft": "8px",
           "paddingRight": "8px",
-          "paddingTop": "7px",
+          "paddingTop": "6px",
           "textAlign": "left"
         }
       },
       "header": {
         "rect": {
-          "height": 84,
+          "height": 108,
           "width": 704,
           "x": 56,
           "y": 48
@@ -273,10 +273,10 @@
       },
       "header.logo": {
         "rect": {
-          "height": 36,
-          "width": 147.266,
+          "height": 96,
+          "width": 180,
           "x": 65,
-          "y": 72.313
+          "y": 54
         },
         "selector": ".cpb-page-header-logo",
         "style": {
@@ -304,7 +304,7 @@
       },
       "header.metadata": {
         "rect": {
-          "height": 82.625,
+          "height": 106,
           "width": 210.609,
           "x": 548.391,
           "y": 49
@@ -326,16 +326,16 @@
           "listStyleType": "disc",
           "marginBottom": "0px",
           "marginTop": "0px",
-          "paddingBottom": "22px",
+          "paddingBottom": "5px",
           "paddingLeft": "8px",
           "paddingRight": "8px",
-          "paddingTop": "22px",
+          "paddingTop": "5px",
           "textAlign": "left"
         }
       },
       "header.title": {
         "rect": {
-          "height": 82.625,
+          "height": 106,
           "width": 280.797,
           "x": 267.594,
           "y": 49
@@ -357,10 +357,10 @@
           "listStyleType": "disc",
           "marginBottom": "0px",
           "marginTop": "0px",
-          "paddingBottom": "22px",
+          "paddingBottom": "5px",
           "paddingLeft": "8px",
           "paddingRight": "8px",
-          "paddingTop": "22px",
+          "paddingTop": "5px",
           "textAlign": "center"
         }
       },
@@ -369,7 +369,7 @@
           "height": 33.047,
           "width": 704,
           "x": 56,
-          "y": 163
+          "y": 187
         },
         "selector": "#golden-heading-1 .cpb-heading",
         "style": {
@@ -400,7 +400,7 @@
           "height": 50.047,
           "width": 704,
           "x": 56,
-          "y": 152
+          "y": 176
         },
         "selector": "#golden-heading-1",
         "style": {
@@ -431,7 +431,7 @@
           "height": 50.047,
           "width": 704,
           "x": 56,
-          "y": 152
+          "y": 176
         },
         "selector": "#golden-heading-1 .cpb-heading-row",
         "style": {
@@ -462,7 +462,7 @@
           "height": 72.016,
           "width": 704,
           "x": 56,
-          "y": 352.156
+          "y": 376.156
         },
         "selector": "#golden-callout-5 .cpb-callout",
         "style": {
@@ -493,7 +493,7 @@
           "height": 95.453,
           "width": 704,
           "x": 56,
-          "y": 340.438
+          "y": 364.438
         },
         "selector": "#golden-callout-5",
         "style": {
@@ -524,7 +524,7 @@
           "height": 19.313,
           "width": 372.797,
           "x": 111,
-          "y": 391.859
+          "y": 415.859
         },
         "selector": "#golden-callout-5 .cpb-callout-text",
         "style": {
@@ -555,7 +555,7 @@
           "height": 22.703,
           "width": 372.797,
           "x": 111,
-          "y": 365.156
+          "y": 389.156
         },
         "selector": "#golden-callout-5 .cpb-callout-title",
         "style": {
@@ -586,7 +586,7 @@
           "height": 24.797,
           "width": 704,
           "x": 56,
-          "y": 257.844
+          "y": 281.844
         },
         "selector": "#golden-list-3 ol",
         "style": {
@@ -617,7 +617,7 @@
           "height": 24.797,
           "width": 704,
           "x": 56,
-          "y": 213.047
+          "y": 237.047
         },
         "selector": "#golden-paragraph-2 .cpb-paragraph",
         "style": {
@@ -648,7 +648,7 @@
           "height": 40.797,
           "width": 704,
           "x": 56,
-          "y": 206.047
+          "y": 230.047
         },
         "selector": "#golden-paragraph-2",
         "style": {
@@ -679,7 +679,7 @@
           "height": 135.672,
           "width": 702,
           "x": 57,
-          "y": 449.688
+          "y": 473.688
         },
         "selector": ".cpb-table",
         "style": {
@@ -710,7 +710,7 @@
           "height": 33.656,
           "width": 351,
           "x": 57,
-          "y": 519.047
+          "y": 543.047
         },
         "selector": ".cpb-table tbody td",
         "style": {
@@ -741,7 +741,7 @@
           "height": 33.656,
           "width": 351,
           "x": 57,
-          "y": 485.391
+          "y": 509.391
         },
         "selector": ".cpb-table-header-row th",
         "style": {
@@ -772,7 +772,7 @@
           "height": 35.703,
           "width": 702,
           "x": 57,
-          "y": 449.688
+          "y": 473.688
         },
         "selector": ".cpb-table-title-row td",
         "style": {
@@ -803,7 +803,7 @@
           "height": 24.797,
           "width": 704,
           "x": 56,
-          "y": 302.641
+          "y": 326.641
         },
         "selector": "#golden-list-4 ul",
         "style": {

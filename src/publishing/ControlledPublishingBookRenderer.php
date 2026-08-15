@@ -609,6 +609,9 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
             . '<table class="cpb-table cpb-part0-table" data-part0-table="amendment_list">'
+            . '<colgroup><col style="width:14%"><col style="width:26%">'
+            . '<col style="width:16%"><col style="width:17%">'
+            . '<col style="width:15%"><col style="width:12%"></colgroup>'
             . '<thead><tr class="cpb-table-header-row">'
             . '<th' . $headerVisual . '>REVISION NR</th>'
             . '<th' . $headerVisual . '>REASON</th>'
@@ -660,6 +663,7 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
             . '<table class="cpb-table cpb-part0-table" data-part0-table="distribution_list">'
+            . '<colgroup><col style="width:18%"><col style="width:82%"></colgroup>'
             . '<thead><tr class="cpb-table-header-row">'
             . '<th' . $headerVisual . '>COPY NR</th>'
             . '<th' . $headerVisual . '>ISSUE TO</th>'
@@ -1002,7 +1006,7 @@ final class ControlledPublishingBookRenderer
     private function renderLepPartsTable(array $lep, bool $editable): string
     {
         $parts = is_array($lep['effective_parts'] ?? null) ? $lep['effective_parts'] : array();
-        $emptyRows = max(0, min(20, (int)($lep['empty_rows'] ?? 10)));
+        $emptyRows = $editable ? max(0, min(20, (int)($lep['empty_rows'] ?? 10))) : 0;
         $tableStyle = $this->resolveStandardTableStyle();
         $headerRow = $tableStyle['header_row'];
         $bodyRow = $tableStyle['body_row'];
@@ -1014,6 +1018,17 @@ final class ControlledPublishingBookRenderer
         $rows = '';
         foreach ($parts as $row) {
             if (!is_array($row)) {
+                continue;
+            }
+            if (
+                !$editable
+                && trim(
+                    (string)($row['part'] ?? '')
+                    . (string)($row['pages'] ?? '')
+                    . (string)($row['date'] ?? '')
+                    . (string)($row['revision'] ?? '')
+                ) === ''
+            ) {
                 continue;
             }
             $rows .= '<tr class="cpb-lep-part-row" data-lep-part-generated="1">'
@@ -1040,6 +1055,8 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . '" contenteditable="false">'
             . '<table class="cpb-table cpb-lep-table" data-lep-parts-table="1">'
+            . '<colgroup><col style="width:17%"><col style="width:22%">'
+            . '<col style="width:34%"><col style="width:27%"></colgroup>'
             . '<thead><tr class="cpb-table-header-row">'
             . '<th' . $headerVisual . '>Part</th>'
             . '<th' . $headerVisual . '>Pages</th>'

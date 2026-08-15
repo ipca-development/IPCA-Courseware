@@ -1,0 +1,18 @@
+{
+  "titles": [
+    "0.1 List of Effective Parts",
+    "0.2 Revision System",
+    "0.3 Amendment List",
+    "0.4 Distribution List",
+    "0.5 Index of Abbreviations",
+    "0.6 Definitions and Terms",
+    "0.7 Highlight of Changes"
+  ],
+  "lep_parts": ["0", "1", "2", "3", "4"],
+  "forbidden_change_tokens": [
+    "BLOCK-",
+    "stable anchor",
+    "source fragment",
+    "source_fragment_id"
+  ]
+}

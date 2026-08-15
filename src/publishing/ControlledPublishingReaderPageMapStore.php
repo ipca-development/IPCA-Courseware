@@ -481,9 +481,10 @@ final class ControlledPublishingReaderPageMapStore
                 : '';
             $stateStmt = $this->pdo->prepare(
                 'SELECT generation_seq, status, requested_fingerprint_hash,
-                        requested_fingerprint_json, lease_token,
+                        requested_fingerprint_json, requested_mutation_json, lease_token,
                         pending_generation_seq, pending_fingerprint_hash,
-                        pending_fingerprint_json, pending_requested_by_user_id
+                        pending_fingerprint_json, pending_mutation_json,
+                        pending_requested_by_user_id
                    FROM ipca_publishing_page_map_generation_state
                   WHERE book_version_id = ? AND layout_profile = ?' . $lockSuffix
             );
@@ -523,6 +524,9 @@ final class ControlledPublishingReaderPageMapStore
                             requested_fingerprint_json = COALESCE(
                                 pending_fingerprint_json, requested_fingerprint_json
                             ),
+                            requested_mutation_json = COALESCE(
+                                pending_mutation_json, requested_mutation_json
+                            ),
                             requested_by_user_id = COALESCE(
                                 pending_requested_by_user_id, requested_by_user_id
                             ),
@@ -539,6 +543,7 @@ final class ControlledPublishingReaderPageMapStore
                             pending_generation_seq = NULL,
                             pending_fingerprint_hash = NULL,
                             pending_fingerprint_json = NULL,
+                            pending_mutation_json = NULL,
                             pending_requested_by_user_id = NULL,
                             updated_at = CURRENT_TIMESTAMP
                       WHERE book_version_id = ? AND layout_profile = ?
@@ -576,6 +581,7 @@ final class ControlledPublishingReaderPageMapStore
                         pending_generation_seq = NULL,
                         pending_fingerprint_hash = NULL,
                         pending_fingerprint_json = NULL,
+                        pending_mutation_json = NULL,
                         pending_requested_by_user_id = NULL,
                         last_error_code = NULL, last_error_message = NULL,
                         updated_at = CURRENT_TIMESTAMP

@@ -143,6 +143,22 @@
   font-style: italic;
 }
 
+.cpb-lep-parts-wrap,
+.cpb-part0-amendment,
+.cpb-part0-distribution {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cpb-lep-parts-wrap > .cpb-lep-table,
+.cpb-part0-amendment > .cpb-part0-table,
+.cpb-part0-distribution > .cpb-part0-table {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+}
+
 .cpb-header-preview .cpb-page-header {
   margin-bottom: 12px;
 }

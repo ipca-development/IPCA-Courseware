@@ -223,6 +223,7 @@
     headerHeight: 84,
     footerTop: 920,
     footerHeight: 72,
+    bottomMargin: 64,
   };
 
   function colLetter(index) {
@@ -845,20 +846,28 @@
     var current = printY(block, sheet);
     var gridGap = parseFloat(window.getComputedStyle(body).rowGap || '0') || 0;
     var spacer = document.createElement('div');
-    spacer.className = manualBreak
-      ? 'cpb-flow-page-break cpb-flow-page-break--manual'
-      : 'cpb-flow-page-break';
+    spacer.className = 'cpb-flow-page-break';
     spacer.setAttribute('data-auto-page-break', '1');
     spacer.setAttribute('data-editor-only', '1');
     spacer.setAttribute('contenteditable', 'false');
+    if (manualBreak) spacer.setAttribute('data-manual-page-break', '1');
     spacer.style.height = Math.max(1, target - current - gridGap) + 'px';
     if (manualBreak) {
+      var control = document.createElement('div');
+      control.className = 'cpb-manual-break-control';
+      control.setAttribute('data-auto-page-break', '1');
+      control.setAttribute('data-editor-only', '1');
+      control.setAttribute('contenteditable', 'false');
+      control.style.top = (
+        pageStart + PRINT_PAGE.height + (PRINT_PAGE.gap / 2)
+      ) + 'px';
       var label = document.createElement('span');
-      label.textContent = 'Manual Page Break';
-      spacer.appendChild(label);
+      label.textContent = 'Page Break';
+      control.appendChild(label);
       var remove = document.createElement('button');
       remove.type = 'button';
       remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', 'Remove manual page break');
       remove.addEventListener('click', function () {
         var row = state.manualBreaks.find(function (item) {
           return item.before_block_anchor === block.getAttribute('data-stable-anchor');
@@ -871,7 +880,8 @@
           }).then(loadUnifiedManualBreaks).catch(showError);
         }
       });
-      spacer.appendChild(remove);
+      control.appendChild(remove);
+      sheet.appendChild(control);
     }
     body.insertBefore(spacer, block);
   }
@@ -995,6 +1005,13 @@
       }
     });
     sheet.insertBefore(layer, sheet.firstChild);
+    var renderedFooter = layer.querySelector('.cpb-print-page-footer');
+    if (renderedFooter) {
+      sheet.style.setProperty(
+        '--cpb-editor-footer-clearance',
+        (PRINT_PAGE.bottomMargin + renderedFooter.getBoundingClientRect().height + 16) + 'px'
+      );
+    }
   }
 
   function applyUnifiedPrintLayout() {
@@ -1027,7 +1044,7 @@
         var anchor = block.getAttribute('data-stable-anchor') || '';
         var previousBreak = block.previousElementSibling;
         var hasManualSpacer = previousBreak
-          && previousBreak.classList.contains('cpb-flow-page-break--manual')
+          && previousBreak.getAttribute('data-manual-page-break') === '1'
           && previousBreak.getAttribute('data-auto-page-break') === '1';
         if (manualAnchors[anchor] && top > contentTop + 1 && !hasManualSpacer) {
           automaticBreakBefore(body, block, sheet, pageIndex, true);

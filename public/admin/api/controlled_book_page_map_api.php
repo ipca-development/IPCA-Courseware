@@ -41,6 +41,23 @@ function cp_pm_validate_book_key(string $bookKey): string
     return $bookKey;
 }
 
+/** @return array<string,mixed> */
+function cp_pm_mutation_hint(array $input): array
+{
+    $impact = strtolower(trim((string)($input['layout_impact'] ?? '')));
+    if (!in_array($impact, array('suffix', 'global'), true)) {
+        $impact = 'global';
+    }
+    return array(
+        'client_mutation_revision' => max(0, (int)($input['client_mutation_revision'] ?? 0)),
+        'section_id' => max(0, (int)($input['section_id'] ?? 0)),
+        'block_id' => max(0, (int)($input['block_id'] ?? 0)),
+        'stable_anchor' => mb_substr(trim((string)($input['stable_anchor'] ?? '')), 0, 255),
+        'mutation_kind' => mb_substr(trim((string)($input['mutation_kind'] ?? '')), 0, 64),
+        'layout_impact' => $impact,
+    );
+}
+
 try {
     $user = compliance_require_access($pdo);
     $uid = (int)($user['id'] ?? 0);
@@ -58,7 +75,7 @@ try {
             }
             cp_pm_json(202, array(
                 'ok' => true,
-                'result' => $reader->ensureLivePageMap($versionId, $uid),
+                'result' => $reader->ensureLivePageMap($versionId, $uid, cp_pm_mutation_hint($in)),
             ));
 
         case 'live_status':
@@ -78,7 +95,7 @@ try {
             }
             cp_pm_json(202, array(
                 'ok' => true,
-                'result' => $reader->retryLivePageMap($versionId, $uid),
+                'result' => $reader->retryLivePageMap($versionId, $uid, cp_pm_mutation_hint($in)),
             ));
 
         case 'generate':

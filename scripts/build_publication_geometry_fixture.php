@@ -28,7 +28,7 @@ $svg = static function (string $label, string $background, int $width, int $heig
     return 'data:image/svg+xml;base64,' . base64_encode($source);
 };
 
-$logo = $svg('IPCA', '#0f2744', 180, 44);
+$logo = $svg('IPCA', '#0f2744', 180, 96);
 $figure = $svg('Deterministic fixture image', '#334155', 560, 112);
 $metadata = array(
     'paragraph_styles' => $styles['paragraph_styles'],
@@ -38,8 +38,8 @@ $metadata = array(
         'enabled' => true,
         'logo_url' => $logo,
         'logo_alt' => 'IPCA fixture logo',
-        'logo_max_height' => 36,
-        'row_height' => 58,
+        'logo_max_height' => 96,
+        'row_height' => 24,
         'center_text' => "{book_title}\n{part_title}",
         'center_font_family' => 'sans',
         'center_font_size' => 11,
@@ -51,7 +51,7 @@ $metadata = array(
     ),
     'page_footer' => array(
         'enabled' => true,
-        'row_height' => 28,
+        'row_height' => 26,
         'left_text' => 'CONTROLLED',
         'left_font_family' => 'sans',
         'left_font_size' => 9,

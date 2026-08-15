@@ -123,12 +123,7 @@ final class ControlledPublishingBookStyleManifestService
         $rules[] = '.reader-page-header-region,.reader-page-footer-region{--reader-font-scale:1;}';
         $rules[] = '.reader-canonical-page.cpb-sheet{padding:0;margin:0;zoom:1;max-width:none;min-height:0;box-shadow:none;border-radius:0;}';
         $rules[] = '.reader-page-header-region,.reader-page-footer-region,.reader-page-body:not(.reader-page-cover){overflow:hidden;}';
-        $rules[] = '.reader-page-header-region>.cpb-page-header,.reader-page-footer-region>.cpb-page-footer{position:static;inset:auto;width:100%;height:100%;margin:0;box-sizing:border-box;}';
-        $rules[] = '.reader-page-header-region .cpb-page-header-logo{max-width:60%!important;max-height:36px!important;}';
-        $rules[] = '.reader-page-header-region>.cpb-page-header>.cpb-page-header-table{height:100%!important;max-height:100%;table-layout:fixed;}';
-        $rules[] = '.reader-page-header-region .cpb-page-header-table td{padding-top:2px!important;padding-bottom:2px!important;line-height:1.15!important;}';
-        $rules[] = '.reader-page-header-region .cpb-page-header-cell--center{font-size:11pt!important;}';
-        $rules[] = '.reader-page-header-region .cpb-page-header-cell--right{font-size:8pt!important;}';
+        $rules[] = '.reader-page-header-region>.cpb-page-header,.reader-page-footer-region>.cpb-page-footer{position:static;inset:auto;width:100%;height:auto;margin:0;box-sizing:border-box;}';
 
         foreach ($paragraphs as $key => $style) {
             if (!is_array($style)) {

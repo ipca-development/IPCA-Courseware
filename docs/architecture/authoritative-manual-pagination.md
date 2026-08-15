@@ -78,6 +78,13 @@ Live generation is revision-safe:
 6. A stale, failed, or timed-out active run atomically advances to the newest
    pending sequence. The scoped CLI worker drains exactly that one follow-up
    immediately, without polling; intermediate fingerprints are discarded.
+7. A committed suffix mutation may reuse stored pages before the prior safe
+   page boundary. Every reused source fragment carries a deterministic
+   fingerprint that is rechecked against the newly normalized full source in
+   Chromium. Prefix mismatch, missing legacy fingerprints, early edits,
+   continuations, global/style/furniture/manual-break changes, and page-total
+   templates fall back automatically to complete pagination. The worker still
+   returns one complete, sequential map for the existing staging/CAS promotion.
 
 During Phase C, the continuous source canvas is still an editing aid. Its local
 page furniture is explicitly labelled as an approximate editing layout; only

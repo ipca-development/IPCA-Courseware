@@ -45,9 +45,11 @@ $pdo->exec('CREATE TABLE ipca_publishing_page_map_generation_state (
     status TEXT NOT NULL,
     requested_fingerprint_hash TEXT NOT NULL DEFAULT \'\',
     requested_fingerprint_json TEXT NULL,
+    requested_mutation_json TEXT NULL,
     pending_generation_seq INTEGER NULL,
     pending_fingerprint_hash TEXT NULL,
     pending_fingerprint_json TEXT NULL,
+    pending_mutation_json TEXT NULL,
     pending_requested_by_user_id INTEGER NULL,
     lease_token TEXT NULL,
     lease_expires_at TEXT NULL,
@@ -81,7 +83,7 @@ $pdo->exec('CREATE TABLE ipca_publishing_reader_page_map_staging (
     UNIQUE (book_version_id, layout_profile, generation_seq, lease_token, page_number)
 )');
 $pdo->exec("INSERT INTO ipca_publishing_book_versions (id, lifecycle_status, metadata_json)
-    VALUES (1, 'draft', '{}'), (2, 'draft', '{}')");
+    VALUES (1, 'draft', '{}'), (2, 'draft', '{}'), (3, 'draft', '{}')");
 
 $revision = 'a';
 $mode = 'success';
@@ -96,6 +98,7 @@ $service = null;
 $versions = array(
     1 => array('id' => 1, 'book_key' => 'OM', 'lifecycle_status' => 'draft'),
     2 => array('id' => 2, 'book_key' => 'OMM', 'lifecycle_status' => 'draft'),
+    3 => array('id' => 3, 'book_key' => 'OM', 'lifecycle_status' => 'draft'),
 );
 $fingerprintFor = static function (string $value, string $profile = 'LETTER_READER_v1'): array {
     return array(
@@ -153,7 +156,16 @@ $service = new ControlledPublishingLivePageMapService(
                 } elseif ($mode === 'queue_five_during_generation') {
                     foreach (range(1, 5) as $edit) {
                         $revision = 'edit-' . $edit;
-                        $pendingRequestsDuringGeneration[] = $service->ensure(1, 8, $profile);
+                        $pendingRequestsDuringGeneration[] = $service->ensure(
+                            1,
+                            8,
+                            $profile,
+                            array(
+                                'layout_impact' => 'suffix',
+                                'stable_anchor' => 'edit-anchor-' . $edit,
+                                'client_mutation_revision' => $edit,
+                            )
+                        );
                     }
                 } elseif ($mode === 'same_key_reentry') {
                     $nestedWorkResult = $service->workOne((int)$version['id'], $profile);
@@ -326,6 +338,18 @@ $assert(
     ($store->loadPage(1, $profile, 1)['page_html'] ?? '') === '<article>edit-5</article>',
     'an intermediate edit was promoted instead of the newest fingerprint.'
 );
+$latestMutationJson = (string)$pdo->query(
+    "SELECT requested_mutation_json
+       FROM ipca_publishing_page_map_generation_state
+      WHERE book_version_id = 1 AND layout_profile = '" . $profile . "'"
+)->fetchColumn();
+$latestMutation = json_decode($latestMutationJson, true);
+$assert(
+    is_array($latestMutation)
+        && ($latestMutation['stable_anchor'] ?? '') === 'edit-anchor-5'
+        && (int)($latestMutation['client_mutation_revision'] ?? 0) === 5,
+    'coalescing did not retain the newest suffix mutation hint.'
+);
 
 // (3) Different versions have independent server locks and may generate together.
 $revision = 'independent-version';
@@ -410,6 +434,96 @@ $assert(count($spawned) === $spawnsBeforeRecovery + 1, 'expired lease did not di
 $assert(($recoveryEnsure['status'] ?? '') === 'generating', 'expired active state was not preserved for fenced reclaim.');
 $assert(($recovered['status'] ?? '') === 'current', 'expired/crashed worker lease was not recovered.');
 
+// (8) A late suffix mutation carries its hint through the server queue and
+// reuses only pages before a safe one-page-back reflow boundary.
+$incrementalFingerprint = $fingerprintFor('incremental-new', $profile);
+$priorFingerprint = array_merge(
+    $incrementalFingerprint,
+    array('source_hash' => hash('sha256', 'incremental-old'))
+);
+$pdo->prepare('UPDATE ipca_publishing_book_versions SET metadata_json = ? WHERE id = 3')
+    ->execute(array(json_encode(array(
+        'reader_page_map' => array('generation' => $priorFingerprint),
+    ), JSON_THROW_ON_ERROR)));
+$insertProduction = $pdo->prepare(
+    'INSERT INTO ipca_publishing_reader_page_maps (
+        book_version_id, layout_profile, layout_hash, page_number, section_id,
+        stable_anchor, page_type, page_html, metadata_json
+     ) VALUES (?,?,?,?,?,?,?,?,?)'
+);
+foreach (range(1, 4) as $pageNumber) {
+    $order = $pageNumber - 1;
+    $anchor = $pageNumber === 4 ? 'changed-anchor' : 'stable-' . $pageNumber;
+    $insertProduction->execute(array(
+        3,
+        $profile,
+        str_repeat('c', 64),
+        $pageNumber,
+        30,
+        $anchor,
+        'content',
+        '<article data-stable-anchor="' . $anchor . '" data-block-id="' . (300 + $pageNumber) . '"></article>',
+        json_encode(array(
+            'coverage' => array(array(
+                'source_order' => $order,
+                'range_start' => 0,
+                'range_end' => 10,
+                'source_length' => 10,
+                'source_fingerprint' => hash('sha256', 'source-' . $order),
+                'presentation_copy' => false,
+            )),
+            'metrics' => array('break_reason' => $pageNumber === 1 ? '' : 'automatic_author_flow'),
+        ), JSON_THROW_ON_ERROR),
+    ));
+}
+$capturedIncrementalOptions = null;
+$incrementalService = new ControlledPublishingLivePageMapService(
+    $pdo,
+    new ControlledPublishingReaderService($pdo),
+    array(
+        'store' => $store,
+        'version_loader' => static fn(int $id): ?array => $versions[$id] ?? null,
+        'source_loader' => static fn(array $version, string $profile): array => array(
+            'revision' => 'incremental-new',
+            'version_id' => (int)$version['id'],
+            'profile' => $profile,
+        ),
+        'fingerprint_loader' => static fn(array $source, array $version, string $profile): array
+            => $fingerprintFor('incremental-new', $profile),
+        'generator' => static function (
+            array $source,
+            array $version,
+            string $profile,
+            array $options
+        ) use (&$capturedIncrementalOptions): array {
+            $capturedIncrementalOptions = $options;
+            throw new RuntimeException('stop after incremental-plan proof');
+        },
+        'spawner' => static function (): void {
+        },
+    )
+);
+$incrementalService->ensure(3, 7, $profile, array(
+    'layout_impact' => 'suffix',
+    'stable_anchor' => 'changed-anchor',
+    'block_id' => 304,
+    'mutation_kind' => 'update_block',
+    'client_mutation_revision' => 88,
+));
+$incrementalService->workOne(3, $profile);
+$assert(
+    count($capturedIncrementalOptions['prefix_pages'] ?? array()) === 2,
+    'late suffix mutation did not reuse the proven two-page prefix.'
+);
+$assert(
+    (int)($capturedIncrementalOptions['incremental']['start_source_order'] ?? -1) === 2,
+    'suffix pagination did not start at the safe prior-page source boundary.'
+);
+$assert(
+    (int)($capturedIncrementalOptions['incremental']['page_number_offset'] ?? -1) === 2,
+    'suffix pagination page-number offset is incorrect.'
+);
+
 if ($failures !== array()) {
     fwrite(STDERR, "Controlled publishing live page map: FAIL\n");
     foreach ($failures as $failure) {
@@ -426,3 +540,4 @@ echo "Proof 4: same-version profiles serialized for shared approval metadata\n";
 echo "Proof 5: active failure preserved and ran newest pending\n";
 echo "Proof 6: stale output preserved the newer production map\n";
 echo "Proof 7: expired crashed-worker lease recovered\n";
+echo "Proof 8: late suffix mutation reused a safe authoritative prefix\n";
