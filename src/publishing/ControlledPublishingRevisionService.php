@@ -297,19 +297,21 @@ final class ControlledPublishingRevisionService
                 : array();
             $reference = trim((string)($context['reference'] ?? ''));
             $title = trim((string)($context['title'] ?? ''));
-            if ($title === '') {
-                $title = trim((string)($change['section_title'] ?? ''));
-            }
-            $groupKey = implode('|', array($part, $reference, $title));
+            $sectionTitle = trim((string)($change['section_title'] ?? ''));
+            $groupKey = implode('|', array($part, $sectionKey, $sectionTitle));
             if (!isset($groups[$groupKey])) {
                 $groups[$groupKey] = array(
                     'part' => $part,
-                    'reference' => $reference,
-                    'title' => $title,
+                    'section_title' => $sectionTitle,
+                    'locations' => array(),
                     'added' => array(),
                     'modified' => array(),
                     'deleted' => array(),
                 );
+            }
+            $location = trim(($reference !== '' ? '§' . $reference . ' ' : '') . $title);
+            if ($location !== '') {
+                $groups[$groupKey]['locations'][$location] = true;
             }
             $status = (string)($change['change_status'] ?? 'modified');
             $payload = $this->decodePayload($change['payload_json'] ?? null);
@@ -329,11 +331,18 @@ final class ControlledPublishingRevisionService
         $output = array();
         foreach ($groups as $key => $group) {
             $location = $group['part'];
-            if ($group['reference'] !== '') {
-                $location .= ($location !== '' ? ' — ' : '') . '§' . $group['reference'];
+            if ($group['section_title'] !== '') {
+                $location .= ($location !== '' ? ' — ' : '') . $group['section_title'];
             }
-            if ($group['title'] !== '') {
-                $location .= ($location !== '' ? ' ' : '') . $group['title'];
+            $subsections = array_keys($group['locations']);
+            if ($subsections !== array()) {
+                $shown = array_slice($subsections, 0, 3);
+                $location .= ' (' . implode('; ', $shown);
+                if (count($subsections) > count($shown)) {
+                    $location .= '; and ' . (count($subsections) - count($shown)) . ' more subsection'
+                        . ((count($subsections) - count($shown)) === 1 ? '' : 's');
+                }
+                $location .= ')';
             }
             $sentences = array();
             if ($group['modified'] !== array()) {
