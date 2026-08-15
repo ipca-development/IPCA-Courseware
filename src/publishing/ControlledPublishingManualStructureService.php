@@ -642,8 +642,13 @@ final class ControlledPublishingManualStructureService
             FROM ipca_publishing_book_version_source_sets vss
             INNER JOIN ipca_canonical_source_sets ss ON ss.id = vss.source_set_id
             WHERE vss.book_version_id = :version_id
-              AND vss.selection_role = 'manual_source'
-            ORDER BY vss.id
+              AND (
+                vss.selection_role = 'manual_source'
+                OR ss.source_family = 'manual'
+              )
+            ORDER BY
+              CASE WHEN vss.selection_role = 'manual_source' THEN 0 ELSE 1 END,
+              vss.id
             LIMIT 1
         ");
         $stmt->execute(array(':version_id' => $versionId));

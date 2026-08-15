@@ -3,9 +3,10 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__);
 $service = file_get_contents($root . '/src/publishing/ControlledPublishingFoundationService.php');
+$structure = file_get_contents($root . '/src/publishing/ControlledPublishingManualStructureService.php');
 $page = file_get_contents($root . '/public/admin/compliance/controlled_books.php');
 
-if (!is_string($service) || !is_string($page)) {
+if (!is_string($service) || !is_string($structure) || !is_string($page)) {
     fwrite(STDERR, "Unable to read new-manual implementation files.\n");
     exit(1);
 }
@@ -53,6 +54,17 @@ if (!str_contains(
 )) {
     fwrite(STDERR, "Structure-only clone must exclude author content.\n");
     exit(1);
+}
+
+foreach (array(
+    "vss.selection_role = 'manual_source'",
+    "ss.source_family = 'manual'",
+    "CASE WHEN vss.selection_role = 'manual_source' THEN 0 ELSE 1 END",
+) as $marker) {
+    if (!str_contains($structure, $marker)) {
+        fwrite(STDERR, "Missing resilient manual-source resolution marker: {$marker}\n");
+        exit(1);
+    }
 }
 
 echo "Controlled publishing new manual workflow: PASS\n";
