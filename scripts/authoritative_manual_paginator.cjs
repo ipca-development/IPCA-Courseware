@@ -58,7 +58,7 @@ async function main() {
   const side = Number(profile.sheet_padding_x_px || 56);
   const top = Number(profile.sheet_padding_top_px || 48);
   const bottom = Number(profile.sheet_padding_bottom_px || 64);
-  const headerHeight = Number(profile.header_band_px || 84);
+  const headerHeight = Number(profile.header_band_px || 64);
   const headerLogoMaxHeight = Math.max(16, headerHeight - 20);
   const headerGap = Number(profile.header_margin_bottom_px || 20);
   const footerGap = Number(profile.footer_margin_top_px || 24);
@@ -150,7 +150,7 @@ async function main() {
           .reader-page-body:not(.reader-page-cover){overflow:hidden}
           .reader-page-header-measurement .cpb-page-header-logo,
           .reader-page-header-region .cpb-page-header-logo{
-            max-width:85%!important;max-height:${headerLogoMaxHeight}px!important
+            max-width:70%!important;max-height:${headerLogoMaxHeight}px!important
           }
           .reader-page-header-region>.cpb-page-header>.cpb-page-header-table{
             height:100%!important;max-height:100%;table-layout:fixed

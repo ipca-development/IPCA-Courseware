@@ -14,11 +14,11 @@ const layout = {
   sheet_padding_x_px: 56,
   sheet_padding_top_px: 48,
   sheet_padding_bottom_px: 64,
-  header_band_px: 84,
+  header_band_px: 64,
   header_margin_bottom_px: 20,
   footer_margin_top_px: 24,
   footer_band_px: 34,
-  body_capacity_px: 782
+  body_capacity_px: 802
 };
 const bookStyleCSS = `
   * { box-sizing: border-box; }
@@ -69,7 +69,7 @@ function section(id, key, title, flags, units, extra) {
     manual_part: 1,
     part_title: "Part One",
     flags: flags || {},
-    header_template: '<header class="cpb-page-header"><div style="height:60px"><strong>Fixture Manual</strong></div></header>',
+    header_template: '<header class="cpb-page-header"><div style="height:40px"><strong>Fixture Manual</strong></div></header>',
     footer_template: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
     show_header_footer: true,
     units
@@ -93,7 +93,7 @@ function sourceWith(sections) {
     layout_profile: "IPCA_READER_CANONICAL_816x1056_v1",
     layout_hash: "fixture-layout",
     layout,
-    header_template_html: '<header class="cpb-page-header"><div style="height:60px"><strong>Fixture Manual</strong></div></header>',
+    header_template_html: '<header class="cpb-page-header"><div style="height:40px"><strong>Fixture Manual</strong></div></header>',
     footer_template_html: '<footer class="cpb-page-footer"><span>Controlled copy</span><span class="cpb-page-number">{{PAGE_NUMBER}}</span></footer>',
     sections
   };
@@ -883,7 +883,7 @@ cases.push(["AG. heading chain stays with meaningful following content", () => {
   const { execution, result } = runWorker(sourceWith([
     section(1, "heading-flow", "Heading flow", {}, [
       unit("lead", "paragraph",
-        '<article data-block-id="71" data-stable-anchor="lead"><p style="min-height:680px">Page-filling lead.</p></article>',
+        '<article data-block-id="71" data-stable-anchor="lead"><p style="min-height:700px">Page-filling lead.</p></article>',
         { block_id: 71 }),
       unit("heading-a", "heading",
         '<article data-block-id="72" data-stable-anchor="heading-a"><h2>Kept heading A</h2></article>',
@@ -1027,7 +1027,7 @@ cases.push(["AM. consecutive styled heading chain moves without a manual break",
   const source = sourceWith([
     section(1, "styled-chain", "Styled chain", {}, [
       unit("lead", "paragraph",
-        '<article data-block-id="131" data-stable-anchor="lead"><p style="min-height:700px">Lead before styled chain.</p></article>',
+        '<article data-block-id="131" data-stable-anchor="lead"><p style="min-height:720px">Lead before styled chain.</p></article>',
         { block_id: 131 }),
       unit("chapter-title", "paragraph",
         '<article class="cpb-block cpb-block--paragraph" data-block-id="132" data-stable-anchor="chapter-title"><p class="cpb-paragraph cpb-ps-subtitle_1" data-paragraph-style="subtitle_1">2.1 ORGANIZATION STRUCTURE</p></article>',

@@ -479,7 +479,7 @@ private final class PaginationSelfTestRunner: ObservableObject {
         ]
         let source: [String: Any] = [
             "version_id": 1,
-            "layout": ["body_capacity_px": 782],
+            "layout": ["body_capacity_px": 802],
             "sections": [
                 [
                     "section_id": 100,

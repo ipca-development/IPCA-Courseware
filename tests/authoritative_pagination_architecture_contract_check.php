@@ -40,12 +40,12 @@ $contracts = array(
         'headerLogoMaxHeight',
     ),
     'src/publishing/ControlledPublishingReaderLayoutProfile.php' => array(
-        "'header_band_px' => 84",
+        "'header_band_px' => 64",
         "'footer_band_px' => 34",
-        "'body_capacity_px' => 782",
+        "'body_capacity_px' => 802",
     ),
     'src/publishing/ControlledPublishingBookStyleManifestService.php' => array(
-        '.reader-page-header-region .cpb-page-header-logo{max-width:85%!important;max-height:64px!important;}',
+        '.reader-page-header-region .cpb-page-header-logo{max-width:70%!important;max-height:44px!important;}',
         '.reader-page-header-region>.cpb-page-header>.cpb-page-header-table{height:100%!important;',
         '.reader-page-header-region .cpb-page-header-table td{padding-top:4px!important;',
     ),
