@@ -8,6 +8,7 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../src/RuntimeSecrets.php';
 RuntimeSecrets::ensureCliEnvLoaded();
+require_once __DIR__ . '/../src/helpers.php';
 require_once __DIR__ . '/../src/db.php';
 require_once __DIR__ . '/../src/publishing/ControlledPublishingLivePageMapService.php';
 

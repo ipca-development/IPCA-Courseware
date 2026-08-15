@@ -76,6 +76,7 @@ $contracts = array(
         "' --drain'",
     ),
     'scripts/controlled_publishing_page_map_worker.php' => array(
+        "require_once __DIR__ . '/../src/helpers.php'",
         'ControlledPublishingLivePageMapService',
         'workOne',
         "'drain'",
