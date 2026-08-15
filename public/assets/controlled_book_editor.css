@@ -3550,12 +3550,26 @@ ol.cpb-list > li[data-indent-level="8"] {
   font-size: calc(10pt - 4px);
 }
 
+.cpb-editor-root.cpb-editor-lep-mode .cpb-toolbar,
+.cpb-editor-root.cpb-editor-part0-mode .cpb-toolbar {
+  position: relative;
+  min-height: 96px;
+  max-height: 96px;
+  padding-bottom: 32px;
+}
+
 .cpb-editor-root.cpb-editor-lep-mode .cpb-toolbar-main {
-  display: none;
+  display: flex;
 }
 
 .cpb-editor-root.cpb-editor-lep-mode .cpb-toolbar-lep {
   display: flex;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 32px;
+  border-top: 1px solid #eef2f7;
 }
 
 .cpb-toolbar-lep {
@@ -3587,11 +3601,17 @@ ol.cpb-list > li[data-indent-level="8"] {
 }
 
 .cpb-editor-root.cpb-editor-part0-mode .cpb-toolbar-main {
-  display: none;
+  display: flex;
 }
 
 .cpb-editor-root.cpb-editor-part0-mode .cpb-toolbar-part0 {
   display: flex;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 32px;
+  border-top: 1px solid #eef2f7;
 }
 
 .cpb-toolbar-part0 {
