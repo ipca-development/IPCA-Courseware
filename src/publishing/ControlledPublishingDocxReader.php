@@ -746,7 +746,16 @@ final class ControlledPublishingDocxReader
                 continue;
             }
             $ref = trim((string)($node['section_ref'] ?? ''));
+            $title = trim((string)($node['section_title'] ?? $node['text'] ?? ''));
             if ($ref === $prefix) {
+                if (self::isGenericPartWrapperTitle($title)) {
+                    continue;
+                }
+                $node['section_ref'] = '';
+                if (strtolower(trim((string)($node['paragraph_style'] ?? ''))) === 'title') {
+                    $node['paragraph_style'] = 'subtitle_1';
+                }
+                $out[] = $node;
                 continue;
             }
             if ($ref !== '' && str_starts_with($ref, $prefixDot)) {
@@ -763,29 +772,40 @@ final class ControlledPublishingDocxReader
     }
 
     /**
-     * MAIN chapter number => title after dropping a generic 1. GENERAL wrapper.
+     * MAIN chapter number => title from the 1.1 / 1.2 headings under a generic wrapper.
      *
      * @param list<array<string,mixed>> $nodes
      * @return array<int,string>
      */
     public static function promotedMainChaptersFromNodes(array $nodes, int $manualPart): array
     {
+        unset($manualPart);
+        $prefix = self::genericPartFlattenPrefix($nodes);
+        if ($prefix === '') {
+            return array();
+        }
+
+        $prefixDot = $prefix . '.';
         $chapters = array();
-        foreach (self::flattenGenericPartChapters($nodes, $manualPart) as $node) {
+        foreach ($nodes as $node) {
             if (!is_array($node)) {
                 continue;
             }
             $ref = trim((string)($node['section_ref'] ?? ''));
-            if (preg_match('/^\d+$/', $ref) !== 1) {
+            if ($ref === '' || !str_starts_with($ref, $prefixDot)) {
+                continue;
+            }
+            $stripped = substr($ref, strlen($prefixDot));
+            if (preg_match('/^\d+$/', $stripped) !== 1) {
                 continue;
             }
             $title = trim((string)($node['section_title'] ?? $node['text'] ?? ''));
             $title = preg_replace('/^\d+(?:\.\d+)*\.?\s+/u', '', $title) ?? $title;
             $title = trim($title);
-            if ($title === '') {
+            if ($title === '' || self::isGenericPartWrapperTitle($title) || self::isStrayPartHeadingTitle($title)) {
                 continue;
             }
-            $chapters[(int)$ref] = $title;
+            $chapters[(int)$stripped] = $title;
         }
 
         return $chapters;
@@ -796,7 +816,7 @@ final class ControlledPublishingDocxReader
      */
     public static function genericPartFlattenPrefix(array $nodes): string
     {
-        $depth1 = array();
+        $depth1Titles = array();
         $depth2Prefixes = array();
         foreach ($nodes as $node) {
             if (!is_array($node)) {
@@ -808,7 +828,7 @@ final class ControlledPublishingDocxReader
             }
             $segments = explode('.', $ref);
             if (count($segments) === 1) {
-                $depth1[$ref] = trim((string)($node['section_title'] ?? $node['text'] ?? ''));
+                $depth1Titles[$ref][] = trim((string)($node['section_title'] ?? $node['text'] ?? ''));
                 continue;
             }
             if (count($segments) === 2) {
@@ -820,19 +840,21 @@ final class ControlledPublishingDocxReader
             return '';
         }
         $prefix = (string)array_key_first($depth2Prefixes);
-        if ($prefix === '' || ($depth2Prefixes[$prefix] ?? array()) === array()) {
+        if ($prefix === '' || count($depth2Prefixes[$prefix] ?? array()) < 2) {
             return '';
         }
 
-        foreach ($depth1 as $ref => $title) {
-            unset($title);
+        foreach ($depth1Titles as $ref => $titles) {
+            unset($titles);
             if ((string)$ref !== $prefix) {
                 return '';
             }
         }
 
-        $wrapperTitle = (string)($depth1[$prefix] ?? '');
-        if ($wrapperTitle !== '' && !self::isGenericPartWrapperTitle($wrapperTitle)) {
+        foreach ($depth1Titles[$prefix] ?? array() as $title) {
+            if (self::isGenericPartWrapperTitle($title) || self::isStrayPartHeadingTitle($title)) {
+                continue;
+            }
             return '';
         }
 
@@ -859,6 +881,19 @@ final class ControlledPublishingDocxReader
             'part 1 - general',
             'part 1 general',
         ), true);
+    }
+
+    /**
+     * Word sometimes emits a second "1. - LABEL" heading under the wrapper.
+     * That is not a real MAIN chapter and must not block 1.1/1.2 promotion.
+     */
+    public static function isStrayPartHeadingTitle(string $title): bool
+    {
+        $title = trim($title);
+        $title = preg_replace('/^\d+(?:\.\d+)*\.?\s+/u', '', $title) ?? $title;
+        $title = trim($title);
+
+        return $title !== '' && preg_match('/^[-–—•]\s*/u', $title) === 1;
     }
 
     /**

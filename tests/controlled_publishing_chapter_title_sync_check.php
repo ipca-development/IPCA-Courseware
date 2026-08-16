@@ -240,6 +240,48 @@ $assert(
     'MAIN chapter list after flatten must be 1 Course Enrollment, 2 Training Records, 3 Safety Training.'
 );
 
+$stray = ControlledPublishingDocxReader::flattenGenericPartChapters(array(
+    $heading('1', 'GENERAL'),
+    $heading('1', '- PERSONAL INFORMATION'),
+    $heading('1.1', 'Course Enrollment'),
+    $heading('1.1.1', 'Enrollment Phases'),
+    $heading('1.2', 'Training Records'),
+    $heading('1.3', 'Safety Training'),
+), 1);
+$strayRefs = array();
+$strayTitles = array();
+foreach ($stray as $node) {
+    $strayRefs[] = (string)($node['section_ref'] ?? '');
+    $strayTitles[] = (string)($node['section_title'] ?? '');
+}
+$assert(
+    $strayRefs === array('', '1', '1.1', '2', '3'),
+    'A stray 1. - PERSONAL INFORMATION heading must not block flattening 1.1/1.2/1.3 into MAIN chapters.'
+);
+$assert(
+    $strayTitles[1] === 'Course Enrollment',
+    'MAIN chapter 1 must be Course Enrollment, not PERSONAL INFORMATION.'
+);
+$strayMains = ControlledPublishingDocxReader::promotedMainChaptersFromNodes(array(
+    $heading('1', 'GENERAL'),
+    $heading('1', '- PERSONAL INFORMATION'),
+    $heading('1.1', 'Course Enrollment'),
+    $heading('1.2', 'Training Records'),
+    $heading('1.3', 'Safety Training'),
+), 1);
+$assert(
+    $strayMains === array(
+        1 => 'Course Enrollment',
+        2 => 'Training Records',
+        3 => 'Safety Training',
+    ),
+    'Stray 1. - PERSONAL INFORMATION must not become a MAIN chapter title.'
+);
+$assert(
+    ControlledPublishingDocxReader::isStrayPartHeadingTitle('- PERSONAL INFORMATION'),
+    'Dashed 1. - PERSONAL INFORMATION must be treated as a stray wrapper heading.'
+);
+
 $assert(
     ControlledPublishingDocxReader::isGenericPartWrapperTitle('GENERAL'),
     'GENERAL must be treated as a generic part wrapper.'
@@ -264,6 +306,7 @@ foreach (array(
     'flattenGenericPartChapters(',
     'promotedMainChaptersFromNodes(',
     'genericPartFlattenPrefix(',
+    'isStrayPartHeadingTitle(',
     'isGenericPartWrapperTitle(',
     'allowTitleCaseChapter',
     'isHeadingParagraphStyle(',

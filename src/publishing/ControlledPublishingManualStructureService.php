@@ -1147,11 +1147,12 @@ final class ControlledPublishingManualStructureService
         }
 
         $byPart = array();
-        foreach ($this->sections->listFlatSections($versionId) as $row) {
+        $flat = $this->sections->listFlatSections($versionId);
+        foreach ($flat as $row) {
             if (!is_array($row) || $this->chapterNumberFromSection($row) <= 0) {
                 continue;
             }
-            $manualPart = (int)($this->decodeMeta($row)['manual_part'] ?? 0);
+            $manualPart = $this->manualPartForSection($row, $flat);
             if ($manualPart <= 0) {
                 continue;
             }
@@ -1160,12 +1161,16 @@ final class ControlledPublishingManualStructureService
 
         $created = 0;
         foreach ($byPart as $manualPart => $chapters) {
-            $created += $this->promoteGenericWrapperInPart(
-                $versionId,
-                (int)$manualPart,
-                $chapters,
-                $actorUserId
-            );
+            try {
+                $created += $this->promoteGenericWrapperInPart(
+                    $versionId,
+                    (int)$manualPart,
+                    $chapters,
+                    $actorUserId
+                );
+            } catch (Throwable $e) {
+                unset($e);
+            }
         }
 
         return $created;
@@ -1201,25 +1206,6 @@ final class ControlledPublishingManualStructureService
                 continue;
             }
 
-            $wrapperTitle = '';
-            foreach ($nodes as $node) {
-                if ((string)($node['section_ref'] ?? '') === $prefix) {
-                    $wrapperTitle = trim((string)($node['section_title'] ?? ''));
-                    break;
-                }
-            }
-            $rowTitle = trim((string)($chapter['title'] ?? ''));
-            $rowNav = trim((string)($this->decodeMeta($chapter)['nav_label'] ?? ''));
-            $wrapperOk = $wrapperTitle === ''
-                ? (
-                    ControlledPublishingDocxReader::isGenericPartWrapperTitle($rowTitle)
-                    || ControlledPublishingDocxReader::isGenericPartWrapperTitle($rowNav)
-                )
-                : ControlledPublishingDocxReader::isGenericPartWrapperTitle($wrapperTitle);
-            if (!$wrapperOk) {
-                continue;
-            }
-
             $promotedTitles = ControlledPublishingDocxReader::promotedMainChaptersFromNodes($nodes, $manualPart);
             if (count($promotedTitles) < 2) {
                 continue;
@@ -1233,6 +1219,10 @@ final class ControlledPublishingManualStructureService
 
             foreach ($nodes as $node) {
                 if ((string)($node['section_ref'] ?? '') !== $prefix) {
+                    continue;
+                }
+                $headingTitle = trim((string)($node['section_title'] ?? ''));
+                if (!ControlledPublishingDocxReader::isGenericPartWrapperTitle($headingTitle)) {
                     continue;
                 }
                 $blockId = (int)($node['block_id'] ?? 0);
@@ -1267,9 +1257,14 @@ final class ControlledPublishingManualStructureService
                     }
                     $payload = is_array($node['payload'] ?? null) ? $node['payload'] : array();
                     $newRef = trim((string)($node['section_ref'] ?? ''));
+                    $style = strtolower(trim((string)($node['paragraph_style'] ?? '')));
+                    if ($style !== '') {
+                        $payload['paragraph_style'] = $style;
+                    }
                     if ($newRef !== '' && preg_match('/^\d+(?:\.\d+)*$/', $newRef) === 1) {
                         $payload['canonical_section_ref'] = $newRef;
-                        $payload['paragraph_style'] = ControlledPublishingDocxReader::sectionRefToParagraphStyle($newRef);
+                    } else {
+                        unset($payload['canonical_section_ref']);
                     }
                     $this->blocks->relocateBlock($blockId, $targetId, $sortOrder, $payload, $actorUserId);
                     $sortOrder += 10;
@@ -1289,9 +1284,39 @@ final class ControlledPublishingManualStructureService
             if ((int)($row['id'] ?? 0) === $wrapperSectionId) {
                 continue;
             }
-            if ((int)($row['block_count'] ?? 0) > 0) {
+            if ($this->chapterHasImportedContent($row)) {
                 return true;
             }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function chapterHasImportedContent(array $row): bool
+    {
+        if ((int)($row['block_count'] ?? 0) <= 0 || $this->blocks === null) {
+            return false;
+        }
+
+        foreach ($this->blocks->listSectionBlocks((int)($row['id'] ?? 0)) as $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            $payload = $this->blocks->decodePayload($block);
+            $text = $this->navBlockEntryText((string)($block['block_type'] ?? ''), $payload);
+            if ($text === '') {
+                continue;
+            }
+            if (preg_match('/^Chapter\s+\d+$/i', $text) === 1) {
+                continue;
+            }
+            if (ControlledPublishingDocxReader::isGenericPartWrapperTitle($text)) {
+                continue;
+            }
+            return true;
         }
 
         return false;
@@ -1481,6 +1506,7 @@ final class ControlledPublishingManualStructureService
                 if ($title !== ''
                     && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)
                     && !ControlledPublishingDocxReader::isGenericPartWrapperTitle($title)
+                    && !ControlledPublishingDocxReader::isStrayPartHeadingTitle($title)
                 ) {
                     return $title;
                 }
@@ -1492,6 +1518,7 @@ final class ControlledPublishingManualStructureService
                 if ($title !== ''
                     && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)
                     && !ControlledPublishingDocxReader::isGenericPartWrapperTitle($title)
+                    && !ControlledPublishingDocxReader::isStrayPartHeadingTitle($title)
                 ) {
                     return $title;
                 }
