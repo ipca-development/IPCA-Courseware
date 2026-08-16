@@ -11,6 +11,16 @@ final class CommunicationTrainingThumbnailRenderer
 {
     public const LANDSCAPE = 'IPCA_ALPHA_LANDSCAPE_V1';
     public const PORTRAIT = 'IPCA_ALPHA_PORTRAIT_V1';
+    public const PRIVATE_PILOT_LANDSCAPE = 'IPCA_PRIVATE_PILOT_LANDSCAPE_V1';
+    public const PRIVATE_PILOT_PORTRAIT = 'IPCA_PRIVATE_PILOT_PORTRAIT_V1';
+    public const INSTRUMENT_LANDSCAPE = 'IPCA_INSTRUMENT_LANDSCAPE_V1';
+    public const INSTRUMENT_PORTRAIT = 'IPCA_INSTRUMENT_PORTRAIT_V1';
+    public const COMMERCIAL_LANDSCAPE = 'IPCA_COMMERCIAL_LANDSCAPE_V1';
+    public const COMMERCIAL_PORTRAIT = 'IPCA_COMMERCIAL_PORTRAIT_V1';
+    public const CFI_LANDSCAPE = 'IPCA_CFI_LANDSCAPE_V1';
+    public const CFI_PORTRAIT = 'IPCA_CFI_PORTRAIT_V1';
+    public const SYSTEMS_LANDSCAPE = 'IPCA_SYSTEMS_LANDSCAPE_V1';
+    public const SYSTEMS_PORTRAIT = 'IPCA_SYSTEMS_PORTRAIT_V1';
     public const LANDSCAPE_WIDTH = 1280;
     public const LANDSCAPE_HEIGHT = 720;
     public const PORTRAIT_WIDTH = 720;
@@ -26,15 +36,38 @@ final class CommunicationTrainingThumbnailRenderer
             throw new RuntimeException('GD is required to render IPCA thumbnails.');
         }
         $template = strtoupper(trim($template));
-        if ($template === self::PORTRAIT) {
-            return $this->renderPortrait($meta, $backgroundBytes);
-        }
-        return $this->renderLandscape($meta, $backgroundBytes);
+        return match ($template) {
+            self::PORTRAIT => $this->renderPortrait($meta, $backgroundBytes),
+            self::PRIVATE_PILOT_LANDSCAPE => $this->renderPrivatePilotLandscape($meta, $backgroundBytes),
+            self::PRIVATE_PILOT_PORTRAIT => $this->renderPrivatePilotPortrait($meta, $backgroundBytes),
+            self::INSTRUMENT_LANDSCAPE => $this->renderInstrumentLandscape($meta, $backgroundBytes),
+            self::INSTRUMENT_PORTRAIT => $this->renderInstrumentPortrait($meta, $backgroundBytes),
+            self::COMMERCIAL_LANDSCAPE => $this->renderCommercialLandscape($meta, $backgroundBytes),
+            self::COMMERCIAL_PORTRAIT => $this->renderCommercialPortrait($meta, $backgroundBytes),
+            self::CFI_LANDSCAPE => $this->renderCfiLandscape($meta, $backgroundBytes),
+            self::CFI_PORTRAIT => $this->renderCfiPortrait($meta, $backgroundBytes),
+            self::SYSTEMS_LANDSCAPE => $this->renderSystemsLandscape($meta, $backgroundBytes),
+            self::SYSTEMS_PORTRAIT => $this->renderSystemsPortrait($meta, $backgroundBytes),
+            default => $this->renderLandscape($meta, $backgroundBytes),
+        };
     }
 
     public static function templateForOrientation(string $orientation): string
     {
         return strtolower(trim($orientation)) === 'portrait' ? self::PORTRAIT : self::LANDSCAPE;
+    }
+
+    public static function templateFor(string $orientation, string $categorySlug = ''): string
+    {
+        $portrait = strtolower(trim($orientation)) === 'portrait';
+        return match (strtolower(trim($categorySlug))) {
+            'private-pilot' => $portrait ? self::PRIVATE_PILOT_PORTRAIT : self::PRIVATE_PILOT_LANDSCAPE,
+            'instrument' => $portrait ? self::INSTRUMENT_PORTRAIT : self::INSTRUMENT_LANDSCAPE,
+            'commercial' => $portrait ? self::COMMERCIAL_PORTRAIT : self::COMMERCIAL_LANDSCAPE,
+            'cfi' => $portrait ? self::CFI_PORTRAIT : self::CFI_LANDSCAPE,
+            'systems' => $portrait ? self::SYSTEMS_PORTRAIT : self::SYSTEMS_LANDSCAPE,
+            default => $portrait ? self::PORTRAIT : self::LANDSCAPE,
+        };
     }
 
     public static function orientationFromDimensions(int $width, int $height): string
@@ -132,6 +165,248 @@ final class CommunicationTrainingThumbnailRenderer
         );
         $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width / 2, $height - 38, true);
         return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderPrivatePilotLandscape(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::LANDSCAPE_WIDTH;
+        $height = self::LANDSCAPE_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.48));
+        $this->overlayVerticalGradient($canvas, $width, $height, 0.46);
+        $this->overlayAccentBar($canvas, 0, 0, 14, $height);
+        $this->overlayBottomBar($canvas, $width, $height, 58);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawLogo($canvas, 40, 36, $font, false);
+        $this->drawCategory($canvas, $meta, $regular, 16, 40, 430, 720, false);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 50, 40, 458, 255, 1.0, 900, 2, false, 0);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width - 48, $height - 24, false);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderPrivatePilotPortrait(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::PORTRAIT_WIDTH;
+        $height = self::PORTRAIT_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.38));
+        $this->overlayVerticalGradient($canvas, $width, $height, 0.42);
+        $this->overlayAccentBar($canvas, 0, 0, 12, $height);
+        $this->overlayBottomBar($canvas, $width, $height, 80);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawLogo($canvas, 40, 48, $font, false);
+        $maxText = $width - 80;
+        $this->drawCategory($canvas, $meta, $regular, 15, 40, 820, $maxText, false);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 40, 40, 852, 255, 1.0, $maxText, 3, false, 0);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width / 2, $height - 36, true);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderInstrumentLandscape(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::LANDSCAPE_WIDTH;
+        $height = self::LANDSCAPE_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.52));
+        $this->overlayVerticalGradient($canvas, $width, $height, 0.50);
+        $this->overlayTopBand($canvas, $width, 78);
+        $this->overlayBottomBar($canvas, $width, $height, 52);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawLogo($canvas, 40, 28, $font, false);
+        $this->drawCategory($canvas, $meta, $regular, 16, 400, 34, 520, false);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 48, 40, 560, 255, 1.0, 980, 2, false, 0);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, 40, $height - 22, false);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderInstrumentPortrait(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::PORTRAIT_WIDTH;
+        $height = self::PORTRAIT_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.42));
+        $this->overlayVerticalGradient($canvas, $width, $height, 0.48);
+        $this->overlayTopBand($canvas, $width, 110);
+        $this->overlayBottomBar($canvas, $width, $height, 72);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawLogo($canvas, (int)round($width / 2), 36, $font, true);
+        $maxText = $width - 80;
+        $this->drawCategory($canvas, $meta, $regular, 15, (int)round($width / 2), 88, $maxText, true);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 40, 40, 900, 255, 1.0, $maxText, 3, false, 0);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, 40, $height - 34, false);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderCommercialLandscape(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::LANDSCAPE_WIDTH;
+        $height = self::LANDSCAPE_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.48));
+        $this->overlayVerticalGradient($canvas, $width, $height, 0.40);
+        $this->overlayTopBand($canvas, $width, 96);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawLogo($canvas, 40, 34, $font, false);
+        $this->drawCategory($canvas, $meta, $regular, 18, 160, 42, 700, false);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 52, 40, 520, 255, 1.0, 980, 2, false, 0);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 15, $width - 48, $height - 28, false);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderCommercialPortrait(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::PORTRAIT_WIDTH;
+        $height = self::PORTRAIT_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.36));
+        $this->overlayVerticalGradient($canvas, $width, $height, 0.36);
+        $this->overlayTopBand($canvas, $width, 140);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawLogo($canvas, 40, 44, $font, false);
+        $maxText = $width - 80;
+        $this->drawCategory($canvas, $meta, $regular, 16, 40, 100, $maxText, false);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 42, 40, 860, 255, 1.0, $maxText, 3, false, 0);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width - 40, $height - 36, false);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderCfiLandscape(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::LANDSCAPE_WIDTH;
+        $height = self::LANDSCAPE_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.62), (float)($meta['focal_y'] ?? 0.48));
+        $this->overlayLeftPanel($canvas, 360, $height);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawLogo($canvas, 36, 40, $font, false);
+        $this->drawCategory($canvas, $meta, $regular, 16, 36, 240, 300, false);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 36, 36, 278, 255, 1.0, 300, 4, false, 0);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 13, 36, $height - 28, false);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderCfiPortrait(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::PORTRAIT_WIDTH;
+        $height = self::PORTRAIT_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.48));
+        $this->overlayTopBand($canvas, $width, 240);
+        $this->overlayBottomBar($canvas, $width, $height, 84);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawLogo($canvas, 40, 48, $font, false);
+        $maxText = $width - 80;
+        $this->drawCategory($canvas, $meta, $regular, 16, 40, 120, $maxText, false);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 38, 40, 168, 255, 1.0, $maxText, 3, false, 0);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width / 2, $height - 36, true);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderSystemsLandscape(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::LANDSCAPE_WIDTH;
+        $height = self::LANDSCAPE_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.42));
+        $this->overlayVerticalGradient($canvas, $width, $height, 0.34);
+        $this->overlayBottomBar($canvas, $width, $height, 148);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 48, 40, 500, 255, 1.0, 980, 2, false, 0);
+        $this->drawLogo($canvas, 40, $height - 118, $font, false);
+        $this->drawCategory($canvas, $meta, $regular, 16, 160, $height - 108, 520, false);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width - 48, $height - 28, false);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param array<string,mixed> $meta
+     */
+    private function renderSystemsPortrait(array $meta, ?string $backgroundBytes): string
+    {
+        $width = self::PORTRAIT_WIDTH;
+        $height = self::PORTRAIT_HEIGHT;
+        $canvas = $this->baseCanvas($width, $height, $backgroundBytes, (float)($meta['focal_x'] ?? 0.5), (float)($meta['focal_y'] ?? 0.34));
+        $this->overlayVerticalGradient($canvas, $width, $height, 0.30);
+        $this->overlayBottomBar($canvas, $width, $height, 220);
+        $font = $this->fontPath(true);
+        $regular = $this->fontPath(false) ?? $font;
+        $maxText = $width - 80;
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 40, 40, 920, 255, 1.0, $maxText, 3, false, 0);
+        $this->drawLogo($canvas, 40, $height - 176, $font, false);
+        $this->drawCategory($canvas, $meta, $regular, 16, 40, $height - 118, $maxText, false);
+        $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width / 2, $height - 36, true);
+        return $this->jpeg($canvas);
+    }
+
+    /**
+     * @param resource|\GdImage $canvas
+     * @param array<string,mixed> $meta
+     */
+    private function drawCategory($canvas, array $meta, ?string $font, int $size, int $x, int $y, int $maxWidth, bool $center): void
+    {
+        $category = strtoupper(trim((string)($meta['category'] ?? '')));
+        if ($category === '') {
+            return;
+        }
+        $this->drawText($canvas, $category, $font, $size, $x, $y, 255, 0.72, $maxWidth, 1, $center, 3);
+    }
+
+    /**
+     * @param resource|\GdImage $canvas
+     */
+    private function overlayAccentBar($canvas, int $x, int $y, int $barWidth, int $height): void
+    {
+        $color = imagecolorallocate($canvas, 7, 27, 53);
+        imagefilledrectangle($canvas, $x, $y, $x + $barWidth, $y + $height, $color);
+    }
+
+    /**
+     * @param resource|\GdImage $canvas
+     */
+    private function overlayTopBand($canvas, int $width, int $bandHeight): void
+    {
+        $color = imagecolorallocatealpha($canvas, 5, 18, 38, 18);
+        imagefilledrectangle($canvas, 0, 0, $width, $bandHeight, $color);
+        $line = imagecolorallocatealpha($canvas, 255, 255, 255, 96);
+        imageline($canvas, 40, $bandHeight, $width - 40, $bandHeight, $line);
+    }
+
+    /**
+     * @param resource|\GdImage $canvas
+     */
+    private function overlayLeftPanel($canvas, int $panelWidth, int $height): void
+    {
+        $color = imagecolorallocatealpha($canvas, 5, 18, 38, 12);
+        imagefilledrectangle($canvas, 0, 0, $panelWidth, $height, $color);
+        $line = imagecolorallocatealpha($canvas, 255, 255, 255, 96);
+        imageline($canvas, $panelWidth, 36, $panelWidth, $height - 36, $line);
     }
 
     /**

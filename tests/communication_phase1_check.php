@@ -344,10 +344,20 @@ function comm_sqlite(): PDO
       video_id INTEGER NOT NULL,
       grant_type TEXT NOT NULL,
       grant_value TEXT NOT NULL DEFAULT '',
-      available_from_utc TEXT NOT NULL,
-      available_until_utc TEXT NOT NULL,
+      available_from_utc TEXT NULL,
+      available_until_utc TEXT NULL,
       created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (video_id) REFERENCES ipca_training_videos(id) ON DELETE CASCADE
+    )");
+    $pdo->exec("CREATE TABLE ipca_training_video_category_entitlements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      category_id INTEGER NOT NULL,
+      available_from_utc TEXT NULL,
+      available_until_utc TEXT NULL,
+      created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at_utc TEXT NULL,
+      UNIQUE (user_id, category_id)
     )");
     $pdo->exec("CREATE TABLE ipca_training_video_views (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1109,6 +1119,8 @@ comm_assert(
     'training video thumbnails keep locked IPCA templates out of the image model',
     str_contains($rendererSource, 'IPCA_ALPHA_LANDSCAPE_V1')
     && str_contains($rendererSource, 'IPCA_ALPHA_PORTRAIT_V1')
+    && str_contains($rendererSource, 'IPCA_PRIVATE_PILOT_LANDSCAPE_V1')
+    && str_contains($rendererSource, 'IPCA_CFI_LANDSCAPE_V1')
     && str_contains($rendererSource, 'ALPHA TRAINER PRO')
     && str_contains($mediaLibrarySource, 'generateAiBackground')
     && str_contains($mediaLibrarySource, 'return null')
@@ -1160,6 +1172,31 @@ comm_assert(
     && str_contains($trainingVideoServiceSource, 'max_position_ms')
     && str_contains($trainingVideoServiceSource, 'watch_percent')
     && str_contains((string)file_get_contents($root . '/src/communication/CommunicationTrainingVideoAnalyzer.php'), 'category_slug')
+);
+$phase10Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_16_communication_phase10_training_video_access.sql');
+comm_assert(
+    'phase 10 SQL adds optional video end dates and category entitlements',
+    is_file($root . '/scripts/apply_communication_phase10_training_video_access.php')
+    && str_contains($phase10Sql, 'ipca_training_video_category_entitlements')
+    && !str_contains($phase10Sql, 'public-read')
+);
+$mediaLibraryPage = (string)file_get_contents($root . '/public/admin/ipca_media_library.php');
+$enrollmentPage = (string)file_get_contents($root . '/public/admin/ipca_app.php');
+comm_assert(
+    'Media Library uses the Training Videos hero catalog shell',
+    str_contains($mediaLibraryPage, 'ia-hero-banner')
+    && str_contains($mediaLibraryPage, 'IPCA App · Media Library')
+    && str_contains($mediaLibraryPage, 'xhr.upload.onprogress')
+    && str_contains($mediaLibraryPage, 'tcc-btn')
+);
+comm_assert(
+    'Enrollment uses the Training Videos hero catalog shell and category access',
+    str_contains($enrollmentPage, 'ia-hero-banner')
+    && str_contains($enrollmentPage, 'IPCA App · Enrollment')
+    && str_contains($enrollmentPage, 'ia-chip--hero')
+    && str_contains($enrollmentPage, 'Bulk category access')
+    && is_file($root . '/public/admin/api/ipca_app_api.php')
+    && is_file($root . '/public/admin/css/ipca_app_catalog.css')
 );
 comm_assert('IPCA Media Library admin page exists', is_file($root . '/public/admin/ipca_media_library.php'));
 comm_assert(
@@ -1402,8 +1439,14 @@ $portraitJpeg = $renderer->render(
     array('title' => 'Cockpit Scan', 'category' => 'Instrument'),
     comm_jpeg(900, 1600, 20, 40, 80)
 );
+$privatePilotJpeg = $renderer->render(
+    CommunicationTrainingThumbnailRenderer::PRIVATE_PILOT_LANDSCAPE,
+    array('title' => 'Steep Turns', 'category' => 'Private Pilot'),
+    comm_jpeg(1600, 900, 30, 60, 110)
+);
 $landscapeInfo = getimagesizefromstring($landscapeJpeg);
 $portraitInfo = getimagesizefromstring($portraitJpeg);
+$privatePilotInfo = getimagesizefromstring($privatePilotJpeg);
 comm_assert(
     'locked IPCA templates render independent landscape and portrait masters',
     is_array($landscapeInfo)
@@ -1412,10 +1455,14 @@ comm_assert(
     && is_array($portraitInfo)
     && (int)$portraitInfo[0] === 720
     && (int)$portraitInfo[1] === 1280
+    && is_array($privatePilotInfo)
+    && (int)$privatePilotInfo[0] === 1280
+    && (int)$privatePilotInfo[1] === 720
     && str_starts_with($landscapeJpeg, "\xff\xd8")
     && str_starts_with($portraitJpeg, "\xff\xd8")
     && CommunicationTrainingThumbnailRenderer::videoOrientation(1920, 1080) === 'landscape'
     && CommunicationTrainingThumbnailRenderer::videoOrientation(1080, 1920) === 'portrait'
+    && CommunicationTrainingThumbnailRenderer::templateFor('landscape', 'private-pilot') === 'IPCA_PRIVATE_PILOT_LANDSCAPE_V1'
 );
 
 $landscapeCockpit = comm_jpeg(1280, 720, 10, 20, 40);
@@ -1434,7 +1481,7 @@ fclose($portraitStream);
 $rampStream = fopen('php://memory', 'rb+');
 fwrite($rampStream, $landscapeRamp);
 rewind($rampStream);
-$kernel->mediaLibrary->putAdminAsset($rampStream, 'image/jpeg', strlen($landscapeRamp), 'ramp_sunset_exterior.jpg', $userB);
+$libraryRamp = $kernel->mediaLibrary->putAdminAsset($rampStream, 'image/jpeg', strlen($landscapeRamp), 'ramp_sunset_exterior.jpg', $userB);
 fclose($rampStream);
 $rankedLandscape = $kernel->mediaLibrary->rankForVideo(array(
     'title' => 'Cessna 172 steep turns',
@@ -1483,7 +1530,7 @@ comm_assert(
     !empty($autoUploaded['video']['has_poster'])
     && (string)($autoUploaded['video']['orientation'] ?? '') === 'landscape'
     && (string)($autoUploaded['video']['poster_source'] ?? '') === 'media_library'
-    && (string)($autoUploaded['video']['poster_template'] ?? '') === 'IPCA_ALPHA_LANDSCAPE_V1'
+    && (string)($autoUploaded['video']['poster_template'] ?? '') === 'IPCA_PRIVATE_PILOT_LANDSCAPE_V1'
     && count($autoUploaded['video']['thumbnail_candidates'] ?? array()) >= 1
     && (string)($autoUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') === (string)($libraryCockpit['asset']['asset_uuid'] ?? '')
     && str_contains((string)($autoUploaded['video']['poster_preview_url'] ?? ''), 'training_videos_preview.php')
@@ -1536,6 +1583,35 @@ comm_assert(
     && (string)($portraitUploaded['video']['poster_source'] ?? '') === 'media_library'
 );
 
+$secondLandscape = $kernel->trainingVideos->saveAdmin(array(
+    'title' => 'Cessna 172 steep turns follow-up',
+    'description' => 'Cockpit demonstration of steep turns',
+    'category' => 'Private Pilot',
+    'aircraft' => 'Cessna 172',
+    'status' => 'draft',
+), array(), $userB);
+$secondUuid = (string)$secondLandscape['video']['video_uuid'];
+$secondStream = fopen('php://memory', 'rb+');
+fwrite($secondStream, str_repeat('v', 2048));
+rewind($secondStream);
+$secondUploaded = $kernel->trainingVideos->putAdminObject(
+    $secondUuid,
+    'video',
+    'video/mp4',
+    2048,
+    $secondStream,
+    60000,
+    array('width' => 1920, 'height' => 1080)
+);
+fclose($secondStream);
+comm_assert(
+    'a second landscape video does not reuse the first video’s photograph',
+    (string)($secondUploaded['video']['poster_source'] ?? '') === 'media_library'
+    && (string)($explained['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') !== ''
+    && (string)($secondUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') !== ''
+    && (string)($secondUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') !== (string)($explained['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '')
+);
+
 $baseVideo = array(
     'video_uuid' => $trainingVideoUuid,
     'title' => 'Private Maneuvers Briefing',
@@ -1585,6 +1661,40 @@ try {
 comm_assert(
     'future grants hide metadata and reject URL issuance',
     $kernel->trainingVideos->feed($sessionA)['videos'] === array() && $futureDenied
+);
+$kernel->trainingVideos->saveAdmin($baseVideo, array(
+    $activeVideoGrant('all'),
+), $adminId);
+$kernel->trainingVideos->saveAdmin(array_merge($baseVideo, array('category' => 'Private Pilot')), array(
+    array(
+        'grant_type' => 'all',
+        'grant_value' => '',
+        'available_from_utc' => '',
+        'available_until_utc' => '',
+    ),
+), $adminId);
+$openEndedFeed = $kernel->trainingVideos->feed($sessionA);
+comm_assert(
+    'an empty video until-date stays available indefinitely',
+    $openEndedFeed['videos'] !== array()
+    && (string)($openEndedFeed['videos'][0]['available_until'] ?? 'missing') === ''
+);
+$instrumentId = 0;
+foreach ($kernel->trainingVideos->listCategories() as $category) {
+    if ((string)$category['slug'] === 'instrument') {
+        $instrumentId = (int)$category['id'];
+        break;
+    }
+}
+$kernel->trainingVideos->grantCategoryEntitlements(array($userA), array($instrumentId));
+$entitledFeedA = $kernel->trainingVideos->feed($sessionA);
+$entitledFeedB = $kernel->trainingVideos->feed($sessionB);
+$kernel->trainingVideos->replaceUserCategoryEntitlements($userA, array());
+comm_assert(
+    'category entitlements hide videos outside the granted categories',
+    $instrumentId > 0
+    && $entitledFeedA['videos'] === array()
+    && $entitledFeedB['videos'] !== array()
 );
 $kernel->trainingVideos->saveAdmin($baseVideo, array(
     $activeVideoGrant('all'),

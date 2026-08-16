@@ -31,13 +31,9 @@ final class CommunicationTrainingMediaLibraryService
         $sql = 'SELECT * FROM ipca_training_media_library WHERE deleted_at_utc IS NULL';
         $params = array();
         $orientation = strtolower(trim($orientation));
-        if ($orientation === 'landscape' || $orientation === 'portrait') {
-            $sql .= ' AND orientation IN (?, ?)';
-            $params[] = $orientation;
-            $params[] = 'square';
-        } elseif ($orientation === 'square') {
+        if ($orientation === 'landscape' || $orientation === 'portrait' || $orientation === 'square') {
             $sql .= ' AND orientation = ?';
-            $params[] = 'square';
+            $params[] = $orientation;
         }
         $sql .= ' ORDER BY id DESC LIMIT ' . $limit;
         $stmt = $this->pdo->prepare($sql);
@@ -131,13 +127,21 @@ final class CommunicationTrainingMediaLibraryService
 
     /**
      * Rank Media Library photographs for a training video.
-     * Orientation is a hard filter: opposite-orientation sources are never used.
+     * Orientation is a hard filter: opposite-orientation and square sources are never used.
+     * Used or similar photographs are skipped so two videos do not share a still.
      *
      * @param array{title?:string,description?:string,category?:string,aircraft?:string,program?:string} $context
+     * @param list<int> $excludeAssetIds
+     * @param list<string> $excludePhashes
      * @return list<array<string,mixed>>
      */
-    public function rankForVideo(array $context, string $orientation, int $limit = 3): array
-    {
+    public function rankForVideo(
+        array $context,
+        string $orientation,
+        int $limit = 3,
+        array $excludeAssetIds = array(),
+        array $excludePhashes = array()
+    ): array {
         if (!$this->tableExists()) {
             return array();
         }
@@ -145,26 +149,28 @@ final class CommunicationTrainingMediaLibraryService
             $orientation === 'portrait' ? 9 : 16,
             $orientation === 'portrait' ? 16 : 9
         );
+        $excludeLookup = array();
+        foreach ($excludeAssetIds as $id) {
+            $excludeLookup[(int)$id] = true;
+        }
         $stmt = $this->pdo->query(
             'SELECT * FROM ipca_training_media_library WHERE deleted_at_utc IS NULL ORDER BY id DESC LIMIT 400'
         );
-        $primary = array();
-        $square = array();
+        $scored = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $assetOrientation = strtolower(trim((string)$row['orientation']));
-            if ($assetOrientation === $orientation) {
-                $primary[] = $row;
-            } elseif ($assetOrientation === 'square') {
-                $square[] = $row;
+            if ($assetOrientation !== $orientation) {
+                continue;
             }
-        }
-        $scored = array();
-        foreach (array_merge($primary, $square) as $row) {
-            $score = $this->semanticScore($context, $row);
-            if ($row['orientation'] === 'square') {
-                $score *= 0.55;
+            if (isset($excludeLookup[(int)$row['id']])) {
+                continue;
             }
-            $scored[] = array('row' => $row, 'score' => $score);
+            $analysis = json_decode((string)($row['analysis_json'] ?? ''), true);
+            $phash = is_array($analysis) ? (string)($analysis['phash'] ?? '') : '';
+            if ($this->phashTooSimilar($phash, $excludePhashes)) {
+                continue;
+            }
+            $scored[] = array('row' => $row, 'score' => $this->semanticScore($context, $row));
         }
         usort($scored, static fn(array $a, array $b): int => $b['score'] <=> $a['score']);
         $shortlist = array_slice($scored, 0, 12);
@@ -268,7 +274,7 @@ final class CommunicationTrainingMediaLibraryService
         string $orientation,
         string $storageKey
     ): array {
-        $fallback = $this->filenameAnalysis($filename, $width, $height, $orientation);
+        $fallback = $this->filenameAnalysis($bytes, $filename, $width, $height, $orientation);
         try {
             $ai = $this->openAiAnalyze($bytes, $filename, $orientation, $storageKey);
             if ($ai !== null) {
@@ -277,6 +283,7 @@ final class CommunicationTrainingMediaLibraryService
                 $merged['height'] = $height;
                 $merged['orientation'] = $orientation;
                 $merged['aspect_ratio'] = $height > 0 ? round($width / $height, 4) : 0;
+                $merged['phash'] = (string)($fallback['json']['phash'] ?? '');
                 $text = $this->analysisText($merged, $filename);
                 return array('json' => $merged, 'text' => $text, 'status' => 'ready');
             }
@@ -289,7 +296,7 @@ final class CommunicationTrainingMediaLibraryService
     /**
      * @return array{json:array<string,mixed>,text:string,status:string}
      */
-    private function filenameAnalysis(string $filename, int $width, int $height, string $orientation): array
+    private function filenameAnalysis(string $bytes, string $filename, int $width, int $height, string $orientation): array
     {
         $stem = strtolower((string)pathinfo($filename, PATHINFO_FILENAME));
         $tokens = preg_split('/[^a-z0-9]+/i', $stem) ?: array();
@@ -312,6 +319,7 @@ final class CommunicationTrainingMediaLibraryService
             'height' => $height,
             'orientation' => $orientation,
             'aspect_ratio' => $height > 0 ? round($width / $height, 4) : 0,
+            'phash' => $this->dHash($bytes),
         );
         return array(
             'json' => $json,
@@ -546,6 +554,90 @@ final class CommunicationTrainingMediaLibraryService
             }
         }
         return strtolower(trim(implode(' ', $chunks)));
+    }
+
+    /**
+     * @param list<string> $excludePhashes
+     */
+    private function phashTooSimilar(string $phash, array $excludePhashes): bool
+    {
+        if (!$this->phashUsable($phash)) {
+            return false;
+        }
+        foreach ($excludePhashes as $other) {
+            $other = strtolower(trim((string)$other));
+            if (!$this->phashUsable($other)) {
+                continue;
+            }
+            if ($this->hammingHex($phash, $other) <= 10) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function phashUsable(string $phash): bool
+    {
+        $phash = strtolower(trim($phash));
+        if ($phash === '' || !preg_match('/^[0-9a-f]{16}$/', $phash)) {
+            return false;
+        }
+        return $phash !== '0000000000000000' && $phash !== 'ffffffffffffffff';
+    }
+
+    private function hammingHex(string $a, string $b): int
+    {
+        $aBin = hex2bin($a);
+        $bBin = hex2bin($b);
+        if (!is_string($aBin) || !is_string($bBin) || strlen($aBin) !== strlen($bBin)) {
+            return 64;
+        }
+        $distance = 0;
+        $len = strlen($aBin);
+        for ($i = 0; $i < $len; $i++) {
+            $xor = ord($aBin[$i]) ^ ord($bBin[$i]);
+            $distance += substr_count(decbin($xor), '1');
+        }
+        return $distance;
+    }
+
+    private function dHash(string $bytes): string
+    {
+        if (!extension_loaded('gd')) {
+            return '';
+        }
+        $image = @imagecreatefromstring($bytes);
+        if ($image === false) {
+            return '';
+        }
+        $small = imagecreatetruecolor(9, 8);
+        if ($small === false) {
+            return '';
+        }
+        imagecopyresampled($small, $image, 0, 0, 0, 0, 9, 8, imagesx($image), imagesy($image));
+        $bits = '';
+        for ($y = 0; $y < 8; $y++) {
+            for ($x = 0; $x < 8; $x++) {
+                $left = imagecolorat($small, $x, $y);
+                $right = imagecolorat($small, $x + 1, $y);
+                $leftY = $this->luma($left);
+                $rightY = $this->luma($right);
+                $bits .= $leftY > $rightY ? '1' : '0';
+            }
+        }
+        $hex = '';
+        foreach (str_split($bits, 8) as $chunk) {
+            $hex .= sprintf('%02x', bindec($chunk));
+        }
+        return $hex;
+    }
+
+    private function luma(int $color): int
+    {
+        $r = ($color >> 16) & 255;
+        $g = ($color >> 8) & 255;
+        $b = $color & 255;
+        return (int)round((0.299 * $r) + (0.587 * $g) + (0.114 * $b));
     }
 
     private function downscaleJpeg(string $bytes, int $maxEdge): ?string

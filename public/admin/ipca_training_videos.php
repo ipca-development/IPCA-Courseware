@@ -14,36 +14,8 @@ $csrf = (string)$_SESSION['training_videos_csrf'];
 cw_header('Training Videos');
 ?>
 <link rel="stylesheet" href="/instructor/css/tcc_ia_shared.css">
+<link rel="stylesheet" href="/admin/css/ipca_app_catalog.css">
 <style>
-.tv-page { max-width: 1180px; display: flex; flex-direction: column; gap: 18px; }
-.ia-hero-banner{
-    padding:20px 22px;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;overflow:hidden;
-    border-radius:22px;border:1px solid rgba(15,23,42,.08);box-shadow:0 14px 30px rgba(15,23,42,.06);
-}
-.ia-hero-banner-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
-.ia-hero-banner-main{min-width:0;flex:1 1 280px}
-.ia-hero-banner-actions{flex:0 0 auto;padding-top:2px;display:flex;gap:8px;flex-wrap:wrap}
-.ia-hero-back-btn{
-    display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 18px;border-radius:12px;
-    font-size:13px;font-weight:900;text-decoration:none;white-space:nowrap;
-    background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.32);
-}
-.ia-hero-back-btn:hover{background:rgba(255,255,255,.22);color:#fff}
-.ia-hero-banner-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;font-weight:900;color:rgba(255,255,255,.72)}
-.ia-hero-banner h1{margin:6px 0 0;font-size:30px;line-height:1.02;letter-spacing:-.04em;color:#fff;font-weight:900}
-.ia-hero-banner-sub{margin-top:8px;font-size:13px;line-height:1.55;color:rgba(255,255,255,.84);max-width:860px}
-.ia-hero-banner-chips{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
-.ia-chip--hero{
-    display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:0 10px;border-radius:999px;
-    font-size:11px;font-weight:800;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.12);color:#fff;
-}
-.ia-chip-row{display:flex;gap:8px;flex-wrap:wrap}
-.ia-chip{
-    display:inline-flex;align-items:center;justify-content:center;min-height:30px;
-    padding:0 12px;border-radius:999px;font-size:11px;font-weight:800;cursor:pointer;
-    border:1px solid rgba(15,23,42,.08);background:#f8fafc;color:#334155;
-}
-.ia-chip.active{background:#12355f;color:#fff;border-color:#12355f}
 .tv-muted { color: #728198; }
 .tv-ok { color: #0f6d32; font-weight: 700; }
 .tv-err { color: #b42318; font-weight: 700; }
@@ -90,11 +62,10 @@ cw_header('Training Videos');
 #tv-edit-modal .tcc-modal-card, #tv-bulk-modal .tcc-modal-card { width:min(920px,96vw); }
 @media (max-width: 900px) {
   .tv-grant { grid-template-columns: 1fr; }
-  .ia-hero-banner h1 { font-size:25px; }
 }
 </style>
 
-<div class="tv-page">
+<div class="ia-page">
   <section class="ia-hero-banner" aria-label="Training Videos">
     <div class="ia-hero-banner-head">
       <div class="ia-hero-banner-main">
@@ -197,7 +168,7 @@ cw_header('Training Videos');
           <p class="tv-muted" id="video-file-status">No video uploaded yet.</p>
         </div>
         <h3>Who can watch</h3>
-        <p class="tv-muted">A person needs at least one currently active grant. Both access times are required and interpreted as UTC.</p>
+        <p class="tv-muted">A person needs at least one currently active grant. Leave until blank to keep access open-ended. Times are UTC. Time-limited category access is set in Enrollment.</p>
         <div id="tv-grants" class="tv-grants"></div>
         <button type="button" class="tcc-btn" id="tv-add-grant">Add access</button>
         <div class="tv-actions">
@@ -426,8 +397,8 @@ cw_header('Training Videos');
           <label>Who</label>
           ${valueInput(grant)}
         </div>
-        <div class="tv-field"><label>Available from</label><input class="grant-from" type="datetime-local" required value="${toLocal(grant.available_from_utc)}"></div>
-        <div class="tv-field"><label>Available until</label><input class="grant-until" type="datetime-local" required value="${toLocal(grant.available_until_utc)}"></div>
+        <div class="tv-field"><label>Available from</label><input class="grant-from" type="datetime-local" value="${toLocal(grant.available_from_utc)}"></div>
+        <div class="tv-field"><label>Available until</label><input class="grant-until" type="datetime-local" value="${toLocal(grant.available_until_utc)}"></div>
         <button type="button" class="tcc-btn grant-remove">Remove</button>
       `;
       row.querySelector('.grant-type').addEventListener('change', (event) => {
@@ -702,14 +673,9 @@ cw_header('Training Videos');
 
   const defaultBulkRange = () => {
     const from = new Date();
-    const until = new Date();
-    until.setFullYear(until.getFullYear() + 5);
-    const stamp = (date) => {
-      const pad = (n) => String(n).padStart(2, '0');
-      return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
-    };
-    document.getElementById('bulk-from').value = stamp(from);
-    document.getElementById('bulk-until').value = stamp(until);
+    const pad = (n) => String(n).padStart(2, '0');
+    document.getElementById('bulk-from').value = `${from.getUTCFullYear()}-${pad(from.getUTCMonth() + 1)}-${pad(from.getUTCDate())}T${pad(from.getUTCHours())}:${pad(from.getUTCMinutes())}`;
+    document.getElementById('bulk-until').value = '';
   };
 
   const bulkGrants = () => [{

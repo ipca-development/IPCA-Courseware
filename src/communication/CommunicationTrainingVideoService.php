@@ -21,6 +21,7 @@ final class CommunicationTrainingVideoService
     public const MAX_POSTER_BYTES = 10485760;
     public const MAX_COMMENT = 2000;
     public const PAGE_SIZE = 30;
+    public const OPEN_ENDED_UNTIL = '9999-12-31 23:59:59.000';
 
     private const GRANT_TYPES = array('all', 'users', 'cohorts', 'programs', 'roles');
     private const VIDEO_MIME = array('video/mp4', 'video/quicktime');
@@ -652,6 +653,10 @@ final class CommunicationTrainingVideoService
         }
         $this->updateVideoFields((int)$row['id'], $fields);
         $fresh = $this->requireAdminVideo($videoUuid);
+        if (strtolower(trim((string)($fresh['poster_source'] ?? ''))) !== 'custom') {
+            $this->ensureGeneratedThumbnail($videoUuid, 'refresh');
+            $fresh = $this->requireAdminVideo($videoUuid);
+        }
         return array(
             'video' => $this->adminVideo($fresh),
             'grants' => $this->grantsFor((int)$fresh['id']),
@@ -744,25 +749,103 @@ final class CommunicationTrainingVideoService
     /** @param array<string,mixed> $user */
     private function activeUntil(array $user, int $videoId): ?string
     {
+        if (!$this->categoryEntitlementAllows($user, $videoId)) {
+            return null;
+        }
         $stmt = $this->pdo->prepare('SELECT * FROM ipca_training_video_grants WHERE video_id = ?');
         $stmt->execute(array($videoId));
         $now = CommunicationSupport::nowUtc();
         $latest = null;
         $context = $this->userGrantContext($user);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $grant) {
-            $from = (string)$grant['available_from_utc'];
-            $until = (string)$grant['available_until_utc'];
-            if ($from === '' || $until === '' || $from > $now || $until < $now) {
+            if (!$this->windowActive((string)($grant['available_from_utc'] ?? ''), (string)($grant['available_until_utc'] ?? ''), $now)) {
                 continue;
             }
             if (!$this->grantMatches($grant, $context)) {
                 continue;
             }
+            $until = $this->effectiveUntil((string)($grant['available_until_utc'] ?? ''));
             if ($latest === null || $until > $latest) {
                 $latest = $until;
             }
         }
         return $latest;
+    }
+
+    private function windowActive(string $from, string $until, string $now): bool
+    {
+        $from = trim($from);
+        $until = trim($until);
+        if ($from !== '' && $from > $now) {
+            return false;
+        }
+        if ($until !== '' && $until < $now) {
+            return false;
+        }
+        return true;
+    }
+
+    private function effectiveUntil(string $until): string
+    {
+        $until = trim($until);
+        return $until === '' ? self::OPEN_ENDED_UNTIL : $until;
+    }
+
+    private function publicUntil(string $until): string
+    {
+        $until = trim($until);
+        if ($until === '' || str_starts_with($until, '9999-')) {
+            return '';
+        }
+        return $until;
+    }
+
+    /**
+     * Users with no category entitlement rows keep video-grant behavior.
+     * Once any row exists, the video's category must also be currently entitled.
+     *
+     * @param array<string,mixed> $user
+     */
+    private function categoryEntitlementAllows(array $user, int $videoId): bool
+    {
+        if (!$this->tableExists('ipca_training_video_category_entitlements')) {
+            return true;
+        }
+        $userId = (int)($user['id'] ?? 0);
+        if ($userId < 1) {
+            return false;
+        }
+        $count = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ipca_training_video_category_entitlements WHERE user_id = ?'
+        );
+        $count->execute(array($userId));
+        if ((int)$count->fetchColumn() === 0) {
+            return true;
+        }
+        $video = $this->pdo->prepare('SELECT category_id, category FROM ipca_training_videos WHERE id = ? LIMIT 1');
+        $video->execute(array($videoId));
+        $row = $video->fetch(PDO::FETCH_ASSOC);
+        $categoryId = is_array($row) ? (int)($row['category_id'] ?? 0) : 0;
+        if ($categoryId < 1) {
+            $uncategorized = $this->categoryBySlug('uncategorized');
+            $categoryId = $uncategorized !== null ? (int)$uncategorized['id'] : 0;
+        }
+        if ($categoryId < 1) {
+            return false;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT available_from_utc, available_until_utc
+             FROM ipca_training_video_category_entitlements
+             WHERE user_id = ? AND category_id = ?'
+        );
+        $stmt->execute(array($userId, $categoryId));
+        $now = CommunicationSupport::nowUtc();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $entitlement) {
+            if ($this->windowActive((string)($entitlement['available_from_utc'] ?? ''), (string)($entitlement['available_until_utc'] ?? ''), $now)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -830,7 +913,7 @@ final class CommunicationTrainingVideoService
 
     /**
      * @param list<array<string,mixed>> $grants
-     * @return list<array{grant_type:string,grant_value:string,available_from_utc:string,available_until_utc:string}>
+     * @return list<array{grant_type:string,grant_value:string,available_from_utc:?string,available_until_utc:?string}>
      */
     private function normalizeGrants(array $grants): array
     {
@@ -849,9 +932,9 @@ final class CommunicationTrainingVideoService
             } elseif ($value === '') {
                 throw new CommunicationException('validation_error', 'Each grant needs a person, cohort, program, or role.', 400);
             }
-            $from = $this->requireUtc((string)($grant['available_from_utc'] ?? ''), 'available_from_utc');
-            $until = $this->requireUtc((string)($grant['available_until_utc'] ?? ''), 'available_until_utc');
-            if ($until <= $from) {
+            $from = $this->optionalUtc((string)($grant['available_from_utc'] ?? ''));
+            $until = $this->optionalUtc((string)($grant['available_until_utc'] ?? ''));
+            if ($from !== null && $until !== null && $until <= $from) {
                 throw new CommunicationException('validation_error', 'Access must end after it starts.', 400);
             }
             $normalized[] = array(
@@ -865,7 +948,7 @@ final class CommunicationTrainingVideoService
     }
 
     /**
-     * @param list<array{grant_type:string,grant_value:string,available_from_utc:string,available_until_utc:string}> $grants
+     * @param list<array{grant_type:string,grant_value:string,available_from_utc:?string,available_until_utc:?string}> $grants
      */
     private function replaceGrants(int $videoId, array $grants): void
     {
@@ -888,17 +971,27 @@ final class CommunicationTrainingVideoService
         }
     }
 
+    private function optionalUtc(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        return $this->requireUtc($value, 'access_time');
+    }
+
     private function requireUtc(string $value, string $field): string
     {
         $value = trim($value);
         if ($value === '') {
-            throw new CommunicationException('validation_error', 'Access from and until times are required.', 400);
+            throw new CommunicationException('validation_error', 'Access times must be valid dates.', 400);
         }
         try {
             $date = new DateTimeImmutable($value);
         } catch (Throwable) {
             throw new CommunicationException('validation_error', 'Access times must be valid dates.', 400);
         }
+        unset($field);
         return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s.000');
     }
 
@@ -1034,7 +1127,7 @@ final class CommunicationTrainingVideoService
             'liked' => $liked,
             'comment_count' => $this->countComments($videoId),
             'downloadable' => trim((string)($row['storage_key'] ?? '')) !== '',
-            'available_until' => $availableUntil,
+            'available_until' => $this->publicUntil($availableUntil),
             'created_at_utc' => (string)$row['created_at_utc'],
             'watch_percent' => (int)$watch['progress_percent'],
             'watch_completed' => !empty($watch['completed']),
@@ -1110,7 +1203,16 @@ final class CommunicationTrainingVideoService
              FROM ipca_training_video_grants WHERE video_id = ? ORDER BY id ASC'
         );
         $stmt->execute(array($videoId));
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $out = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $out[] = array(
+                'grant_type' => (string)$row['grant_type'],
+                'grant_value' => (string)$row['grant_value'],
+                'available_from_utc' => (string)($row['available_from_utc'] ?? ''),
+                'available_until_utc' => (string)($row['available_until_utc'] ?? ''),
+            );
+        }
+        return $out;
     }
 
     /** @return array<string,mixed> */
@@ -1422,6 +1524,129 @@ final class CommunicationTrainingVideoService
     }
 
     /**
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function categoryEntitlementsByUser(): array
+    {
+        if (!$this->tableExists('ipca_training_video_category_entitlements')) {
+            return array();
+        }
+        $stmt = $this->pdo->query(
+            'SELECT user_id, category_id, available_from_utc, available_until_utc
+             FROM ipca_training_video_category_entitlements
+             ORDER BY user_id ASC, category_id ASC'
+        );
+        $out = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $userId = (int)$row['user_id'];
+            $out[$userId][] = array(
+                'category_id' => (int)$row['category_id'],
+                'available_from_utc' => (string)($row['available_from_utc'] ?? ''),
+                'available_until_utc' => (string)($row['available_until_utc'] ?? ''),
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $userIds
+     * @param list<int> $categoryIds
+     * @return array<string,mixed>
+     */
+    public function grantCategoryEntitlements(
+        array $userIds,
+        array $categoryIds,
+        string $availableFromUtc = '',
+        string $availableUntilUtc = ''
+    ): array {
+        $this->requireEntitlementsTable();
+        $from = $this->optionalUtc($availableFromUtc);
+        $until = $this->optionalUtc($availableUntilUtc);
+        if ($from !== null && $until !== null && $until <= $from) {
+            throw new CommunicationException('validation_error', 'Access must end after it starts.', 400);
+        }
+        $users = array();
+        foreach ($userIds as $userId) {
+            $userId = (int)$userId;
+            if ($userId > 0) {
+                $users[$userId] = $userId;
+            }
+        }
+        $categories = array();
+        foreach ($categoryIds as $categoryId) {
+            $categoryId = (int)$categoryId;
+            if ($categoryId > 0) {
+                $categories[$categoryId] = $categoryId;
+            }
+        }
+        if ($users === array() || $categories === array()) {
+            throw new CommunicationException('validation_error', 'Choose at least one person and one category.', 400);
+        }
+        $now = CommunicationSupport::nowUtc();
+        $delete = $this->pdo->prepare(
+            'DELETE FROM ipca_training_video_category_entitlements WHERE user_id = ? AND category_id = ?'
+        );
+        $insert = $this->pdo->prepare(
+            'INSERT INTO ipca_training_video_category_entitlements
+                (user_id, category_id, available_from_utc, available_until_utc, created_at_utc, updated_at_utc)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($users as $userId) {
+            foreach ($categories as $categoryId) {
+                $delete->execute(array($userId, $categoryId));
+                $insert->execute(array($userId, $categoryId, $from, $until, $now, $now));
+            }
+        }
+        return array('ok' => true, 'entitlements' => $this->categoryEntitlementsByUser());
+    }
+
+    /**
+     * @param list<array<string,mixed>> $items
+     * @return array<string,mixed>
+     */
+    public function replaceUserCategoryEntitlements(int $userId, array $items): array
+    {
+        $this->requireEntitlementsTable();
+        if ($userId < 1) {
+            throw new CommunicationException('validation_error', 'A person is required.', 400);
+        }
+        $this->pdo->prepare(
+            'DELETE FROM ipca_training_video_category_entitlements WHERE user_id = ?'
+        )->execute(array($userId));
+        $now = CommunicationSupport::nowUtc();
+        $insert = $this->pdo->prepare(
+            'INSERT INTO ipca_training_video_category_entitlements
+                (user_id, category_id, available_from_utc, available_until_utc, created_at_utc, updated_at_utc)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $seen = array();
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $categoryId = (int)($item['category_id'] ?? 0);
+            if ($categoryId < 1 || isset($seen[$categoryId])) {
+                continue;
+            }
+            $from = $this->optionalUtc((string)($item['available_from_utc'] ?? ''));
+            $until = $this->optionalUtc((string)($item['available_until_utc'] ?? ''));
+            if ($from !== null && $until !== null && $until <= $from) {
+                throw new CommunicationException('validation_error', 'Access must end after it starts.', 400);
+            }
+            $seen[$categoryId] = true;
+            $insert->execute(array($userId, $categoryId, $from, $until, $now, $now));
+        }
+        return array('ok' => true, 'entitlements' => $this->categoryEntitlementsByUser());
+    }
+
+    private function requireEntitlementsTable(): void
+    {
+        if (!$this->tableExists('ipca_training_video_category_entitlements')) {
+            throw new CommunicationException('not_found', 'Category access is not installed yet.', 404);
+        }
+    }
+
+    /**
      * @return array{id:int,slug:string,name:string}|null
      */
     private function categoryBySlug(string $slug): ?array
@@ -1565,7 +1790,8 @@ final class CommunicationTrainingVideoService
         if ($orientation === '') {
             $orientation = 'landscape';
         }
-        $template = CommunicationTrainingThumbnailRenderer::templateForOrientation($orientation);
+        $category = $this->categoryPayload($row);
+        $template = CommunicationTrainingThumbnailRenderer::templateFor($orientation, (string)$category['slug']);
         $context = array(
             'title' => (string)($row['title'] ?? ''),
             'description' => (string)($row['description'] ?? ''),
@@ -1575,7 +1801,9 @@ final class CommunicationTrainingVideoService
         );
         $candidates = $this->resolvedCandidates($row, $context, $orientation, $mode === 'ensure');
         $index = (int)($row['poster_candidate_index'] ?? 0);
-        if ($mode === 'regenerate' && $candidates !== array()) {
+        if ($mode === 'refresh') {
+            $index = 0;
+        } elseif ($mode === 'regenerate' && $candidates !== array()) {
             $index = ($index + 1) % count($candidates);
         } elseif ($mode === 'choose' && $chosenAssetUuid !== '') {
             $chosen = $this->mediaLibrary->findByUuid($chosenAssetUuid);
@@ -1633,7 +1861,7 @@ final class CommunicationTrainingVideoService
 
         $jpeg = $this->renderer->render($template, array(
             'title' => (string)$row['title'],
-            'category' => trim((string)($row['category'] ?? '') . ((string)($row['aircraft'] ?? '') !== '' ? ' · ' . $row['aircraft'] : '')),
+            'category' => (string)$category['name'],
             'focal_x' => $focalX,
             'focal_y' => $focalY,
         ), $background);
@@ -1677,7 +1905,14 @@ final class CommunicationTrainingVideoService
                 return $out;
             }
         }
-        $ranked = $this->mediaLibrary->rankForVideo($context, $orientation, 3);
+        $exclusions = $this->usedLibraryExclusions((int)($row['id'] ?? 0));
+        $ranked = $this->mediaLibrary->rankForVideo(
+            $context,
+            $orientation,
+            3,
+            $exclusions['ids'],
+            $exclusions['phashes']
+        );
         $out = array();
         foreach ($ranked as $asset) {
             $out[] = array(
@@ -1688,6 +1923,44 @@ final class CommunicationTrainingVideoService
             );
         }
         return $out;
+    }
+
+    /**
+     * @return array{ids:list<int>,phashes:list<string>}
+     */
+    private function usedLibraryExclusions(int $exceptVideoId): array
+    {
+        $ids = array();
+        $phashes = array();
+        if (!$this->hasVideoColumn('poster_library_asset_id')) {
+            return array('ids' => $ids, 'phashes' => $phashes);
+        }
+        $sql = 'SELECT poster_library_asset_id FROM ipca_training_videos
+                WHERE deleted_at_utc IS NULL AND poster_library_asset_id IS NOT NULL';
+        $args = array();
+        if ($exceptVideoId > 0) {
+            $sql .= ' AND id != ?';
+            $args[] = $exceptVideoId;
+        }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($args);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $id = (int)($row['poster_library_asset_id'] ?? 0);
+            if ($id < 1) {
+                continue;
+            }
+            $ids[] = $id;
+            $asset = $this->mediaLibrary->findById($id);
+            if (!is_array($asset)) {
+                continue;
+            }
+            $analysis = json_decode((string)($asset['analysis_json'] ?? ''), true);
+            $hash = is_array($analysis) ? trim((string)($analysis['phash'] ?? '')) : '';
+            if ($hash !== '') {
+                $phashes[] = $hash;
+            }
+        }
+        return array('ids' => $ids, 'phashes' => $phashes);
     }
 
     /**
@@ -1706,10 +1979,6 @@ final class CommunicationTrainingVideoService
 
     private function orientationAllowed(string $videoOrientation, string $assetOrientation): bool
     {
-        $assetOrientation = strtolower(trim($assetOrientation));
-        if ($assetOrientation === $videoOrientation) {
-            return true;
-        }
-        return $assetOrientation === 'square';
+        return strtolower(trim($assetOrientation)) === strtolower(trim($videoOrientation));
     }
 }

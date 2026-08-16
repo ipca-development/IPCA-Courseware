@@ -1,0 +1,51 @@
+/* Shared IPCA App catalog shell: Training Videos, Media Library, Enrollment. */
+.ia-page{max-width:1180px;display:flex;flex-direction:column;gap:18px}
+.ia-hero-banner{
+    padding:20px 22px;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;overflow:hidden;
+    border-radius:22px;border:1px solid rgba(15,23,42,.08);box-shadow:0 14px 30px rgba(15,23,42,.06);
+}
+.ia-hero-banner-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.ia-hero-banner-main{min-width:0;flex:1 1 280px}
+.ia-hero-banner-actions{flex:0 0 auto;padding-top:2px;display:flex;gap:8px;flex-wrap:wrap}
+.ia-hero-back-btn{
+    display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 18px;border-radius:12px;
+    font-size:13px;font-weight:900;text-decoration:none;white-space:nowrap;cursor:pointer;font-family:inherit;
+    background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.32);
+}
+.ia-hero-back-btn:hover{background:rgba(255,255,255,.22);color:#fff}
+.ia-hero-banner-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;font-weight:900;color:rgba(255,255,255,.72)}
+.ia-hero-banner h1{margin:6px 0 0;font-size:30px;line-height:1.02;letter-spacing:-.04em;color:#fff;font-weight:900}
+.ia-hero-banner-sub{margin-top:8px;font-size:13px;line-height:1.55;color:rgba(255,255,255,.84);max-width:860px}
+.ia-hero-banner-chips{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.ia-chip--hero{
+    display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:0 10px;border-radius:999px;
+    font-size:11px;font-weight:800;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.12);color:#fff;
+}
+.ia-chip-row{display:flex;gap:8px;flex-wrap:wrap}
+.ia-chip{
+    display:inline-flex;align-items:center;justify-content:center;min-height:30px;
+    padding:0 12px;border-radius:999px;font-size:11px;font-weight:800;cursor:pointer;
+    border:1px solid rgba(15,23,42,.08);background:#f8fafc;color:#334155;font-family:inherit;
+}
+.ia-chip.active{background:#12355f;color:#fff;border-color:#12355f}
+.ia-muted{color:#728198}
+.ia-ok{color:#0f6d32;font-weight:700}
+.ia-err{color:#b42318;font-weight:700}
+.ia-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+.ia-card{background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:18px;overflow:hidden;box-shadow:0 8px 20px rgba(15,23,42,.04);display:flex;flex-direction:column}
+.ia-card img{width:100%;height:160px;object-fit:cover;display:block;background:#071b35}
+.ia-card-body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;flex:1}
+.ia-card-title{font-size:16px;font-weight:900;color:#102845;line-height:1.25}
+.ia-progress{height:8px;background:#e6edf5;border-radius:999px;overflow:hidden;margin:8px 0 0}
+.ia-progress[hidden]{display:none}
+.ia-progress-bar{height:100%;width:0;background:#1f6feb;transition:width .12s linear}
+.ia-table{width:100%;border-collapse:collapse}
+.ia-table th,.ia-table td{text-align:left;padding:12px 10px;border-bottom:1px solid rgba(15,23,42,.08);font-size:14px;vertical-align:top}
+.ia-table th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:900}
+.ia-panel{background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:18px;padding:18px 20px;box-shadow:0 8px 20px rgba(15,23,42,.04)}
+.ia-badge{display:inline-flex;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:#eef2f6;color:#4b5d73}
+.ia-badge-live{background:#d8f3dc;color:#0f6d32}
+.ia-badge-warn{background:#fff3cd;color:#8a6d00}
+@media (max-width:900px){
+  .ia-hero-banner h1{font-size:25px}
+}

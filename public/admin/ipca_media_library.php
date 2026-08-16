@@ -16,44 +16,42 @@ $csrf = (string)$_SESSION['media_library_csrf'];
 
 cw_header('Media Library');
 ?>
+<link rel="stylesheet" href="/instructor/css/tcc_ia_shared.css">
+<link rel="stylesheet" href="/admin/css/ipca_app_catalog.css">
 <style>
-.ml-page { max-width: 1100px; }
-.ml-kicker { font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #728198; }
-.ml-muted { color: #728198; }
-.ml-ok { color: #0f6d32; font-weight: 700; }
-.ml-err { color: #b42318; font-weight: 700; }
-.ml-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.ml-card { border: 1px solid #e6edf5; border-radius: 10px; overflow: hidden; background: #fff; }
-.ml-card img { display: block; width: 100%; height: 160px; object-fit: cover; background: #071b35; }
-.ml-card-body { padding: 10px; }
-.ml-badge { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: #eef2f6; color: #4b5d73; }
-.ml-tags { font-size: 12px; color: #4b5d73; margin: 6px 0 0; max-height: 3.6em; overflow: hidden; }
-.ml-progress { height: 8px; background: #e6edf5; border-radius: 999px; overflow: hidden; margin: 8px 0 0; }
-.ml-progress[hidden] { display: none; }
-.ml-progress-bar { height: 100%; width: 0; background: #1f6feb; }
-.ml-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+.ml-tags { font-size: 12px; color: #4b5d73; margin: 0; max-height: 3.6em; overflow: hidden; }
+.ml-card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; }
 </style>
 
-<div class="ml-page">
-  <div class="card">
-    <div class="ml-kicker">IPCA App</div>
-    <h2 style="margin:6px 0 8px;">Media Library</h2>
-    <p class="ml-muted">Photograph archive for IPCA. Bulk-upload stills here. Training video thumbnails use these images automatically, and the same tagged archive is the source for future social media content. Photographs stay private until a later publishing step.</p>
-    <div class="ml-actions">
-      <label class="btn">Upload photographs
-        <input id="ml-files" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
-      </label>
-      <select id="ml-orientation">
-        <option value="">All orientations</option>
-        <option value="landscape">Landscape</option>
-        <option value="portrait">Portrait</option>
-        <option value="square">Square</option>
-      </select>
+<div class="ia-page">
+  <section class="ia-hero-banner" aria-label="Media Library">
+    <div class="ia-hero-banner-head">
+      <div class="ia-hero-banner-main">
+        <div class="ia-hero-banner-kicker">IPCA App · Media Library</div>
+        <h1>Media Library</h1>
+        <p class="ia-hero-banner-sub">Photograph archive for IPCA. Bulk-upload stills here. Training video thumbnails use these images automatically, and the same tagged archive is the source for future social media content. Photographs stay private until a later publishing step.</p>
+      </div>
+      <div class="ia-hero-banner-actions">
+        <label class="ia-hero-back-btn">Upload
+          <input id="ml-files" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+        </label>
+        <a class="ia-hero-back-btn" href="/admin/ipca_training_videos.php">Training Videos</a>
+      </div>
     </div>
-    <div class="ml-progress" id="ml-progress" hidden><div class="ml-progress-bar" id="ml-progress-bar"></div></div>
-    <p id="ml-message" class="ml-muted">JPEG, PNG, or WebP. AI tags aircraft, cockpit/exterior, maneuvers, avionics, and environment after each upload.</p>
+    <div class="ia-hero-banner-chips">
+      <span class="ia-chip--hero" id="ml-count">0 photographs</span>
+      <span class="ia-chip--hero">JPEG, PNG, or WebP</span>
+    </div>
+  </section>
+
+  <div class="ia-chip-row" id="ml-orientation">
+    <button type="button" class="ia-chip active" data-orientation="">All</button>
+    <button type="button" class="ia-chip" data-orientation="landscape">Landscape</button>
+    <button type="button" class="ia-chip" data-orientation="portrait">Portrait</button>
   </div>
-  <div id="ml-grid" class="ml-grid" style="margin-top:16px;"></div>
+  <div class="ia-progress" id="ml-progress" hidden><div class="ia-progress-bar" id="ml-progress-bar"></div></div>
+  <p id="ml-message" class="ia-muted">JPEG, PNG, or WebP. AI tags aircraft, cockpit/exterior, maneuvers, avionics, and environment after each upload.</p>
+  <div id="ml-grid" class="ia-card-grid"></div>
 </div>
 
 <script>
@@ -64,10 +62,11 @@ cw_header('Media Library');
   const message = document.getElementById('ml-message');
   const progress = document.getElementById('ml-progress');
   const bar = document.getElementById('ml-progress-bar');
+  let orientation = '';
 
   const setMessage = (text, kind) => {
     message.textContent = text || '';
-    message.className = kind === 'ok' ? 'ml-ok' : (kind === 'err' ? 'ml-err' : 'ml-muted');
+    message.className = kind === 'ok' ? 'ia-ok' : (kind === 'err' ? 'ia-err' : 'ia-muted');
   };
 
   const tags = (asset) => {
@@ -81,16 +80,20 @@ cw_header('Media Library');
   };
 
   const render = (assets) => {
+    document.getElementById('ml-count').textContent = (assets || []).length + ' photograph' + ((assets || []).length === 1 ? '' : 's');
     grid.innerHTML = (assets || []).map((asset) => `
-      <div class="ml-card">
+      <div class="ia-card">
         <img src="${asset.preview_url || ''}" alt="">
-        <div class="ml-card-body">
-          <span class="ml-badge">${asset.orientation || 'photo'}</span>
+        <div class="ia-card-body">
+          <span class="ia-badge">${asset.orientation || 'photo'}</span>
+          <div class="ia-card-title">${asset.filename || 'Photograph'}</div>
           <div class="ml-tags">${tags(asset)}</div>
-          <button type="button" class="btn ml-delete" data-uuid="${asset.asset_uuid}" style="margin-top:8px;">Remove</button>
+          <div class="ml-card-actions">
+            <button type="button" class="tcc-btn ml-delete" data-uuid="${asset.asset_uuid}">Remove</button>
+          </div>
         </div>
       </div>
-    `).join('') || '<p class="ml-muted">No photographs yet. Upload a batch to start the archive.</p>';
+    `).join('') || '<p class="ia-muted">No photographs yet. Upload a batch to start the archive.</p>';
     grid.querySelectorAll('.ml-delete').forEach((button) => {
       button.addEventListener('click', async () => {
         const result = await fetch(api, {
@@ -108,7 +111,6 @@ cw_header('Media Library');
   };
 
   const load = async () => {
-    const orientation = document.getElementById('ml-orientation').value;
     const data = await fetch(api + '?action=list&orientation=' + encodeURIComponent(orientation)).then((r) => r.json());
     render(data.assets || []);
   };
@@ -157,7 +159,14 @@ cw_header('Media Library');
     }
     event.target.value = '';
   });
-  document.getElementById('ml-orientation').addEventListener('change', load);
+  document.querySelectorAll('#ml-orientation .ia-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('#ml-orientation .ia-chip').forEach((item) => item.classList.remove('active'));
+      chip.classList.add('active');
+      orientation = chip.dataset.orientation || '';
+      load();
+    });
+  });
   load();
 })();
 </script>
