@@ -14,9 +14,11 @@ interface CommunicationObjectStore
     public function publicUrl(string $key): string;
 
     /**
-     * @return array{byte_size:int,content_type:string}|null
+     * Private server-side PUT. Does not set public-read.
+     *
+     * @param resource $stream
      */
-    public function head(string $key): ?array;
+    public function putStream(string $key, $stream, int $byteSize, string $contentType): void;
 }
 
 final class CommunicationMemoryObjectStore implements CommunicationObjectStore
@@ -53,6 +55,12 @@ final class CommunicationMemoryObjectStore implements CommunicationObjectStore
             'content_type' => $contentType,
             'byte_size' => strlen($bytes),
         );
+    }
+
+    public function putStream(string $key, $stream, int $byteSize, string $contentType): void
+    {
+        $bytes = stream_get_contents($stream);
+        $this->put($key, is_string($bytes) ? $bytes : '', $contentType);
     }
 
     public function head(string $key): ?array
@@ -109,5 +117,10 @@ final class CommunicationSpacesObjectStore implements CommunicationObjectStore
     public function head(string $key): ?array
     {
         return cw_spaces_head_object($key);
+    }
+
+    public function putStream(string $key, $stream, int $byteSize, string $contentType): void
+    {
+        cw_spaces_put_private_stream($key, $stream, $byteSize, $contentType);
     }
 }

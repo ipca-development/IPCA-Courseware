@@ -373,6 +373,27 @@ final class CommunicationTrainingVideoService
         );
     }
 
+    /**
+     * Same-origin admin upload. Streams through the Courseware origin so the
+     * browser does not need Spaces CORS.
+     *
+     * @param resource $stream
+     * @return array<string,mixed>
+     */
+    public function putAdminObject(
+        string $videoUuid,
+        string $kind,
+        string $mimeType,
+        int $byteSize,
+        $stream,
+        int $durationMs = 0
+    ): array {
+        $prepared = $this->presignAdminUpload($videoUuid, $kind, $mimeType, $byteSize);
+        $key = (string)$prepared['storage_key'];
+        $this->store->putStream($key, $stream, $byteSize, strtolower(trim($mimeType)));
+        return $this->completeAdminUpload($videoUuid, $kind, $durationMs, $byteSize, $mimeType);
+    }
+
     /** @return array<string,mixed> */
     public function completeAdminUpload(
         string $videoUuid,

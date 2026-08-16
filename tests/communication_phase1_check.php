@@ -989,8 +989,24 @@ comm_assert('training videos admin page exists', is_file($root . '/public/admin/
 comm_assert(
     'training videos admin shows upload progress and published state',
     str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'xhr.upload.onprogress')
+    && str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'training_videos_upload.php')
     && str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'On the app')
     && str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'Publish to app')
+);
+comm_assert(
+    'training videos admin origin upload endpoint exists',
+    is_file($root . '/public/admin/api/training_videos_upload.php')
+);
+$spacesSource = (string)file_get_contents($root . '/src/spaces.php');
+$privateStreamStart = strpos($spacesSource, 'function cw_spaces_put_private_stream');
+$privateStreamEnd = strpos($spacesSource, 'function cw_spaces_presign');
+comm_assert(
+    'origin training-video PUT stays private',
+    $privateStreamStart !== false
+    && $privateStreamEnd !== false
+    && $privateStreamEnd > $privateStreamStart
+    && !str_contains(substr($spacesSource, $privateStreamStart, $privateStreamEnd - $privateStreamStart), 'public-read')
+    && !str_contains(substr($spacesSource, $privateStreamStart, $privateStreamEnd - $privateStreamStart), 'x-amz-acl:')
 );
 comm_assert('training videos admin API exists', is_file($root . '/public/admin/api/training_videos_api.php'));
 comm_assert(
@@ -1110,6 +1126,24 @@ $videoPresign = $kernel->trainingVideos->presignAdminUpload(
 );
 $objectStore->put('training-videos/1/' . $trainingVideoUuid . '.video', str_repeat('v', 4096), 'video/mp4');
 $kernel->trainingVideos->completeAdminUpload($trainingVideoUuid, 'video', 125000);
+$originStream = fopen('php://memory', 'rb+');
+fwrite($originStream, str_repeat('z', 2048));
+rewind($originStream);
+$originUpload = $kernel->trainingVideos->putAdminObject(
+    $trainingVideoUuid,
+    'video',
+    'video/mp4',
+    2048,
+    $originStream,
+    125000
+);
+fclose($originStream);
+comm_assert(
+    'admin origin upload stores a private object',
+    !empty($originUpload['video']['has_video'])
+    && (int)$originUpload['video']['byte_size'] === 2048
+    && !empty($originUpload['video']['app_visible'])
+);
 $posterPresign = $kernel->trainingVideos->presignAdminUpload(
     $trainingVideoUuid,
     'poster',

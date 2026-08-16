@@ -132,6 +132,83 @@ function cw_spaces_put_object(string $objectKey, string $bytes, string $contentT
 }
 
 /**
+ * Stream a private object to Spaces. Does not set x-amz-acl.
+ *
+ * @param resource $stream
+ */
+function cw_spaces_put_private_stream(string $objectKey, $stream, int $byteSize, string $contentType): void
+{
+    if (!is_resource($stream)) {
+        throw new RuntimeException('A readable stream is required.');
+    }
+    $byteSize = max(0, $byteSize);
+    if ($byteSize < 1) {
+        throw new RuntimeException('Upload is empty.');
+    }
+    $cfg = cw_spaces_config();
+    $method = 'PUT';
+    $service = 's3';
+    $host = $cfg['bucket'] . '.' . $cfg['endpoint'];
+    $canonicalUri = '/' . str_replace('%2F', '/', cw_spaces_uri_encode(ltrim($objectKey, '/')));
+    $amzDate = gmdate('Ymd\THis\Z');
+    $date = substr($amzDate, 0, 8);
+    $payloadHash = 'UNSIGNED-PAYLOAD';
+    $contentType = strtolower(trim($contentType));
+    $signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+    $canonicalHeaders =
+        'content-type:' . $contentType . "\n" .
+        'host:' . $host . "\n" .
+        'x-amz-content-sha256:' . $payloadHash . "\n" .
+        'x-amz-date:' . $amzDate . "\n";
+    $canonicalRequest =
+        $method . "\n" .
+        $canonicalUri . "\n" .
+        '' . "\n" .
+        $canonicalHeaders . "\n" .
+        $signedHeaders . "\n" .
+        $payloadHash;
+    $credentialScope = $date . '/' . $cfg['region'] . '/' . $service . '/aws4_request';
+    $stringToSign =
+        "AWS4-HMAC-SHA256\n" .
+        $amzDate . "\n" .
+        $credentialScope . "\n" .
+        hash('sha256', $canonicalRequest);
+    $signingKey = cw_sigv4_signing_key($cfg['secret'], $date, $cfg['region'], $service);
+    $signature = hash_hmac('sha256', $stringToSign, $signingKey);
+    $authorization =
+        'AWS4-HMAC-SHA256 ' .
+        'Credential=' . $cfg['key'] . '/' . $credentialScope . ', ' .
+        'SignedHeaders=' . $signedHeaders . ', ' .
+        'Signature=' . $signature;
+
+    $ch = curl_init('https://' . $host . $canonicalUri);
+    curl_setopt($ch, CURLOPT_UPLOAD, true);
+    curl_setopt($ch, CURLOPT_INFILESIZE, $byteSize);
+    curl_setopt($ch, CURLOPT_READFUNCTION, static function ($curl, $fd, int $length) use ($stream): string {
+        $chunk = fread($stream, $length);
+        return $chunk === false ? '' : $chunk;
+    });
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+        'Authorization: ' . $authorization,
+        'Content-Type: ' . $contentType,
+        'x-amz-content-sha256: ' . $payloadHash,
+        'x-amz-date: ' . $amzDate,
+        'Content-Length: ' . $byteSize,
+        'Host: ' . $host,
+    ));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 7200);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
+    $resp = curl_exec($ch);
+    $err = curl_error($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($resp === false || $code < 200 || $code >= 300) {
+        throw new RuntimeException('Private Spaces upload failed HTTP ' . $code . '. ' . $err . ' ' . substr((string)$resp, 0, 300));
+    }
+}
+
+/**
  * Private SigV4 query-string URL. Does not set x-amz-acl; objects stay private.
  *
  * @param array<string,string> $extraHeaders lowercase header names to sign (e.g. content-type)

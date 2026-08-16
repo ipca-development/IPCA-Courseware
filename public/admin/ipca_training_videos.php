@@ -250,16 +250,23 @@ cw_header('Training Videos');
     return response.json();
   };
 
-  const putWithProgress = (url, headers, file, onProgress) => new Promise((resolve, reject) => {
+  const putWithProgress = (kind, uuid, file, mime, onProgress) => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('PUT', url);
-    Object.keys(headers || {}).forEach((key) => xhr.setRequestHeader(key, headers[key]));
+    xhr.open('POST', '/admin/api/training_videos_upload.php?kind=' + encodeURIComponent(kind)
+      + '&video_uuid=' + encodeURIComponent(uuid));
+    xhr.setRequestHeader('X-IPCA-CSRF', csrf);
+    xhr.setRequestHeader('Content-Type', mime);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(event.loaded, event.total);
     };
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error('Upload failed (' + xhr.status + ').'));
+      let payload = null;
+      try { payload = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300 && payload && payload.ok) {
+        resolve(payload);
+        return;
+      }
+      reject(new Error((payload && payload.error) || ('Upload failed (' + xhr.status + ').')));
     };
     xhr.onerror = () => reject(new Error('Upload failed. Check the connection and try again.'));
     xhr.send(file);
@@ -320,7 +327,7 @@ cw_header('Training Videos');
     return saved;
   };
 
-    const upload = async (kind, file) => {
+  const upload = async (kind, file) => {
     if (!file) return;
     busy = true;
     document.getElementById('video-file').disabled = true;
@@ -335,34 +342,11 @@ cw_header('Training Videos');
       const mime = file.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg');
       setProgress(kind, 0, 'Preparing ' + kind + ' upload…');
       setMessage('Uploading ' + kind + '…');
-      const presign = await post({
-        action: kind === 'video' ? 'presign_video' : 'presign_poster',
-        video_uuid: uuid,
-        mime_type: mime,
-        byte_size: file.size,
-        filename: file.name,
-      });
-      if (!presign.ok) {
-        setProgress(kind, null);
-        setMessage(presign.error || 'Could not start upload.', 'err');
-        return;
-      }
-      await putWithProgress(presign.put_url, presign.headers || { 'Content-Type': mime }, file, (loaded, total) => {
+      const complete = await putWithProgress(kind, uuid, file, mime, (loaded, total) => {
         const pct = total ? Math.round((loaded / total) * 100) : 0;
         setProgress(kind, total ? loaded / total : 0, 'Uploading ' + kind + '… ' + pct + '% · ' + formatBytes(loaded) + ' of ' + formatBytes(total));
       });
-      setProgress(kind, 1, 'Finishing ' + kind + ' upload…');
-      const complete = await post({
-        action: kind === 'video' ? 'complete_video' : 'complete_poster',
-        video_uuid: uuid,
-        mime_type: mime,
-        byte_size: file.size,
-      });
       setProgress(kind, null);
-      if (!complete.ok) {
-        setMessage(complete.error || 'The file reached storage, but the platform could not mark it as uploaded. Save and try completing again.', 'err');
-        return;
-      }
       fillForm(complete.video, collectGrants());
       await loadList();
       if (kind === 'video' && complete.video.app_visible) {
