@@ -720,9 +720,10 @@ final class ControlledPublishingDocxReader
     }
 
     /**
-     * Non-OM parts often number MAIN sections as 1.1, 1.2 under a generic
+     * Parts often number MAIN sections as 1.1, 1.2 under a generic
      * "1. GENERAL" wrapper. Promote those to chapters 1, 2, 3 and rewrite
      * 1.1.1 → 1.1 so the editor sidebar matches the real manual.
+     * OM-style files with real chapters 1 and 2 are left unchanged.
      *
      * @param list<array<string,mixed>> $nodes
      * @return list<array<string,mixed>>
@@ -762,9 +763,38 @@ final class ControlledPublishingDocxReader
     }
 
     /**
+     * MAIN chapter number => title after dropping a generic 1. GENERAL wrapper.
+     *
+     * @param list<array<string,mixed>> $nodes
+     * @return array<int,string>
+     */
+    public static function promotedMainChaptersFromNodes(array $nodes, int $manualPart): array
+    {
+        $chapters = array();
+        foreach (self::flattenGenericPartChapters($nodes, $manualPart) as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $ref = trim((string)($node['section_ref'] ?? ''));
+            if (preg_match('/^\d+$/', $ref) !== 1) {
+                continue;
+            }
+            $title = trim((string)($node['section_title'] ?? $node['text'] ?? ''));
+            $title = preg_replace('/^\d+(?:\.\d+)*\.?\s+/u', '', $title) ?? $title;
+            $title = trim($title);
+            if ($title === '') {
+                continue;
+            }
+            $chapters[(int)$ref] = $title;
+        }
+
+        return $chapters;
+    }
+
+    /**
      * @param list<array<string,mixed>> $nodes
      */
-    private static function genericPartFlattenPrefix(array $nodes): string
+    public static function genericPartFlattenPrefix(array $nodes): string
     {
         $depth1 = array();
         $depth2Prefixes = array();

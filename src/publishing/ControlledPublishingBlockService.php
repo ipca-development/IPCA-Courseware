@@ -167,6 +167,41 @@ final class ControlledPublishingBlockService
         ));
     }
 
+    /**
+     * Move a block to another chapter page and rewrite its payload (section refs).
+     */
+    public function relocateBlock(
+        int $blockId,
+        int $sectionId,
+        int $sortOrder,
+        array $payload,
+        ?int $actorUserId = null
+    ): void {
+        $block = $this->requireEditableBlock($blockId);
+        $blockType = (string)$block['block_type'];
+        $payload = $this->normalizePayload($blockType, $payload, false);
+        $contentHash = $this->contentHash($blockType, $payload);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_publishing_book_blocks
+            SET section_id = :section_id,
+                sort_order = :sort_order,
+                payload_json = :payload_json,
+                content_hash = :content_hash,
+                updated_by = :updated_by,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+        ");
+        $stmt->execute(array(
+            ':section_id' => $sectionId,
+            ':sort_order' => $sortOrder,
+            ':payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            ':content_hash' => $contentHash,
+            ':updated_by' => $actorUserId,
+            ':id' => $blockId,
+        ));
+    }
+
     public function deleteBlock(int $blockId, ?int $actorUserId = null): void
     {
         $block = $this->requireEditableBlock($blockId);

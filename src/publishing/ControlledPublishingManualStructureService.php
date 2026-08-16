@@ -120,6 +120,7 @@ final class ControlledPublishingManualStructureService
             $removed += $result['removed'];
         }
 
+        $created += $this->promoteGenericWrapperChapters($versionId, $actorUserId);
         $updated += $this->overlayChapterTitlesFromImportedBlocks($versionId);
 
         return array(
@@ -139,7 +140,7 @@ final class ControlledPublishingManualStructureService
     public function ensureVersionStructure(int $versionId, ?int $actorUserId = null): array
     {
         if (!$this->needsStructureSync($versionId)) {
-            return $this->refreshImportedChapterTitles($versionId);
+            return $this->refreshImportedChapterTitles($versionId, $actorUserId);
         }
 
         $result = $this->syncVersionStructure($versionId, $actorUserId);
@@ -153,16 +154,17 @@ final class ControlledPublishingManualStructureService
      *
      * @return array{parts_synced:int,chapters_created:int,chapters_updated:int,chapters_removed:int,skipped:bool}
      */
-    private function refreshImportedChapterTitles(int $versionId): array
+    private function refreshImportedChapterTitles(int $versionId, ?int $actorUserId = null): array
     {
+        $created = $this->promoteGenericWrapperChapters($versionId, $actorUserId);
         $updated = $this->overlayChapterTitlesFromImportedBlocks($versionId);
 
         return array(
             'parts_synced' => 0,
-            'chapters_created' => 0,
+            'chapters_created' => $created,
             'chapters_updated' => $updated,
             'chapters_removed' => 0,
-            'skipped' => $updated === 0,
+            'skipped' => $created === 0 && $updated === 0,
         );
     }
 
@@ -538,6 +540,10 @@ final class ControlledPublishingManualStructureService
         }
 
         foreach ($existingByNumber as $row) {
+            // Keep chapters that already contain imported blocks (promoted 1.1 → 2, etc.).
+            if ((int)($row['block_count'] ?? 0) > 0) {
+                continue;
+            }
             if ($pruneStaleChapters || $this->canRemoveChapterSection($row)) {
                 $this->deleteSection((int)$row['id']);
                 $removed++;
@@ -545,6 +551,9 @@ final class ControlledPublishingManualStructureService
         }
 
         foreach ($orphans as $row) {
+            if ((int)($row['block_count'] ?? 0) > 0) {
+                continue;
+            }
             if ($pruneStaleChapters || $this->canRemoveChapterSection($row)) {
                 $this->deleteSection((int)$row['id']);
                 $removed++;
@@ -1128,6 +1137,263 @@ final class ControlledPublishingManualStructureService
     }
 
     /**
+     * Split a generic "1. GENERAL" chapter whose blocks are numbered 1.1, 1.2, 1.3
+     * into real MAIN chapters 1, 2, 3. Repairs manuals imported before flatten ran.
+     */
+    private function promoteGenericWrapperChapters(int $versionId, ?int $actorUserId = null): int
+    {
+        if ($this->blocks === null || $versionId <= 0) {
+            return 0;
+        }
+
+        $byPart = array();
+        foreach ($this->sections->listFlatSections($versionId) as $row) {
+            if (!is_array($row) || $this->chapterNumberFromSection($row) <= 0) {
+                continue;
+            }
+            $manualPart = (int)($this->decodeMeta($row)['manual_part'] ?? 0);
+            if ($manualPart <= 0) {
+                continue;
+            }
+            $byPart[$manualPart][] = $row;
+        }
+
+        $created = 0;
+        foreach ($byPart as $manualPart => $chapters) {
+            $created += $this->promoteGenericWrapperInPart(
+                $versionId,
+                (int)$manualPart,
+                $chapters,
+                $actorUserId
+            );
+        }
+
+        return $created;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $chapters
+     */
+    private function promoteGenericWrapperInPart(
+        int $versionId,
+        int $manualPart,
+        array $chapters,
+        ?int $actorUserId
+    ): int {
+        if ($this->blocks === null || $chapters === array()) {
+            return 0;
+        }
+
+        $created = 0;
+        foreach ($chapters as $chapter) {
+            $sectionId = (int)($chapter['id'] ?? 0);
+            if ($sectionId <= 0) {
+                continue;
+            }
+            if ($this->partHasPopulatedSiblingChapters($chapters, $sectionId)) {
+                continue;
+            }
+
+            $blocks = $this->blocks->listSectionBlocks($sectionId);
+            $nodes = $this->flattenNodesFromSectionBlocks($blocks);
+            $prefix = ControlledPublishingDocxReader::genericPartFlattenPrefix($nodes);
+            if ($prefix === '') {
+                continue;
+            }
+
+            $wrapperTitle = '';
+            foreach ($nodes as $node) {
+                if ((string)($node['section_ref'] ?? '') === $prefix) {
+                    $wrapperTitle = trim((string)($node['section_title'] ?? ''));
+                    break;
+                }
+            }
+            $rowTitle = trim((string)($chapter['title'] ?? ''));
+            $rowNav = trim((string)($this->decodeMeta($chapter)['nav_label'] ?? ''));
+            $wrapperOk = $wrapperTitle === ''
+                ? (
+                    ControlledPublishingDocxReader::isGenericPartWrapperTitle($rowTitle)
+                    || ControlledPublishingDocxReader::isGenericPartWrapperTitle($rowNav)
+                )
+                : ControlledPublishingDocxReader::isGenericPartWrapperTitle($wrapperTitle);
+            if (!$wrapperOk) {
+                continue;
+            }
+
+            $promotedTitles = ControlledPublishingDocxReader::promotedMainChaptersFromNodes($nodes, $manualPart);
+            if (count($promotedTitles) < 2) {
+                continue;
+            }
+
+            $flattened = ControlledPublishingDocxReader::flattenGenericPartChapters($nodes, $manualPart);
+            $groups = $this->groupFlattenedBlockNodes($flattened);
+            if (count($groups) < 2) {
+                continue;
+            }
+
+            foreach ($nodes as $node) {
+                if ((string)($node['section_ref'] ?? '') !== $prefix) {
+                    continue;
+                }
+                $blockId = (int)($node['block_id'] ?? 0);
+                if ($blockId <= 0) {
+                    continue;
+                }
+                try {
+                    $this->blocks->deleteBlock($blockId, $actorUserId);
+                } catch (Throwable $e) {
+                    unset($e);
+                }
+            }
+
+            foreach ($groups as $chapterNumber => $group) {
+                $title = trim((string)($promotedTitles[$chapterNumber] ?? $group['title'] ?? ''));
+                $targetId = $this->ensureChapterSection(
+                    $versionId,
+                    $manualPart,
+                    (int)$chapterNumber,
+                    $title,
+                    $actorUserId
+                );
+                if ($targetId <= 0) {
+                    continue;
+                }
+                $created++;
+                $sortOrder = 10;
+                foreach ($group['nodes'] as $node) {
+                    $blockId = (int)($node['block_id'] ?? 0);
+                    if ($blockId <= 0) {
+                        continue;
+                    }
+                    $payload = is_array($node['payload'] ?? null) ? $node['payload'] : array();
+                    $newRef = trim((string)($node['section_ref'] ?? ''));
+                    if ($newRef !== '' && preg_match('/^\d+(?:\.\d+)*$/', $newRef) === 1) {
+                        $payload['canonical_section_ref'] = $newRef;
+                        $payload['paragraph_style'] = ControlledPublishingDocxReader::sectionRefToParagraphStyle($newRef);
+                    }
+                    $this->blocks->relocateBlock($blockId, $targetId, $sortOrder, $payload, $actorUserId);
+                    $sortOrder += 10;
+                }
+            }
+        }
+
+        return $created;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $chapters
+     */
+    private function partHasPopulatedSiblingChapters(array $chapters, int $wrapperSectionId): bool
+    {
+        foreach ($chapters as $row) {
+            if ((int)($row['id'] ?? 0) === $wrapperSectionId) {
+                continue;
+            }
+            if ((int)($row['block_count'] ?? 0) > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $blocks
+     * @return list<array<string,mixed>>
+     */
+    private function flattenNodesFromSectionBlocks(array $blocks): array
+    {
+        $nodes = array();
+        foreach ($blocks as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $payload = $this->blocks !== null ? $this->blocks->decodePayload($row) : array();
+            $text = $this->navBlockEntryText((string)($row['block_type'] ?? ''), $payload);
+            $ref = $this->importedBlockSectionRef($payload);
+            $title = $text;
+            $parsed = $text !== '' ? ControlledPublishingDocxReader::parseSectionHeading($text) : null;
+            if ($parsed !== null) {
+                $title = (string)$parsed['title'];
+                if ($ref === '') {
+                    $ref = (string)$parsed['section_ref'];
+                }
+            } elseif ($ref !== '') {
+                $title = $this->stripLeadingSectionRef($text, $ref);
+                if ($title === '') {
+                    $title = $text;
+                }
+            }
+            $nodes[] = array(
+                'block_id' => (int)($row['id'] ?? 0),
+                'payload' => $payload,
+                'section_ref' => $ref,
+                'section_title' => $title,
+                'text' => $text,
+                'paragraph_style' => $this->navBlockParagraphStyle((string)($row['block_type'] ?? ''), $payload),
+            );
+        }
+
+        return $nodes;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     */
+    private function importedBlockSectionRef(array $payload): string
+    {
+        $canon = rtrim(trim((string)($payload['canonical_section_ref'] ?? '')), '.');
+        if ($canon !== '' && preg_match('/^\d+(?:\.\d+)*$/', $canon) === 1) {
+            return $canon;
+        }
+
+        return '';
+    }
+
+    /**
+     * @param list<array<string,mixed>> $nodes
+     * @return array<int, array{title:string, nodes:list<array<string,mixed>>}>
+     */
+    private function groupFlattenedBlockNodes(array $nodes): array
+    {
+        $groups = array();
+        $current = 0;
+        $preamble = array();
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $ref = trim((string)($node['section_ref'] ?? ''));
+            if (preg_match('/^(\d+)/', $ref, $m) === 1) {
+                $chapterNumber = (int)$m[1];
+                if ($chapterNumber > 0) {
+                    $current = $chapterNumber;
+                    if ($preamble !== array()) {
+                        $groups[$current]['nodes'] = array_merge(
+                            $preamble,
+                            $groups[$current]['nodes'] ?? array()
+                        );
+                        $preamble = array();
+                    }
+                    if (preg_match('/^\d+$/', $ref) === 1) {
+                        $groups[$current]['title'] = trim((string)($node['section_title'] ?? ''));
+                    }
+                }
+            }
+            if ($current <= 0) {
+                $preamble[] = $node;
+                continue;
+            }
+            $groups[$current]['nodes'][] = $node;
+            if (!isset($groups[$current]['title'])) {
+                $groups[$current]['title'] = trim((string)($node['section_title'] ?? ''));
+            }
+        }
+
+        return $groups;
+    }
+
+    /**
      * Rewrite cloned OM MAIN titles from imported heading blocks (title / 1. Title).
      */
     private function overlayChapterTitlesFromImportedBlocks(int $versionId): int
@@ -1212,7 +1478,10 @@ final class ControlledPublishingManualStructureService
             if ($depth === 1 && $canonRef === $chapterRef) {
                 $title = $this->stripLeadingSectionRef($text, $chapterRef);
                 $title = $this->formatChapterTitle($title !== '' ? $title : $text);
-                if ($title !== '' && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)) {
+                if ($title !== ''
+                    && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)
+                    && !ControlledPublishingDocxReader::isGenericPartWrapperTitle($title)
+                ) {
                     return $title;
                 }
             }
@@ -1220,7 +1489,10 @@ final class ControlledPublishingManualStructureService
             $parsed = ControlledPublishingDocxReader::parseSectionHeading($text);
             if ($parsed !== null && (string)$parsed['section_ref'] === $chapterRef) {
                 $title = $this->formatChapterTitle((string)$parsed['title']);
-                if ($title !== '' && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)) {
+                if ($title !== ''
+                    && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)
+                    && !ControlledPublishingDocxReader::isGenericPartWrapperTitle($title)
+                ) {
                     return $title;
                 }
             }

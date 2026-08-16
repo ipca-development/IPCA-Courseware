@@ -260,8 +260,7 @@ final class ControlledPublishingDocxImportService
     private function parsePartFile(string $path, int $manualPart, array $version): array
     {
         $parsed = $this->reader->parseFile($path, $manualPart);
-        $manualCode = strtoupper(trim((string)($version['manual_code'] ?? $version['book_key'] ?? 'OM')));
-        if ($manualPart > 0 && !in_array($manualCode, array('OM', 'OMM'), true)) {
+        if ($manualPart > 0) {
             $nodes = is_array($parsed['nodes'] ?? null) ? $parsed['nodes'] : array();
             $parsed['nodes'] = ControlledPublishingDocxReader::flattenGenericPartChapters($nodes, $manualPart);
         }

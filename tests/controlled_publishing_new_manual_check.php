@@ -67,6 +67,7 @@ foreach (array(
     'AND manual_code = :manual_code',
     "\$manualCode === 'OM' && isset(self::OM_DEFAULT_CHAPTER_TITLES[\$number])",
     'overlayChapterTitlesFromImportedBlocks(',
+    'promoteGenericWrapperChapters(',
     '$existingNav !== $navLabel',
     'refreshImportedChapterTitles(',
     'ensureChapterSection(',

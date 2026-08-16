@@ -224,6 +224,22 @@ $assert(
     'Part files that start at 1.1/1.2 with no 1. GENERAL wrapper must still promote those to MAIN chapters.'
 );
 
+$promotedMains = ControlledPublishingDocxReader::promotedMainChaptersFromNodes(array(
+    $heading('1', 'GENERAL'),
+    $heading('1.1', 'Course Enrollment'),
+    $heading('1.1.1', 'Enrollment Phases'),
+    $heading('1.2', 'Training Records'),
+    $heading('1.3', 'Safety Training'),
+), 1);
+$assert(
+    $promotedMains === array(
+        1 => 'Course Enrollment',
+        2 => 'Training Records',
+        3 => 'Safety Training',
+    ),
+    'MAIN chapter list after flatten must be 1 Course Enrollment, 2 Training Records, 3 Safety Training.'
+);
+
 $assert(
     ControlledPublishingDocxReader::isGenericPartWrapperTitle('GENERAL'),
     'GENERAL must be treated as a generic part wrapper.'
@@ -246,6 +262,8 @@ foreach (array(
     'promoteMissingChapterHeadings(',
     'promoteUnnumberedChapterTitles(',
     'flattenGenericPartChapters(',
+    'promotedMainChaptersFromNodes(',
+    'genericPartFlattenPrefix(',
     'isGenericPartWrapperTitle(',
     'allowTitleCaseChapter',
     'isHeadingParagraphStyle(',
@@ -266,6 +284,9 @@ foreach (array(
         $failures[] = 'Missing DocxImportService marker: ' . $marker;
     }
 }
+if (str_contains($import, "if (\$manualPart > 0 && !in_array(\$manualCode, array('OM', 'OMM'), true))")) {
+    $failures[] = 'Generic 1.1/1.2 flatten must also run when the book still uses OM as manual_code.';
+}
 if (!str_contains($nav, 'chapterTitleFromImportedBlocks(')) {
     $failures[] = 'Editor sidebar must prefer imported MAIN chapter titles.';
 }
@@ -275,6 +296,12 @@ if (!str_contains($foundation, 'resetClonedChapterTitles(')) {
 $structure = file_get_contents($root . '/src/publishing/ControlledPublishingManualStructureService.php');
 if (!is_string($structure) || !str_contains($structure, '$pruneStaleChapters || $this->canRemoveChapterSection($row)')) {
     $failures[] = 'Non-OM structure sync must remove leftover OM MAIN chapter shells.';
+}
+if (!is_string($structure) || !str_contains($structure, 'promoteGenericWrapperChapters(')) {
+    $failures[] = 'Editor open must split a generic 1. GENERAL wrapper into MAIN chapters 1/2/3.';
+}
+if (!is_string($structure) || !str_contains($structure, 'Keep chapters that already contain imported blocks')) {
+    $failures[] = 'Structure prune must not delete MAIN chapters that still contain imported blocks.';
 }
 
 if ($failures !== array()) {
