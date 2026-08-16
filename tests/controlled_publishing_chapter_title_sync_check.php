@@ -260,6 +260,7 @@ foreach (array(
     'flattenGenericPartChapters(',
     'parsePartFile(',
     'ensureChapterSection(',
+    'syncVersionStructure($versionId, $actorUserId, false)',
 ) as $marker) {
     if (!str_contains($import, $marker)) {
         $failures[] = 'Missing DocxImportService marker: ' . $marker;

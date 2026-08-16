@@ -146,7 +146,7 @@ final class ControlledPublishingDocxImportService
             $stats['parts_imported']++;
         }
 
-        $this->manualStructure->syncVersionStructure($versionId, $actorUserId);
+        $this->manualStructure->syncVersionStructure($versionId, $actorUserId, false);
 
         foreach ($partFiles as $manualPart => $path) {
             $manualPart = (int)$manualPart;
@@ -172,7 +172,7 @@ final class ControlledPublishingDocxImportService
         }
 
         // Re-sync after blocks import so chapter nav labels pick up depth-1 canonical titles.
-        $this->manualStructure->syncVersionStructure($versionId, $actorUserId);
+        $this->manualStructure->syncVersionStructure($versionId, $actorUserId, true);
 
         return $stats;
     }
@@ -743,17 +743,19 @@ final class ControlledPublishingDocxImportService
             $sectionId = $this->resolveChapterSectionId($versionId, $manualPart, $chapterNumber);
             if ($sectionId <= 0) {
                 $first = is_array($chapterSections[0] ?? null) ? $chapterSections[0] : array();
-                $sectionId = $this->manualStructure->ensureChapterSection(
-                    $versionId,
-                    $manualPart,
-                    $chapterNumber,
-                    (string)($first['title'] ?? ''),
-                    $actorUserId
-                );
-            }
-            if ($sectionId <= 0) {
-                $warnings[] = 'No chapter section found for part ' . $manualPart . ' chapter ' . $chapterNumber;
-                continue;
+                try {
+                    $sectionId = $this->manualStructure->ensureChapterSection(
+                        $versionId,
+                        $manualPart,
+                        $chapterNumber,
+                        (string)($first['title'] ?? ''),
+                        $actorUserId
+                    );
+                } catch (Throwable $e) {
+                    $warnings[] = 'No chapter section found for part ' . $manualPart
+                        . ' chapter ' . $chapterNumber . ': ' . $e->getMessage();
+                    continue;
+                }
             }
 
             if ($force) {

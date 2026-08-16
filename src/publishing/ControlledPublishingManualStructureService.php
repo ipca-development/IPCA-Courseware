@@ -66,7 +66,7 @@ final class ControlledPublishingManualStructureService
      *
      * @return array{parts_synced:int,chapters_created:int,chapters_updated:int,chapters_removed:int}
      */
-    public function syncVersionStructure(int $versionId, ?int $actorUserId = null): array
+    public function syncVersionStructure(int $versionId, ?int $actorUserId = null, bool $pruneStaleChapters = true): array
     {
         $version = $this->foundation->getVersion($versionId);
         if ($version === null) {
@@ -112,7 +112,7 @@ final class ControlledPublishingManualStructureService
                 $chapters,
                 $partIndex + 1,
                 $actorUserId,
-                !in_array($manualCode, array('OM', 'OMM'), true)
+                $pruneStaleChapters && !in_array($manualCode, array('OM', 'OMM'), true)
             );
             $partsSynced++;
             $created += $result['created'];
@@ -315,18 +315,25 @@ final class ControlledPublishingManualStructureService
 
         foreach ($rows as $row) {
             $ref = trim((string)($row['section_ref'] ?? ''));
-            if ($ref === '' || $this->isSkippableCanonicalExcerpt($ref, (string)($row['title'] ?? ''), '')) {
+            if ($ref === '') {
                 continue;
             }
             if (preg_match('/^(\d+)$/', $ref, $chapterMatch)) {
                 $chapterNum = (int)$chapterMatch[1];
-                if ($chapterNum > 0) {
-                    $chapterNumbers[$chapterNum] = true;
-                    $titleCandidate = trim((string)($row['title'] ?? ''));
-                    if ($titleCandidate !== '' && strcasecmp($titleCandidate, 'outline') !== 0) {
-                        $headingTitles[$chapterNum] = $this->formatChapterTitle($titleCandidate);
-                    }
+                $titleCandidate = trim((string)($row['title'] ?? ''));
+                if ($chapterNum <= 0 || $chapterNum > ControlledPublishingDocxReader::MAX_CHAPTER_NUMBER) {
+                    continue;
                 }
+                if (ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt($ref, $titleCandidate)) {
+                    continue;
+                }
+                $chapterNumbers[$chapterNum] = true;
+                if ($titleCandidate !== '' && strcasecmp($titleCandidate, 'outline') !== 0) {
+                    $headingTitles[$chapterNum] = $this->formatChapterTitle($titleCandidate);
+                }
+                continue;
+            }
+            if ($this->isSkippableCanonicalExcerpt($ref, (string)($row['title'] ?? ''), '')) {
                 continue;
             }
             if (preg_match('/^(\d+)\.\d/', $ref, $m)) {
@@ -707,39 +714,58 @@ final class ControlledPublishingManualStructureService
         string $title,
         ?int $actorUserId = null
     ): int {
+        $partKey = 'part_' . max(1, $manualPart);
+        $sectionKey = $this->chapterSectionKey($partKey, $chapterNumber);
+        $title = $this->formatChapterTitle($title !== '' ? $title : ('Chapter ' . $chapterNumber));
+        $navLabel = $chapterNumber . '. ' . $title;
+        $metadata = array(
+            'chapter_number' => $chapterNumber,
+            'manual_part' => $manualPart,
+            'nav_label' => $navLabel,
+            'synced_from_canonical' => true,
+        );
+
         $existing = $this->chapterSectionIdForPart($versionId, $manualPart, $chapterNumber);
+        if ($existing <= 0) {
+            $existing = $this->sectionIdByKey($versionId, $sectionKey);
+        }
         if ($existing > 0) {
+            $this->updateChapterSection($existing, $sectionKey, $title, $chapterNumber * 10, $metadata);
             return $existing;
         }
 
-        $partKey = 'part_' . max(1, $manualPart);
         $parentId = $this->resolvePartParentSectionId($versionId, $partKey);
         if ($parentId <= 0) {
-            return 0;
+            throw new RuntimeException('Missing PART ' . $manualPart . ' section for chapter ' . $chapterNumber . '.');
         }
         $parent = $this->sections->getSection($versionId, $parentId);
         if ($parent === null) {
-            return 0;
+            throw new RuntimeException('PART ' . $manualPart . ' section could not be loaded.');
         }
 
-        $title = $this->formatChapterTitle($title !== '' ? $title : ('Chapter ' . $chapterNumber));
-        $navLabel = $chapterNumber . '. ' . $title;
-
-        return $this->insertChapterSection(
-            $versionId,
-            $parentId,
-            (string)($parent['stable_anchor'] ?? ''),
-            $this->chapterSectionKey($partKey, $chapterNumber),
-            $title,
-            $chapterNumber * 10,
-            array(
-                'chapter_number' => $chapterNumber,
-                'manual_part' => $manualPart,
-                'nav_label' => $navLabel,
-                'synced_from_canonical' => true,
-            ),
-            $actorUserId
-        );
+        try {
+            return $this->insertChapterSection(
+                $versionId,
+                $parentId,
+                (string)($parent['stable_anchor'] ?? ''),
+                $sectionKey,
+                $title,
+                $chapterNumber * 10,
+                $metadata,
+                $actorUserId
+            );
+        } catch (Throwable $e) {
+            $retry = $this->sectionIdByKey($versionId, $sectionKey);
+            if ($retry > 0) {
+                $this->updateChapterSection($retry, $sectionKey, $title, $chapterNumber * 10, $metadata);
+                return $retry;
+            }
+            throw new RuntimeException(
+                'Could not create part ' . $manualPart . ' chapter ' . $chapterNumber . ': ' . $e->getMessage(),
+                0,
+                $e
+            );
+        }
     }
 
     public function chapterSectionIdForPart(int $versionId, int $manualPart, int $chapterNumber): int

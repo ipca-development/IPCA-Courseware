@@ -70,6 +70,7 @@ foreach (array(
     '$existingNav !== $navLabel',
     'refreshImportedChapterTitles(',
     'ensureChapterSection(',
+    'Missing PART ',
     '$allowTitleCaseChapter = preg_match(\'/^\\d+$/\', $sectionRef) === 1',
     '$pruneStaleChapters || $this->canRemoveChapterSection($row)',
 ) as $marker) {
