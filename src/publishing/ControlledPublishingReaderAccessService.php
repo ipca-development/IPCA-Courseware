@@ -54,4 +54,25 @@ final class ControlledPublishingReaderAccessService
 
         return in_array($role, self::DRAFT_PREVIEW_ROLES, true);
     }
+
+    /**
+     * Admins are always allowed. Instructor roles require explicit online approval.
+     *
+     * @param array<string,mixed>|null $user
+     */
+    public function canReviewManuals(?array $user): bool
+    {
+        if (!is_array($user)) {
+            return false;
+        }
+        $role = strtolower(trim((string)($user['role'] ?? '')));
+        if ($role === 'admin') {
+            return true;
+        }
+        if (!in_array($role, array('instructor', 'supervisor', 'chief_instructor'), true)) {
+            return false;
+        }
+
+        return (int)($user['can_manual_reviewer'] ?? 0) === 1;
+    }
 }

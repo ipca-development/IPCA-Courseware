@@ -138,6 +138,27 @@ struct LibraryView: View {
         availableWidth: CGFloat
     ) -> some View {
         switch destination {
+        case .personalNotes:
+            PersonalNotesLibraryView(books: viewModel.books) { book, highlight in
+                presentReader(
+                    book,
+                    bookmark: LocalBookmark(
+                        id: UUID(),
+                        bookKey: highlight.bookKey,
+                        versionID: highlight.versionID,
+                        pageNumber: highlight.pageNumber,
+                        label: "Personal Note",
+                        createdAt: highlight.createdAt,
+                        stableAnchor: highlight.stableAnchor,
+                        blockAnchor: highlight.sourceFragmentID,
+                        officialLocation: nil,
+                        semanticLocation: nil,
+                        personalReaderPageNumber: highlight.pageNumber,
+                        clientUpdatedAt: highlight.clientUpdatedAt,
+                        deletedAt: nil
+                    )
+                )
+            }
         case .help:
             LibraryPlaceholderView(
                 title: "Help & Support",
@@ -196,6 +217,7 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
     case categories = "Categories"
     case downloads = "Downloads"
     case bookmarks = "Bookmarks"
+    case personalNotes = "Personal Notes"
     case help = "Help & Support"
     case more = "More"
 
@@ -208,6 +230,7 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
         case .categories: "square.grid.2x2"
         case .downloads: "arrow.down.to.line"
         case .bookmarks: "bookmark"
+        case .personalNotes: "note.text"
         case .help: "questionmark.circle"
         case .more: "ellipsis"
         }
@@ -255,7 +278,7 @@ private struct LibrarySidebar: View {
     let onSignOut: () -> Void
 
     private let primaryItems: [LibraryDestination] = [
-        .home, .library, .categories, .downloads, .bookmarks, .help,
+        .home, .library, .categories, .downloads, .bookmarks, .personalNotes, .help,
     ]
 
     var body: some View {
@@ -404,6 +427,7 @@ private struct LibraryContentView: View {
         case .downloads: "Downloads"
         case .categories: "Categories"
         case .bookmarks: "Bookmarks"
+        case .personalNotes: "Personal Notes"
         default: "My Library"
         }
     }
@@ -413,6 +437,7 @@ private struct LibraryContentView: View {
         case .downloads: "Manuals available without an internet connection."
         case .categories: "Browse the manuals available to your account."
         case .bookmarks: "Return to manuals containing your saved bookmarks."
+        case .personalNotes: "Review your personal notes, grouped by manual."
         default: "All manuals and books, always at your fingertips."
         }
     }
@@ -991,6 +1016,83 @@ private struct BookmarksByManualSection: View {
     }
 }
 
+private struct PersonalNotesLibraryView: View {
+    @ObservedObject private var session = ManualReaderSessionStore.shared
+    let books: [LibraryBook]
+    let onSelect: (LibraryBook, TextHighlightAnchor) -> Void
+
+    private var groupedNotes: [(LibraryBook, [TextHighlightAnchor])] {
+        books.compactMap { book in
+            let notes = session.highlights
+                .filter {
+                    $0.bookKey == book.bookKey
+                        && $0.deletedAt == nil
+                        && !($0.personalNote ?? "").trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty
+                }
+                .sorted { $0.createdAt > $1.createdAt }
+            return notes.isEmpty ? nil : (book, notes)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                LibraryHeader(
+                    title: "Personal Notes",
+                    subtitle: "Your private notes, grouped by manual.",
+                    user: ManualReaderSessionStore.shared.user,
+                    isPhone: UIDevice.current.userInterfaceIdiom != .pad
+                )
+                if groupedNotes.isEmpty {
+                    ContentUnavailableView(
+                        "No Personal Notes",
+                        systemImage: "note.text",
+                        description: Text("Notes added while reading will appear here.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 280)
+                } else {
+                    ForEach(groupedNotes, id: \.0.id) { book, notes in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(book.displayTitle)
+                                .font(.headline)
+                                .foregroundStyle(IPCAReaderTheme.navy)
+                            ForEach(notes) { note in
+                                Button { onSelect(book, note) } label: {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Rectangle()
+                                            .fill(Color.yellow)
+                                            .frame(width: 4)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(note.personalNote ?? "")
+                                                .foregroundStyle(Color.black)
+                                                .multilineTextAlignment(.leading)
+                                            Text("Page \(note.pageNumber) · \(note.selectedText)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(14)
+                                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(24)
+        }
+        .background(IPCAReaderTheme.shelfBackground)
+        .navigationTitle("Personal Notes")
+    }
+}
+
 private struct CategoriesSection: View {
     let categories: [(ManualCategory, Int)]
     @Binding var selectedCategory: ManualCategory?
@@ -1083,6 +1185,9 @@ private struct MoreView: View {
             Section {
                 Button { onOpen(.bookmarks) } label: {
                     Label("Bookmarks", systemImage: "bookmark")
+                }
+                Button { onOpen(.personalNotes) } label: {
+                    Label("Personal Notes", systemImage: "note.text")
                 }
                 Button { onOpen(.help) } label: {
                     Label("Help & Support", systemImage: "questionmark.circle")

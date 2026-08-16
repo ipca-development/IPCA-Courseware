@@ -143,6 +143,7 @@ struct ManualReaderAPIClient {
             loggedIn: true,
             user: ReaderUser(id: 0, email: email, name: displayName, role: ""),
             canReadManuals: true,
+            canReviewManuals: nil,
             error: nil
         )
     }
@@ -151,16 +152,16 @@ struct ManualReaderAPIClient {
         do {
             let library = try await fetchLibrary()
             if library.ok {
-                return AuthSessionResponse(ok: true, loggedIn: true, user: nil, canReadManuals: true, error: nil)
+                return AuthSessionResponse(ok: true, loggedIn: true, user: nil, canReadManuals: true, canReviewManuals: nil, error: nil)
             }
         } catch ManualReaderAPIError.unauthorized {
-            return AuthSessionResponse(ok: true, loggedIn: false, user: nil, canReadManuals: nil, error: nil)
+            return AuthSessionResponse(ok: true, loggedIn: false, user: nil, canReadManuals: nil, canReviewManuals: nil, error: nil)
         } catch ManualReaderAPIError.forbidden {
-            return AuthSessionResponse(ok: true, loggedIn: false, user: nil, canReadManuals: nil, error: nil)
+            return AuthSessionResponse(ok: true, loggedIn: false, user: nil, canReadManuals: nil, canReviewManuals: nil, error: nil)
         } catch ManualReaderAPIError.invalidJSON {
-            return AuthSessionResponse(ok: true, loggedIn: false, user: nil, canReadManuals: nil, error: nil)
+            return AuthSessionResponse(ok: true, loggedIn: false, user: nil, canReadManuals: nil, canReviewManuals: nil, error: nil)
         }
-        return AuthSessionResponse(ok: true, loggedIn: false, user: nil, canReadManuals: nil, error: nil)
+        return AuthSessionResponse(ok: true, loggedIn: false, user: nil, canReadManuals: nil, canReviewManuals: nil, error: nil)
     }
 
     private func formURLEncodedBody(_ fields: [String: String]) -> Data {
@@ -328,6 +329,105 @@ struct ManualReaderAPIClient {
                 extra: [("q", query)]
             )
         )
+    }
+
+    func pullAnnotations(
+        bookKey: String,
+        versionId: Int
+    ) async throws -> ReaderAnnotationSyncResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: [
+                ("action", "annotations_pull"),
+                ("book", bookKey),
+                ("version_id", String(versionId)),
+            ]
+        )
+    }
+
+    func pushAnnotations(
+        bookKey: String,
+        versionId: Int,
+        annotations: [[String: Any]]
+    ) async throws -> ReaderAnnotationSyncResponse {
+        try await postJSON(
+            "student/api/manual_reader_api.php?action=annotations_push",
+            body: [
+                "book": bookKey,
+                "version_id": versionId,
+                "annotations": annotations,
+            ]
+        )
+    }
+
+    func fetchReviewThreads(
+        bookKey: String,
+        versionId: Int
+    ) async throws -> ReviewThreadsResponse {
+        try await get(
+            "student/api/manual_reader_api.php",
+            query: [
+                ("action", "review_threads"),
+                ("book", bookKey),
+                ("version_id", String(versionId)),
+            ]
+        )
+    }
+
+    func createReviewThread(
+        bookKey: String,
+        versionId: Int,
+        selection: ReaderTextSelection,
+        pageNumber: Int,
+        body text: String,
+        threadUUID: UUID = UUID(),
+        commentUUID: UUID = UUID()
+    ) async throws -> ReviewNoteThread {
+        let response: ReviewThreadsResponse = try await postJSON(
+            "student/api/manual_reader_api.php?action=review_thread_create",
+            body: [
+                "book": bookKey,
+                "version_id": versionId,
+                "body": text,
+                "anchor": [
+                    "thread_uuid": threadUUID.uuidString,
+                    "comment_uuid": commentUUID.uuidString,
+                    "page_number": pageNumber,
+                    "selected_text": selection.selectedText,
+                    "source_fragment_id": selection.sourceFragmentID ?? "",
+                    "stable_anchor": selection.stableAnchor ?? "",
+                    "start_offset": selection.startOffset,
+                    "end_offset": selection.endOffset,
+                ],
+            ]
+        )
+        guard let thread = response.thread else {
+            throw ManualReaderAPIError.badResponse("Reviewer thread was not returned.")
+        }
+        return thread
+    }
+
+    func addReviewComment(
+        bookKey: String,
+        versionId: Int,
+        threadUUID: String,
+        body text: String,
+        commentUUID: UUID = UUID()
+    ) async throws -> ReviewNoteThread {
+        let response: ReviewThreadsResponse = try await postJSON(
+            "student/api/manual_reader_api.php?action=review_comment_add",
+            body: [
+                "book": bookKey,
+                "version_id": versionId,
+                "thread_uuid": threadUUID,
+                "comment_uuid": commentUUID.uuidString,
+                "body": text,
+            ]
+        )
+        guard let thread = response.thread else {
+            throw ManualReaderAPIError.badResponse("Reviewer thread was not returned.")
+        }
+        return thread
     }
 
     // MARK: - Transport
@@ -503,6 +603,9 @@ extension ManualReaderAPIClient {
               width: \(pageWidth)px;
               height: \(pageHeight)px;
               transform-origin: top left;
+              -webkit-touch-callout: none;
+              -webkit-user-select: text;
+              user-select: text;
             }
             .reader-page-header-region > .cpb-page-header,
             .reader-page-footer-region > .cpb-page-footer {
@@ -521,6 +624,10 @@ extension ManualReaderAPIClient {
               -webkit-box-decoration-break: clone;
             }
             .mr-search-hit { background: #fff34d !important; }
+            .mr-user-highlight.is-noted {
+              border-left: 4px solid #f4c430 !important;
+              padding-left: 2px;
+            }
           </style>
         </head>
         <body class="mr-body" data-mr-theme="\(theme)" data-reader-validated="\(isValidatedPersonalPage ? "1" : "0")">
@@ -547,6 +654,8 @@ enum ReaderHTMLAnnotationService {
                 "anchor": $0.stableAnchor ?? "",
                 "start": $0.startOffset,
                 "color": $0.color.cssColor,
+                "id": $0.id.uuidString,
+                "noted": !($0.personalNote ?? "").isEmpty,
             ]
         }
         let payloadData = try? JSONSerialization.data(withJSONObject: payload)
@@ -571,15 +680,48 @@ enum ReaderHTMLAnnotationService {
             while (walker.nextNode()) nodes.push(walker.currentNode);
             return nodes;
           }
-          function wrap(node, start, length, className, color) {
+          function wrap(node, start, length, className, color, item) {
             if (!node || length <= 0) return;
             const range = document.createRange();
             range.setStart(node, start);
             range.setEnd(node, start + length);
+            wrapRange(range, className, color, item);
+          }
+          function wrapRange(range, className, color, item) {
             const mark = document.createElement('mark');
             mark.className = className;
             if (color) mark.style.backgroundColor = color;
-            range.surroundContents(mark);
+            if (item && item.id) mark.dataset.highlightId = item.id;
+            if (item && item.noted) mark.classList.add('is-noted');
+            try {
+              range.surroundContents(mark);
+            } catch (_) {
+              const contents = range.extractContents();
+              mark.appendChild(contents);
+              range.insertNode(mark);
+            }
+          }
+          function boundaryAt(nodes, offset) {
+            let consumed = 0;
+            for (const node of nodes) {
+              const next = consumed + node.nodeValue.length;
+              if (offset <= next) {
+                return { node: node, offset: Math.max(0, offset - consumed) };
+              }
+              consumed = next;
+            }
+            const last = nodes[nodes.length - 1];
+            return last ? { node: last, offset: last.nodeValue.length } : null;
+          }
+          function wrapGlobal(nodes, start, length, className, color, item) {
+            const from = boundaryAt(nodes, start);
+            const to = boundaryAt(nodes, start + length);
+            if (!from || !to) return false;
+            const range = document.createRange();
+            range.setStart(from.node, from.offset);
+            range.setEnd(to.node, to.offset);
+            wrapRange(range, className, color, item);
+            return true;
           }
           function highlightExact(item) {
             let scope = root;
@@ -594,22 +736,17 @@ enum ReaderHTMLAnnotationService {
                 || scope;
             }
             const nodes = textNodes(scope);
-            let consumed = 0;
-            for (const node of nodes) {
-              const local = item.start - consumed;
-              if (local >= 0 && local + item.text.length <= node.nodeValue.length
-                  && node.nodeValue.substr(local, item.text.length) === item.text) {
-                wrap(node, local, item.text.length, 'mr-user-highlight', item.color);
-                return;
-              }
-              consumed += node.nodeValue.length;
+            const fullText = nodes.map(node => node.nodeValue).join('');
+            if (item.start >= 0
+                && fullText.substr(item.start, item.text.length) === item.text
+                && wrapGlobal(
+                  nodes, item.start, item.text.length, 'mr-user-highlight', item.color, item
+                )) {
+              return;
             }
-            for (const node of nodes) {
-              const found = node.nodeValue.indexOf(item.text);
-              if (found >= 0) {
-                wrap(node, found, item.text.length, 'mr-user-highlight', item.color);
-                return;
-              }
+            const found = fullText.indexOf(item.text);
+            if (found >= 0) {
+              wrapGlobal(nodes, found, item.text.length, 'mr-user-highlight', item.color, item);
             }
           }
           highlights.forEach(highlightExact);
@@ -622,7 +759,7 @@ enum ReaderHTMLAnnotationService {
               while (count < 200) {
                 const found = node.nodeValue.toLocaleLowerCase().indexOf(needle, offset);
                 if (found < 0) break;
-                wrap(node, found, searchTerm.length, 'mr-search-hit', null);
+                wrap(node, found, searchTerm.length, 'mr-search-hit', null, null);
                 count += 1;
                 break;
               }

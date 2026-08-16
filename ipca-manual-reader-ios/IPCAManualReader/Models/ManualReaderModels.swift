@@ -12,6 +12,7 @@ struct AuthSessionResponse: Codable {
     var loggedIn: Bool?
     var user: ReaderUser?
     var canReadManuals: Bool?
+    var canReviewManuals: Bool?
     var error: String?
 
     enum CodingKeys: String, CodingKey {
@@ -19,6 +20,7 @@ struct AuthSessionResponse: Codable {
         case loggedIn = "logged_in"
         case user
         case canReadManuals = "can_read_manuals"
+        case canReviewManuals = "can_review_manuals"
         case error
     }
 }
@@ -664,6 +666,8 @@ struct LocalBookmark: Codable, Identifiable, Hashable {
     var officialLocation: OfficialDocumentLocation?
     var semanticLocation: SemanticReaderLocation?
     var personalReaderPageNumber: Int?
+    var clientUpdatedAt: Date?
+    var deletedAt: Date?
 }
 
 enum ReaderHighlightColor: String, Codable, CaseIterable, Identifiable {
@@ -701,6 +705,7 @@ struct ReaderTextSelection: Codable, Hashable {
     var endOffset: Int
     var prefix: String?
     var suffix: String?
+    var existingHighlightID: UUID?
 }
 
 struct TextHighlightAnchor: Codable, Identifiable, Hashable {
@@ -716,6 +721,148 @@ struct TextHighlightAnchor: Codable, Identifiable, Hashable {
     var prefix: String?
     var suffix: String?
     var color: ReaderHighlightColor
+    var personalNote: String?
+    var clientUpdatedAt: Date?
+    var deletedAt: Date?
+    var createdAt: Date
+}
+
+struct ReaderServerAnnotation: Codable {
+    var annotationUUID: String
+    var kind: String
+    var bookKey: String
+    var versionID: Int
+    var pageNumber: Int
+    var label: String?
+    var selectedText: String?
+    var sourceFragmentID: String?
+    var stableAnchor: String?
+    var startOffset: Int?
+    var endOffset: Int?
+    var prefix: String?
+    var suffix: String?
+    var color: String?
+    var personalNote: String?
+    var clientUpdatedAtUTC: String
+    var serverUpdatedAtUTC: String?
+    var deletedAtUTC: String?
+    var createdAtUTC: String?
+
+    enum CodingKeys: String, CodingKey {
+        case annotationUUID = "annotation_uuid"
+        case kind
+        case bookKey = "book_key"
+        case versionID = "version_id"
+        case pageNumber = "page_number"
+        case label
+        case selectedText = "selected_text"
+        case sourceFragmentID = "source_fragment_id"
+        case stableAnchor = "stable_anchor"
+        case startOffset = "start_offset"
+        case endOffset = "end_offset"
+        case prefix, suffix, color
+        case personalNote = "personal_note"
+        case clientUpdatedAtUTC = "client_updated_at_utc"
+        case serverUpdatedAtUTC = "server_updated_at_utc"
+        case deletedAtUTC = "deleted_at_utc"
+        case createdAtUTC = "created_at_utc"
+    }
+}
+
+struct ReaderAnnotationSyncResponse: Codable {
+    var ok: Bool
+    var canReviewManuals: Bool?
+    var annotations: [ReaderServerAnnotation]
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case canReviewManuals = "can_review_manuals"
+        case annotations
+    }
+}
+
+struct ReviewNoteAuthor: Codable, Hashable, Identifiable {
+    var id: Int
+    var name: String
+    var role: String
+    var photoURL: String?
+    var initials: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, role, initials
+        case photoURL = "photo_url"
+    }
+}
+
+struct ReviewNoteComment: Codable, Identifiable, Hashable {
+    var commentUUID: String
+    var body: String
+    var createdAtUTC: String
+    var updatedAtUTC: String
+    var author: ReviewNoteAuthor
+
+    var id: String { commentUUID }
+
+    enum CodingKeys: String, CodingKey {
+        case commentUUID = "comment_uuid"
+        case body
+        case createdAtUTC = "created_at_utc"
+        case updatedAtUTC = "updated_at_utc"
+        case author
+    }
+}
+
+struct ReviewNoteThread: Codable, Identifiable, Hashable {
+    var threadUUID: String
+    var versionID: Int
+    var bookKey: String
+    var pageNumber: Int
+    var selectedText: String
+    var sourceFragmentID: String?
+    var stableAnchor: String?
+    var startOffset: Int?
+    var endOffset: Int?
+    var status: String
+    var createdAtUTC: String
+    var updatedAtUTC: String
+    var createdBy: ReviewNoteAuthor
+    var comments: [ReviewNoteComment]
+
+    var id: String { threadUUID }
+
+    enum CodingKeys: String, CodingKey {
+        case threadUUID = "thread_uuid"
+        case versionID = "version_id"
+        case bookKey = "book_key"
+        case pageNumber = "page_number"
+        case selectedText = "selected_text"
+        case sourceFragmentID = "source_fragment_id"
+        case stableAnchor = "stable_anchor"
+        case startOffset = "start_offset"
+        case endOffset = "end_offset"
+        case status
+        case createdAtUTC = "created_at_utc"
+        case updatedAtUTC = "updated_at_utc"
+        case createdBy = "created_by"
+        case comments
+    }
+}
+
+struct ReviewThreadsResponse: Codable {
+    var ok: Bool
+    var threads: [ReviewNoteThread]?
+    var thread: ReviewNoteThread?
+}
+
+struct PendingReviewNote: Codable, Identifiable, Hashable {
+    var id: UUID
+    var threadUUID: String?
+    var commentUUID: UUID
+    var bookKey: String
+    var versionID: Int
+    var pageNumber: Int
+    var selection: ReaderTextSelection
+    var body: String
     var createdAt: Date
 }
 

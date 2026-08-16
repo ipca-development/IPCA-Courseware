@@ -10,12 +10,12 @@ struct BookPageCurlView: UIViewControllerRepresentable {
     let pageBackground: Color
     let bookKey: String
     @Binding var currentIndex: Int
-    let onTap: () -> Void
+    let onTap: (Int) -> Void
     let onPageReady: (Int) -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
     let onExternalLink: (URL) -> Void
-    let onTextSelection: (ReaderTextSelection) -> Void
+    let onTextSelection: (Int, ReaderTextSelection) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -62,8 +62,26 @@ struct BookPageCurlView: UIViewControllerRepresentable {
             self.parent = parent
         }
 
-        @objc func didTap() {
-            parent.onTap()
+        @objc func didTap(_ recognizer: UITapGestureRecognizer) {
+            guard let controller else { return }
+            let location = recognizer.location(in: controller.view)
+            let visible = controller.viewControllers?
+                .compactMap { $0 as? PageHostController }
+                .filter { parent.pages.indices.contains($0.position) } ?? []
+            if let hit = visible.first(where: {
+                let frame = $0.view.convert($0.view.bounds, to: controller.view)
+                return frame.contains(location)
+            }) {
+                parent.onTap(hit.position)
+                return
+            }
+            let positions = visible.map(\.position).sorted()
+            guard !positions.isEmpty else { return }
+            if parent.isLandscape && positions.count > 1 {
+                parent.onTap(location.x < controller.view.bounds.midX ? positions[0] : positions[1])
+            } else {
+                parent.onTap(positions[0])
+            }
         }
 
         func gestureRecognizer(
@@ -88,7 +106,9 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
                     onExternalLink: parent.onExternalLink,
-                    onTextSelection: parent.onTextSelection,
+                    onTextSelection: { [weak self] selection in
+                        self?.parent.onTextSelection(position, selection)
+                    },
                     onZoomChanged: { [weak self] zoomed in
                         self?.setZoomed(zoomed, at: position)
                     }
@@ -164,7 +184,9 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
                     onExternalLink: parent.onExternalLink,
-                    onTextSelection: parent.onTextSelection,
+                    onTextSelection: { [weak self] selection in
+                        self?.parent.onTextSelection(position, selection)
+                    },
                     onZoomChanged: { [weak self] zoomed in
                         self?.setZoomed(zoomed, at: position)
                     }
@@ -388,16 +410,26 @@ private struct PhysicalManualPage: View {
                     .allowsHitTesting(false)
                 }
             }
-            .overlay(alignment: .topTrailing) {
-                if session.bookmarks(for: bookKey).contains(where: { $0.pageNumber == pageNumber }) {
-                    Image(systemName: "bookmark.fill")
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundStyle(IPCAReaderTheme.navy)
+            .overlay(alignment: .topLeading) {
+                if let ordinal = session.bookmarkOrdinal(
+                    for: bookKey,
+                    pageNumber: pageNumber
+                ) {
+                    ZStack(alignment: .top) {
+                        Image(systemName: "bookmark.fill")
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundStyle(IPCAReaderTheme.navy)
+                        Text("\(ordinal)")
+                            .font(.system(size: ordinal > 99 ? 8 : 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .monospacedDigit()
+                            .padding(.top, 7)
+                    }
                         .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
                         .padding(.top, 4)
-                        .padding(.trailing, 8)
+                        .padding(.leading, 8)
                         .allowsHitTesting(false)
-                        .accessibilityLabel("Bookmarked page")
+                        .accessibilityLabel("Bookmark \(ordinal)")
                 }
             }
         }

@@ -1,6 +1,12 @@
 import SwiftUI
 import WebKit
 
+private final class ReaderWebView: WKWebView {
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        false
+    }
+}
+
 struct ManualPageWebView: UIViewRepresentable {
     let html: String
     let baseURL: URL
@@ -37,7 +43,7 @@ struct ManualPageWebView: UIViewRepresentable {
                 forMainFrameOnly: true
             )
         )
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let webView = ReaderWebView(frame: .zero, configuration: config)
         webView.isOpaque = true
         webView.backgroundColor = UIColor(pageBackground)
         webView.scrollView.backgroundColor = UIColor(pageBackground)
@@ -163,7 +169,9 @@ struct ManualPageWebView: UIViewRepresentable {
                     startOffset: body["startOffset"] as? Int ?? 0,
                     endOffset: body["endOffset"] as? Int ?? text.count,
                     prefix: body["prefix"] as? String,
-                    suffix: body["suffix"] as? String
+                    suffix: body["suffix"] as? String,
+                    existingHighlightID: (body["existingHighlightID"] as? String)
+                        .flatMap(UUID.init(uuidString:))
                 )
             )
         }
@@ -215,6 +223,7 @@ struct ManualPageWebView: UIViewRepresentable {
           try { prefixRange.setEnd(range.startContainer, range.startOffset); } catch (_) {}
           const startOffset = prefixRange.toString().length;
           const scopeText = scope.textContent || '';
+          const existingMark = element && element.closest('.mr-user-highlight[data-highlight-id]');
           window.webkit.messageHandlers.readerSelection.postMessage({
             selectedText: text,
             sourceFragmentID: fragment?.getAttribute('data-source-fragment-id')
@@ -224,7 +233,8 @@ struct ManualPageWebView: UIViewRepresentable {
             startOffset: startOffset,
             endOffset: startOffset + text.length,
             prefix: scopeText.substring(Math.max(0, startOffset - 24), startOffset),
-            suffix: scopeText.substring(startOffset + text.length, startOffset + text.length + 24)
+            suffix: scopeText.substring(startOffset + text.length, startOffset + text.length + 24),
+            existingHighlightID: existingMark?.dataset.highlightId || ''
           });
         }, 20);
       }, { passive: true });

@@ -27,17 +27,40 @@ function cstgs_flash_take(): ?array
 
 // Detect whether the optional is_compliance_admin column exists (phase 2.5 migration).
 $hasCAFlag = false;
+$hasManualReviewerFlag = false;
 try {
     $pdo->query('SELECT is_compliance_admin FROM users LIMIT 0');
     $hasCAFlag = true;
 } catch (Throwable) {
     $hasCAFlag = false;
 }
+try {
+    $pdo->query('SELECT can_manual_reviewer FROM users LIMIT 0');
+    $hasManualReviewerFlag = true;
+} catch (Throwable) {
+    $hasManualReviewerFlag = false;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     try {
-        if ($action === 'toggle_compliance_admin') {
+        if ($action === 'toggle_manual_reviewer') {
+            if (!$hasManualReviewerFlag) {
+                throw new RuntimeException(
+                    'can_manual_reviewer is unavailable — apply the manual reader annotations migration.'
+                );
+            }
+            $targetId = (int)($_POST['user_id'] ?? 0);
+            $flag = ((string)($_POST['flag'] ?? '0')) === '1' ? 1 : 0;
+            $pdo->prepare(
+                "UPDATE users SET can_manual_reviewer = ?
+                 WHERE id = ? AND role IN ('instructor','supervisor','chief_instructor')"
+            )->execute(array($flag, $targetId));
+            cstgs_flash(
+                'success',
+                $flag === 1 ? 'Manual reviewer approval granted.' : 'Manual reviewer approval revoked.'
+            );
+        } elseif ($action === 'toggle_compliance_admin') {
             if (!$hasCAFlag) {
                 throw new RuntimeException('is_compliance_admin column not present — run scripts/sql/compliance_os_phase_2_5_users_is_compliance_admin.sql.');
             }
@@ -95,6 +118,20 @@ try {
     )->fetchAll(PDO::FETCH_ASSOC) ?: array();
 } catch (Throwable) {
     $managerUsers = array();
+}
+
+$manualReviewers = array();
+try {
+    $sql = $hasManualReviewerFlag
+        ? "SELECT id, name, email, role, can_manual_reviewer FROM users
+           WHERE role IN ('instructor','supervisor','chief_instructor')
+           ORDER BY COALESCE(NULLIF(name,''), email) ASC LIMIT 1000"
+        : "SELECT id, name, email, role FROM users
+           WHERE role IN ('instructor','supervisor','chief_instructor')
+           ORDER BY COALESCE(NULLIF(name,''), email) ASC LIMIT 1000";
+    $manualReviewers = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: array();
+} catch (Throwable) {
+    $manualReviewers = array();
 }
 
 // Compliance row counts for "system health" panel.
@@ -220,6 +257,61 @@ compliance_page_open(array(
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
+    <?php endif; ?>
+  </section>
+
+  <section class="cmp-card">
+    <div class="cmp-list-head" style="margin-bottom:14px;">
+      <div class="cmp-list-title">
+        <?= compliance_ui_icon('users') ?>
+        <span>Manual reviewer approvals</span>
+      </div>
+      <div class="cmp-count-pill"><?= count($manualReviewers) ?></div>
+    </div>
+    <p style="margin:0 0 14px;color:var(--text-muted);font-size:14px;">
+      Admins may always add reviewer notes. Instructors and supervisors require explicit approval here.
+    </p>
+    <?php if (!$hasManualReviewerFlag): ?>
+      <p class="cmp-flash is-warn">
+        Apply <code>scripts/sql/2026_08_16_manual_reader_annotations.sql</code> to enable approvals.
+      </p>
+    <?php elseif ($manualReviewers === array()): ?>
+      <p style="color:var(--text-muted);margin:0;">No instructors or supervisors on file.</p>
+    <?php else: ?>
+      <div class="compliance-table-wrap">
+        <table class="compliance-table">
+          <thead><tr>
+            <th>Name</th><th>Email</th><th>Role</th><th>Reviewer notes</th><th></th>
+          </tr></thead>
+          <tbody>
+            <?php foreach ($manualReviewers as $reviewer):
+              $reviewFlag = (int)($reviewer['can_manual_reviewer'] ?? 0);
+            ?>
+              <tr>
+                <td><?= h((string)($reviewer['name'] ?? '')) ?></td>
+                <td class="cmp-mono"><?= h((string)($reviewer['email'] ?? '')) ?></td>
+                <td><?= h(ucwords(str_replace('_', ' ', (string)($reviewer['role'] ?? '')))) ?></td>
+                <td>
+                  <span class="cmp-pill <?= $reviewFlag === 1 ? 'cmp-pill-ok' : '' ?>">
+                    <?= $reviewFlag === 1 ? 'Approved' : 'Not approved' ?>
+                  </span>
+                </td>
+                <td>
+                  <form method="post" style="display:inline;">
+                    <input type="hidden" name="action" value="toggle_manual_reviewer">
+                    <input type="hidden" name="user_id" value="<?= (int)$reviewer['id'] ?>">
+                    <input type="hidden" name="flag" value="<?= $reviewFlag === 1 ? '0' : '1' ?>">
+                    <button type="submit" class="<?= $reviewFlag === 1 ? 'cmp-btn-secondary' : '' ?>"
+                      style="height:32px;min-height:32px;padding:0 12px;font-size:12px;">
+                      <?= $reviewFlag === 1 ? 'Revoke' : 'Approve' ?>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
       </div>
     <?php endif; ?>
   </section>

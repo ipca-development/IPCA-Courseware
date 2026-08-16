@@ -17,6 +17,13 @@ struct ReaderView: View {
     @State private var renderedPages: Set<Int> = []
     @State private var pendingExternalURL: URL?
     @State private var pendingTextSelection: ReaderTextSelection?
+    @State private var focusedPageIndex: Int?
+    @State private var selectionPageIndex: Int?
+    @State private var showHighlightColors = false
+    @State private var showPersonalNoteEditor = false
+    @State private var personalNoteDraft = ""
+    @State private var showReviewerThread = false
+    @State private var reviewerNoteDraft = ""
     private let onExit: (() -> Void)?
     private let initialBookmark: LocalBookmark?
 
@@ -82,7 +89,7 @@ struct ReaderView: View {
                 if showChrome && !isOpening {
                     ReaderControlsOverlay(
                         pageDescription: pageDescription,
-                        isBookmarked: viewModel.isCurrentPageBookmarked(),
+                        isBookmarked: viewModel.isPageBookmarked(at: selectedPageIndex),
                         isExiting: isExiting,
                         onClose: exitReader,
                         onSearch: {
@@ -94,7 +101,13 @@ struct ReaderView: View {
                             scheduleControlsAutoHide()
                         },
                         onBookmark: {
-                            viewModel.toggleBookmark(label: "Page \(viewModel.currentPage?.pageNumber ?? 0)")
+                            let pageNumber = viewModel.pages.indices.contains(selectedPageIndex)
+                                ? viewModel.pages[selectedPageIndex].pageNumber
+                                : 0
+                            viewModel.toggleBookmark(
+                                at: selectedPageIndex,
+                                label: "Page \(pageNumber)"
+                            )
                             scheduleControlsAutoHide()
                         },
                         showSearch: $showSearch,
@@ -108,6 +121,33 @@ struct ReaderView: View {
                     .padding(.horizontal, 18)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if pendingTextSelection != nil && !isOpening {
+                    VStack(spacing: 8) {
+                        Spacer()
+                        if showHighlightColors {
+                            HighlightColorMenu(
+                                onSelect: applyHighlightColor,
+                                onBack: { showHighlightColors = false }
+                            )
+                        } else {
+                            ReaderSelectionActionMenu(
+                                hasHighlight: selectedHighlight != nil,
+                                canAddReviewerNote: session.canAddReviewerNotes
+                                    && viewModel.book.isDraftPreview,
+                                onHighlight: { showHighlightColors = true },
+                                onPersonalNote: openPersonalNoteEditor,
+                                onReviewerNote: openReviewerNoteEditor,
+                                onRemoveHighlight: removeSelectedHighlight,
+                                onDismiss: dismissSelectionMenu
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, max(28, proxy.safeAreaInsets.bottom + 18))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(200)
                 }
             }
             .task(
@@ -134,6 +174,7 @@ struct ReaderView: View {
             }
         }
         .onChange(of: viewModel.currentIndex) { _, newIndex in
+            focusedPageIndex = nil
             Task { await viewModel.goToIndex(newIndex) }
         }
         .onDisappear {
@@ -158,24 +199,36 @@ struct ReaderView: View {
                     + (pendingExternalURL?.absoluteString ?? "")
             )
         }
-        .confirmationDialog(
-            "Highlight Selected Text",
-            isPresented: Binding(
-                get: { pendingTextSelection != nil },
-                set: { if !$0 { pendingTextSelection = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            ForEach(ReaderHighlightColor.allCases) { color in
-                Button(color.label) {
-                    guard let selection = pendingTextSelection else { return }
-                    pendingTextSelection = nil
-                    Task { await viewModel.addHighlight(selection, color: color) }
-                }
-            }
-            Button("Cancel", role: .cancel) { pendingTextSelection = nil }
-        } message: {
-            Text(pendingTextSelection?.selectedText ?? "")
+        .sheet(isPresented: $showPersonalNoteEditor) {
+            PersonalNoteEditorSheet(
+                selectedText: pendingTextSelection?.selectedText ?? "",
+                note: $personalNoteDraft,
+                hasHighlight: selectedHighlight != nil,
+                hasPersonalNote: !(selectedHighlight?.personalNote ?? "").isEmpty,
+                onSave: savePersonalNote,
+                onRemoveNote: removePersonalNote,
+                onRemoveHighlight: removeSelectedHighlight
+            )
+        }
+        .sheet(isPresented: $showReviewerThread) {
+            ReviewerConversationSheet(
+                selectedText: pendingTextSelection?.selectedText ?? "",
+                thread: pendingTextSelection.flatMap {
+                    viewModel.reviewThread(matching: $0, at: selectionTargetIndex)
+                },
+                isLoading: viewModel.isLoadingReviewThreads,
+                errorMessage: viewModel.reviewErrorMessage,
+                pendingNotes: session.pendingReviewNotes.filter {
+                    $0.bookKey == viewModel.book.bookKey
+                        && $0.versionID == viewModel.book.versionId
+                        && $0.pageNumber
+                            == (viewModel.pages.indices.contains(selectionTargetIndex)
+                                ? viewModel.pages[selectionTargetIndex].pageNumber
+                                : -1)
+                },
+                draft: $reviewerNoteDraft,
+                onSend: sendReviewerNote
+            )
         }
     }
 
@@ -241,7 +294,14 @@ struct ReaderView: View {
                     pageBackground: pageBackgroundColor,
                     bookKey: viewModel.book.bookKey,
                     currentIndex: $viewModel.currentIndex,
-                    onTap: toggleControls,
+                    onTap: { pageIndex in
+                        focusedPageIndex = pageIndex
+                        controlsHideTask?.cancel()
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showChrome = true
+                        }
+                        scheduleControlsAutoHide()
+                    },
                     onPageReady: { renderedPages.insert($0) },
                     onNavigateToAnchor: { anchor in
                         Task { await viewModel.goToStableAnchor(anchor) }
@@ -250,7 +310,12 @@ struct ReaderView: View {
                         Task { await viewModel.goToSection(sectionID) }
                     },
                     onExternalLink: { pendingExternalURL = $0 },
-                    onTextSelection: { pendingTextSelection = $0 }
+                    onTextSelection: { pageIndex, selection in
+                        focusedPageIndex = pageIndex
+                        selectionPageIndex = pageIndex
+                        pendingTextSelection = selection
+                        showHighlightColors = false
+                    }
                 )
                 .id(landscape)
 
@@ -277,8 +342,96 @@ struct ReaderView: View {
     }
 
     private var pageDescription: String {
-        guard let page = viewModel.currentPage else { return "" }
+        guard viewModel.pages.indices.contains(selectedPageIndex) else { return "" }
+        let page = viewModel.pages[selectedPageIndex]
         return "Page \(page.pageNumber) of \(viewModel.pageCount)"
+    }
+
+    private var selectedPageIndex: Int {
+        guard let focusedPageIndex, viewModel.pages.indices.contains(focusedPageIndex) else {
+            return viewModel.currentIndex
+        }
+        return focusedPageIndex
+    }
+
+    private var selectionTargetIndex: Int {
+        guard let selectionPageIndex,
+              viewModel.pages.indices.contains(selectionPageIndex) else {
+            return selectedPageIndex
+        }
+        return selectionPageIndex
+    }
+
+    private var selectedHighlight: TextHighlightAnchor? {
+        guard let pendingTextSelection else { return nil }
+        return viewModel.highlight(
+            matching: pendingTextSelection,
+            at: selectionTargetIndex
+        )
+    }
+
+    private func applyHighlightColor(_ color: ReaderHighlightColor) {
+        guard let selection = pendingTextSelection else { return }
+        let index = selectionTargetIndex
+        dismissSelectionMenu()
+        Task { await viewModel.addHighlight(selection, color: color, at: index) }
+    }
+
+    private func openPersonalNoteEditor() {
+        personalNoteDraft = selectedHighlight?.personalNote ?? ""
+        showPersonalNoteEditor = true
+    }
+
+    private func savePersonalNote() {
+        guard let selection = pendingTextSelection else { return }
+        let note = personalNoteDraft
+        let index = selectionTargetIndex
+        showPersonalNoteEditor = false
+        dismissSelectionMenu()
+        Task {
+            await viewModel.savePersonalNote(note, selection: selection, at: index)
+        }
+    }
+
+    private func removePersonalNote() {
+        guard let highlight = selectedHighlight else { return }
+        let index = selectionTargetIndex
+        viewModel.removePersonalNote(from: highlight, at: index)
+        showPersonalNoteEditor = false
+        dismissSelectionMenu()
+    }
+
+    private func removeSelectedHighlight() {
+        guard let highlight = selectedHighlight else { return }
+        viewModel.removeHighlight(highlight, at: selectionTargetIndex)
+        showPersonalNoteEditor = false
+        dismissSelectionMenu()
+    }
+
+    private func openReviewerNoteEditor() {
+        reviewerNoteDraft = ""
+        showReviewerThread = true
+        Task { await viewModel.loadReviewThreads() }
+    }
+
+    private func sendReviewerNote() {
+        guard let selection = pendingTextSelection else { return }
+        let text = reviewerNoteDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        reviewerNoteDraft = ""
+        Task {
+            await viewModel.sendReviewerNote(
+                text,
+                selection: selection,
+                at: selectionTargetIndex
+            )
+        }
+    }
+
+    private func dismissSelectionMenu() {
+        pendingTextSelection = nil
+        selectionPageIndex = nil
+        showHighlightColors = false
     }
 
     private var contentsPopover: some View {
@@ -286,12 +439,15 @@ struct ReaderView: View {
             nav: viewModel.nav,
             sectionPageIndex: viewModel.sectionPageIndex,
             referencePageIndex: viewModel.tocReferencePageIndex,
-            currentSectionId: viewModel.currentPage?.sectionId
+            currentSectionId: viewModel.currentPage?.sectionId,
+            bookmarkedPageNumbers: Set(
+                session.bookmarks(for: viewModel.book.bookKey).map(\.pageNumber)
+            )
         ) { node in
             showTOC = false
             Task { await viewModel.goToTOCNode(node) }
         }
-        .frame(minWidth: 390, idealWidth: 430, minHeight: 520)
+        .frame(minWidth: 507, idealWidth: 559, minHeight: 520)
         .foregroundStyle(.primary)
         .preferredColorScheme(readerColorScheme)
     }
@@ -525,17 +681,14 @@ struct TableOfContentsView: View {
     let sectionPageIndex: [Int: Int]
     let referencePageIndex: [String: Int]
     let currentSectionId: Int?
+    let bookmarkedPageNumbers: Set<Int>
     let onSelect: (NavNode) -> Void
 
     var body: some View {
         NavigationStack {
             List {
                 ForEach(flatten(nav), id: \.id) { row in
-                    if row.node.isSeparator == true {
-                        Divider()
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    } else if row.node.isNavigable == true,
+                    if row.node.isNavigable == true,
                               pageNumber(for: row.node) != nil {
                         Button {
                             onSelect(row.node)
@@ -544,12 +697,15 @@ struct TableOfContentsView: View {
                         }
                         .buttonStyle(.plain)
                         .listRowBackground(Color.white)
+                        .listRowInsets(rowInsets(for: row))
                     } else {
                         tocRowLabel(row)
                             .listRowBackground(Color.white)
+                            .listRowInsets(rowInsets(for: row))
                     }
                 }
             }
+            .listRowSpacing(0)
             .scrollContentBackground(.hidden)
             .background(Color.white)
             .navigationTitle("Contents")
@@ -569,16 +725,33 @@ struct TableOfContentsView: View {
     private func tocRowLabel(_ row: TocRow) -> some View {
         HStack {
             Text(row.node.title ?? "Section")
-                .font(row.node.isGroup == true || row.depth == 0 ? .headline : .body)
+                .font(row.node.isGroup == true || row.depth == 0 ? .subheadline.weight(.semibold) : .footnote)
                 .foregroundStyle(Color.black)
                 .padding(.leading, CGFloat(row.depth) * 16)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
             Spacer()
             if let page = pageNumber(for: row.node) {
+                if bookmarkedPageNumbers.contains(page) {
+                    Image(systemName: "bookmark.fill")
+                        .font(.caption2)
+                        .foregroundStyle(IPCAReaderTheme.navy)
+                        .accessibilityLabel("Bookmarked")
+                }
                 Text("\(page)")
                     .foregroundStyle(Color.black.opacity(0.65))
                     .monospacedDigit()
             }
         }
+    }
+
+    private func rowInsets(for row: TocRow) -> EdgeInsets {
+        EdgeInsets(
+            top: row.node.isGroup == true ? 3 : 5,
+            leading: 16,
+            bottom: row.node.isGroup == true ? 3 : 5,
+            trailing: 16
+        )
     }
 
     private func pageNumber(for node: NavNode) -> Int? {
@@ -615,7 +788,8 @@ struct TableOfContentsView: View {
             if let level = subtitleLevel(node), level > 2 {
                 continue
             }
-            if node.isSeparator == true || !(node.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if node.isSeparator != true
+                && !(node.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 rows.append(TocRow(id: "\(nodePath)-\(node.nodeID)", node: node, depth: depth))
             }
             if let children = node.children, !children.isEmpty {
@@ -672,7 +846,32 @@ struct SearchSheetView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color.white)
-            .searchable(text: $query, prompt: "Search manual")
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(Color.black.opacity(0.65))
+                    TextField("Search manual", text: $query)
+                        .foregroundStyle(Color.black)
+                        .tint(IPCAReaderTheme.navy)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(Color.black.opacity(0.65))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.white)
+            }
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -706,20 +905,333 @@ struct BookmarksSheetView: View {
                     } label: {
                         HStack {
                             Text(bookmark.label)
+                                .foregroundStyle(Color.black)
                             Spacer()
                             Text("p. \(bookmark.pageNumber)")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.black)
                         }
                     }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.white)
                 }
                 .onDelete { indexSet in
                     let items = session.bookmarks(for: bookKey)
                     indexSet.map { items[$0] }.forEach(session.removeBookmark)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.white)
             .navigationTitle("Bookmarks")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .background(Color.white)
+        .preferredColorScheme(.light)
+    }
+}
+
+private struct ReaderSelectionActionMenu: View {
+    let hasHighlight: Bool
+    let canAddReviewerNote: Bool
+    let onHighlight: () -> Void
+    let onPersonalNote: () -> Void
+    let onReviewerNote: () -> Void
+    let onRemoveHighlight: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                menuButton("Highlight", action: onHighlight)
+                Divider().frame(height: 28)
+                menuButton("Add Personal Note", action: onPersonalNote)
+                if canAddReviewerNote {
+                    Divider().frame(height: 28)
+                    menuButton("Add Reviewer Note", action: onReviewerNote)
+                }
+                if hasHighlight {
+                    Divider().frame(height: 28)
+                    menuButton("Remove Highlight", color: .red, action: onRemoveHighlight)
+                }
+                Divider().frame(height: 28)
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .frame(width: 42, height: 42)
+                }
+                .foregroundStyle(Color.black)
+            }
+            .padding(.horizontal, 8)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.ultraThickMaterial, in: Capsule())
+        .environment(\.colorScheme, .light)
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+    }
+
+    private func menuButton(
+        _ title: String,
+        color: Color = .black,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(title, action: action)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 16)
+            .frame(height: 48)
+            .buttonStyle(.plain)
+    }
+}
+
+private struct HighlightColorMenu: View {
+    let onSelect: (ReaderHighlightColor) -> Void
+    let onBack: () -> Void
+
+    var body: some View {
+        HStack(spacing: 18) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.left")
+                    .foregroundStyle(Color.black)
+                    .frame(width: 36, height: 36)
+            }
+            ForEach(ReaderHighlightColor.allCases) { color in
+                Button { onSelect(color) } label: {
+                    Circle()
+                        .fill(Color(hex: color.cssColor))
+                        .frame(width: 30, height: 30)
+                        .overlay(Circle().stroke(Color.black.opacity(0.12), lineWidth: 1))
+                }
+                .accessibilityLabel(color.label)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(.ultraThickMaterial, in: Capsule())
+        .environment(\.colorScheme, .light)
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+    }
+}
+
+private struct PersonalNoteEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let selectedText: String
+    @Binding var note: String
+    let hasHighlight: Bool
+    let hasPersonalNote: Bool
+    let onSave: () -> Void
+    let onRemoveNote: () -> Void
+    let onRemoveHighlight: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(selectedText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.yellow.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+                TextEditor(text: $note)
+                    .foregroundStyle(Color.black)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(uiColor: .secondarySystemBackground))
+                    )
+                if hasHighlight {
+                    HStack {
+                        if hasPersonalNote {
+                            Button("Remove Note", role: .destructive, action: onRemoveNote)
+                        }
+                        Spacer()
+                        Button("Remove Highlight", role: .destructive, action: onRemoveHighlight)
+                    }
+                }
+            }
+            .padding(18)
+            .navigationTitle("Personal Note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: onSave)
+                        .disabled(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .preferredColorScheme(.light)
+    }
+}
+
+private struct ReviewerConversationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var session = ManualReaderSessionStore.shared
+    let selectedText: String
+    let thread: ReviewNoteThread?
+    let isLoading: Bool
+    let errorMessage: String?
+    let pendingNotes: [PendingReviewNote]
+    @Binding var draft: String
+    let onSend: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Text(selectedText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(uiColor: .secondarySystemBackground))
+
+                if isLoading {
+                    ProgressView("Loading reviewer conversation…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(thread?.comments ?? []) { comment in
+                                reviewerComment(comment)
+                            }
+                            ForEach(pendingNotes) { note in
+                                HStack {
+                                    Spacer(minLength: 48)
+                                    VStack(alignment: .trailing, spacing: 3) {
+                                        Text("Pending sync")
+                                            .font(.caption2)
+                                            .foregroundStyle(.orange)
+                                        Text(note.body)
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 13)
+                                            .padding(.vertical, 9)
+                                            .background(
+                                                IPCAReaderTheme.navy.opacity(0.72),
+                                                in: RoundedRectangle(cornerRadius: 16)
+                                            )
+                                    }
+                                }
+                            }
+                            if thread?.comments.isEmpty != false && pendingNotes.isEmpty {
+                                ContentUnavailableView(
+                                    "Start the Review",
+                                    systemImage: "bubble.left.and.bubble.right",
+                                    description: Text(
+                                        "Your reviewer note will be visible to approved reviewers and in the online editor."
+                                    )
+                                )
+                                .padding(.top, 40)
+                            }
+                        }
+                        .padding(16)
+                    }
+                }
+
+                if let errorMessage, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal)
+                }
+
+                VStack(spacing: 8) {
+                    HStack(alignment: .bottom, spacing: 8) {
+                        TextField("Reviewer note", text: $draft, axis: .vertical)
+                            .foregroundStyle(Color.black)
+                            .lineLimit(1...5)
+                            .padding(10)
+                            .background(
+                                Color(uiColor: .secondarySystemBackground),
+                                in: RoundedRectangle(cornerRadius: 18)
+                            )
+                        Button(action: onSend) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundStyle(IPCAReaderTheme.navy)
+                        }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    Text("Regulation references will be enabled in the next phase.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .background(.ultraThinMaterial)
+            }
+            .navigationTitle("Reviewer Notes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.light)
+    }
+
+    private func reviewerComment(_ comment: ReviewNoteComment) -> some View {
+        let isCurrentUser = comment.author.id == session.user?.id
+        return HStack(alignment: .bottom, spacing: 8) {
+            if isCurrentUser { Spacer(minLength: 48) }
+            if !isCurrentUser { reviewerAvatar(comment.author) }
+            VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 3) {
+                Text(comment.author.name)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(comment.body)
+                    .foregroundStyle(isCurrentUser ? Color.white : Color.black)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(
+                        isCurrentUser ? IPCAReaderTheme.navy : Color(uiColor: .secondarySystemBackground),
+                        in: RoundedRectangle(cornerRadius: 16)
+                    )
+            }
+            if isCurrentUser { reviewerAvatar(comment.author) }
+            if !isCurrentUser { Spacer(minLength: 48) }
+        }
+    }
+
+    @ViewBuilder
+    private func reviewerAvatar(_ author: ReviewNoteAuthor) -> some View {
+        let url = ManualReaderAPIClient.absoluteURL(
+            from: author.photoURL,
+            baseURL: session.baseURL ?? URL(fileURLWithPath: "/")
+        )
+        if let url {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                initialsAvatar(author.initials)
+            }
+            .frame(width: 34, height: 34)
+            .clipShape(Circle())
+        } else {
+            initialsAvatar(author.initials)
+        }
+    }
+
+    private func initialsAvatar(_ initials: String) -> some View {
+        Text(initials)
+            .font(.caption2.bold())
+            .foregroundStyle(.white)
+            .frame(width: 34, height: 34)
+            .background(IPCAReaderTheme.navy, in: Circle())
+    }
+}
+
+private extension Color {
+    init(hex: String) {
+        let value = UInt64(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+        self.init(
+            .sRGB,
+            red: Double((value >> 16) & 0xff) / 255,
+            green: Double((value >> 8) & 0xff) / 255,
+            blue: Double(value & 0xff) / 255,
+            opacity: 1
+        )
     }
 }
 

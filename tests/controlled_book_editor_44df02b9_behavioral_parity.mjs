@@ -225,7 +225,7 @@ async function exerciseRow(page, row) {
     const payload = (id) => [...window.__requests].reverse().find((request) => request.action === 'update_block' && request.payload.block_id === id)?.payload.payload;
     // Phase B pagination transport is additive and has its own behavioral contract.
     // Keep this parity observation focused on the frozen source-editor API calls and payloads.
-    const observe = (value) => ({ value, requests: window.__requests.filter((r) => !['load', 'get_callout_presets', 'list', 'section_index', 'generate', 'live_ensure', 'live_status', 'live_retry'].includes(r.action)) });
+    const observe = (value) => ({ value, requests: window.__requests.filter((r) => !['load', 'get_callout_presets', 'list', 'section_index', 'generate', 'live_ensure', 'live_status', 'live_retry', 'review_threads'].includes(r.action)) });
     await wait(50);
 
     switch (name) {

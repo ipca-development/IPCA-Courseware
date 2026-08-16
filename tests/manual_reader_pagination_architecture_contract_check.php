@@ -118,7 +118,8 @@ require_markers(
     array(
         '"Open External Website?"',
         'viewModel.openingProgress',
-        '"Highlight Selected Text"',
+        'ReaderSelectionActionMenu',
+        'PersonalNoteEditorSheet',
         'bookmarksPopover',
         '.preferredColorScheme(.light)',
     ),

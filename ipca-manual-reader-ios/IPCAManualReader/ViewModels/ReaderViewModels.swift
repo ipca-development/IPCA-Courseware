@@ -64,6 +64,9 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var paginationValidation: PaginationValidationSummary?
     @Published var searchResults: [SearchResult] = []
     @Published var isSearching = false
+    @Published private(set) var reviewThreads: [ReviewNoteThread] = []
+    @Published private(set) var isLoadingReviewThreads = false
+    @Published var reviewErrorMessage: String?
     @Published private(set) var activeSearchTerm: String?
     @Published private(set) var openingProgress = 0.05
     @Published private(set) var openingMessage = "Opening manual…"
@@ -212,6 +215,14 @@ final class ReaderViewModel: ObservableObject {
         currentPageHTML = pageHTMLByIndex[startIndex] ?? ""
         openingProgress = 0.85
         openingMessage = "Rendering visible pages…"
+        Task { [weak self] in
+            guard let self else { return }
+            await ManualReaderSessionStore.shared.syncAnnotations(
+                bookKey: self.book.bookKey,
+                versionID: self.book.versionId
+            )
+            await self.reloadCurrentPageStyles()
+        }
 #if DEBUG
         print(
             "READER_PACKAGE_APPLIED pages=\(pages.count) start=\(startIndex) "
@@ -456,34 +467,216 @@ final class ReaderViewModel: ObservableObject {
         }
     }
 
-    func addHighlight(_ selection: ReaderTextSelection, color: ReaderHighlightColor) async {
-        guard let page = currentPage,
+    func highlight(
+        matching selection: ReaderTextSelection,
+        at index: Int
+    ) -> TextHighlightAnchor? {
+        guard pages.indices.contains(index) else { return nil }
+        return ManualReaderSessionStore.shared.highlight(
+            matching: selection,
+            bookKey: book.bookKey,
+            pageNumber: pages[index].pageNumber
+        )
+    }
+
+    func addHighlight(
+        _ selection: ReaderTextSelection,
+        color: ReaderHighlightColor,
+        at index: Int
+    ) async {
+        guard pages.indices.contains(index),
               !selection.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
-        ManualReaderSessionStore.shared.addHighlight(
+        let page = pages[index]
+        let store = ManualReaderSessionStore.shared
+        if let existing = highlight(matching: selection, at: index) {
+            store.updateHighlight(id: existing.id, color: color)
+            refreshAnnotationHTML(at: index)
+            scheduleAnnotationSync()
+            return
+        }
+        store.addHighlight(
             bookKey: book.bookKey,
             versionID: book.versionId,
             pageNumber: page.pageNumber,
             selection: selection,
             color: color
         )
-        pageHTMLByIndex[currentIndex] = nil
-        preparePageHTML(at: currentIndex)
-        currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
+        refreshAnnotationHTML(at: index)
+        scheduleAnnotationSync()
     }
 
-    func toggleBookmark(label: String) {
-        guard let page = currentPage else { return }
-        let store = ManualReaderSessionStore.shared
-        let semanticLocation = currentSemanticLocation
-        let blockAnchor = semanticLocation?.semanticAnchor
-            ?? rawHTMLForCurrentPage().flatMap(firstBlockAnchor)
-        let officialLocation = resolvedOfficialLocation()
-        if let existing = store.bookmarks(for: book.bookKey).first(where: {
-            if let sourceFragmentID = semanticLocation?.sourceFragmentID {
-                return $0.semanticLocation?.sourceFragmentID == sourceFragmentID
+    func removeHighlight(_ highlight: TextHighlightAnchor, at index: Int) {
+        ManualReaderSessionStore.shared.removeHighlight(highlight)
+        refreshAnnotationHTML(at: index)
+        scheduleAnnotationSync()
+    }
+
+    func savePersonalNote(
+        _ note: String,
+        selection: ReaderTextSelection,
+        at index: Int
+    ) async {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if highlight(matching: selection, at: index) == nil {
+            await addHighlight(selection, color: .fluorescentYellow, at: index)
+        }
+        guard let highlight = highlight(matching: selection, at: index) else { return }
+        ManualReaderSessionStore.shared.updateHighlight(
+            id: highlight.id,
+            personalNote: .some(trimmed.isEmpty ? nil : trimmed)
+        )
+        refreshAnnotationHTML(at: index)
+        scheduleAnnotationSync()
+    }
+
+    func loadReviewThreads() async {
+        guard ManualReaderSessionStore.shared.canAddReviewerNotes,
+              let client = ManualReaderSessionStore.shared.client else { return }
+        isLoadingReviewThreads = true
+        defer { isLoadingReviewThreads = false }
+        do {
+            let response = try await client.fetchReviewThreads(
+                bookKey: book.bookKey,
+                versionId: book.versionId
+            )
+            reviewThreads = response.threads ?? []
+            reviewErrorMessage = nil
+            await flushPendingReviewNotes()
+        } catch {
+            reviewErrorMessage = error.localizedDescription
+        }
+    }
+
+    func reviewThread(
+        matching selection: ReaderTextSelection,
+        at index: Int
+    ) -> ReviewNoteThread? {
+        guard pages.indices.contains(index) else { return nil }
+        return reviewThreads.first {
+            guard $0.pageNumber == pages[index].pageNumber else { return false }
+            if let sourceFragmentID = selection.sourceFragmentID,
+               !sourceFragmentID.isEmpty,
+               $0.sourceFragmentID != sourceFragmentID {
+                return false
             }
+            return selection.startOffset < ($0.endOffset ?? 0)
+                && selection.endOffset > ($0.startOffset ?? 0)
+        }
+    }
+
+    func sendReviewerNote(
+        _ text: String,
+        selection: ReaderTextSelection,
+        at index: Int
+    ) async {
+        guard pages.indices.contains(index),
+              let client = ManualReaderSessionStore.shared.client else { return }
+        let existing = reviewThread(matching: selection, at: index)
+        let pending = PendingReviewNote(
+            id: UUID(),
+            threadUUID: existing?.threadUUID,
+            commentUUID: UUID(),
+            bookKey: book.bookKey,
+            versionID: book.versionId,
+            pageNumber: pages[index].pageNumber,
+            selection: selection,
+            body: text,
+            createdAt: Date()
+        )
+        ManualReaderSessionStore.shared.queueReviewNote(pending)
+        do {
+            let thread: ReviewNoteThread
+            if let existing {
+                thread = try await client.addReviewComment(
+                    bookKey: book.bookKey,
+                    versionId: book.versionId,
+                    threadUUID: existing.threadUUID,
+                    body: text,
+                    commentUUID: pending.commentUUID
+                )
+            } else {
+                thread = try await client.createReviewThread(
+                    bookKey: book.bookKey,
+                    versionId: book.versionId,
+                    selection: selection,
+                    pageNumber: pages[index].pageNumber,
+                    body: text,
+                    threadUUID: pending.id,
+                    commentUUID: pending.commentUUID
+                )
+            }
+            ManualReaderSessionStore.shared.removePendingReviewNote(id: pending.id)
+            reviewThreads.removeAll { $0.threadUUID == thread.threadUUID }
+            reviewThreads.insert(thread, at: 0)
+            reviewErrorMessage = nil
+        } catch {
+            reviewErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func flushPendingReviewNotes() async {
+        guard let client = ManualReaderSessionStore.shared.client else { return }
+        let pending = ManualReaderSessionStore.shared.pendingReviewNotes.filter {
+            $0.bookKey == book.bookKey && $0.versionID == book.versionId
+        }
+        for note in pending {
+            do {
+                let thread: ReviewNoteThread
+                if let threadUUID = note.threadUUID {
+                    thread = try await client.addReviewComment(
+                        bookKey: note.bookKey,
+                        versionId: note.versionID,
+                        threadUUID: threadUUID,
+                        body: note.body,
+                        commentUUID: note.commentUUID
+                    )
+                } else {
+                    thread = try await client.createReviewThread(
+                        bookKey: note.bookKey,
+                        versionId: note.versionID,
+                        selection: note.selection,
+                        pageNumber: note.pageNumber,
+                        body: note.body,
+                        threadUUID: note.id,
+                        commentUUID: note.commentUUID
+                    )
+                }
+                ManualReaderSessionStore.shared.removePendingReviewNote(id: note.id)
+                reviewThreads.removeAll { $0.threadUUID == thread.threadUUID }
+                reviewThreads.append(thread)
+            } catch {
+                reviewErrorMessage = "Offline reviewer note saved locally. It will retry automatically."
+                return
+            }
+        }
+    }
+
+    func removePersonalNote(from highlight: TextHighlightAnchor, at index: Int) {
+        ManualReaderSessionStore.shared.updateHighlight(
+            id: highlight.id,
+            personalNote: .some(nil)
+        )
+        refreshAnnotationHTML(at: index)
+        scheduleAnnotationSync()
+    }
+
+    private func refreshAnnotationHTML(at index: Int) {
+        pageHTMLByIndex[index] = nil
+        preparePageHTML(at: index)
+        if index == currentIndex {
+            currentPageHTML = pageHTMLByIndex[index] ?? ""
+        }
+    }
+
+    func toggleBookmark(at index: Int, label: String) {
+        guard pages.indices.contains(index) else { return }
+        let page = pages[index]
+        let store = ManualReaderSessionStore.shared
+        let blockAnchor = offlinePackage?.page(number: page.pageNumber)?.pageHtml
+            .flatMap(firstBlockAnchor)
+        if let existing = store.bookmarks(for: book.bookKey).first(where: {
             if let blockAnchor, let existingBlockAnchor = $0.blockAnchor, !existingBlockAnchor.isEmpty {
                 return existingBlockAnchor == blockAnchor
             }
@@ -498,25 +691,27 @@ final class ReaderViewModel: ObservableObject {
                 label: label,
                 stableAnchor: page.stableAnchor,
                 blockAnchor: blockAnchor,
-                officialLocation: officialLocation,
-                semanticLocation: semanticLocation
+                officialLocation: nil,
+                semanticLocation: nil
             )
+        }
+        scheduleAnnotationSync()
+    }
+
+    func isPageBookmarked(at index: Int) -> Bool {
+        guard pages.indices.contains(index) else { return false }
+        let page = pages[index]
+        return ManualReaderSessionStore.shared.bookmarks(for: book.bookKey).contains {
+            return $0.pageNumber == page.pageNumber
         }
     }
 
-    func isCurrentPageBookmarked() -> Bool {
-        guard let page = currentPage else { return false }
-        let semanticLocation = currentSemanticLocation
-        let blockAnchor = semanticLocation?.semanticAnchor
-            ?? rawHTMLForCurrentPage().flatMap(firstBlockAnchor)
-        return ManualReaderSessionStore.shared.bookmarks(for: book.bookKey).contains {
-            if let sourceFragmentID = semanticLocation?.sourceFragmentID {
-                return $0.semanticLocation?.sourceFragmentID == sourceFragmentID
-            }
-            if let blockAnchor, let existingBlockAnchor = $0.blockAnchor, !existingBlockAnchor.isEmpty {
-                return existingBlockAnchor == blockAnchor
-            }
-            return $0.pageNumber == page.pageNumber
+    private func scheduleAnnotationSync() {
+        Task {
+            await ManualReaderSessionStore.shared.syncAnnotations(
+                bookKey: book.bookKey,
+                versionID: book.versionId
+            )
         }
     }
 

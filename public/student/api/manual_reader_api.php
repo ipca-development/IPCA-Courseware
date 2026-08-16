@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAccessService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleManifestService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -31,7 +32,7 @@ function mr_input(): array
 function mr_validate_book_key(string $bookKey): string
 {
     $bookKey = strtoupper(trim($bookKey));
-    if (!in_array($bookKey, array('OM', 'OMM'), true)) {
+    if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,95}$/', $bookKey)) {
         throw new RuntimeException('Invalid book key.');
     }
 
@@ -52,6 +53,21 @@ function mr_can_preview_drafts(?array $user, ControlledPublishingReaderAccessSer
     $role = strtolower(trim((string)($user['role'] ?? '')));
 
     return in_array($role, array('instructor', 'chief_instructor', 'admin'), true);
+}
+
+function mr_review_user(PDO $pdo, ?array $user): ?array
+{
+    if (!is_array($user) || strtolower((string)($user['role'] ?? '')) === 'admin') {
+        return $user;
+    }
+    try {
+        $stmt = $pdo->prepare('SELECT can_manual_reviewer FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute(array((int)($user['id'] ?? 0)));
+        $user['can_manual_reviewer'] = (int)$stmt->fetchColumn();
+    } catch (Throwable) {
+        $user['can_manual_reviewer'] = 0;
+    }
+    return $user;
 }
 
 /**
@@ -102,7 +118,7 @@ function mr_reader_context(
 }
 
 try {
-    $user = cw_current_user($pdo);
+    $user = mr_review_user($pdo, cw_current_user($pdo));
     if (!is_array($user) || (int)($user['id'] ?? 0) <= 0) {
         mr_json(401, array('ok' => false, 'error' => 'Login required'));
     }
@@ -117,10 +133,101 @@ try {
     }
 
     $reader = new ControlledPublishingReaderService($pdo);
+    $annotations = new ControlledPublishingReaderAnnotationService($pdo);
     $canPreviewDrafts = mr_can_preview_drafts($user, $access);
+    $canReviewManuals = $access->canReviewManuals($user);
     $action = strtolower(trim((string)($_GET['action'] ?? '')));
 
     switch ($action) {
+        case 'annotations_pull':
+            $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            mr_json(200, array(
+                'ok' => true,
+                'can_review_manuals' => $canReviewManuals,
+                'annotations' => $annotations->listPersonalAnnotations(
+                    $userId,
+                    (int)$ctx['version']['id']
+                ),
+            ));
+
+        case 'annotations_push':
+            $in = mr_input();
+            $bookKey = mr_validate_book_key((string)($in['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey, $in);
+            $changes = $in['annotations'] ?? array();
+            if (!is_array($changes)) {
+                throw new RuntimeException('annotations must be an array.');
+            }
+            mr_json(200, array(
+                'ok' => true,
+                'annotations' => $annotations->pushPersonalAnnotations(
+                    $userId,
+                    (int)$ctx['version']['id'],
+                    $bookKey,
+                    array_values(array_filter($changes, 'is_array'))
+                ),
+            ));
+
+        case 'review_threads':
+            if (!$canReviewManuals) {
+                mr_json(403, array('ok' => false, 'error' => 'Reviewer approval required.'));
+            }
+            $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey);
+            mr_json(200, array(
+                'ok' => true,
+                'threads' => $annotations->listReviewThreads((int)$ctx['version']['id']),
+            ));
+
+        case 'review_thread_create':
+            if (!$canReviewManuals) {
+                mr_json(403, array('ok' => false, 'error' => 'Reviewer approval required.'));
+            }
+            $in = mr_input();
+            $bookKey = mr_validate_book_key((string)($in['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey, $in);
+            if (!$ctx['is_preview']) {
+                throw new RuntimeException('Reviewer notes may only be added to draft manuals.');
+            }
+            $anchor = $in['anchor'] ?? array();
+            if (!is_array($anchor)) {
+                throw new RuntimeException('anchor is required.');
+            }
+            mr_json(200, array(
+                'ok' => true,
+                'thread' => $annotations->createReviewThread(
+                    $userId,
+                    (int)$ctx['version']['id'],
+                    $bookKey,
+                    $anchor,
+                    (string)($in['body'] ?? '')
+                ),
+            ));
+
+        case 'review_comment_add':
+            if (!$canReviewManuals) {
+                mr_json(403, array('ok' => false, 'error' => 'Reviewer approval required.'));
+            }
+            $in = mr_input();
+            $bookKey = mr_validate_book_key((string)($in['book'] ?? ''));
+            $ctx = mr_reader_context($reader, $access, $user, $bookKey, $in);
+            if (!$ctx['is_preview']) {
+                throw new RuntimeException('Reviewer notes may only be added to draft manuals.');
+            }
+            $regulationReference = $in['regulation_reference'] ?? null;
+            mr_json(200, array(
+                'ok' => true,
+                'thread' => $annotations->addReviewComment(
+                    $userId,
+                    (int)$ctx['version']['id'],
+                    (string)($in['thread_uuid'] ?? ''),
+                    (string)($in['comment_uuid'] ?? ''),
+                    (string)($in['body'] ?? ''),
+                    is_array($regulationReference) ? $regulationReference : null
+                ),
+            ));
+
         case 'library':
             mr_json(200, array(
                 'ok' => true,
