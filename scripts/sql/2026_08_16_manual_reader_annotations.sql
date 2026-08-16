@@ -1,5 +1,5 @@
 ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS can_manual_reviewer TINYINT(1) NOT NULL DEFAULT 0;
+    ADD COLUMN can_manual_reviewer TINYINT(1) NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS ipca_manual_reader_annotations (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

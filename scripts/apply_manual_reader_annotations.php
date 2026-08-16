@@ -12,6 +12,16 @@ if (!is_string($sql) || trim($sql) === '') {
 foreach (preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: array() as $statement) {
     $statement = trim($statement);
     if ($statement !== '') {
+        if (str_starts_with($statement, 'ALTER TABLE users')) {
+            $columnStmt = $pdo->prepare(
+                'SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+            );
+            $columnStmt->execute(array('users', 'can_manual_reviewer'));
+            if ((int)$columnStmt->fetchColumn() > 0) {
+                continue;
+            }
+        }
         $pdo->exec($statement);
     }
 }
