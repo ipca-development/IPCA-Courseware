@@ -1005,6 +1005,15 @@
     );
   }
 
+  function hasPrecedingManualPrintBreak(block) {
+    var sibling = block ? block.previousElementSibling : null;
+    while (sibling && sibling.getAttribute('data-auto-page-break') === '1') {
+      if (sibling.getAttribute('data-manual-page-break') === '1') return true;
+      sibling = sibling.previousElementSibling;
+    }
+    return false;
+  }
+
   function automaticBreakBefore(body, block, sheet, pageIndex, manualBreak) {
     var pageStart = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap);
     var target = pageStart + PRINT_PAGE.height + PRINT_PAGE.gap + PRINT_PAGE.contentTop;
@@ -1254,10 +1263,7 @@
         var contentTop = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap) + PRINT_PAGE.contentTop;
         var contentBottom = contentTop + PRINT_PAGE.contentHeight;
         var anchor = block.getAttribute('data-stable-anchor') || '';
-        var previousBreak = block.previousElementSibling;
-        var hasManualSpacer = previousBreak
-          && previousBreak.getAttribute('data-manual-page-break') === '1'
-          && previousBreak.getAttribute('data-auto-page-break') === '1';
+        var hasManualSpacer = hasPrecedingManualPrintBreak(block);
         if (manualAnchors[anchor] && top > contentTop + 1 && !hasManualSpacer) {
           automaticBreakBefore(body, block, sheet, pageIndex, true);
           inserted = true;
@@ -1268,7 +1274,13 @@
         var nextMeaningfulBottom = nextBlock
           ? printY(nextBlock, sheet) + Math.min(64, Math.max(1, printBottom(nextBlock, sheet) - printY(nextBlock, sheet)))
           : 0;
-        if (isHeading && nextBlock && top > contentTop + 1 && nextMeaningfulBottom > contentBottom) {
+        if (
+          isHeading
+          && !hasManualSpacer
+          && nextBlock
+          && top > contentTop + 1
+          && nextMeaningfulBottom > contentBottom
+        ) {
           automaticBreakBefore(body, block, sheet, pageIndex, false);
           inserted = true;
           break;

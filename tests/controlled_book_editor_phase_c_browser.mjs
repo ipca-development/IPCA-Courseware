@@ -273,7 +273,12 @@ async function installMock(page, initialPreview = previewResult()) {
   }, { sourceBlocks, initialPreview });
 }
 
-async function newEditorPage(browser, search = 'live_projection=1', initialPreview = previewResult()) {
+async function newEditorPage(
+  browser,
+  search = 'live_projection=1',
+  initialPreview = previewResult(),
+  initialPageRules = null,
+) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const browserErrors = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
@@ -285,6 +290,11 @@ async function newEditorPage(browser, search = 'live_projection=1', initialPrevi
   }));
   await page.goto(document.url, { waitUntil: 'domcontentloaded' });
   await installMock(page, initialPreview);
+  if (initialPageRules) {
+    await page.evaluate((payload) => {
+      window.__phaseC.queuePageRules({ payload });
+    }, initialPageRules);
+  }
   await page.addScriptTag({ content: editorJs });
   await page.waitForFunction(() =>
     document.querySelector('#cpbCanvas .cpb-block[data-block-id="1"]')
@@ -582,6 +592,59 @@ test('styled paragraph headings move intact instead of gaining an inline page ga
       observed.localTop >= 151 && observed.localTop <= 190,
       JSON.stringify(observed)
     );
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('manual break before a styled heading is not duplicated by heading flow', async (browser) => {
+  const pageRules = {
+    ok: true,
+    breaks: [{
+      id: 91,
+      section_id: 11,
+      before_block_anchor: 'paragraph-2',
+    }],
+    candidates: [],
+  };
+  const { page, browserErrors } = await newEditorPage(
+    browser,
+    '',
+    previewResult(),
+    pageRules,
+  );
+  try {
+    await page.evaluate(() => {
+      const heading = document.querySelector(
+        '#cpbCanvas [data-block-id="2"] .cpb-paragraph'
+      );
+      heading.setAttribute('data-paragraph-style', 'subtitle_1');
+      heading.classList.add('cpb-ps-subtitle_1');
+      heading.innerHTML = '2.5 Aircraft Journey Logs';
+      heading.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    await page.waitForTimeout(1000);
+    const observed = await page.evaluate(() => {
+      const block = document.querySelector('#cpbCanvas [data-block-id="2"]');
+      const heading = block.querySelector('.cpb-paragraph');
+      const precedingBreaks = [];
+      let sibling = block.previousElementSibling;
+      while (sibling?.getAttribute('data-auto-page-break') === '1') {
+        precedingBreaks.push({
+          manual: sibling.getAttribute('data-manual-page-break'),
+          height: sibling.getBoundingClientRect().height,
+        });
+        sibling = sibling.previousElementSibling;
+      }
+      return {
+        precedingBreaks,
+        inlineSpacers: heading.querySelectorAll('[data-auto-page-break="1"]').length,
+      };
+    });
+    assert.equal(observed.inlineSpacers, 0, JSON.stringify(observed));
+    assert.equal(observed.precedingBreaks.length, 1, JSON.stringify(observed));
+    assert.equal(observed.precedingBreaks[0].manual, '1', JSON.stringify(observed));
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();
