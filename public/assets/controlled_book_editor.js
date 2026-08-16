@@ -980,6 +980,31 @@
     if (furniture) furniture.remove();
   }
 
+  function isHeadingParagraphStyle(styleKey) {
+    styleKey = canonicalParagraphStyleKey(styleKey || '');
+    return styleKey === 'title'
+      || styleKey === 'subtitle_1'
+      || styleKey === 'subtitle_2'
+      || styleKey === 'subtitle_3'
+      || styleKey === 'subtitle_4';
+  }
+
+  function isHeadingLikeField(field) {
+    if (!field) return false;
+    if (field.classList.contains('cpb-heading')) return true;
+    if (/^H[1-6]$/.test(field.tagName || '')) return true;
+    return isHeadingParagraphStyle(field.getAttribute('data-paragraph-style') || '');
+  }
+
+  function isHeadingLikeBlock(block) {
+    if (!block) return false;
+    if ((block.getAttribute('data-block-type') || '') === 'heading') return true;
+    return Array.prototype.some.call(
+      block.querySelectorAll('.cpb-heading, [data-paragraph-style], h1, h2, h3, h4, h5, h6'),
+      isHeadingLikeField
+    );
+  }
+
   function automaticBreakBefore(body, block, sheet, pageIndex, manualBreak) {
     var pageStart = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap);
     var target = pageStart + PRINT_PAGE.height + PRINT_PAGE.gap + PRINT_PAGE.contentTop;
@@ -1238,7 +1263,7 @@
           inserted = true;
           break;
         }
-        var isHeading = (block.getAttribute('data-block-type') || '') === 'heading';
+        var isHeading = isHeadingLikeBlock(block);
         var nextBlock = blocks[index + 1] || null;
         var nextMeaningfulBottom = nextBlock
           ? printY(nextBlock, sheet) + Math.min(64, Math.max(1, printBottom(nextBlock, sheet) - printY(nextBlock, sheet)))
@@ -1261,7 +1286,9 @@
           + '.cpb-list[contenteditable="true"],'
           + '.cpb-list-continuation[contenteditable="true"],'
           + '.cpb-callout-text[contenteditable="true"]'
-        ));
+        )).filter(function (field) {
+          return !isHeadingLikeField(field);
+        });
         var flowingField = null;
         var laterField = null;
         var laterFieldTarget = 0;

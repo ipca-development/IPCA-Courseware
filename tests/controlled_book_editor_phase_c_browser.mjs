@@ -543,6 +543,51 @@ test('long paragraphs and table rows never enter repeated header or footer bands
   }
 });
 
+test('styled paragraph headings move intact instead of gaining an inline page gap', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    await page.evaluate(() => {
+      document.querySelectorAll('#cpbCanvas .cpb-block').forEach((block) => {
+        block.style.minHeight = '0';
+      });
+      const lead = document.querySelector('#cpbCanvas [data-block-id="1"]');
+      const heading = document.querySelector(
+        '#cpbCanvas [data-block-id="2"] .cpb-paragraph'
+      );
+      lead.style.height = '720px';
+      heading.setAttribute('data-paragraph-style', 'subtitle_1');
+      heading.classList.add('cpb-ps-subtitle_1');
+      heading.innerHTML = '2.5 Aircraft Journey Logs<br>Operational records';
+      heading.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    await page.waitForTimeout(1000);
+    const observed = await page.evaluate(() => {
+      const sheet = document.querySelector('#cpbCanvas .cpb-sheet');
+      const block = document.querySelector('#cpbCanvas [data-block-id="2"]');
+      const heading = block.querySelector('.cpb-paragraph');
+      const stride = 1056 + 28;
+      const top = (
+        block.getBoundingClientRect().top - sheet.getBoundingClientRect().top
+      );
+      const pageIndex = Math.max(0, Math.floor(top / stride));
+      return {
+        inlineSpacers: heading.querySelectorAll('[data-auto-page-break="1"]').length,
+        precedingSpacer: block.previousElementSibling?.getAttribute('data-auto-page-break'),
+        localTop: top - pageIndex * stride,
+      };
+    });
+    assert.equal(observed.inlineSpacers, 0, JSON.stringify(observed));
+    assert.equal(observed.precedingSpacer, '1', JSON.stringify(observed));
+    assert.ok(
+      observed.localTop >= 151 && observed.localTop <= 190,
+      JSON.stringify(observed)
+    );
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
 test('enabled creates #cpbProjection alongside unchanged #cpbCanvas and source stays editable', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser);
   try {
