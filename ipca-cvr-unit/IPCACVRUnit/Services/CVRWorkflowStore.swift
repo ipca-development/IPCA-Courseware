@@ -1,6 +1,24 @@
 import CryptoKit
 import Foundation
 
+private final class CVRDeferredArchiveSaveCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation = 0
+
+    func nextGeneration() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        generation += 1
+        return generation
+    }
+
+    func isLatest(_ candidate: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return candidate == generation
+    }
+}
+
 enum CVRWorkflowFailureOutcome: Equatable {
     case queued
     case authenticationPaused
@@ -53,6 +71,11 @@ final class CVRWorkflowStore: ObservableObject {
     private let archiveEncoder: JSONEncoder
     private let decoder: JSONDecoder
     private var archiveRewriteSafe = true
+    private let archivePersistenceQueue = DispatchQueue(
+        label: "com.ipca.cvrunit.workflow-archives",
+        qos: .utility
+    )
+    private let deferredArchiveSaveCoordinator = CVRDeferredArchiveSaveCoordinator()
     private static let dismissedContinuationArchiveIDsKey = "cvr.dismissedContinuationArchiveIDs"
     /// Wall-clock when avionics first came ON for the current power session (arms taxi inference).
     private var avionicsOnSince: Date?
@@ -3584,12 +3607,8 @@ final class CVRWorkflowStore: ObservableObject {
             requestID: requestID
         )
         updated[archiveIndex].status = updated[archiveIndex].uploadComponents.allSatisfy { $0.state == .serverVerified } ? .serverVerified : .uploadPending
-        do {
-            try saveArchives(updated)
-            archives = updated
-        } catch {
-            self.lastError = "Could not persist archived upload receipt: \(error.localizedDescription)"
-        }
+        archives = updated
+        deferArchiveSave(updated)
     }
 
     func workflowComponentsRequiringReconciliation(explicitRetry: Bool = false) -> [CVRUploadComponentRecord] {
@@ -4998,15 +5017,10 @@ final class CVRWorkflowStore: ObservableObject {
         updated[archiveIndex].status = updated[archiveIndex].uploadComponents.allSatisfy {
             $0.state == .serverVerified
         } ? .serverVerified : .uploadPending
-        do {
-            try saveArchives(updated)
-            archives = updated
-            lastError = ""
-            return true
-        } catch {
-            lastError = "Could not durably persist workflow upload metadata: \(error.localizedDescription)"
-            return false
-        }
+        archives = updated
+        lastError = ""
+        deferArchiveSave(updated)
+        return true
     }
 
     private static func applyVerifiedMetadata(
@@ -5027,6 +5041,7 @@ final class CVRWorkflowStore: ObservableObject {
         component.reconciliationRequired = false
         component.state = .serverVerified
         component.progress = 1
+        component.requestPayloadSnapshot = nil
         component.lastError = ""
         component.errorCode = nil
         component.retryable = false
@@ -5111,6 +5126,7 @@ final class CVRWorkflowStore: ObservableObject {
             }
             component.serverVerificationAt = Date()
             component.serverReceiptID = serverReceiptID
+            component.requestPayloadSnapshot = nil
         }
         if state == .uploading && previousState != .uploading {
             component.attemptCount += 1
@@ -5625,9 +5641,32 @@ final class CVRWorkflowStore: ObservableObject {
         let url = try archivesURL()
         let compacted = Self.compactVerifiedArchivePayloads(records)
         let data = try archiveEncoder.encode(compacted)
-        try data.write(to: url, options: [.atomic])
-        guard try Data(contentsOf: url) == data else {
-            throw CocoaError(.fileWriteUnknown)
+        try archivePersistenceQueue.sync {
+            try data.write(to: url, options: [.atomic])
+            guard try Data(contentsOf: url) == data else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
+    }
+
+    private func deferArchiveSave(_ records: [CVRWorkflowArchiveRecord]) {
+        guard archiveRewriteSafe, let url = try? archivesURL() else { return }
+        let generation = deferredArchiveSaveCoordinator.nextGeneration()
+        let coordinator = deferredArchiveSaveCoordinator
+        archivePersistenceQueue.async { [weak self] in
+            guard coordinator.isLatest(generation) else { return }
+            do {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                encoder.dateEncodingStrategy = .iso8601
+                let data = try encoder.encode(records)
+                guard coordinator.isLatest(generation) else { return }
+                try data.write(to: url, options: [.atomic])
+            } catch {
+                Task { @MainActor [weak self] in
+                    self?.lastError = "Could not persist archived upload metadata: \(error.localizedDescription)"
+                }
+            }
         }
     }
 

@@ -1,6 +1,17 @@
 import SwiftUI
 import UIKit
 
+private struct AudioRecorderReferenceKey: EnvironmentKey {
+    static let defaultValue: AudioRecorderManager? = nil
+}
+
+extension EnvironmentValues {
+    var audioRecorderReference: AudioRecorderManager? {
+        get { self[AudioRecorderReferenceKey.self] }
+        set { self[AudioRecorderReferenceKey.self] = newValue }
+    }
+}
+
 @main
 struct IPCACVRUnitApp: App {
     @Environment(\.scenePhase) private var scenePhase
@@ -57,6 +68,7 @@ struct IPCACVRUnitApp: App {
                 .environmentObject(settings)
                 .environmentObject(recordingStore)
                 .environmentObject(audioRecorder)
+                .environment(\.audioRecorderReference, audioRecorder)
                 .environmentObject(uploadManager)
                 .environmentObject(network)
                 .environmentObject(systemMonitor)

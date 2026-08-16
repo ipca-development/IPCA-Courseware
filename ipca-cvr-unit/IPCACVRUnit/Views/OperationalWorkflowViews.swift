@@ -1,13 +1,29 @@
+import Combine
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+private let cvrOperationalCalendar: Calendar = {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+    return calendar
+}()
+
 private let cvrReservationTimeFormatter: DateFormatter = {
     let formatter = DateFormatter()
-    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.calendar = cvrOperationalCalendar
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+    formatter.timeZone = cvrOperationalCalendar.timeZone
     formatter.dateFormat = "HH:mm"
+    return formatter
+}()
+
+private let cvrScheduleDayFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.calendar = cvrOperationalCalendar
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = cvrOperationalCalendar.timeZone
+    formatter.dateFormat = "EEEE"
     return formatter
 }()
 
@@ -1500,7 +1516,7 @@ private struct ScheduledFlightsView: View {
     @EnvironmentObject private var workflow: CVRWorkflowStore
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var beacon: AvionicsBeaconManager
-    @EnvironmentObject private var audio: AudioRecorderManager
+    @Environment(\.audioRecorderReference) private var audioRecorder
     @EnvironmentObject private var missionCatalog: MissionCatalogStore
     @EnvironmentObject private var uploadManager: UploadManager
     @Binding var showAdminUnlock: Bool
@@ -1510,6 +1526,7 @@ private struct ScheduledFlightsView: View {
     @State private var showCancelRemainingLegsConfirm = false
     @State private var continuationCandidate: CVRReservationContinuationCandidate?
     @State private var continuationEndCandidate: CVRReservationContinuationCandidate?
+    @State private var isAudioRecording = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -1610,7 +1627,16 @@ private struct ScheduledFlightsView: View {
             Text("Unused legs are cancelled on this CVR Unit only. The online schedule is unchanged. Completed legs and uploads are kept. You will not continue this reservation under engine continuity.")
         }
         .onAppear {
+            isAudioRecording = audioRecorder?.isRecording ?? false
             workflow.clearIdleCompletedOperationalSessionIfNeeded()
+        }
+        .onReceive(
+            audioRecorder?.$isRecording
+                .removeDuplicates()
+                .eraseToAnyPublisher()
+                ?? Just(false).eraseToAnyPublisher()
+        ) { isRecording in
+            isAudioRecording = isRecording
         }
         .onChange(of: workflow.scheduleRefreshRevision) {
             Task {
@@ -1634,7 +1660,6 @@ private struct ScheduledFlightsView: View {
                 .environmentObject(workflow)
                 .environmentObject(settings)
                 .environmentObject(beacon)
-                .environmentObject(audio)
         }
         .confirmationDialog(
             "Finish this reservation?",
@@ -1966,11 +1991,11 @@ private struct ScheduledFlightsView: View {
             return !workflow.canOpenScheduledSession(
                 session,
                 selectedAircraft: aircraftForSession(session),
-                isAudioRecording: audio.isRecording
+                isAudioRecording: isAudioRecording
             )
         }
         if workflow.state.engineSessionContinuityActive { return false }
-        return audio.isRecording && workflow.state.activeFlightRecord != nil
+        return isAudioRecording && workflow.state.activeFlightRecord != nil
     }
 
     private func openLeg(_ leg: CVRScheduledLegItem) {
@@ -1992,7 +2017,7 @@ private struct ScheduledFlightsView: View {
                 selectedAircraft: settings.selectedAircraft,
                 cvrUnitID: settings.cvrUnitIdentifier,
                 beaconID: beacon.expectedBeaconIdentityHex,
-                isAudioRecording: audio.isRecording,
+                isAudioRecording: isAudioRecording,
                 canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled,
                 operationalSessionModelEnabled: settings.operationalSessionModelEnabled
             )
@@ -2019,7 +2044,7 @@ private struct ScheduledFlightsView: View {
             selectedAircraft: aircraftForSession(session),
             cvrUnitID: settings.cvrUnitIdentifier,
             beaconID: beacon.expectedBeaconIdentityHex,
-            isAudioRecording: audio.isRecording,
+            isAudioRecording: isAudioRecording,
             canonicalWriteEnabled: settings.operationalIdentityCanonicalWriteEnabled,
             operationalSessionModelEnabled: settings.operationalSessionModelEnabled
         )
@@ -2155,6 +2180,7 @@ private struct ScheduledFlightsView: View {
         var consumedLegUUIDs = Set(
             workflow.archives.compactMap { $0.dispatch.operationalIdentity?.legUUID }
         )
+        let locallySupersededSchedulerRecordIDs = workflow.locallySupersededSchedulerRecordIDs
         for planned in workflow.state.plannedLegs where planned.status == "checked_in" {
             consumedLegUUIDs.insert(planned.legUUID)
         }
@@ -2167,7 +2193,7 @@ private struct ScheduledFlightsView: View {
                       ($0.dateTime(nil) ?? .distantPast) >= startOfToday else {
                     return false
                 }
-                if workflow.locallySupersededSchedulerRecordIDs.contains(
+                if locallySupersededSchedulerRecordIDs.contains(
                     $0.schedulerRecordID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 ) {
                     return false
@@ -2250,26 +2276,19 @@ private struct ScheduledFlightsView: View {
         let grouped = Dictionary(grouping: visibleGroups) { group in
             operationalCalendar.startOfDay(for: group.dayStart)
         }
-        let formatter = DateFormatter()
-        formatter.calendar = operationalCalendar
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = operationalCalendar.timeZone
-        formatter.dateFormat = "EEEE"
         return grouped.keys.sorted().map { day in
             let title: String
             if operationalCalendar.isDate(day, inSameDayAs: Date()) {
                 title = "Today"
             } else {
-                title = formatter.string(from: day)
+                title = cvrScheduleDayFormatter.string(from: day)
             }
             return (title, grouped[day] ?? [])
         }
     }
 
     private var operationalCalendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
-        return calendar
+        cvrOperationalCalendar
     }
 
     private func timeRange(_ leg: CVRScheduledLegItem) -> String {
