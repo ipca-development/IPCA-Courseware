@@ -537,6 +537,30 @@ final class CommunicationTrainingVideoService
         );
     }
 
+    /**
+     * Same-origin admin preview. The browser must not load private Spaces URLs
+     * with extra cache-buster query parameters; those break SigV4 signatures.
+     *
+     * @return array{bytes:string,mime_type:string}
+     */
+    public function adminPosterBytes(string $videoUuid): array
+    {
+        $row = $this->requireAdminVideo($videoUuid);
+        $key = trim((string)($row['poster_storage_key'] ?? ''));
+        if ($key === '') {
+            throw new CommunicationException('not_found', 'That thumbnail is not ready yet.', 404);
+        }
+        $bytes = $this->store->getBytes($key);
+        if (!is_string($bytes) || $bytes === '') {
+            throw new CommunicationException('not_found', 'That thumbnail is not ready yet.', 404);
+        }
+        $mime = strtolower(trim((string)($row['poster_mime_type'] ?? 'image/jpeg')));
+        if ($mime === '' || $mime === 'image/jpg') {
+            $mime = 'image/jpeg';
+        }
+        return array('bytes' => $bytes, 'mime_type' => $mime);
+    }
+
     /** @param array<string,mixed> $session @return array<string,mixed> */
     private function requireAccessible(array $session, string $videoUuid): array
     {
@@ -830,6 +854,9 @@ final class CommunicationTrainingVideoService
             'has_poster' => $posterKey !== '',
             'app_visible' => $videoKey !== '' && (string)$row['status'] === 'published',
             'poster_url' => $posterKey !== '' ? $this->store->presignGet($posterKey, self::GET_EXPIRES) : '',
+            'poster_preview_url' => $posterKey !== ''
+                ? '/admin/api/training_videos_preview.php?video_uuid=' . rawurlencode((string)$row['video_uuid'])
+                : '',
             'poster_source' => $source,
             'poster_source_label' => $sourceLabel,
             'poster_template' => (string)($row['poster_template'] ?? ''),

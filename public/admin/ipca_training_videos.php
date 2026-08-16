@@ -40,7 +40,7 @@ cw_header('Training Videos');
 .tv-progress-bar { height: 100%; width: 0; background: #1f6feb; transition: width .12s linear; }
 .tv-ok { color: #0f6d32; font-weight: 700; }
 .tv-err { color: #b42318; font-weight: 700; }
-.tv-thumb { width: 100%; max-width: 420px; border-radius: 10px; background: #071b35; display: block; }
+.tv-thumb { width: 100%; max-width: 420px; height: auto; border-radius: 10px; background: #071b35; display: block; object-fit: contain; }
 .tv-thumb-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .tv-picker { position: fixed; inset: 0; background: rgba(7,27,53,.45); display: none; align-items: center; justify-content: center; z-index: 40; padding: 24px; }
 .tv-picker.open { display: flex; }
@@ -211,9 +211,10 @@ cw_header('Training Videos');
   const setThumb = (video) => {
     const img = document.getElementById('thumb-preview');
     const source = document.getElementById('thumb-source');
-    if (video && video.poster_url) {
+    const url = (video && (video.poster_preview_url || video.poster_url)) || '';
+    if (url) {
       img.hidden = false;
-      img.src = video.poster_url + (video.poster_url.includes('?') ? '&' : '?') + 't=' + Date.now();
+      img.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
     } else {
       img.hidden = true;
       img.removeAttribute('src');

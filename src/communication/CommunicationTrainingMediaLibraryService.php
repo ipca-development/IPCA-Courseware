@@ -250,7 +250,9 @@ final class CommunicationTrainingMediaLibraryService
             'analysis' => $analysis,
             'analysis_text' => (string)($row['analysis_text'] ?? ''),
             'analysis_status' => (string)($row['analysis_status'] ?? ''),
-            'preview_url' => $key !== '' ? $this->store->presignGet($key, self::GET_EXPIRES) : '',
+            'preview_url' => $key !== ''
+                ? '/admin/api/media_library_preview.php?asset_uuid=' . rawurlencode((string)$row['asset_uuid'])
+                : '',
             'created_at_utc' => (string)$row['created_at_utc'],
         );
     }

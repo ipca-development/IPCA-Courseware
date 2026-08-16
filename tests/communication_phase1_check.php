@@ -1040,6 +1040,12 @@ comm_assert(
     && str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'Publish to app')
 );
 comm_assert(
+    'training videos admin previews thumbnails through the origin',
+    is_file($root . '/public/admin/api/training_videos_preview.php')
+    && str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'poster_preview_url')
+    && !str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'poster_url +')
+);
+comm_assert(
     'training videos admin origin upload endpoint exists',
     is_file($root . '/public/admin/api/training_videos_upload.php')
 );
@@ -1100,7 +1106,8 @@ comm_assert(
 );
 comm_assert(
     'Media Library stays on private object storage',
-    str_contains($mediaLibrarySource, 'presignGet')
+    str_contains($mediaLibrarySource, 'putStream')
+    && str_contains($mediaLibrarySource, 'getBytes')
     && !str_contains($mediaLibrarySource, 'publicUrl')
     && !str_contains($mediaLibrarySource, 'presignPublicPut')
     && str_contains((string)file_get_contents($root . '/src/spaces.php'), 'function cw_spaces_get_object')
@@ -1403,6 +1410,8 @@ comm_assert(
     && (string)($autoUploaded['video']['poster_template'] ?? '') === 'IPCA_ALPHA_LANDSCAPE_V1'
     && count($autoUploaded['video']['thumbnail_candidates'] ?? array()) >= 1
     && (string)($autoUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') === (string)($libraryCockpit['asset']['asset_uuid'] ?? '')
+    && str_contains((string)($autoUploaded['video']['poster_preview_url'] ?? ''), 'training_videos_preview.php')
+    && str_starts_with($kernel->trainingVideos->adminPosterBytes($autoUuid)['bytes'], "\xff\xd8")
 );
 
 $portraitVideo = $kernel->trainingVideos->saveAdmin(array(
