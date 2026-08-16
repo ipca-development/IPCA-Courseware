@@ -13,7 +13,7 @@ final class CommunicationTrainingVideoService
 {
     public const GET_EXPIRES = 300;
     public const DOWNLOAD_EXPIRES = 3600;
-    public const PUT_EXPIRES = 900;
+    public const PUT_EXPIRES = 3600;
     public const MAX_VIDEO_BYTES = 5368709120;
     public const MAX_POSTER_BYTES = 10485760;
     public const MAX_COMMENT = 2000;
@@ -374,8 +374,13 @@ final class CommunicationTrainingVideoService
     }
 
     /** @return array<string,mixed> */
-    public function completeAdminUpload(string $videoUuid, string $kind, int $durationMs = 0): array
-    {
+    public function completeAdminUpload(
+        string $videoUuid,
+        string $kind,
+        int $durationMs = 0,
+        int $byteSize = 0,
+        string $mimeType = ''
+    ): array {
         $row = $this->requireAdminVideo($videoUuid);
         $kind = strtolower(trim($kind));
         if ($kind === 'video') {
@@ -386,7 +391,15 @@ final class CommunicationTrainingVideoService
             throw new CommunicationException('validation_error', 'Unknown upload kind.', 400);
         }
         $head = $this->store->head($key);
-        if ($head === null) {
+        $contentType = is_array($head) ? trim((string)$head['content_type']) : '';
+        if ($contentType === '') {
+            $contentType = strtolower(trim($mimeType));
+        }
+        $storedBytes = is_array($head) ? (int)$head['byte_size'] : 0;
+        if ($storedBytes < 1) {
+            $storedBytes = max(0, $byteSize);
+        }
+        if ($contentType === '' || $storedBytes < 1) {
             throw new CommunicationException('validation_error', 'Upload the file before completing.', 400);
         }
         $now = CommunicationSupport::nowUtc();
@@ -397,8 +410,8 @@ final class CommunicationTrainingVideoService
                  WHERE id = ?'
             )->execute(array(
                 $key,
-                (string)$head['content_type'],
-                (int)$head['byte_size'],
+                $contentType,
+                $storedBytes,
                 max(0, $durationMs),
                 $now,
                 (int)$row['id'],
@@ -410,7 +423,7 @@ final class CommunicationTrainingVideoService
                  WHERE id = ?'
             )->execute(array(
                 $key,
-                (string)$head['content_type'],
+                $contentType,
                 $now,
                 (int)$row['id'],
             ));
@@ -695,6 +708,7 @@ final class CommunicationTrainingVideoService
             'mime_type' => (string)$row['mime_type'],
             'has_video' => $videoKey !== '',
             'has_poster' => $posterKey !== '',
+            'app_visible' => $videoKey !== '' && (string)$row['status'] === 'published',
             'poster_url' => $posterKey !== '' ? $this->store->presignGet($posterKey, self::GET_EXPIRES) : '',
             'view_count' => $this->countViews((int)$row['id']),
             'like_count' => $this->countLikes((int)$row['id']),

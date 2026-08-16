@@ -986,6 +986,12 @@ comm_assert(
 );
 comm_assert('training videos member endpoint exists', is_file($root . '/public/api/communication/training_videos.php'));
 comm_assert('training videos admin page exists', is_file($root . '/public/admin/ipca_training_videos.php'));
+comm_assert(
+    'training videos admin shows upload progress and published state',
+    str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'xhr.upload.onprogress')
+    && str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'On the app')
+    && str_contains((string)file_get_contents($root . '/public/admin/ipca_training_videos.php'), 'Publish to app')
+);
 comm_assert('training videos admin API exists', is_file($root . '/public/admin/api/training_videos_api.php'));
 comm_assert(
     'admin navigation includes Training Videos',
@@ -1113,6 +1119,14 @@ $posterPresign = $kernel->trainingVideos->presignAdminUpload(
 );
 $objectStore->put('training-videos/1/' . $trainingVideoUuid . '.poster', str_repeat('p', 1024), 'image/jpeg');
 $kernel->trainingVideos->completeAdminUpload($trainingVideoUuid, 'poster');
+$publishedAdmin = $kernel->trainingVideos->adminDetail($trainingVideoUuid);
+comm_assert(
+    'admin catalog marks a published file as visible on the app',
+    !empty($publishedAdmin['video']['has_video'])
+    && !empty($publishedAdmin['video']['has_poster'])
+    && !empty($publishedAdmin['video']['app_visible'])
+    && (string)$publishedAdmin['video']['status'] === 'published'
+);
 comm_assert(
     'admin uploads use private PUTs without a public-read ACL',
     str_contains((string)$videoPresign['put_url'], 'memory.invalid/put/')
