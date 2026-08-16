@@ -26,6 +26,10 @@
   var tableToolbarEl = document.getElementById('cpbTableToolbar');
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
+  var editOutlineBtn = document.getElementById('cpbEditOutline');
+  var outlinePanelEl = document.getElementById('cpbOutlinePanel');
+  var outlineBodyEl = document.getElementById('cpbOutlineBody');
+  var treeHeadTitleEl = document.getElementById('cpbTreeHeadTitle');
   var imageInput = document.getElementById('cpbImageInput');
   var paragraphStyleSelect = document.getElementById('cpbParagraphStyleSelect');
   var regulatoryRefInput = document.getElementById('cpbRegulatoryRef');
@@ -121,6 +125,7 @@
     saving: false,
     pending: {},
     expanded: {},
+    outlineOpen: false,
     pageLayout: {},
     pageHeader: null,
     pageFooter: null,
@@ -579,6 +584,11 @@
     upload_image: 'suffix',
     save_section_layout: 'suffix',
     create_subsection: 'global',
+    rename_outline_part: 'global',
+    rename_outline_chapter: 'global',
+    add_outline_chapter: 'global',
+    delete_outline_chapter: 'global',
+    move_outline_chapter: 'global',
     save_book_styles: 'global',
     copy_book_styles: 'global',
     save_page_header: 'global',
@@ -2864,6 +2874,118 @@
     return text.slice(0, maxLen - 3) + '...';
   }
 
+  function loadReviewThreadMarkers() {
+    canvasEl.querySelectorAll('.cpb-review-thread-pin').forEach(function (pin) {
+      pin.remove();
+    });
+    if (!state.versionId) return;
+    apiGet(
+      apiBase + '?action=review_threads&version_id=' + encodeURIComponent(String(state.versionId))
+    ).then(function (res) {
+      if (!res || !res.ok || !Array.isArray(res.threads)) return;
+      res.threads.forEach(function (thread) {
+        var anchor = String(thread.stable_anchor || '');
+        var fragment = String(thread.source_fragment_id || '');
+        var target = null;
+        if (anchor) {
+          target = canvasEl.querySelector(
+            '[data-stable-anchor="' + CSS.escape(anchor) + '"],#' + CSS.escape(anchor)
+          );
+        }
+        if (!target && fragment) {
+          target = canvasEl.querySelector(
+            '[data-source-fragment-id="' + CSS.escape(fragment) + '"],'
+              + '[data-fragment-id="' + CSS.escape(fragment) + '"],'
+              + '[data-stable-anchor="' + CSS.escape(fragment) + '"]'
+          );
+        }
+        if (!target) return;
+        var block = target.closest('.cpb-block') || target;
+        var pin = document.createElement('button');
+        pin.type = 'button';
+        pin.className = 'cpb-review-thread-pin';
+        pin.textContent = String((thread.comments || []).length || 1);
+        pin.title = 'Open reviewer notes';
+        pin.setAttribute('aria-label', 'Open reviewer notes');
+        pin.addEventListener('click', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          showReviewThreadPanel(thread);
+        });
+        block.appendChild(pin);
+      });
+    }).catch(function () {
+      // Reviewer notes are additive and must never interrupt authoring.
+    });
+  }
+
+  function showReviewThreadPanel(thread) {
+    var panel = document.getElementById('cpbReviewThreadPanel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'cpbReviewThreadPanel';
+      panel.className = 'cpb-review-thread-panel';
+      document.body.appendChild(panel);
+    }
+    var comments = Array.isArray(thread.comments) ? thread.comments : [];
+    panel.innerHTML =
+      '<div class="cpb-review-thread-panel__backdrop" data-review-close></div>'
+      + '<section class="cpb-review-thread-panel__card" role="dialog" aria-modal="true">'
+      + '<header><div><strong>Reviewer Notes</strong><small>'
+      + escapeHtml(String(thread.selected_text || ''))
+      + '</small></div><button type="button" data-review-close aria-label="Close">×</button></header>'
+      + '<div class="cpb-review-thread-panel__messages">'
+      + comments.map(function (comment) {
+        var author = comment.author || {};
+        var photo = String(author.photo_url || '');
+        var avatar = photo
+          ? '<img src="' + escapeHtml(photo) + '" alt="">'
+          : '<span>' + escapeHtml(String(author.initials || '?')) + '</span>';
+        return '<article class="cpb-review-thread-message"><div class="cpb-review-thread-avatar">'
+          + avatar + '</div><div><strong>' + escapeHtml(String(author.name || 'Reviewer'))
+          + '</strong><p>' + escapeHtml(String(comment.body || '')) + '</p></div></article>';
+      }).join('')
+      + '</div><form class="cpb-review-thread-panel__composer">'
+      + '<textarea name="body" rows="2" placeholder="Reply to reviewer thread" required></textarea>'
+      + '<button type="submit">Send</button></form></section>';
+    panel.hidden = false;
+    panel.querySelectorAll('[data-review-close]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        panel.hidden = true;
+      });
+    });
+    var form = panel.querySelector('.cpb-review-thread-panel__composer');
+    if (form) {
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var textarea = form.querySelector('textarea');
+        var body = textarea ? String(textarea.value || '').trim() : '';
+        if (!body) return;
+        var submit = form.querySelector('button');
+        if (submit) submit.disabled = true;
+        apiPost('review_comment_add', {
+          version_id: state.versionId,
+          thread_uuid: thread.thread_uuid,
+          comment_uuid: (window.crypto && window.crypto.randomUUID)
+            ? window.crypto.randomUUID()
+            : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (char) {
+              var value = Math.random() * 16 | 0;
+              return (char === 'x' ? value : (value & 3 | 8)).toString(16);
+            }),
+          body: body,
+        }).then(function (res) {
+          if (!res || !res.ok || !res.thread) {
+            throw new Error((res && res.error) || 'Unable to add reviewer comment.');
+          }
+          showReviewThreadPanel(res.thread);
+          loadReviewThreadMarkers();
+        }).catch(showError).finally(function () {
+          if (submit) submit.disabled = false;
+        });
+      });
+    }
+  }
+
   function loadSection(sectionId, scrollRef) {
     var loadSequence = ++state.sectionLoadSequence;
     state.sectionAssemblyProgress = 0;
@@ -2917,6 +3039,7 @@
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
+      loadReviewThreadMarkers();
       applyLayoutToDom(state.pageLayout);
       refreshContentTableTypographyFromBookStyles();
       refreshCalloutTypographyFromBookStyles();
@@ -2934,6 +3057,7 @@
       }
       applyCanvasZoom(state.canvasZoom, false);
       updateAddSubsection(res.section);
+      updateOutlineButton();
       setSectionAssembly(true, 'Loading fonts, images, and page rules…', 52);
       var fontReady = settleWithin(
         document.fonts && document.fonts.ready
@@ -3019,8 +3143,15 @@
     var isNestable = ['part_1', 'part_2', 'part_3', 'part_4', 'main_content', 'annexes'].indexOf(key) >= 0
       || !!section.parent_section_id
       || documentType === 'form';
-    addSubBtn.style.display = state.editable && isNestable ? 'block' : 'none';
+    addSubBtn.style.display = state.editable && isNestable && !state.outlineOpen ? 'block' : 'none';
     addSubBtn.setAttribute('data-parent-id', String(section.id || state.sectionId));
+  }
+
+  function updateOutlineButton() {
+    if (!editOutlineBtn) return;
+    var show = documentType !== 'form' && !!state.editable;
+    editOutlineBtn.style.display = show ? '' : 'none';
+    if (!show && state.outlineOpen) setOutlineMode(false);
   }
 
   function collectExpandableTreeNodeIds(nodes, ids) {
@@ -3056,6 +3187,163 @@
       state.expanded[id] = expanded;
     });
     renderTree(state.sectionsTree, state.sectionId);
+  }
+
+  function setOutlineMode(open) {
+    state.outlineOpen = !!open;
+    if (treeEl) treeEl.hidden = state.outlineOpen;
+    if (outlinePanelEl) outlinePanelEl.hidden = !state.outlineOpen;
+    if (treeToggleAllBtn) treeToggleAllBtn.style.display = state.outlineOpen ? 'none' : '';
+    if (editOutlineBtn) {
+      editOutlineBtn.textContent = state.outlineOpen ? 'Done' : 'Edit outline';
+      editOutlineBtn.setAttribute('aria-pressed', state.outlineOpen ? 'true' : 'false');
+    }
+    if (treeHeadTitleEl) {
+      treeHeadTitleEl.textContent = state.outlineOpen ? 'Edit outline' : 'Manual sections';
+    }
+    if (addSubBtn && state.outlineOpen) addSubBtn.style.display = 'none';
+  }
+
+  function applyOutlineResult(res) {
+    if (!res || !res.ok) throw new Error((res && res.error) || 'Could not update outline');
+    if (res.sections_tree) {
+      state.sectionsTree = res.sections_tree;
+      if (!state.outlineOpen) renderTree(state.sectionsTree, state.sectionId);
+    }
+    renderOutlinePanel(res);
+    setStatus('Outline saved', 'saved');
+    return res;
+  }
+
+  function outlinePost(action, payload) {
+    return apiPost(action, Object.assign({ version_id: state.versionId }, payload || {})).then(applyOutlineResult);
+  }
+
+  function renderOutlinePanel(data) {
+    if (!outlineBodyEl) return;
+    outlineBodyEl.innerHTML = '';
+    var locked = document.createElement('div');
+    locked.className = 'cpb-outline-locked';
+    (data.locked || []).forEach(function (item) {
+      var row = document.createElement('div');
+      row.className = 'cpb-outline-locked-item';
+      var icon = document.createElement('span');
+      icon.className = 'cpb-outline-lock';
+      icon.textContent = '🔒';
+      var label = document.createElement('span');
+      label.textContent = item.title || item.kind;
+      row.appendChild(icon);
+      row.appendChild(label);
+      locked.appendChild(row);
+    });
+    outlineBodyEl.appendChild(locked);
+
+    (data.parts || []).forEach(function (part) {
+      var box = document.createElement('div');
+      box.className = 'cpb-outline-part';
+
+      var head = document.createElement('div');
+      head.className = 'cpb-outline-part-head';
+      var num = document.createElement('span');
+      num.className = 'cpb-outline-part-num';
+      num.textContent = 'PART ' + part.part_number;
+      var partInput = document.createElement('input');
+      partInput.type = 'text';
+      partInput.value = part.title || '';
+      partInput.setAttribute('aria-label', 'PART ' + part.part_number + ' title');
+      partInput.addEventListener('change', function () {
+        outlinePost('rename_outline_part', {
+          section_id: part.section_id,
+          title: partInput.value,
+        }).catch(showError);
+      });
+      head.appendChild(num);
+      head.appendChild(partInput);
+      box.appendChild(head);
+
+      (part.chapters || []).forEach(function (chapter, index) {
+        var row = document.createElement('div');
+        row.className = 'cpb-outline-chapter';
+        var chNum = document.createElement('span');
+        chNum.className = 'cpb-outline-chapter-num';
+        chNum.textContent = chapter.chapter_number + '.';
+        var chInput = document.createElement('input');
+        chInput.type = 'text';
+        chInput.value = chapter.title || '';
+        chInput.setAttribute('aria-label', 'Chapter ' + chapter.chapter_number + ' title');
+        chInput.addEventListener('change', function () {
+          outlinePost('rename_outline_chapter', {
+            section_id: chapter.section_id,
+            title: chInput.value,
+          }).catch(showError);
+        });
+        var actions = document.createElement('div');
+        actions.className = 'cpb-outline-chapter-actions';
+        function smallBtn(label, className, disabled, onClick) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'cpb-outline-btn' + (className ? ' ' + className : '');
+          btn.textContent = label;
+          btn.disabled = !!disabled;
+          btn.addEventListener('click', onClick);
+          return btn;
+        }
+        actions.appendChild(smallBtn('↑', '', index === 0, function () {
+          outlinePost('move_outline_chapter', { section_id: chapter.section_id, direction: 'up' }).catch(showError);
+        }));
+        actions.appendChild(smallBtn('↓', '', index === part.chapters.length - 1, function () {
+          outlinePost('move_outline_chapter', { section_id: chapter.section_id, direction: 'down' }).catch(showError);
+        }));
+        actions.appendChild(smallBtn('×', 'cpb-outline-btn--danger', false, function () {
+          if (!window.confirm('Remove MAIN chapter “' + (chapter.title || chapter.nav_label) + '”?')) return;
+          outlinePost('delete_outline_chapter', { section_id: chapter.section_id }).then(function () {
+            if (state.sectionId === chapter.section_id) {
+              loadSection(part.section_id);
+            }
+          }).catch(showError);
+        }));
+        row.appendChild(chNum);
+        row.appendChild(chInput);
+        row.appendChild(actions);
+        box.appendChild(row);
+      });
+
+      var add = document.createElement('span');
+      add.className = 'cpb-outline-add';
+      add.setAttribute('role', 'button');
+      add.tabIndex = 0;
+      add.textContent = '+ Add MAIN chapter';
+      add.addEventListener('click', function () {
+        var title = window.prompt('MAIN chapter title');
+        if (!title || !title.trim()) return;
+        outlinePost('add_outline_chapter', {
+          part_section_id: part.section_id,
+          title: title.trim(),
+        }).then(function (res) {
+          if (res.section_id) loadSection(res.section_id);
+        }).catch(showError);
+      });
+      box.appendChild(add);
+      outlineBodyEl.appendChild(box);
+    });
+  }
+
+  function openOutlinePanel() {
+    if (!state.editable) return;
+    setOutlineMode(true);
+    apiPost('get_outline', { version_id: state.versionId }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Could not load outline');
+      renderOutlinePanel(res);
+    }).catch(function (error) {
+      setOutlineMode(false);
+      showError(error);
+    });
+  }
+
+  function closeOutlinePanel() {
+    setOutlineMode(false);
+    renderTree(state.sectionsTree, state.sectionId);
+    if (state.sectionId) loadSection(state.sectionId);
   }
 
   function wireTreeToggleAll() {
@@ -10528,6 +10816,14 @@
         uploadCoverAsset('cover_image', coverImageInput.files[0]);
         coverImageInput.value = '';
       }
+    });
+  }
+
+  if (editOutlineBtn) {
+    if (documentType === 'form') editOutlineBtn.style.display = 'none';
+    editOutlineBtn.addEventListener('click', function () {
+      if (state.outlineOpen) closeOutlinePanel();
+      else openOutlinePanel();
     });
   }
 

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingAnnexService.php';
 require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
+require_once __DIR__ . '/ControlledPublishingOutlineService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 
@@ -73,7 +74,9 @@ final class ControlledPublishingEditorNavService
         $tree = array();
 
         if (isset($byKey['cover'])) {
-            $tree[] = $this->leafNode($byKey['cover'], 'Cover Page');
+            $tree[] = $this->leafNode($byKey['cover'], 'Cover Page', array(
+                'outline_kind' => 'locked',
+            ));
         }
 
         $tree[] = $this->separatorNode('after_cover');
@@ -89,15 +92,25 @@ final class ControlledPublishingEditorNavService
             $partRow = $byKey[$partKey] ?? $byKey['main_content'];
             $partId = $this->resolvePartParentId($partKey, $byKey, $childrenByParent);
             $manualPart = $this->manualPartIndexFromKey($partKey);
+            $partTitle = ControlledPublishingOutlineService::partNavTitle(
+                $partRow,
+                (string)$partDef['title']
+            );
             $subsections = $this->formatChapterSubsections(
                 $childrenByParent[$partId] ?? array(),
                 $manualPart,
                 $sectionNumberDisplay
             );
             if ($subsections !== array()) {
-                $tree[] = $this->groupNode('group_' . $partKey, (string)$partDef['title'], $subsections);
+                $tree[] = $this->groupNode('group_' . $partKey, $partTitle, $subsections, array(
+                    'section_id' => (int)($partRow['id'] ?? 0),
+                    'section_key' => $partKey,
+                    'outline_kind' => 'part',
+                ));
             } else {
-                $tree[] = $this->leafNode($partRow, (string)$partDef['title']);
+                $tree[] = $this->leafNode($partRow, $partTitle, array(
+                    'outline_kind' => 'part',
+                ));
             }
         }
 
@@ -110,9 +123,12 @@ final class ControlledPublishingEditorNavService
             if ($annexChildren !== array()) {
                 $tree[] = $this->groupNode('group_annexes', 'ANNEXES', $annexChildren, array(
                     'label_style' => 'chapter_upper',
+                    'outline_kind' => 'locked',
                 ));
             } else {
-                $tree[] = $this->leafNode($annexRow, 'ANNEXES');
+                $tree[] = $this->leafNode($annexRow, 'ANNEXES', array(
+                    'outline_kind' => 'locked',
+                ));
             }
         }
 
@@ -153,7 +169,8 @@ final class ControlledPublishingEditorNavService
         return $this->groupNode(
             'group_part0',
             ControlledPublishingPart0PageService::PART_TITLE,
-            array($outlineGroup)
+            array($outlineGroup),
+            array('outline_kind' => 'locked')
         );
     }
 
@@ -225,10 +242,13 @@ final class ControlledPublishingEditorNavService
             $meta = $this->decodeMeta($row);
             $chapterNumber = (int)($meta['chapter_number'] ?? 0);
             $sectionId = (int)($row['id'] ?? 0);
-            $importedLabel = $this->manualStructure->chapterTitleFromImportedBlocks($sectionId, $chapterNumber);
+            $lockedLabel = ControlledPublishingManualStructureService::navLabelForSection($row, true);
+            $importedLabel = !empty($meta['outline_locked'])
+                ? ''
+                : $this->manualStructure->chapterTitleFromImportedBlocks($sectionId, $chapterNumber);
             $label = $importedLabel !== ''
                 ? ControlledPublishingManualStructureService::uppercaseNavLabel($importedLabel)
-                : ControlledPublishingManualStructureService::navLabelForSection($row, true);
+                : $lockedLabel;
 
             $navItems = $this->manualStructure->listNavSubsectionsFromChapterBlocks(
                 $sectionId,

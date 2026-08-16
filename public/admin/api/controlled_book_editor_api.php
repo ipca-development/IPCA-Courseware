@@ -19,10 +19,12 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingApprovalSer
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingEditorNavService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStructureService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingOutlineService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRichTextService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAnnexService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualPageBreakService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -51,9 +53,11 @@ $lepPageSvc = new ControlledPublishingLepService($pdo);
 $approvalSvc = new ControlledPublishingApprovalService($pdo, $lepPageSvc);
 $part0PageSvc = new ControlledPublishingPart0PageService($pdo, $blocks);
 $manualStructureSvc = new ControlledPublishingManualStructureService($pdo, $foundation, $sections, $blocks);
+$outlineSvc = new ControlledPublishingOutlineService($pdo, $foundation, $sections, $manualStructureSvc);
 $editorNavSvc = new ControlledPublishingEditorNavService($sections, $manualStructureSvc);
 $richTextSvc = new ControlledPublishingRichTextService($pdo);
 $manualPageBreakSvc = new ControlledPublishingManualPageBreakService($pdo);
+$readerAnnotationSvc = new ControlledPublishingReaderAnnotationService($pdo);
 $annexSvc = new ControlledPublishingAnnexService($pdo, $foundation, $sections, $blocks, new ControlledPublishingDocxImportService(
     $pdo,
     $foundation,
@@ -80,6 +84,33 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 try {
     switch ($action) {
+        case 'review_threads':
+            $versionId = (int)($_GET['version_id'] ?? 0);
+            if ($versionId <= 0) {
+                throw new InvalidArgumentException('version_id required.');
+            }
+            cp_editor_json(200, array(
+                'ok' => true,
+                'threads' => $readerAnnotationSvc->listReviewThreads($versionId),
+            ));
+            break;
+        case 'review_comment_add':
+            $versionId = (int)($_POST['version_id'] ?? 0);
+            if ($versionId <= 0) {
+                throw new InvalidArgumentException('version_id required.');
+            }
+            cp_editor_json(200, array(
+                'ok' => true,
+                'thread' => $readerAnnotationSvc->addReviewComment(
+                    $uid,
+                    $versionId,
+                    (string)($_POST['thread_uuid'] ?? ''),
+                    (string)($_POST['comment_uuid'] ?? ''),
+                    (string)($_POST['body'] ?? ''),
+                    null
+                ),
+            ));
+            break;
         case 'load':
             cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $editorNavSvc, $manualStructureSvc, $annexSvc, $uid);
             break;
@@ -196,6 +227,24 @@ try {
             break;
         case 'create_subsection':
             cp_editor_handle_create_subsection($sections, $uid);
+            break;
+        case 'get_outline':
+            cp_editor_handle_get_outline($foundation, $outlineSvc);
+            break;
+        case 'rename_outline_part':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'rename_part');
+            break;
+        case 'rename_outline_chapter':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'rename_chapter');
+            break;
+        case 'add_outline_chapter':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'add_chapter');
+            break;
+        case 'delete_outline_chapter':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'delete_chapter');
+            break;
+        case 'move_outline_chapter':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'move_chapter');
             break;
         case 'upload_image':
             cp_editor_handle_upload_image($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
@@ -2704,6 +2753,78 @@ function cp_editor_handle_create_subsection(ControlledPublishingSectionService $
         'section_id' => $sectionId,
         'sections_tree' => $sections->listSectionTree($versionId),
     ));
+}
+
+function cp_editor_handle_get_outline(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingOutlineService $outlineSvc
+): void {
+    $versionId = (int)($_GET['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        $in = cp_editor_input();
+        $versionId = (int)($in['version_id'] ?? 0);
+    }
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    if ($foundation->getVersion($versionId) === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+
+    cp_editor_json(200, array_merge(array('ok' => true), $outlineSvc->getOutline($versionId)));
+}
+
+function cp_editor_handle_outline_mutate(
+    ControlledPublishingFoundationService $foundation,
+    ControlledPublishingOutlineService $outlineSvc,
+    ControlledPublishingEditorNavService $editorNavSvc,
+    int $uid,
+    string $op
+): void {
+    $in = cp_editor_input();
+    $versionId = (int)($in['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+        cp_editor_json(409, array('ok' => false, 'error' => 'Released versions cannot be restructured.'));
+    }
+
+    $sectionId = (int)($in['section_id'] ?? 0);
+    $createdId = 0;
+    try {
+        if ($op === 'rename_part') {
+            $outlineSvc->renamePart($versionId, $sectionId, (string)($in['title'] ?? ''), $uid);
+        } elseif ($op === 'rename_chapter') {
+            $outlineSvc->renameChapter($versionId, $sectionId, (string)($in['title'] ?? ''), $uid);
+        } elseif ($op === 'add_chapter') {
+            $createdId = $outlineSvc->addChapter(
+                $versionId,
+                (int)($in['part_section_id'] ?? $sectionId),
+                (string)($in['title'] ?? ''),
+                $uid
+            );
+        } elseif ($op === 'delete_chapter') {
+            $outlineSvc->deleteChapter($versionId, $sectionId, $uid);
+        } elseif ($op === 'move_chapter') {
+            $outlineSvc->moveChapter($versionId, $sectionId, (string)($in['direction'] ?? ''), $uid);
+        } else {
+            cp_editor_json(400, array('ok' => false, 'error' => 'Unknown outline action.'));
+        }
+    } catch (RuntimeException $e) {
+        cp_editor_json(400, array('ok' => false, 'error' => $e->getMessage()));
+    }
+
+    $payload = array_merge(array('ok' => true), $outlineSvc->getOutline($versionId));
+    $payload['sections_tree'] = $editorNavSvc->buildNavTree($versionId, (string)($version['book_key'] ?? 'OM'));
+    if ($createdId > 0) {
+        $payload['section_id'] = $createdId;
+    }
+    cp_editor_json(200, $payload);
 }
 
 function cp_editor_handle_upload_image(

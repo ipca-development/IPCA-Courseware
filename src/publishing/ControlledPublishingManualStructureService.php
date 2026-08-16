@@ -5,6 +5,7 @@ require_once __DIR__ . '/ControlledPublishingBlockService.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingDocxReader.php';
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
+require_once __DIR__ . '/ControlledPublishingOutlineService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
@@ -507,18 +508,31 @@ final class ControlledPublishingManualStructureService
                 $row = $existingByNumber[$number];
                 $meta = $this->decodeMeta($row);
                 $existingNav = trim((string)($meta['nav_label'] ?? ''));
-                $needsUpdate = ((string)($row['title'] ?? '') !== $title)
-                    || ($existingNav !== $navLabel)
-                    || ((string)($row['section_key'] ?? '') !== $sectionKey)
+                $outlineLocked = !empty($meta['outline_locked']);
+                $needsUpdate = ((string)($row['section_key'] ?? '') !== $sectionKey)
                     || (int)($meta['manual_part'] ?? 0) !== $manualPart
                     || !$this->isCanonicalChapterSection($row);
+                if (!$outlineLocked) {
+                    $needsUpdate = $needsUpdate
+                        || ((string)($row['title'] ?? '') !== $title)
+                        || ($existingNav !== $navLabel);
+                }
                 if ($needsUpdate) {
+                    $saveTitle = $title;
+                    $saveNav = $navLabel;
+                    $saveMeta = $metadata;
+                    if ($outlineLocked) {
+                        $saveTitle = (string)($row['title'] ?? $title);
+                        $saveNav = $existingNav !== '' ? $existingNav : $navLabel;
+                        $saveMeta['nav_label'] = $saveNav;
+                        $saveMeta['outline_locked'] = true;
+                    }
                     $this->updateChapterSection(
                         (int)$row['id'],
                         $sectionKey,
-                        $title,
+                        $saveTitle,
                         $number * 10,
-                        $metadata
+                        $saveMeta
                     );
                     $updated++;
                 }
@@ -544,6 +558,9 @@ final class ControlledPublishingManualStructureService
             if ((int)($row['block_count'] ?? 0) > 0) {
                 continue;
             }
+            if (!empty($this->decodeMeta($row)['outline_locked'])) {
+                continue;
+            }
             if ($pruneStaleChapters || $this->canRemoveChapterSection($row)) {
                 $this->deleteSection((int)$row['id']);
                 $removed++;
@@ -552,6 +569,9 @@ final class ControlledPublishingManualStructureService
 
         foreach ($orphans as $row) {
             if ((int)($row['block_count'] ?? 0) > 0) {
+                continue;
+            }
+            if (!empty($this->decodeMeta($row)['outline_locked'])) {
                 continue;
             }
             if ($pruneStaleChapters || $this->canRemoveChapterSection($row)) {
@@ -1445,6 +1465,9 @@ final class ControlledPublishingManualStructureService
 
             $navLabel = $number . '. ' . $importedTitle;
             $meta = $this->decodeMeta($row);
+            if (!empty($meta['outline_locked'])) {
+                continue;
+            }
             $currentTitle = trim((string)($row['title'] ?? ''));
             $currentNav = trim((string)($meta['nav_label'] ?? ''));
             if ($currentTitle === $importedTitle && $currentNav === $navLabel) {
@@ -1690,7 +1713,7 @@ final class ControlledPublishingManualStructureService
     {
         $key = (string)($section['section_key'] ?? '');
         if (isset(self::PART_TITLES[$key])) {
-            return self::PART_TITLES[$key];
+            return ControlledPublishingOutlineService::partNavTitle($section, self::PART_TITLES[$key]);
         }
         if (in_array($key, self::PART0_SECTION_KEYS, true)) {
             return ControlledPublishingPart0PageService::PART_TITLE;
@@ -1709,7 +1732,7 @@ final class ControlledPublishingManualStructureService
             }
             $parentKey = (string)($parent['section_key'] ?? '');
             if (isset(self::PART_TITLES[$parentKey])) {
-                return self::PART_TITLES[$parentKey];
+                return ControlledPublishingOutlineService::partNavTitle($parent, self::PART_TITLES[$parentKey]);
             }
             if (in_array($parentKey, self::PART0_SECTION_KEYS, true)) {
                 return ControlledPublishingPart0PageService::PART_TITLE;
