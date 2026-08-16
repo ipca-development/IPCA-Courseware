@@ -836,6 +836,17 @@ private struct ManualCoverCard: View {
             }
         case .downloading:
             EmptyView()
+        case .updateAvailable:
+            Button("Download Update") {
+                guard let client = ManualReaderSessionStore.shared.client else { return }
+                Task {
+                    _ = try? await downloads.ensureDownloaded(
+                        book: book,
+                        client: client,
+                        forceRefresh: true
+                    )
+                }
+            }
         default:
             Button("Download") {
                 guard let client = ManualReaderSessionStore.shared.client else { return }
@@ -866,6 +877,12 @@ private struct DownloadStatusIndicator: View {
         case .availableOffline:
             Label("Available offline", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
+        case .updateAvailable(let priorVersion):
+            Label(
+                "Update available · \(book.versionLabel) (installed \(priorVersion))",
+                systemImage: "arrow.down.circle.fill"
+            )
+            .foregroundStyle(.orange)
         case .failed:
             Label("Download failed", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)

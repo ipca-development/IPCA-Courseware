@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__);
+require_once $root . '/src/helpers.php';
 require_once $root . '/src/publishing/ControlledPublishingPaginationService.php';
 
 $pdo = new PDO('sqlite::memory:');
@@ -49,6 +50,39 @@ $classifyMethod = new ReflectionMethod($service, 'classifySection');
 $classified = $classifyMethod->invoke($service, $section, array(70 => $section));
 if (empty($classified['force_page_break_before']) || empty($classified['is_part0'])) {
     throw new RuntimeException('Generated Part 0 section boundary is not explicit.');
+}
+
+$annexRegister = array(
+    'id' => 80,
+    'section_key' => 'annexes_register',
+    'parent_section_id' => null,
+    'stable_anchor' => 'OM-6_0-ANNEXES-REGISTER',
+    'is_generated' => 1,
+    'is_system_managed' => 1,
+    'allow_author_blocks' => 0,
+);
+$annexFlags = $classifyMethod->invoke($service, $annexRegister, array(80 => $annexRegister));
+if (
+    empty($annexFlags['force_page_break_before'])
+    || empty($annexFlags['is_section_start'])
+) {
+    throw new RuntimeException('Annex Register does not begin a distinct authoritative section page.');
+}
+
+$renderer = new ControlledPublishingBookRenderer();
+$abbreviations = $renderer->renderAbbreviationsIndexContent(array(
+    'entries' => array(array(
+        'abbreviation' => 'FDM',
+        'definition' => 'Flight Data Monitoring',
+        'definition_status' => 'confirmed',
+    )),
+    'empty_rows' => 0,
+), false);
+if (
+    str_contains($abbreviations, 'cpb-part0-abbr-sep')
+    || str_contains($abbreviations, 'FDM</span>–')
+) {
+    throw new RuntimeException('Published abbreviation row still contains a dash separator.');
 }
 
 $authoritative = new ControlledPublishingAuthoritativePaginationService($reader, $root);

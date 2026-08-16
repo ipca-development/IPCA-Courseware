@@ -6,11 +6,11 @@ $failures = array();
 
 $protected = array(
     'src/publishing/ControlledPublishingBlockService.php'
-        => 'd63175aa9e0292b9137f27a38eeb913337e6af8ab5e6086cdf4207385474f265',
+        => '4561ff4a647e95f43b335bac28f750090bcc5f3a6bfa18b8b621e3a2ab002f51',
     'src/document/StructuredDocumentPayload.php'
-        => '71bcbba2711d9158d952c8042af6439dc8df1697318da877f6e2225eca80a805',
+        => '9b5412d9966d0e7ce162ae652cbd8515b4f8864689852f2807e5f404f356a8ed',
     'src/publishing/ControlledPublishingBookRenderer.php'
-        => '3f4af44e623dd5dbacd91f36578cf14764c487cb0cfeef9dc99aff101d48e0e9',
+        => '1c2b71ec9d6bb1724026c5c484e992ddb5b18776106cd27248d6bdc456c2b87d',
 );
 
 foreach ($protected as $relative => $expectedHash) {
@@ -78,6 +78,39 @@ require_markers(
         'rewrittenPaginateSourceData',
         'catch ManualReaderAPIError.unauthorized',
         'ManualReaderSessionStore.shared.clearSession()',
+        'case updateAvailable(String)',
+        'downloadTasks',
+        'var isFullyDownloaded: Bool',
+        'return try await completeDownload(',
+    ),
+    $failures
+);
+
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/BookPageCurlView.swift',
+    array(
+        'return [safeIndex, right]',
+        'if !pageNumber.isMultiple(of: 2)',
+        'pageNumber.isMultiple(of: 2) == false',
+    ),
+    $failures
+);
+
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ManualPageWebView.swift',
+    array(
+        'onNavigateToAnchor(fragment)',
+        'onNavigateToSection(sectionID)',
+        'onExternalLink(url)',
+    ),
+    $failures
+);
+
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ReaderView.swift',
+    array(
+        '"Open External Website?"',
+        '"Preparing page \\(viewModel.currentIndex + 1)…"',
     ),
     $failures
 );

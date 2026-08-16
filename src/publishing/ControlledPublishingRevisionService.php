@@ -206,7 +206,30 @@ final class ControlledPublishingRevisionService
             return array('section_id' => $sectionId, 'blocks_created' => $created + 1, 'changes_count' => 0);
         }
 
+        $lastPart = null;
         foreach ($summaries as $summary) {
+            $part = trim((string)($summary['part'] ?? ''));
+            if ($part !== '' && $part !== $lastPart) {
+                $partPayload = array(
+                    'html' => '<p>' . htmlspecialchars($part, ENT_QUOTES, 'UTF-8') . '</p>',
+                    'paragraph_style' => 'subtitle_2',
+                );
+                $partKey = 'part_' . substr(hash('sha256', $part), 0, 12);
+                $this->insertHighlightBlock(
+                    $ins,
+                    $versionId,
+                    $sectionId,
+                    $stableBase,
+                    $partKey,
+                    'paragraph',
+                    $partPayload,
+                    $sort,
+                    $actorUserId
+                );
+                $sort += 10;
+                $created++;
+                $lastPart = $part;
+            }
             $para = array('html' => '<p>' . htmlspecialchars($summary['text'], ENT_QUOTES, 'UTF-8') . '</p>');
             $key = 'change_' . substr(hash('sha256', $summary['key']), 0, 12);
             $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, $key, 'paragraph', $para, $sort, $actorUserId);
@@ -284,7 +307,7 @@ final class ControlledPublishingRevisionService
 
     /**
      * @param list<array<string,mixed>> $changes
-     * @return list<array{key:string,text:string}>
+     * @return list<array{key:string,text:string,part:string}>
      */
     private function humanChangeSummaries(array $changes): array
     {
@@ -302,6 +325,7 @@ final class ControlledPublishingRevisionService
             if (!isset($groups[$groupKey])) {
                 $groups[$groupKey] = array(
                     'part' => $part,
+                    'section_key' => $sectionKey,
                     'section_title' => $sectionTitle,
                     'locations' => array(),
                     'added' => array(),
@@ -327,6 +351,18 @@ final class ControlledPublishingRevisionService
                 $groups[$groupKey]['modified'][] = array($priorText, $currentText);
             }
         }
+
+        uasort($groups, function (array $left, array $right): int {
+            $partOrder = $this->partSortOrder((string)($left['part'] ?? ''))
+                <=> $this->partSortOrder((string)($right['part'] ?? ''));
+            if ($partOrder !== 0) {
+                return $partOrder;
+            }
+            return strcmp(
+                (string)($left['section_key'] ?? ''),
+                (string)($right['section_key'] ?? '')
+            );
+        });
 
         $output = array();
         foreach ($groups as $key => $group) {
@@ -365,6 +401,7 @@ final class ControlledPublishingRevisionService
             }
             $output[] = array(
                 'key' => $key,
+                'part' => (string)$group['part'],
                 'text' => ($location !== '' ? $location . ': ' : '') . implode(' ', $sentences),
             );
         }
@@ -379,7 +416,22 @@ final class ControlledPublishingRevisionService
         if (str_contains($sectionKey, 'part_1') || str_contains($sectionKey, 'main_content')) {
             return 'Part 1 — General';
         }
-        return str_contains($sectionKey, 'part0') ? 'Part 0 — Manual Administration' : '';
+        if (str_contains($sectionKey, 'part0')) return 'Part 0 — Manual Administration';
+        if (str_contains($sectionKey, 'annex')) return 'Annexes';
+        return 'Other Changes';
+    }
+
+    private function partSortOrder(string $part): int
+    {
+        return match (true) {
+            str_starts_with($part, 'Part 0') => 0,
+            str_starts_with($part, 'Part 1') => 1,
+            str_starts_with($part, 'Part 2') => 2,
+            str_starts_with($part, 'Part 3') => 3,
+            str_starts_with($part, 'Part 4') => 4,
+            $part === 'Annexes' => 5,
+            default => 6,
+        };
     }
 
     /** @return array<string,mixed> */

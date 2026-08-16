@@ -92,4 +92,30 @@ if (preg_match('/BLOCK-|stable anchor|source fragment|source_fragment_id/i', $te
     throw new RuntimeException('Human change summary exposes an internal identifier.');
 }
 
+$ordered = $summariesMethod->invoke($service, array(
+    array(
+        'block_key' => 'part_4_change',
+        'section_key' => 'part_4_chapter_1',
+        'section_title' => 'Training',
+        'change_status' => 'new',
+        'payload_json' => json_encode(array('html' => '<p>Part 4 update.</p>'), JSON_THROW_ON_ERROR),
+        'change_context' => array(),
+    ),
+    array(
+        'block_key' => 'part_1_change',
+        'section_key' => 'main_content_chapter_1',
+        'section_title' => 'General',
+        'change_status' => 'new',
+        'payload_json' => json_encode(array('html' => '<p>Part 1 update.</p>'), JSON_THROW_ON_ERROR),
+        'change_context' => array(),
+    ),
+));
+if (
+    count($ordered) !== 2
+    || (string)($ordered[0]['part'] ?? '') !== 'Part 1 — General'
+    || (string)($ordered[1]['part'] ?? '') !== 'Part 4 — Training'
+) {
+    throw new RuntimeException('Generated change summaries are not ordered by manual part.');
+}
+
 echo "Controlled publishing revision highlights: PASS\n";

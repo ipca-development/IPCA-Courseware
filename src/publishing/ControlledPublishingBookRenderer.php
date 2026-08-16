@@ -735,7 +735,6 @@ final class ControlledPublishingBookRenderer
             $rowsHtml .= '<div class="' . $rowClass . '" data-part0-row="' . $rowIdx . '"' . $statusAttr . '>'
                 . '<span class="cpb-part0-abbr-term ' . $bodyStyle['class'] . '" data-part0-col="abbreviation"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . '>' . $abbr . '</span>'
-                . '<span class="cpb-part0-abbr-sep" aria-hidden="true">–</span>'
                 . '<span class="' . $defClass . '" data-part0-col="definition"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>' . $defHtml . '</span>'
                 . $badge
@@ -747,7 +746,6 @@ final class ControlledPublishingBookRenderer
             $rowsHtml .= '<div class="cpb-part0-abbr-row cpb-part0-row--empty" data-part0-row="' . $rowIdx . '">'
                 . '<span class="cpb-part0-abbr-term ' . $bodyStyle['class'] . '" data-part0-col="abbreviation"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . '>&nbsp;</span>'
-                . '<span class="cpb-part0-abbr-sep" aria-hidden="true">–</span>'
                 . '<span class="cpb-part0-abbr-def ' . $bodyStyle['class'] . '" data-part0-col="definition"'
                 . ' data-part0-row="' . $rowIdx . '"' . $bodyStyle['attr'] . $fieldEdit . '>&nbsp;</span>'
                 . '</div>';

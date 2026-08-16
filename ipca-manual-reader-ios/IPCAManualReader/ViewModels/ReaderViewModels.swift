@@ -53,6 +53,7 @@ final class ReaderViewModel: ObservableObject {
     @Published var nav: [NavNode] = []
     @Published var sectionPageIndex: [Int: Int] = [:]
     @Published private(set) var tocReferencePageIndex: [String: Int] = [:]
+    @Published private(set) var stableAnchorPageIndex: [String: Int] = [:]
     @Published var isLoading = true
     @Published var errorMessage: String?
     @Published var currentPageHTML: String = ""
@@ -120,7 +121,7 @@ final class ReaderViewModel: ObservableObject {
                     + "verified=\(cachedPackage.hasVerifiedPublicationStyle)"
             )
 #endif
-            if cachedPackage.hasCanonicalPublicationPackage,
+            if cachedPackage.isFullyDownloaded,
                openingPageNumber.flatMap({ cachedPackage.page(number: $0)?.pageHtml }) != nil {
                 await applyPackage(cachedPackage)
 #if DEBUG
@@ -179,6 +180,7 @@ final class ReaderViewModel: ObservableObject {
                 return (pageNumber, html)
             }
         )
+        stableAnchorPageIndex = officialPageLookups(package: package).byAnchor
         var startIndex = 0
         if !isPreview,
            let anchor = book.continueStableAnchor, !anchor.isEmpty,
@@ -228,6 +230,21 @@ final class ReaderViewModel: ObservableObject {
     func goToPageNumber(_ pageNumber: Int) async {
         guard let index = pages.firstIndex(where: { $0.pageNumber == pageNumber }) else { return }
         await goToIndex(index)
+    }
+
+    func goToStableAnchor(_ anchor: String) async {
+        let normalized = anchor.removingPercentEncoding ?? anchor
+        if let pageNumber = stableAnchorPageIndex[normalized] {
+            await goToPageNumber(pageNumber)
+            return
+        }
+        if let pageNumber = tocReferencePageIndex[normalized] {
+            await goToPageNumber(pageNumber)
+            return
+        }
+        if let page = pages.first(where: { $0.stableAnchor == normalized }) {
+            await goToPageNumber(page.pageNumber)
+        }
     }
 
     func goToSection(_ sectionId: Int) async {

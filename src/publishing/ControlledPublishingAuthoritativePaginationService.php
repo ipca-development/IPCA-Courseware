@@ -180,10 +180,12 @@ final class ControlledPublishingAuthoritativePaginationService
             }
             $this->validateMergedCoverageOrder($pages);
             $sectionIndex = $this->sectionIndexFromPages($pages);
+            $anchorIndex = $this->anchorIndexFromPages($pages);
             foreach ($pages as &$page) {
                 $page['page_html'] = $this->injectTocPageNumbers(
                     (string)($page['page_html'] ?? ''),
-                    $sectionIndex
+                    $sectionIndex,
+                    $anchorIndex
                 );
             }
             unset($page);
@@ -242,6 +244,40 @@ final class ControlledPublishingAuthoritativePaginationService
             $sectionId = (int)($page['section_id'] ?? 0);
             if ($sectionId > 0 && !isset($index[(string)$sectionId])) {
                 $index[(string)$sectionId] = (int)($page['page_number'] ?? 0);
+            }
+        }
+        return $index;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $pages
+     * @return array<string,int>
+     */
+    private function anchorIndexFromPages(array $pages): array
+    {
+        $index = array();
+        foreach ($pages as $page) {
+            $pageNumber = (int)($page['page_number'] ?? 0);
+            if ($pageNumber <= 0) {
+                continue;
+            }
+            $pageAnchor = trim((string)($page['stable_anchor'] ?? ''));
+            if ($pageAnchor !== '' && !isset($index[$pageAnchor])) {
+                $index[$pageAnchor] = $pageNumber;
+            }
+            $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+            $coverage = is_array($metadata['coverage'] ?? null) ? $metadata['coverage'] : array();
+            foreach ($coverage as $entry) {
+                if (!is_array($entry) || !empty($entry['presentation_copy'])) {
+                    continue;
+                }
+                $sourceId = trim((string)($entry['source_fragment_id'] ?? ''));
+                foreach (explode('/', $sourceId) as $anchor) {
+                    $anchor = trim($anchor);
+                    if ($anchor !== '' && !isset($index[$anchor])) {
+                        $index[$anchor] = $pageNumber;
+                    }
+                }
             }
         }
         return $index;
@@ -474,18 +510,34 @@ final class ControlledPublishingAuthoritativePaginationService
 
     /**
      * @param array<string,mixed> $sectionPageIndex
+     * @param array<string,mixed> $anchorPageIndex
      */
-    private function injectTocPageNumbers(string $html, array $sectionPageIndex): string
+    private function injectTocPageNumbers(
+        string $html,
+        array $sectionPageIndex,
+        array $anchorPageIndex = array()
+    ): string
     {
         if (!str_contains($html, 'cpb-toc-row')) {
             return $html;
         }
         $updated = preg_replace_callback(
             '/<div class="cpb-toc-row[^"]*"[^>]*>.*?<\/div>/s',
-            static function (array $match) use ($sectionPageIndex): string {
+            static function (array $match) use ($sectionPageIndex, $anchorPageIndex): string {
                 $row = $match[0];
                 $page = '—';
-                if (preg_match('/data-section-id="(\d+)"/', $row, $sectionMatch) === 1) {
+                if (preg_match('/data-toc-target="([^"]+)"/', $row, $anchorMatch) === 1) {
+                    $anchor = rawurldecode(html_entity_decode(
+                        (string)$anchorMatch[1],
+                        ENT_QUOTES | ENT_HTML5,
+                        'UTF-8'
+                    ));
+                    $resolved = $anchorPageIndex[$anchor] ?? null;
+                    if ($resolved !== null && (int)$resolved > 0) {
+                        $page = (string)(int)$resolved;
+                    }
+                }
+                if ($page === '—' && preg_match('/data-section-id="(\d+)"/', $row, $sectionMatch) === 1) {
                     $resolved = $sectionPageIndex[(string)(int)$sectionMatch[1]]
                         ?? $sectionPageIndex[(int)$sectionMatch[1]]
                         ?? null;
@@ -494,11 +546,22 @@ final class ControlledPublishingAuthoritativePaginationService
                     }
                 }
                 $escaped = htmlspecialchars($page, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                return preg_replace(
+                $replaced = preg_replace_callback(
                     '/(<span class="cpb-toc-page" data-toc-page=")[^"]*(">)[^<]*(<\/span>)/s',
-                    '$1' . $escaped . '$2' . $escaped . '$3',
+                    static fn(array $pageMatch): string =>
+                        $pageMatch[1] . $escaped . $pageMatch[2] . $escaped . $pageMatch[3],
                     $row
                 ) ?? $row;
+                if (str_contains($replaced, 'class="cpb-toc-page"')) {
+                    return $replaced;
+                }
+                return preg_replace_callback(
+                    '/(<span class="cpb-toc-leader"[^>]*><\/span>)[^<]*(?:<\/span>)?(\s*<\/div>)$/s',
+                    static fn(array $pageMatch): string => $pageMatch[1]
+                        . '<span class="cpb-toc-page" data-toc-page="' . $escaped . '">'
+                        . $escaped . '</span>' . $pageMatch[2],
+                    $replaced
+                ) ?? $replaced;
             },
             $html
         );

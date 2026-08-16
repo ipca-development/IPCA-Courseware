@@ -231,6 +231,7 @@ final class ControlledPublishingPaginationService
 
         $isCover = $key === 'cover';
         $isPart0 = in_array($key, self::PART0_SECTION_KEYS, true);
+        $isAnnexRegister = $key === 'annexes_register';
         $isPartStart = in_array($key, self::PART_KEYS, true);
         $isChapterStart = false;
         $isMajorSectionStart = false;
@@ -253,7 +254,7 @@ final class ControlledPublishingPaginationService
             }
         }
 
-        $pageBreakBefore = $isCover || $isPart0;
+        $pageBreakBefore = $isCover || $isPart0 || $isAnnexRegister;
 
         return array(
             'is_cover' => $isCover,
@@ -261,7 +262,8 @@ final class ControlledPublishingPaginationService
             'is_part_start' => $isPartStart,
             'is_chapter_start' => $isChapterStart,
             'is_major_section_start' => $isMajorSectionStart,
-            'is_section_start' => $isPartStart || $isChapterStart || $isCover || $isPart0,
+            'is_section_start' => $isPartStart || $isChapterStart || $isCover || $isPart0
+                || $isAnnexRegister,
             'force_page_break_before' => $pageBreakBefore,
             'manual_part' => $manualPart,
             'pagination_authority' => $this->paginationAuthority($section),

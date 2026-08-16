@@ -10,6 +10,10 @@ struct BookPageCurlView: UIViewControllerRepresentable {
     let pageBackground: Color
     @Binding var currentIndex: Int
     let onTap: () -> Void
+    let onPageReady: (Int) -> Void
+    let onNavigateToAnchor: (String) -> Void
+    let onNavigateToSection: (Int) -> Void
+    let onExternalLink: (URL) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -75,7 +79,11 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     isLandscape: parent.isLandscape,
                     pageNumber: parent.pages[position].pageNumber,
                     pageSize: parent.pageSize,
-                    pageBackground: parent.pageBackground
+                    pageBackground: parent.pageBackground,
+                    onReady: { [weak self] in self?.parent.onPageReady(position) },
+                    onNavigateToAnchor: parent.onNavigateToAnchor,
+                    onNavigateToSection: parent.onNavigateToSection,
+                    onExternalLink: parent.onExternalLink
                 )
             }
         }
@@ -100,9 +108,10 @@ struct BookPageCurlView: UIViewControllerRepresentable {
 
             let pageNumber = parent.pages[safeIndex].pageNumber
             if pageNumber == 1 {
-                return [-1, safeIndex]
+                let right = index(forPageNumber: 2) ?? parent.pages.count
+                return [safeIndex, right]
             }
-            if pageNumber.isMultiple(of: 2) {
+            if !pageNumber.isMultiple(of: 2) {
                 let right = index(forPageNumber: pageNumber + 1) ?? parent.pages.count
                 return [safeIndex, right]
             }
@@ -141,7 +150,11 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     isLandscape: parent.isLandscape,
                     pageNumber: parent.pages[position].pageNumber,
                     pageSize: parent.pageSize,
-                    pageBackground: parent.pageBackground
+                    pageBackground: parent.pageBackground,
+                    onReady: { [weak self] in self?.parent.onPageReady(position) },
+                    onNavigateToAnchor: parent.onNavigateToAnchor,
+                    onNavigateToSection: parent.onNavigateToSection,
+                    onExternalLink: parent.onExternalLink
                 )
             } else {
                 host = PageHostController(
@@ -159,7 +172,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
         ) -> UIViewController? {
             guard let page = viewController as? PageHostController else { return nil }
             let previous = page.position - 1
-            guard previous >= -1 else { return nil }
+            guard previous >= 0 else { return nil }
             return pageController(at: previous)
         }
 
@@ -169,7 +182,18 @@ struct BookPageCurlView: UIViewControllerRepresentable {
         ) -> UIViewController? {
             guard let page = viewController as? PageHostController else { return nil }
             let next = page.position + 1
-            guard next <= parent.pages.count else { return nil }
+            guard next < parent.pages.count else {
+                // A trailing blank is only needed when the final authoritative
+                // page is a left-hand (odd-numbered) page. Supplying one after
+                // a right-hand final page makes a mid-spine page curl request a
+                // two-controller transition with only one controller.
+                guard next == parent.pages.count,
+                      parent.isLandscape,
+                      parent.pages.last?.pageNumber.isMultiple(of: 2) == false else {
+                    return nil
+                }
+                return pageController(at: next)
+            }
             return pageController(at: next)
         }
 
@@ -220,7 +244,11 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
             width: ManualPageLayout.width,
             height: ManualPageLayout.height
         ),
-        pageBackground: Color = .white
+        pageBackground: Color = .white,
+        onReady: @escaping () -> Void = {},
+        onNavigateToAnchor: @escaping (String) -> Void = { _ in },
+        onNavigateToSection: @escaping (Int) -> Void = { _ in },
+        onExternalLink: @escaping (URL) -> Void = { _ in }
     ) {
         self.position = position
         super.init(rootView: AnyView(pageBackground))
@@ -232,7 +260,11 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 isLandscape: isLandscape,
                 pageNumber: pageNumber,
                 pageSize: pageSize,
-                pageBackground: pageBackground
+                pageBackground: pageBackground,
+                onReady: onReady,
+                onNavigateToAnchor: onNavigateToAnchor,
+                onNavigateToSection: onNavigateToSection,
+                onExternalLink: onExternalLink
             )
         }
     }
@@ -247,7 +279,11 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         isLandscape: Bool,
         pageNumber: Int,
         pageSize: CGSize,
-        pageBackground: Color
+        pageBackground: Color,
+        onReady: @escaping () -> Void,
+        onNavigateToAnchor: @escaping (String) -> Void,
+        onNavigateToSection: @escaping (Int) -> Void,
+        onExternalLink: @escaping (URL) -> Void
     ) {
         view.backgroundColor = UIColor(pageBackground)
         rootView = AnyView(
@@ -255,9 +291,13 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 html: html,
                 baseURL: baseURL,
                 isLandscape: isLandscape,
-                isLeftPage: pageNumber.isMultiple(of: 2),
+                isLeftPage: !pageNumber.isMultiple(of: 2),
                 pageSize: pageSize,
-                pageBackground: pageBackground
+                pageBackground: pageBackground,
+                onReady: onReady,
+                onNavigateToAnchor: onNavigateToAnchor,
+                onNavigateToSection: onNavigateToSection,
+                onExternalLink: onExternalLink
             )
         )
     }
@@ -272,6 +312,10 @@ private struct PhysicalManualPage: View {
     let isLeftPage: Bool
     let pageSize: CGSize
     let pageBackground: Color
+    let onReady: () -> Void
+    let onNavigateToAnchor: (String) -> Void
+    let onNavigateToSection: (Int) -> Void
+    let onExternalLink: (URL) -> Void
 
     var body: some View {
         GeometryReader { proxy in
@@ -281,7 +325,11 @@ private struct PhysicalManualPage: View {
                 zoomMode: session.settings.zoom,
                 containerSize: proxy.size,
                 pageSize: pageSize,
-                pageBackground: pageBackground
+                pageBackground: pageBackground,
+                onReady: onReady,
+                onNavigateToAnchor: onNavigateToAnchor,
+                onNavigateToSection: onNavigateToSection,
+                onExternalLink: onExternalLink
             )
             .background(pageBackground)
             .overlay {

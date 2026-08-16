@@ -8,9 +8,18 @@ struct ManualPageWebView: UIViewRepresentable {
     var containerSize: CGSize
     var pageSize: CGSize
     var pageBackground: Color
+    var onReady: () -> Void
+    var onNavigateToAnchor: (String) -> Void
+    var onNavigateToSection: (Int) -> Void
+    var onExternalLink: (URL) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(
+            onReady: onReady,
+            onNavigateToAnchor: onNavigateToAnchor,
+            onNavigateToSection: onNavigateToSection,
+            onExternalLink: onExternalLink
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -20,6 +29,10 @@ struct ManualPageWebView: UIViewRepresentable {
         webView.isOpaque = true
         webView.backgroundColor = UIColor(pageBackground)
         webView.scrollView.backgroundColor = UIColor(pageBackground)
+        context.coordinator.onReady = onReady
+        context.coordinator.onNavigateToAnchor = onNavigateToAnchor
+        context.coordinator.onNavigateToSection = onNavigateToSection
+        context.coordinator.onExternalLink = onExternalLink
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.scrollView.minimumZoomScale = 1
@@ -70,16 +83,49 @@ struct ManualPageWebView: UIViewRepresentable {
         var lastHTML: String = ""
         var pendingScaleJS: String = ""
         var isLoaded = false
+        var onReady: () -> Void
+        var onNavigateToAnchor: (String) -> Void
+        var onNavigateToSection: (Int) -> Void
+        var onExternalLink: (URL) -> Void
+
+        init(
+            onReady: @escaping () -> Void,
+            onNavigateToAnchor: @escaping (String) -> Void,
+            onNavigateToSection: @escaping (Int) -> Void,
+            onExternalLink: @escaping (URL) -> Void
+        ) {
+            self.onReady = onReady
+            self.onNavigateToAnchor = onNavigateToAnchor
+            self.onNavigateToSection = onNavigateToSection
+            self.onExternalLink = onExternalLink
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isLoaded = true
             if !pendingScaleJS.isEmpty {
                 webView.evaluateJavaScript(pendingScaleJS, completionHandler: nil)
             }
+            DispatchQueue.main.async { self.onReady() }
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated {
+                if let url = navigationAction.request.url,
+                   url.path.hasSuffix("/admin/compliance/controlled_book_editor.php"),
+                   let sectionValue = URLComponents(
+                       url: url,
+                       resolvingAgainstBaseURL: false
+                   )?.queryItems?.first(where: { $0.name == "section_id" })?.value,
+                   let sectionID = Int(sectionValue),
+                   sectionID > 0 {
+                    onNavigateToSection(sectionID)
+                } else if let url = navigationAction.request.url,
+                   let fragment = url.fragment?.removingPercentEncoding,
+                   !fragment.isEmpty {
+                    onNavigateToAnchor(fragment)
+                } else if let url = navigationAction.request.url {
+                    onExternalLink(url)
+                }
                 decisionHandler(.cancel)
                 return
             }

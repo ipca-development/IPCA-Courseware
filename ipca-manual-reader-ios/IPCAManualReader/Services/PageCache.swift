@@ -38,6 +38,7 @@ actor PageCache {
 struct OfflineManualPackage: Codable {
     let bookID: String
     let versionID: Int
+    let versionLabel: String?
     let downloadedAt: Date
     let pageMap: PageMapResponse
     let tableOfContents: TocResponse
@@ -84,6 +85,21 @@ struct OfflineManualPackage: Codable {
             }
             return true
         }.allSatisfy { $0 }
+    }
+
+    var isFullyDownloaded: Bool {
+        let expected = Set(pageMap.pages.map(\.pageNumber))
+        let downloaded = Set(pages.compactMap { page -> Int? in
+            guard let pageNumber = page.pageNumber,
+                  let html = page.pageHtml,
+                  !html.isEmpty else {
+                return nil
+            }
+            return pageNumber
+        })
+        return !expected.isEmpty
+            && expected == downloaded
+            && hasCanonicalPublicationPackage
     }
 
     var bookStyleCSS: String? {
@@ -209,6 +225,7 @@ enum ManualDownloadStatus: Equatable {
     case notDownloaded
     case downloading(Double)
     case availableOffline(Date)
+    case updateAvailable(String)
     case failed(String)
 
     var isAvailableOffline: Bool {
@@ -244,6 +261,25 @@ private actor ManualPackageDiskStore {
         return package
     }
 
+    func latestOtherVersion(bookKey: String, excludingVersionID: Int) -> OfflineManualPackage? {
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: nil
+        ) else {
+            return nil
+        }
+        let prefix = bookKey.uppercased() + "-"
+        return urls.compactMap { url -> OfflineManualPackage? in
+            guard let data = try? Data(contentsOf: url),
+                  let package = try? JSONDecoder().decode(OfflineManualPackage.self, from: data),
+                  package.bookID.uppercased().hasPrefix(prefix),
+                  package.versionID != excludingVersionID else {
+                return nil
+            }
+            return package
+        }.max { $0.downloadedAt < $1.downloadedAt }
+    }
+
     func save(_ package: OfflineManualPackage) throws {
         try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(package)
@@ -266,6 +302,7 @@ final class ManualDownloadManager: ObservableObject {
     @Published private(set) var packages: [String: OfflineManualPackage] = [:]
 
     private let diskStore = ManualPackageDiskStore()
+    private var downloadTasks: [String: Task<OfflineManualPackage, Error>] = [:]
 
     private init() {}
 
@@ -281,7 +318,7 @@ final class ManualDownloadManager: ObservableObject {
             return nil
         }
         packages[book.id] = package
-        statuses[book.id] = package.hasCanonicalPublicationPackage
+        statuses[book.id] = package.isFullyDownloaded
             ? .availableOffline(package.downloadedAt)
             : .notDownloaded
         return package
@@ -291,11 +328,29 @@ final class ManualDownloadManager: ObservableObject {
         for book in books {
             if let package = await diskStore.load(bookID: book.id, versionID: book.versionId) {
                 packages[book.id] = package
-                statuses[book.id] = package.hasCanonicalPublicationPackage
-                    ? .availableOffline(package.downloadedAt)
-                    : .notDownloaded
+                if package.isFullyDownloaded {
+                    statuses[book.id] = .availableOffline(package.downloadedAt)
+                } else if let prior = await diskStore.latestOtherVersion(
+                    bookKey: book.bookKey,
+                    excludingVersionID: book.versionId
+                ) {
+                    statuses[book.id] = .updateAvailable(
+                        prior.versionLabel ?? "Version \(prior.versionID)"
+                    )
+                } else {
+                    statuses[book.id] = .notDownloaded
+                }
             } else if statuses[book.id] == nil {
-                statuses[book.id] = .notDownloaded
+                if let prior = await diskStore.latestOtherVersion(
+                    bookKey: book.bookKey,
+                    excludingVersionID: book.versionId
+                ) {
+                    statuses[book.id] = .updateAvailable(
+                        prior.versionLabel ?? "Version \(prior.versionID)"
+                    )
+                } else {
+                    statuses[book.id] = .notDownloaded
+                }
             }
         }
     }
@@ -307,7 +362,32 @@ final class ManualDownloadManager: ObservableObject {
     ) async throws -> OfflineManualPackage {
         if !forceRefresh,
            let existing = await package(for: book),
-           existing.hasCanonicalPublicationPackage {
+           existing.isFullyDownloaded {
+            return existing
+        }
+        if let active = downloadTasks[book.id] {
+            return try await active.value
+        }
+        let task = Task { @MainActor in
+            try await self.performDownload(
+                book: book,
+                client: client,
+                forceRefresh: forceRefresh
+            )
+        }
+        downloadTasks[book.id] = task
+        defer { downloadTasks[book.id] = nil }
+        return try await task.value
+    }
+
+    private func performDownload(
+        book: LibraryBook,
+        client: ManualReaderAPIClient,
+        forceRefresh: Bool
+    ) async throws -> OfflineManualPackage {
+        if !forceRefresh,
+           let existing = await package(for: book),
+           existing.isFullyDownloaded {
             return existing
         }
 
@@ -397,6 +477,7 @@ final class ManualDownloadManager: ObservableObject {
             let starterPackage = OfflineManualPackage(
                 bookID: book.id,
                 versionID: book.versionId,
+                versionLabel: book.versionLabel,
                 downloadedAt: Date(),
                 pageMap: pageMap,
                 tableOfContents: tableOfContents,
@@ -416,15 +497,12 @@ final class ManualDownloadManager: ObservableObject {
             statuses[book.id] = .downloading(
                 Double(openingBatch.pages.count) / Double(max(pageNumbers.count, 1))
             )
-            Task { @MainActor [weak self] in
-                await self?.completeDownload(
-                    book: book,
-                    client: client,
-                    starterPackage: starterPackage,
-                    pageNumbers: pageNumbers
-                )
-            }
-            return starterPackage
+            return try await completeDownload(
+                book: book,
+                client: client,
+                starterPackage: starterPackage,
+                pageNumbers: pageNumbers
+            )
         } catch ManualReaderAPIError.unauthorized {
             ManualReaderSessionStore.shared.clearSession()
             statuses[book.id] = .failed(ManualReaderAPIError.unauthorized.localizedDescription)
@@ -440,9 +518,10 @@ final class ManualDownloadManager: ObservableObject {
         client: ManualReaderAPIClient,
         starterPackage: OfflineManualPackage,
         pageNumbers: [Int]
-    ) async {
-        do {
-            guard let publicationPackage = starterPackage.publicationPackage else { return }
+    ) async throws -> OfflineManualPackage {
+            guard let publicationPackage = starterPackage.publicationPackage else {
+                throw ManualReaderAPIError.badResponse("Publication package is missing.")
+            }
             let publicationAssets = try await downloadPublicationAssets(
                 publicationPackage.assets,
                 client: client
@@ -456,19 +535,38 @@ final class ManualDownloadManager: ObservableObject {
             var batchStart = 0
             while batchStart < missingNumbers.count {
                 try Task.checkCancellation()
-                let batchEnd = min(batchStart + 8, missingNumbers.count)
-                let batchNumbers = Array(missingNumbers[batchStart..<batchEnd])
-                let batch = try await downloadBatchWithRetry(
-                    book: book,
-                    pageNumbers: batchNumbers,
-                    client: client
-                )
-                for page in batch.pages {
-                    if let pageNumber = page.pageNumber {
-                        downloadedByNumber[pageNumber] = page
+                let firstEnd = min(batchStart + 12, missingNumbers.count)
+                let firstNumbers = Array(missingNumbers[batchStart..<firstEnd])
+                let secondEnd = min(firstEnd + 12, missingNumbers.count)
+                let secondNumbers = Array(missingNumbers[firstEnd..<secondEnd])
+                let batches: [ManualPageBatchResponse]
+                if secondNumbers.isEmpty {
+                    batches = [try await downloadBatchWithRetry(
+                        book: book,
+                        pageNumbers: firstNumbers,
+                        client: client
+                    )]
+                } else {
+                    async let firstBatch = downloadBatchWithRetry(
+                        book: book,
+                        pageNumbers: firstNumbers,
+                        client: client
+                    )
+                    async let secondBatch = downloadBatchWithRetry(
+                        book: book,
+                        pageNumbers: secondNumbers,
+                        client: client
+                    )
+                    batches = try await [firstBatch, secondBatch]
+                }
+                for batch in batches {
+                    for page in batch.pages {
+                        if let pageNumber = page.pageNumber {
+                            downloadedByNumber[pageNumber] = page
+                        }
                     }
                 }
-                batchStart = batchEnd
+                batchStart = secondEnd
                 statuses[book.id] = .downloading(
                     Double(downloadedByNumber.count) / Double(max(pageNumbers.count, 1))
                 )
@@ -493,6 +591,7 @@ final class ManualDownloadManager: ObservableObject {
             let completedPackage = OfflineManualPackage(
                 bookID: starterPackage.bookID,
                 versionID: starterPackage.versionID,
+                versionLabel: starterPackage.versionLabel,
                 downloadedAt: starterPackage.downloadedAt,
                 pageMap: starterPackage.pageMap,
                 tableOfContents: starterPackage.tableOfContents,
@@ -510,9 +609,7 @@ final class ManualDownloadManager: ObservableObject {
             try await diskStore.save(completedPackage)
             packages[book.id] = completedPackage
             statuses[book.id] = .availableOffline(completedPackage.downloadedAt)
-        } catch {
-            statuses[book.id] = .failed(error.localizedDescription)
-        }
+            return completedPackage
     }
 
     func removeDownload(for book: LibraryBook) async {

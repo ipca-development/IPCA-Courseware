@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ReaderView: View {
     @Environment(\.dismiss) private var dismiss
@@ -13,6 +14,8 @@ struct ReaderView: View {
     @State private var searchQuery = ""
     @State private var controlsHideTask: Task<Void, Never>?
     @State private var isExiting = false
+    @State private var renderedPages: Set<Int> = []
+    @State private var pendingExternalURL: URL?
     private let onExit: (() -> Void)?
 
     init(book: LibraryBook, onExit: (() -> Void)? = nil) {
@@ -53,6 +56,15 @@ struct ReaderView: View {
                 } else {
                     physicalBookReader(size: safeSize)
                         .frame(width: safeSize.width, height: safeSize.height)
+                    if !renderedPages.contains(viewModel.currentIndex) {
+                        VStack(spacing: 14) {
+                            ProgressView()
+                            Text("Preparing page \(viewModel.currentIndex + 1)…")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .padding(24)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    }
                 }
 
                 if showChrome && !viewModel.isLoading {
@@ -114,6 +126,25 @@ struct ReaderView: View {
         .onDisappear {
             controlsHideTask?.cancel()
         }
+        .alert(
+            "Open External Website?",
+            isPresented: Binding(
+                get: { pendingExternalURL != nil },
+                set: { if !$0 { pendingExternalURL = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) { pendingExternalURL = nil }
+            Button("Open in Browser") {
+                guard let url = pendingExternalURL else { return }
+                pendingExternalURL = nil
+                UIApplication.shared.open(url)
+            }
+        } message: {
+            Text(
+                "You are visiting a website outside of this app.\n"
+                    + (pendingExternalURL?.absoluteString ?? "")
+            )
+        }
     }
 
     private var openingProgress: Double? {
@@ -171,7 +202,15 @@ struct ReaderView: View {
                     pageSize: CGSize(width: pageWidth, height: pageHeight),
                     pageBackground: pageBackgroundColor,
                     currentIndex: $viewModel.currentIndex,
-                    onTap: toggleControls
+                    onTap: toggleControls,
+                    onPageReady: { renderedPages.insert($0) },
+                    onNavigateToAnchor: { anchor in
+                        Task { await viewModel.goToStableAnchor(anchor) }
+                    },
+                    onNavigateToSection: { sectionID in
+                        Task { await viewModel.goToSection(sectionID) }
+                    },
+                    onExternalLink: { pendingExternalURL = $0 }
                 )
                 .id(landscape)
 
