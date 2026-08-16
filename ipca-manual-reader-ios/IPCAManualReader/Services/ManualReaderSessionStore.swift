@@ -18,6 +18,7 @@ final class ManualReaderSessionStore: ObservableObject {
     private let offlineUserKey = "ipca.manual_reader.offline_user"
     private let credentialService = "com.europilotcenter.IPCAManualReader.credentials"
     private let credentialAccount = "manual-reader-login"
+    private var apiClient: ManualReaderAPIClient?
 
     private struct StoredCredentials: Codable {
         let serverURL: String
@@ -48,7 +49,12 @@ final class ManualReaderSessionStore: ObservableObject {
 
     var client: ManualReaderAPIClient? {
         guard let baseURL else { return nil }
-        return ManualReaderAPIClient(baseURL: baseURL)
+        if let apiClient, apiClient.baseURL == baseURL {
+            return apiClient
+        }
+        let client = ManualReaderAPIClient(baseURL: baseURL)
+        apiClient = client
+        return client
     }
 
     func setServerURL(_ string: String) throws {
@@ -66,6 +72,9 @@ final class ManualReaderSessionStore: ObservableObject {
         }
         guard let url = components.url else {
             throw ManualReaderAPIError.invalidServerURL
+        }
+        if baseURL != url {
+            apiClient = nil
         }
         baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: baseURLKey)
@@ -176,6 +185,8 @@ final class ManualReaderSessionStore: ObservableObject {
         guard baseURL != nil else { return }
         do {
             try await restoreSession()
+        } catch ManualReaderAPIError.unauthorized {
+            clearSession()
         } catch {
             // Preserve the last authenticated identity so downloaded manuals remain usable offline.
         }

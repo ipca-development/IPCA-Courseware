@@ -33,6 +33,9 @@ final class LibraryViewModel: ObservableObject {
                 UserDefaults.standard.set(data, forKey: cachedLibraryKey)
             }
             await ManualDownloadManager.shared.refreshStatuses(for: books)
+        } catch ManualReaderAPIError.unauthorized {
+            ManualReaderSessionStore.shared.clearSession()
+            errorMessage = ManualReaderAPIError.unauthorized.localizedDescription
         } catch {
             if books.isEmpty {
                 errorMessage = error.localizedDescription

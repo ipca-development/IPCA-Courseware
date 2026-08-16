@@ -76,9 +76,44 @@ require_markers(
         'downloadPublicationAssets',
         'Publication asset hash verification failed',
         'rewrittenPaginateSourceData',
+        'catch ManualReaderAPIError.unauthorized',
+        'ManualReaderSessionStore.shared.clearSession()',
     ),
     $failures
 );
+
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ManualReaderSessionStore.swift',
+    array(
+        'private var apiClient: ManualReaderAPIClient?',
+        'if let apiClient, apiClient.baseURL == baseURL',
+        'catch ManualReaderAPIError.unauthorized',
+    ),
+    $failures
+);
+
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ManualReaderAPIClient.swift',
+    array(
+        'http.url?.path.hasSuffix("/login.php")',
+        'throw ManualReaderAPIError.unauthorized',
+    ),
+    $failures
+);
+
+$readerApi = (string)file_get_contents($root . '/public/student/api/manual_reader_api.php');
+if (str_contains($readerApi, 'cw_require_login();')) {
+    $failures[] = 'Manual Reader API must return JSON 401 instead of redirecting to login.php.';
+}
+foreach (array(
+    "mr_json(401, array('ok' => false, 'error' => 'Login required'))",
+    "loadReaderPageMap(\$ctx['version'], false)",
+    "loadReaderTocWithPages(\$ctx['version'], false)",
+) as $readerApiMarker) {
+    if (!str_contains($readerApi, $readerApiMarker)) {
+        $failures[] = "Manual Reader API missing stored-map/auth marker: {$readerApiMarker}";
+    }
+}
 
 $iosSwiftFiles = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(
     $root . '/ipca-manual-reader-ios/IPCAManualReader',

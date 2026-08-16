@@ -6,8 +6,6 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderServi
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAccessService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleManifestService.php';
 
-cw_require_login();
-
 header('Content-Type: application/json; charset=utf-8');
 
 function mr_json(int $code, array $payload): void
@@ -105,6 +103,9 @@ function mr_reader_context(
 
 try {
     $user = cw_current_user($pdo);
+    if (!is_array($user) || (int)($user['id'] ?? 0) <= 0) {
+        mr_json(401, array('ok' => false, 'error' => 'Login required'));
+    }
     $access = new ControlledPublishingReaderAccessService();
     if (!$access->canReadManuals($user)) {
         mr_json(403, array('ok' => false, 'error' => 'Forbidden'));
@@ -150,7 +151,7 @@ try {
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             if (method_exists($reader, 'loadReaderPageMap')) {
-                mr_json(200, $reader->loadReaderPageMap($ctx['version'], $ctx['can_preview']));
+                mr_json(200, $reader->loadReaderPageMap($ctx['version'], false));
             }
             mr_json(200, $reader->loadFrozenPageMap($bookKey));
 
@@ -214,7 +215,7 @@ try {
                 $pages[] = $reader->loadReaderPage(
                     $ctx['version'],
                     $pageNumber,
-                    $ctx['can_preview']
+                    false
                 );
             }
             mr_json(200, array(
@@ -229,7 +230,7 @@ try {
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             $pageNumber = (int)($_GET['page_number'] ?? $_GET['page'] ?? 0);
             if (method_exists($reader, 'loadReaderPage')) {
-                mr_json(200, $reader->loadReaderPage($ctx['version'], $pageNumber, $ctx['can_preview']));
+                mr_json(200, $reader->loadReaderPage($ctx['version'], $pageNumber, false));
             }
             mr_json(200, $reader->loadFrozenPage($bookKey, $pageNumber));
 
@@ -237,7 +238,7 @@ try {
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             if (method_exists($reader, 'loadReaderTocWithPages')) {
-                mr_json(200, $reader->loadReaderTocWithPages($ctx['version'], $ctx['can_preview']));
+                mr_json(200, $reader->loadReaderTocWithPages($ctx['version'], false));
             }
             mr_json(200, $reader->loadTocWithPages($bookKey));
 

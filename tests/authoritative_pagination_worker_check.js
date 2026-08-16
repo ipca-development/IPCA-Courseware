@@ -425,6 +425,32 @@ cases.push(["H/I. long table row-paginates with presentation-only headers", () =
   assertContentFragmentGeometry(result.pages, "block-table");
 }]);
 
+cases.push(["H1. one-pixel Chromium table rounding does not invalidate a page", () => {
+  const tableRows = Array.from({ length: 24 }, (_, index) =>
+    `<tr><td>${index + 1}</td><td>Flight-planning value ${index + 1}</td><td>Reference</td></tr>`
+  ).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "rounded-table", "Flight Planning", {}, [
+      unit(
+        "rounded-table-block",
+        "table",
+        '<article class="cpb-block" data-block-id="8" data-block-type="table">'
+          + '<table class="cpb-table" style="width:calc(100% + 1px)">'
+          + '<thead><tr><th>Fuel</th><th>Amount</th><th>Reference</th></tr></thead>'
+          + `<tbody>${tableRows}</tbody></table></article>`,
+        { block_id: 8 }
+      ),
+    ]),
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.ok(result.pages.length >= 2, "rounded table must paginate normally");
+  assert.ok(!(result.failures || []).some((failure) =>
+    failure.code === "CONTENT_WIDTH_OVERFLOW"
+    || failure.code === "UNLAYOUTABLE_FRAGMENT"
+  ), JSON.stringify(result.failures));
+  assertContentFragmentGeometry(result.pages, "rounded-table-block");
+}]);
+
 cases.push(["H2. vertically merged table rows stay in one pagination fragment", () => {
   const { execution, result } = runWorker(sourceWith([
     section(1, "vertical-table", "Vertical table", {}, [

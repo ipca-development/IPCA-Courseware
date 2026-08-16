@@ -368,6 +368,9 @@ struct ManualReaderAPIClient {
 
     private func validate(response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
+        if http.url?.path.hasSuffix("/login.php") == true {
+            throw ManualReaderAPIError.unauthorized
+        }
         if http.statusCode == 401 {
             throw ManualReaderAPIError.unauthorized
         }

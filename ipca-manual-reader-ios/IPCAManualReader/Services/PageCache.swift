@@ -425,6 +425,10 @@ final class ManualDownloadManager: ObservableObject {
                 )
             }
             return starterPackage
+        } catch ManualReaderAPIError.unauthorized {
+            ManualReaderSessionStore.shared.clearSession()
+            statuses[book.id] = .failed(ManualReaderAPIError.unauthorized.localizedDescription)
+            throw ManualReaderAPIError.unauthorized
         } catch {
             statuses[book.id] = .failed(error.localizedDescription)
             throw error

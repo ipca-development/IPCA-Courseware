@@ -9,7 +9,10 @@
   const NORMALIZER_VERSION = "reader-normalizer-v1";
   const ENGINE_VERSION = "live-authoritative-flow-v1";
   const VALIDATOR_VERSION = "pagination-validator-v2";
-  const VALIDATION_TOLERANCE = 0.75;
+  // Chromium reports scrollWidth/clientWidth as integers. A visually flush
+  // 100%-wide table can therefore round to a 1px overflow even when every
+  // measured fragment remains inside the content frame.
+  const VALIDATION_TOLERANCE = 1.01;
   const source = input.source;
   const layout = input.layout;
   const officialPageByAnchor = input.officialPageByAnchor || {};
