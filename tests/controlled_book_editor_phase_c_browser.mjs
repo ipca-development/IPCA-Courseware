@@ -299,7 +299,7 @@ async function newEditorPage(
   }
   await page.addScriptTag({ content: editorJs });
   await page.waitForFunction(() =>
-    document.querySelector('#cpbCanvas .cpb-block[data-block-id="1"]')
+    document.querySelector('#cpbCanvas .cpb-block[data-block-id]')
     && document.querySelector('#cpbEditorRoot').__cpbPhaseC
   );
   await page.waitForFunction(() =>
@@ -669,6 +669,71 @@ test('manual break before a styled heading is not duplicated by heading flow', a
     assert.equal(observed.inlineSpacers, 0, JSON.stringify(observed));
     assert.equal(observed.precedingBreaks.length, 1, JSON.stringify(observed));
     assert.equal(observed.precedingBreaks[0].manual, '1', JSON.stringify(observed));
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('generated TOC rows flow across editor pages without crossing page furniture', async (browser) => {
+  const tocRows = Array.from({ length: 90 }, (_, index) => `
+    <div class="cpb-toc-row cpb-toc-depth-${Math.min(3, index % 4)}"
+      data-toc-depth="${Math.min(3, index % 4)}" data-toc-style="subtitle_2">
+      <span class="cpb-toc-label">${index + 1}. Generated TOC entry ${index + 1}</span>
+      <span class="cpb-toc-leader"></span>
+      <span class="cpb-toc-page">—</span>
+    </div>`).join('');
+  const tocBlocks = `
+    <div class="cpb-block cpb-block--paragraph" data-block-id="10"
+      data-block-type="paragraph" data-stable-anchor="toc-title">
+      <div class="cpb-paragraph" contenteditable="true" data-field="html"
+        data-paragraph-style="subtitle_1">Table of Contents</div>
+    </div>
+    <div class="cpb-block cpb-block--toc" data-block-id="11"
+      data-block-type="toc" data-stable-anchor="generated-toc">
+      <nav class="cpb-toc" aria-label="Table of contents">${tocRows}</nav>
+    </div>`;
+  const { page, browserErrors } = await newEditorPage(
+    browser,
+    '',
+    previewResult(),
+    null,
+    tocBlocks,
+  );
+  try {
+    const observed = await page.evaluate(() => {
+      const sheet = document.querySelector('#cpbCanvas .cpb-sheet');
+      const rows = Array.from(document.querySelectorAll('#cpbCanvas .cpb-toc-row'));
+      const stride = 1056 + 28;
+      const contentTop = 152;
+      const contentBottom = 152 + 744;
+      const sheetTop = sheet.getBoundingClientRect().top;
+      const positions = rows.map((row) => {
+        const rect = row.getBoundingClientRect();
+        const top = rect.top - sheetTop;
+        const pageIndex = Math.max(0, Math.floor(top / stride));
+        return {
+          pageIndex,
+          localTop: top - pageIndex * stride,
+          localBottom: rect.bottom - sheetTop - pageIndex * stride,
+        };
+      });
+      return {
+        firstPage: positions[0]?.pageIndex,
+        pageCount: new Set(positions.map((position) => position.pageIndex)).size,
+        spacers: document.querySelectorAll(
+          '#cpbCanvas .cpb-toc-page-spacer[data-auto-page-break="1"]'
+        ).length,
+        violations: positions.filter((position) =>
+          position.localTop < contentTop - 1
+          || position.localBottom > contentBottom + 1
+        ),
+      };
+    });
+    assert.equal(observed.firstPage, 0, JSON.stringify(observed));
+    assert.ok(observed.pageCount >= 3, JSON.stringify(observed));
+    assert.ok(observed.spacers >= 2, JSON.stringify(observed));
+    assert.deepEqual(observed.violations, []);
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

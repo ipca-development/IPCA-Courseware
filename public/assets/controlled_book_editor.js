@@ -1119,6 +1119,39 @@
     return false;
   }
 
+  function insertTocRowPageBreak(block, sheet) {
+    var toc = block.querySelector('.cpb-toc');
+    if (!toc) return false;
+    var rows = Array.prototype.slice.call(toc.querySelectorAll(':scope > .cpb-toc-row'));
+    var stride = PRINT_PAGE.height + PRINT_PAGE.gap;
+    var rowGap = parseFloat(window.getComputedStyle(toc).rowGap || '0') || 0;
+    for (var index = 0; index < rows.length; index++) {
+      var row = rows[index];
+      var top = printY(row, sheet);
+      var bottom = printBottom(row, sheet);
+      if (bottom - top > PRINT_PAGE.contentHeight) continue;
+      var pageIndex = Math.max(0, Math.floor(top / stride));
+      var contentTop = pageIndex * stride + PRINT_PAGE.contentTop;
+      var contentBottom = contentTop + PRINT_PAGE.contentHeight;
+      var target = 0;
+      if (pageIndex > 0 && top < contentTop - 1) {
+        target = contentTop;
+      } else if (top > contentBottom - 1 || bottom > contentBottom + 0.5) {
+        target = (pageIndex + 1) * stride + PRINT_PAGE.contentTop;
+      }
+      if (!target || target <= top + 1) continue;
+      var spacer = document.createElement('div');
+      spacer.className = 'cpb-flow-page-break cpb-toc-page-spacer';
+      spacer.setAttribute('data-auto-page-break', '1');
+      spacer.setAttribute('data-editor-only', '1');
+      spacer.setAttribute('contenteditable', 'false');
+      spacer.style.height = Math.max(1, target - top - rowGap) + 'px';
+      toc.insertBefore(spacer, row);
+      return true;
+    }
+    return false;
+  }
+
   function paragraphBreak(field, sheet, pageIndex) {
     var textLength = field.textContent.length;
     if (textLength < 2) return false;
@@ -1298,7 +1331,14 @@
           inserted = true;
           break;
         }
+        var isTocBlock = (block.getAttribute('data-block-type') || '') === 'toc'
+          || !!block.querySelector('.cpb-toc-row');
+        if (isTocBlock && insertTocRowPageBreak(block, sheet)) {
+          inserted = true;
+          break;
+        }
         if (bottom <= contentBottom + 0.5) continue;
+        if (isTocBlock) continue;
         var flowingFields = Array.prototype.slice.call(block.querySelectorAll(
           '.cpb-paragraph[contenteditable="true"],'
           + '.cpb-list[contenteditable="true"],'
