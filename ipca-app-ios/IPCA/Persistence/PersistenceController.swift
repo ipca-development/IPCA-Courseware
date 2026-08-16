@@ -21,9 +21,12 @@ final class PersistenceController {
             description.type = NSInMemoryStoreType
             container.persistentStoreDescriptions = [description]
         } else {
-            let description = container.persistentStoreDescriptions.first
-            description?.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
-            description?.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+            let description = container.persistentStoreDescriptions.first ?? NSPersistentStoreDescription()
+            description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+            description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+            description.shouldMigrateStoreAutomatically = true
+            description.shouldInferMappingModelAutomatically = true
+            container.persistentStoreDescriptions = [description]
         }
         container.loadPersistentStores { _, error in
             if let error {
@@ -72,7 +75,14 @@ final class PersistenceController {
             string("senderType"),
             date("createdAt"),
             string("localState"),
-            bool("isFromMe")
+            bool("isFromMe"),
+            string("attachmentsJSON"),
+            bool("requiresAcknowledgement"),
+            bool("replyAllowed", defaultValue: true),
+            string("senderDisplayName"),
+            optionalDate("acknowledgedAt"),
+            string("replyToJSON"),
+            string("reactionsJSON")
         ]
 
         let member = NSEntityDescription()
@@ -83,7 +93,8 @@ final class PersistenceController {
             string("userUUID"),
             string("name"),
             string("role"),
-            int64("lastReadSeq")
+            int64("lastReadSeq"),
+            int64("lastDeliveredSeq")
         ]
 
         let person = NSEntityDescription()
@@ -133,8 +144,10 @@ final class PersistenceController {
         attribute(name, .integer64AttributeType)
     }
 
-    private static func bool(_ name: String) -> NSAttributeDescription {
-        attribute(name, .booleanAttributeType)
+    private static func bool(_ name: String, defaultValue: Bool = false) -> NSAttributeDescription {
+        let attr = attribute(name, .booleanAttributeType)
+        attr.defaultValue = defaultValue
+        return attr
     }
 
     private static func date(_ name: String) -> NSAttributeDescription {
@@ -193,6 +206,13 @@ final class MessageEntity: NSManagedObject {
     @NSManaged var createdAt: Date
     @NSManaged var localState: String
     @NSManaged var isFromMe: Bool
+    @NSManaged var attachmentsJSON: String
+    @NSManaged var requiresAcknowledgement: Bool
+    @NSManaged var replyAllowed: Bool
+    @NSManaged var senderDisplayName: String
+    @NSManaged var acknowledgedAt: Date?
+    @NSManaged var replyToJSON: String
+    @NSManaged var reactionsJSON: String
 }
 
 @objc(MemberEntity)
@@ -202,6 +222,7 @@ final class MemberEntity: NSManagedObject {
     @NSManaged var name: String
     @NSManaged var role: String
     @NSManaged var lastReadSeq: Int64
+    @NSManaged var lastDeliveredSeq: Int64
 }
 
 @objc(PersonEntity)

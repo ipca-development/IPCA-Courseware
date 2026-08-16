@@ -63,6 +63,12 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>IPCA uses the camera when you attach a photo to a message or share a photo or video in Community.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>IPCA uses your photo library when you attach a photo to a message or share a photo or video in Community.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>IPCA uses the microphone when you record a short Community video.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

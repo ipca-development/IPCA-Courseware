@@ -13,62 +13,84 @@ struct LoginView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Spacer()
-                VStack(spacing: 8) {
-                    Text("IPCA")
-                        .font(.largeTitle.weight(.bold))
-                    Text("Messages for students and instructors")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                VStack(spacing: 12) {
-                    TextField("Email", text: $email)
-                        .textContentType(.username)
-                        .keyboardType(.emailAddress)
+            ZStack {
+                IPCABackground()
+                VStack(spacing: IPCATheme.Spacing.xl) {
+                    Spacer()
+                    VStack(spacing: IPCATheme.Spacing.sm) {
+                        IPCALogo(height: 72, lockup: true)
+                        Text("Sign in with your IPCA.training account")
+                            .font(.subheadline)
+                            .foregroundStyle(IPCATheme.Colors.textSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    VStack(spacing: IPCATheme.Spacing.sm) {
+                        TextField("Email", text: $email)
+                            .textContentType(.username)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($focused, equals: .email)
+                            .padding(IPCATheme.Spacing.sm)
+                            .foregroundStyle(IPCATheme.Colors.textPrimary)
+                            .background(IPCATheme.Colors.navySurface, in: RoundedRectangle(cornerRadius: IPCATheme.Radius.medium, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: IPCATheme.Radius.medium, style: .continuous)
+                                    .stroke(IPCATheme.Colors.separator, lineWidth: 1)
+                            )
+                        SecureField("Password", text: $password)
+                            .textContentType(.password)
+                            .focused($focused, equals: .password)
+                            .padding(IPCATheme.Spacing.sm)
+                            .foregroundStyle(IPCATheme.Colors.textPrimary)
+                            .background(IPCATheme.Colors.navySurface, in: RoundedRectangle(cornerRadius: IPCATheme.Radius.medium, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: IPCATheme.Radius.medium, style: .continuous)
+                                    .stroke(IPCATheme.Colors.separator, lineWidth: 1)
+                            )
+                        Button(action: signIn) {
+                            if session.isLoggingIn {
+                                ProgressView()
+                                    .tint(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                            } else {
+                                Text("Sign In")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                            }
+                        }
+                        .foregroundStyle(.white)
+                        .background(
+                            (session.isLoggingIn || email.isEmpty || password.isEmpty)
+                            ? AnyShapeStyle(IPCATheme.Colors.navyElevated)
+                            : AnyShapeStyle(IPCATheme.interactiveGradient),
+                            in: RoundedRectangle(cornerRadius: IPCATheme.Radius.medium, style: .continuous)
+                        )
+                        .disabled(session.isLoggingIn || email.isEmpty || password.isEmpty)
+                    }
+                    if let error = session.loginError {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(IPCATheme.Colors.destructive)
+                            .multilineTextAlignment(.center)
+                    }
+                    Spacer()
+#if DEBUG
+                    TextField("Server", text: $serverURL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .focused($focused, equals: .email)
-                        .padding(12)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
-                        .focused($focused, equals: .password)
-                        .padding(12)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    Button(action: signIn) {
-                        if session.isLoggingIn {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            Text("Sign In")
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(session.isLoggingIn || email.isEmpty || password.isEmpty)
-                }
-                if let error = session.loginError {
-                    Text(error)
+                        .keyboardType(.URL)
+                        .focused($focused, equals: .server)
                         .font(.footnote)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                }
-                Spacer()
-#if DEBUG
-                TextField("Server", text: $serverURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .focused($focused, equals: .server)
-                    .font(.footnote)
-                    .padding(10)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        .padding(10)
+                        .foregroundStyle(IPCATheme.Colors.textSecondary)
+                        .background(IPCATheme.Colors.navySurface, in: RoundedRectangle(cornerRadius: IPCATheme.Radius.medium, style: .continuous))
 #endif
+                }
+                .padding(IPCATheme.Spacing.xl)
             }
-            .padding(24)
             .onAppear {
                 serverURL = session.serverURLString
             }

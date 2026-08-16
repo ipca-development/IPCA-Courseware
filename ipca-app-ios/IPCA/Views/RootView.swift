@@ -11,6 +11,7 @@ struct RootView: View {
                 LoginView()
             }
         }
+        .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: session.isAuthenticated)
     }
 }

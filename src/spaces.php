@@ -132,6 +132,232 @@ function cw_spaces_put_object(string $objectKey, string $bytes, string $contentT
 }
 
 /**
+ * Private SigV4 query-string URL. Does not set x-amz-acl; objects stay private.
+ *
+ * @param array<string,string> $extraHeaders lowercase header names to sign (e.g. content-type)
+ */
+function cw_spaces_presign(string $method, string $objectKey, int $expiresSeconds = 300, array $extraHeaders = []): string
+{
+    $cfg = cw_spaces_config();
+    $method = strtoupper($method);
+    $expiresSeconds = max(1, min(3600, $expiresSeconds));
+    $service = 's3';
+    $host = $cfg['bucket'] . '.' . $cfg['endpoint'];
+    $canonicalUri = '/' . str_replace('%2F', '/', cw_spaces_uri_encode(ltrim($objectKey, '/')));
+    $amzDate = gmdate('Ymd\THis\Z');
+    $date = substr($amzDate, 0, 8);
+    $payloadHash = 'UNSIGNED-PAYLOAD';
+
+    $headers = array('host' => $host);
+    foreach ($extraHeaders as $name => $value) {
+        $headers[strtolower(trim((string)$name))] = trim((string)$value);
+    }
+    ksort($headers, SORT_STRING);
+    $canonicalHeaders = '';
+    $signedHeadersArr = array();
+    foreach ($headers as $name => $value) {
+        $canonicalHeaders .= $name . ':' . $value . "\n";
+        $signedHeadersArr[] = $name;
+    }
+    $signedHeaders = implode(';', $signedHeadersArr);
+
+    $credentialScope = $date . '/' . $cfg['region'] . '/' . $service . '/aws4_request';
+    $query = array(
+        'X-Amz-Algorithm' => 'AWS4-HMAC-SHA256',
+        'X-Amz-Content-Sha256' => $payloadHash,
+        'X-Amz-Credential' => $cfg['key'] . '/' . $credentialScope,
+        'X-Amz-Date' => $amzDate,
+        'X-Amz-Expires' => (string)$expiresSeconds,
+        'X-Amz-SignedHeaders' => $signedHeaders,
+    );
+    ksort($query, SORT_STRING);
+    $canonicalQuery = cw_spaces_canonical_query($query);
+
+    $canonicalRequest =
+        $method . "\n" .
+        $canonicalUri . "\n" .
+        $canonicalQuery . "\n" .
+        $canonicalHeaders . "\n" .
+        $signedHeaders . "\n" .
+        $payloadHash;
+
+    $stringToSign =
+        "AWS4-HMAC-SHA256\n" .
+        $amzDate . "\n" .
+        $credentialScope . "\n" .
+        hash('sha256', $canonicalRequest);
+
+    $signingKey = cw_sigv4_signing_key($cfg['secret'], $date, $cfg['region'], $service);
+    $signature = hash_hmac('sha256', $stringToSign, $signingKey);
+    $query['X-Amz-Signature'] = $signature;
+
+    return 'https://' . $host . $canonicalUri . '?' . cw_spaces_canonical_query($query);
+}
+
+/**
+ * Server-side HEAD. Returns size/type if the private object exists.
+ *
+ * @return array{byte_size:int,content_type:string}|null
+ */
+function cw_spaces_head_object(string $objectKey): ?array
+{
+    $cfg = cw_spaces_config();
+    $method = 'HEAD';
+    $service = 's3';
+    $host = $cfg['bucket'] . '.' . $cfg['endpoint'];
+    $canonicalUri = '/' . str_replace('%2F', '/', cw_spaces_uri_encode(ltrim($objectKey, '/')));
+    $amzDate = gmdate('Ymd\THis\Z');
+    $date = substr($amzDate, 0, 8);
+    $payloadHash = 'UNSIGNED-PAYLOAD';
+    $signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+    $canonicalHeaders =
+        'host:' . $host . "\n" .
+        'x-amz-content-sha256:' . $payloadHash . "\n" .
+        'x-amz-date:' . $amzDate . "\n";
+
+    $canonicalRequest =
+        $method . "\n" .
+        $canonicalUri . "\n" .
+        '' . "\n" .
+        $canonicalHeaders . "\n" .
+        $signedHeaders . "\n" .
+        $payloadHash;
+
+    $credentialScope = $date . '/' . $cfg['region'] . '/' . $service . '/aws4_request';
+    $stringToSign =
+        "AWS4-HMAC-SHA256\n" .
+        $amzDate . "\n" .
+        $credentialScope . "\n" .
+        hash('sha256', $canonicalRequest);
+    $signingKey = cw_sigv4_signing_key($cfg['secret'], $date, $cfg['region'], $service);
+    $signature = hash_hmac('sha256', $stringToSign, $signingKey);
+    $authorization =
+        'AWS4-HMAC-SHA256 ' .
+        'Credential=' . $cfg['key'] . '/' . $credentialScope . ', ' .
+        'SignedHeaders=' . $signedHeaders . ', ' .
+        'Signature=' . $signature;
+
+    $headerLines = array();
+    $ch = curl_init('https://' . $host . $canonicalUri);
+    curl_setopt($ch, CURLOPT_NOBODY, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'HEAD');
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+        'Authorization: ' . $authorization,
+        'x-amz-date: ' . $amzDate,
+        'x-amz-content-sha256: ' . $payloadHash,
+        'Host: ' . $host,
+    ));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_HEADERFUNCTION, static function ($curl, string $header) use (&$headerLines): int {
+        $len = strlen($header);
+        $parts = explode(':', $header, 2);
+        if (count($parts) === 2) {
+            $headerLines[strtolower(trim($parts[0]))] = trim($parts[1]);
+        }
+        return $len;
+    });
+    curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($code === 404 || $code === 403) {
+        return null;
+    }
+    if ($code < 200 || $code >= 300) {
+        return null;
+    }
+    $size = (int)($headerLines['content-length'] ?? 0);
+    $type = (string)($headerLines['content-type'] ?? 'application/octet-stream');
+    return array(
+        'byte_size' => $size,
+        'content_type' => $type,
+    );
+}
+
+function cw_spaces_public_url(string $objectKey): string
+{
+    $cfg = cw_spaces_config();
+    return rtrim((string)$cfg['cdnBase'], '/') . '/' . ltrim($objectKey, '/');
+}
+
+/**
+ * Make an existing object anonymously readable so the Spaces CDN can serve it.
+ */
+function cw_spaces_put_acl(string $objectKey, string $acl = 'public-read'): bool
+{
+    $cfg = cw_spaces_config();
+    $method = 'PUT';
+    $service = 's3';
+    $host = $cfg['bucket'] . '.' . $cfg['endpoint'];
+    $canonicalUri = '/' . str_replace('%2F', '/', cw_spaces_uri_encode(ltrim($objectKey, '/')));
+    $amzDate = gmdate('Ymd\THis\Z');
+    $date = substr($amzDate, 0, 8);
+    $payloadHash = 'UNSIGNED-PAYLOAD';
+    $acl = trim($acl) !== '' ? trim($acl) : 'public-read';
+    $canonicalQuery = 'acl=';
+    $signedHeaders = 'host;x-amz-acl;x-amz-content-sha256;x-amz-date';
+    $canonicalHeaders =
+        'host:' . $host . "\n" .
+        'x-amz-acl:' . $acl . "\n" .
+        'x-amz-content-sha256:' . $payloadHash . "\n" .
+        'x-amz-date:' . $amzDate . "\n";
+
+    $canonicalRequest =
+        $method . "\n" .
+        $canonicalUri . "\n" .
+        $canonicalQuery . "\n" .
+        $canonicalHeaders . "\n" .
+        $signedHeaders . "\n" .
+        $payloadHash;
+
+    $credentialScope = $date . '/' . $cfg['region'] . '/' . $service . '/aws4_request';
+    $stringToSign =
+        "AWS4-HMAC-SHA256\n" .
+        $amzDate . "\n" .
+        $credentialScope . "\n" .
+        hash('sha256', $canonicalRequest);
+    $signingKey = cw_sigv4_signing_key($cfg['secret'], $date, $cfg['region'], $service);
+    $signature = hash_hmac('sha256', $stringToSign, $signingKey);
+    $authorization =
+        'AWS4-HMAC-SHA256 ' .
+        'Credential=' . $cfg['key'] . '/' . $credentialScope . ', ' .
+        'SignedHeaders=' . $signedHeaders . ', ' .
+        'Signature=' . $signature;
+
+    $url = 'https://' . $host . $canonicalUri . '?acl=';
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+        'Authorization: ' . $authorization,
+        'x-amz-acl: ' . $acl,
+        'x-amz-content-sha256: ' . $payloadHash,
+        'x-amz-date: ' . $amzDate,
+        'Content-Length: 0',
+    ));
+    curl_setopt($ch, CURLOPT_POSTFIELDS, '');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return $code >= 200 && $code < 300;
+}
+
+/**
+ * @param array<string,string> $params
+ */
+function cw_spaces_canonical_query(array $params): string
+{
+    ksort($params, SORT_STRING);
+    $pairs = array();
+    foreach ($params as $k => $v) {
+        $pairs[] = cw_spaces_uri_encode((string)$k) . '=' . cw_spaces_uri_encode((string)$v);
+    }
+    return implode('&', $pairs);
+}
+
+/**
  * RFC3986-style encoding for SigV4 query (AWS: URI-encode each byte except unreserved).
  */
 function cw_spaces_uri_encode(string $s): string

@@ -15,12 +15,17 @@ struct NewMessageView: View {
         List {
             if session.capabilities.groupsEnabled {
                 Toggle("New Group", isOn: $isGroup)
+                    .tint(IPCATheme.Colors.ipcaBlue)
+                    .listRowBackground(IPCATheme.Colors.navySurface)
+                    .foregroundStyle(IPCATheme.Colors.textPrimary)
             }
             if isGroup {
                 TextField("Group name", text: $groupName)
+                    .foregroundStyle(IPCATheme.Colors.textPrimary)
+                    .listRowBackground(IPCATheme.Colors.navySurface)
             }
-            Section("People") {
-                ForEach(session.people.filter { !$0.uuid.isEmpty }) { person in
+            Section {
+                ForEach(visiblePeople) { person in
                     Button {
                         if isGroup {
                             if selected.contains(person.uuid) {
@@ -32,29 +37,44 @@ struct NewMessageView: View {
                             Task { await openDirect(person) }
                         }
                     } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
+                        HStack(spacing: IPCATheme.Spacing.sm) {
+                            IPCAAvatar(
+                                name: person.name,
+                                photoPath: person.photoPath,
+                                serverURL: session.serverURLString,
+                                size: 40
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(person.name)
-                                    .foregroundStyle(.primary)
-                                Text(person.role.replacingOccurrences(of: "_", with: " "))
+                                    .foregroundStyle(IPCATheme.Colors.textPrimary)
+                                Text(IPCATheme.formattedRole(person.role))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(IPCATheme.Colors.textSecondary)
                             }
                             Spacer()
                             if isGroup && selected.contains(person.uuid) {
                                 Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(IPCATheme.Colors.ipcaBlue)
                             }
                         }
                     }
                     .disabled(isOpening)
+                    .listRowBackground(IPCATheme.Colors.navySurface)
                 }
+            } header: {
+                Text("People")
+                    .foregroundStyle(IPCATheme.Colors.textTertiary)
             }
         }
+        .ipcaListChrome()
         .navigationTitle("New Message")
-        .searchable(text: $query)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(IPCATheme.Colors.navyBase, for: .navigationBar)
+        .searchable(text: $query, prompt: "Search people")
         .overlay {
             if isOpening {
                 ProgressView()
+                    .tint(IPCATheme.Colors.ipcaBlue)
             }
         }
         .onChange(of: query) {
@@ -81,6 +101,10 @@ struct NewMessageView: View {
                 }
             }
         }
+    }
+
+    private var visiblePeople: [PublicUser] {
+        session.people.filter { !$0.uuid.isEmpty }
     }
 
     private func openDirect(_ person: PublicUser) async {

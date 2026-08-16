@@ -323,6 +323,30 @@ return [
         ],
     ],
     [
+        'key' => 'ipca_app',
+        'label' => 'IPCA App',
+        'icon' => 'users',
+        'href' => '/admin/ipca_app.php',
+        'match_paths' => [
+            '/admin/ipca_app.php',
+            '/admin/ipca_training_videos.php',
+        ],
+        'items' => [
+            [
+                'key' => 'ipca_app_enrollment',
+                'label' => 'Enrollment',
+                'icon' => 'users',
+                'href' => '/admin/ipca_app.php',
+            ],
+            [
+                'key' => 'ipca_training_videos',
+                'label' => 'Training Videos',
+                'icon' => 'reviews',
+                'href' => '/admin/ipca_training_videos.php',
+            ],
+        ],
+    ],
+    [
         'key' => 'projects',
         'label' => 'Projects',
         'icon' => 'projects',

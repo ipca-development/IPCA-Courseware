@@ -350,6 +350,18 @@ final class CommunicationAuthService
             ->execute($params);
     }
 
+    public function userIsStaff(array $user): bool
+    {
+        $role = strtolower(trim((string)($user['role'] ?? '')));
+        return in_array($role, array('admin', 'chief_instructor', 'supervisor'), true);
+    }
+
+    public function userCanPostLongCommunityVideo(array $user): bool
+    {
+        $role = strtolower(trim((string)($user['role'] ?? '')));
+        return in_array($role, array('admin', 'instructor', 'chief_instructor', 'supervisor'), true);
+    }
+
     private function hasApnsEnvironmentColumn(): bool
     {
         static $has = null;

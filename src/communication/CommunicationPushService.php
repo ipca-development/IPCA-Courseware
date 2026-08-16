@@ -28,6 +28,37 @@ final class CommunicationPushService
         return $enabled && $this->transport->isReady();
     }
 
+    public function notifyCommunityComment(
+        int $authorUserId,
+        int $commenterUserId,
+        int $commenterDeviceId,
+        string $postUuid,
+        string $commenterName,
+        string $commentBody
+    ): void {
+        if ($authorUserId < 1 || $authorUserId === $commenterUserId) {
+            return;
+        }
+        $devices = $this->userDevices($authorUserId, $commenterDeviceId);
+        if ($devices === array()) {
+            return;
+        }
+        $title = trim($commenterName);
+        if ($title === '') {
+            $title = 'IPCA';
+        }
+        $body = trim($commentBody);
+        if ($body === '') {
+            $body = 'commented on your post';
+        }
+        if (mb_strlen($body) > 80) {
+            $body = mb_substr($body, 0, 80);
+        }
+        foreach ($devices as $device) {
+            $this->deliverCommunity($device, $title, $body, $postUuid);
+        }
+    }
+
     public function notifyNewMessage(int $messageId, int $senderDeviceId): void
     {
         if ($messageId < 1) {
@@ -35,10 +66,11 @@ final class CommunicationPushService
         }
         $stmt = $this->pdo->prepare("
             SELECT m.id, m.message_uuid, m.body, m.conversation_id, m.sender_user_id,
-                   c.conversation_uuid, u.name AS sender_name
+                   c.conversation_uuid, u.name AS sender_name, sa.display_name AS actor_name
             FROM ipca_communication_messages m
             INNER JOIN ipca_communication_conversations c ON c.id = m.conversation_id
             LEFT JOIN users u ON u.id = m.sender_user_id
+            LEFT JOIN ipca_communication_system_actors sa ON sa.id = m.sender_system_actor_id
             WHERE m.id = ?
             LIMIT 1
         ");
@@ -53,11 +85,36 @@ final class CommunicationPushService
             return;
         }
 
-        $title = trim((string)($message['sender_name'] ?? ''));
+        $title = trim((string)($message['actor_name'] ?? ''));
+        if ($title === '') {
+            $title = trim((string)($message['sender_name'] ?? ''));
+        }
         if ($title === '') {
             $title = 'IPCA';
         }
         $body = trim((string)$message['body']);
+        if ($body === '') {
+            $att = $this->pdo->prepare("
+                SELECT a.mime_type, a.original_filename
+                FROM ipca_communication_message_attachments ma
+                INNER JOIN ipca_communication_attachments a ON a.id = ma.attachment_id
+                WHERE ma.message_id = ?
+                ORDER BY ma.sort_order ASC
+                LIMIT 1
+            ");
+            $att->execute(array((int)$message['id']));
+            $attachment = $att->fetch(PDO::FETCH_ASSOC);
+            $mime = is_array($attachment) ? strtolower((string)$attachment['mime_type']) : '';
+            if (str_starts_with($mime, 'image/')) {
+                $body = 'Photo';
+            } elseif ($mime === 'application/pdf') {
+                $body = 'PDF';
+            } elseif (is_array($attachment) && trim((string)$attachment['original_filename']) !== '') {
+                $body = (string)$attachment['original_filename'];
+            } else {
+                $body = 'Attachment';
+            }
+        }
         if (mb_strlen($body) > 80) {
             $body = mb_substr($body, 0, 80);
         }
@@ -72,6 +129,79 @@ final class CommunicationPushService
                 (string)$message['message_uuid']
             );
         }
+    }
+
+    /**
+     * Community comments must not write message delivery evidence.
+     *
+     * @param array<string,mixed> $device
+     */
+    private function deliverCommunity(array $device, string $title, string $body, string $postUuid): void
+    {
+        if (!$this->isConfigured()) {
+            return;
+        }
+        $environment = strtolower(trim((string)($device['apns_environment'] ?? 'sandbox')));
+        if ($environment !== 'production') {
+            $environment = 'sandbox';
+        }
+        $payload = array(
+            'aps' => array(
+                'alert' => array(
+                    'title' => $title,
+                    'body' => $body,
+                ),
+                'sound' => 'default',
+                'category' => 'COMMUNITY',
+                'thread-id' => $postUuid,
+            ),
+            'community_post_uuid' => $postUuid,
+        );
+        $result = $this->transport->send((string)$device['apns_token'], $environment, $payload);
+        $deviceId = (int)$device['id'];
+        if ($result->accepted) {
+            CommunicationSupport::log('communication.community.push.accepted', array(
+                'post_uuid' => $postUuid,
+                'device_id' => $deviceId,
+                'environment' => $environment,
+            ));
+            return;
+        }
+        if ($result->invalidateToken) {
+            $this->pdo->prepare('UPDATE ipca_communication_devices SET apns_token = NULL, push_authorized = 0, updated_at_utc = ? WHERE id = ?')
+                ->execute(array(CommunicationSupport::nowUtc(), $deviceId));
+        }
+        CommunicationSupport::log('communication.community.push.failed', array(
+            'post_uuid' => $postUuid,
+            'device_id' => $deviceId,
+            'http_status' => $result->httpStatus,
+            'reason' => $result->reason,
+        ));
+    }
+
+    /**
+     * @return array<int,array<string,mixed>>
+     */
+    private function userDevices(int $userId, int $excludeDeviceId): array
+    {
+        $sql = "
+            SELECT d.id, d.user_id, d.apns_token, d.push_authorized, d.revoked_at_utc
+        ";
+        if ($this->hasApnsEnvironmentColumn()) {
+            $sql .= ', d.apns_environment';
+        }
+        $sql .= "
+            FROM ipca_communication_devices d
+            WHERE d.user_id = ?
+              AND d.revoked_at_utc IS NULL
+              AND d.push_authorized = 1
+              AND d.apns_token IS NOT NULL
+              AND TRIM(d.apns_token) != ''
+              AND d.id != ?
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(array($userId, $excludeDeviceId));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**

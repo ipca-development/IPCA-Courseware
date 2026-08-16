@@ -38,6 +38,7 @@ final class CommunicationConfigService
             'attachments_enabled' => $this->enabled('attachments_enabled'),
             'system_messages_enabled' => $this->enabled('system_messages_enabled'),
             'training_enabled' => $this->enabled('training_enabled'),
+            'training_videos_enabled' => $this->enabled('training_videos_enabled'),
             'community_enabled' => $this->enabled('community_enabled'),
             'community_posting_enabled' => $this->enabled('community_posting_enabled'),
         );
@@ -55,6 +56,51 @@ final class CommunicationConfigService
         $this->requireMessaging();
         if (!$this->enabled('groups_enabled')) {
             throw new CommunicationException('groups_disabled', 'Group messaging is currently unavailable.', 403);
+        }
+    }
+
+    public function requireAttachments(): void
+    {
+        $this->requireMessaging();
+        if (!$this->enabled('attachments_enabled')) {
+            throw new CommunicationException('attachments_disabled', 'Attachments are currently unavailable.', 403);
+        }
+    }
+
+    public function requireSystemMessages(): void
+    {
+        $this->requireMessaging();
+        if (!$this->enabled('system_messages_enabled')) {
+            throw new CommunicationException('system_messages_disabled', 'Official messages are currently unavailable.', 403);
+        }
+    }
+
+    public function requireTraining(): void
+    {
+        if (!$this->enabled('training_enabled')) {
+            throw new CommunicationException('training_disabled', 'Training is currently unavailable.', 403);
+        }
+    }
+
+    public function requireTrainingVideos(): void
+    {
+        if (!$this->enabled('training_videos_enabled')) {
+            throw new CommunicationException('training_videos_disabled', 'Training Videos are currently unavailable.', 403);
+        }
+    }
+
+    public function requireCommunity(): void
+    {
+        if (!$this->enabled('community_enabled')) {
+            throw new CommunicationException('community_disabled', 'Community is currently unavailable.', 403);
+        }
+    }
+
+    public function requireCommunityPosting(): void
+    {
+        $this->requireCommunity();
+        if (!$this->enabled('community_posting_enabled')) {
+            throw new CommunicationException('community_posting_disabled', 'Community posting is currently unavailable.', 403);
         }
     }
 

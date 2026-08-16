@@ -1,6 +1,6 @@
 # IPCA (iPhone / iPad)
 
-Native daily IPCA application. Phase 1 is the messaging foundation: sign in with IPCA.training, 1:1 and group text, durable outbox, incremental sync.
+Native daily IPCA application. Sign in with IPCA.training, then Messages, Training, and Community.
 
 ## Open
 
@@ -8,28 +8,17 @@ Native daily IPCA application. Phase 1 is the messaging foundation: sign in with
 open ipca-app-ios/IPCA.xcodeproj
 ```
 
-Set the Development Team, then run on an iPhone simulator or device. iPad is supported with split conversation navigation.
+Set the Development Team, then run on an iPhone or iPad. Enrollment is: install → sign in → done.
 
 ## First launch
 
-1. Sign in with your IPCA email and password.
+1. Sign in with your IPCA.training email and password.
 2. Messages opens as home.
-3. Community and Training stay hidden until server flags enable them.
+3. The app asks to turn on notifications so instructor and staff messages can reach you.
+4. After sign-in you appear as reachable for a DM, even if notifications are still off.
 
-DEBUG builds show a server URL field. Production uses `https://courseware.europilotcenter.com`.
+DEBUG builds show a server URL field. The default production server is `https://ipca.training`.
 
 The session token is stored in Keychain, never UserDefaults.
 
-## Phase 1 APIs
-
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /api/communication/auth.php` | Login / logout |
-| `GET  /api/communication/bootstrap.php` | User, device, capabilities |
-| `GET  /api/communication/sync.php?cursor=` | Incremental sync |
-| `POST /api/communication/conversations.php` | Direct / group |
-| `POST /api/communication/messages.php` | Idempotent send |
-| `POST /api/communication/receipts.php` | Read cursor |
-| `GET  /api/communication/directory.php` | People search |
-
-Apply `scripts/sql/2026_08_13_communication_phase1.sql` on the Courseware database before pointing the app at a server.
+Unsent messages stay in the local outbox when the network drops and send when connectivity returns.

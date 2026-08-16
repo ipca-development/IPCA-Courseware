@@ -27,6 +27,12 @@
 		B10000000000000000000010 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* ConversationView.swift */; };
 		B10000000000000000000011 /* NewMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* NewMessageView.swift */; };
 		B10000000000000000000012 /* MeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000012 /* MeView.swift */; };
+		B1000000000000000000001A /* ActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001A /* ActionsView.swift */; };
+		B1000000000000000000001B /* TrainingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001B /* TrainingView.swift */; };
+		B1000000000000000000001C /* CommunityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001C /* CommunityView.swift */; };
+		B1000000000000000000001D /* IPCATheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001D /* IPCATheme.swift */; };
+		B1000000000000000000001E /* TrainingVideosView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001E /* TrainingVideosView.swift */; };
+		B1000000000000000000001F /* TrainingVideoDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001F /* TrainingVideoDownloadManager.swift */; };
 		B10000000000000000000013 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000013 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -53,6 +59,12 @@
 		B20000000000000000000010 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
 		B20000000000000000000011 /* NewMessageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMessageView.swift; sourceTree = "<group>"; };
 		B20000000000000000000012 /* MeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeView.swift; sourceTree = "<group>"; };
+		B2000000000000000000001A /* ActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionsView.swift; sourceTree = "<group>"; };
+		B2000000000000000000001B /* TrainingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingView.swift; sourceTree = "<group>"; };
+		B2000000000000000000001C /* CommunityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommunityView.swift; sourceTree = "<group>"; };
+		B2000000000000000000001D /* IPCATheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCATheme.swift; sourceTree = "<group>"; };
+		B2000000000000000000001E /* TrainingVideosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingVideosView.swift; sourceTree = "<group>"; };
+		B2000000000000000000001F /* TrainingVideoDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingVideoDownloadManager.swift; sourceTree = "<group>"; };
 		B20000000000000000000013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B20000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000000000000000000015 /* IPCA.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IPCA.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -87,6 +99,7 @@
 				B40000000000000000000007 /* Persistence */,
 				B40000000000000000000008 /* Sync */,
 				B40000000000000000000009 /* Views */,
+				B4000000000000000000000A /* Theme */,
 				B20000000000000000000013 /* Assets.xcassets */,
 				B20000000000000000000014 /* Info.plist */,
 				B20000000000000000000018 /* IPCA-Debug.entitlements */,
@@ -136,6 +149,7 @@
 			children = (
 				B20000000000000000000006 /* PersistenceController.swift */,
 				B20000000000000000000007 /* StoreWriter.swift */,
+				B2000000000000000000001F /* TrainingVideoDownloadManager.swift */,
 			);
 			path = Persistence;
 			sourceTree = "<group>";
@@ -160,8 +174,20 @@
 				B20000000000000000000010 /* ConversationView.swift */,
 				B20000000000000000000011 /* NewMessageView.swift */,
 				B20000000000000000000012 /* MeView.swift */,
+				B2000000000000000000001A /* ActionsView.swift */,
+				B2000000000000000000001B /* TrainingView.swift */,
+				B2000000000000000000001C /* CommunityView.swift */,
+				B2000000000000000000001E /* TrainingVideosView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		B4000000000000000000000A /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				B2000000000000000000001D /* IPCATheme.swift */,
+			);
+			path = Theme;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -253,6 +279,12 @@
 				B10000000000000000000010 /* ConversationView.swift in Sources */,
 				B10000000000000000000011 /* NewMessageView.swift in Sources */,
 				B10000000000000000000012 /* MeView.swift in Sources */,
+				B1000000000000000000001A /* ActionsView.swift in Sources */,
+				B1000000000000000000001B /* TrainingView.swift in Sources */,
+				B1000000000000000000001C /* CommunityView.swift in Sources */,
+				B1000000000000000000001D /* IPCATheme.swift in Sources */,
+				B1000000000000000000001E /* TrainingVideosView.swift in Sources */,
+				B1000000000000000000001F /* TrainingVideoDownloadManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -263,6 +263,8 @@ final class ConversationService
                 'member_role' => (string)$row['member_role'],
                 'last_read_seq' => (int)$row['last_read_seq'],
                 'last_read_at_utc' => $row['last_read_at_utc'],
+                'last_delivered_seq' => (int)($row['last_delivered_seq'] ?? 0),
+                'last_delivered_at_utc' => $row['last_delivered_at_utc'] ?? null,
             );
         }
 
@@ -280,7 +282,74 @@ final class ConversationService
             'preview' => $preview,
             'unread_count' => $unread,
             'viewer_last_read_seq' => $viewerRead,
+            'reply_allowed' => !in_array((string)$conversation['conversation_type'], array('announcement', 'system'), true),
         );
+    }
+
+    /**
+     * @param array<string,mixed> $actor
+     * @return array<string,mixed>
+     */
+    public function ensureSystemConversation(array $actor, ?int $targetUserId): array
+    {
+        $actorKey = (string)$actor['actor_key'];
+        $title = (string)$actor['display_name'];
+        $pairKey = $targetUserId === null ? ('system:' . $actorKey) : ('system:' . $actorKey . ':' . $targetUserId);
+        $type = $targetUserId === null ? 'announcement' : 'system';
+        $existing = $this->pdo->prepare('SELECT * FROM ipca_communication_conversations WHERE organization_id = 1 AND direct_pair_key = ? LIMIT 1');
+        $existing->execute(array($pairKey));
+        $row = $existing->fetch(PDO::FETCH_ASSOC);
+        if (is_array($row)) {
+            if ($targetUserId !== null) {
+                $this->ensureMember((int)$row['id'], $targetUserId);
+            }
+            return $row;
+        }
+
+        $now = CommunicationSupport::nowUtc();
+        $uuid = CommunicationSupport::uuid();
+        $this->pdo->prepare("
+            INSERT INTO ipca_communication_conversations
+              (conversation_uuid, organization_id, conversation_type, title, direct_pair_key, created_at_utc, updated_at_utc)
+            VALUES (?, 1, ?, ?, ?, ?, ?)
+        ")->execute(array($uuid, $type, $title, $pairKey, $now, $now));
+        $id = (int)$this->pdo->lastInsertId();
+        $this->appendChange($id, 'conversation', $uuid, $now);
+        if ($targetUserId !== null) {
+            $this->ensureMember($id, $targetUserId);
+        }
+        $created = $this->pdo->prepare('SELECT * FROM ipca_communication_conversations WHERE id = ?');
+        $created->execute(array($id));
+        $row = $created->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : array(
+            'id' => $id,
+            'conversation_uuid' => $uuid,
+            'conversation_type' => $type,
+            'title' => $title,
+            'direct_pair_key' => $pairKey,
+        );
+    }
+
+    public function addActiveMember(int $conversationId, int $userId): void
+    {
+        $this->ensureMember($conversationId, $userId);
+    }
+
+    /**
+     * @return array<int,int>
+     */
+    public function eligibleUserIds(): array
+    {
+        $stmt = $this->pdo->query("
+            SELECT id FROM users
+            WHERE status = 'active'
+              AND role IN ('student','instructor','supervisor','chief_instructor','admin')
+        ");
+        $ids = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $ids[] = (int)$row['id'];
+        }
+        return $ids;
     }
 
     public function unreadTotal(int $userId): int
@@ -318,7 +387,7 @@ final class ConversationService
     private function lastMessagePreview(int $conversationId): ?array
     {
         $stmt = $this->pdo->prepare("
-            SELECT message_uuid, seq, body, sender_user_id, created_at_utc
+            SELECT id, message_uuid, seq, body, sender_user_id, created_at_utc
             FROM ipca_communication_messages
             WHERE conversation_id = ?
             ORDER BY seq DESC
@@ -329,7 +398,29 @@ final class ConversationService
         if (!is_array($row)) {
             return null;
         }
-        $body = (string)$row['body'];
+        $body = trim((string)$row['body']);
+        if ($body === '') {
+            $att = $this->pdo->prepare("
+                SELECT a.mime_type, a.original_filename
+                FROM ipca_communication_message_attachments ma
+                INNER JOIN ipca_communication_attachments a ON a.id = ma.attachment_id
+                WHERE ma.message_id = ?
+                ORDER BY ma.sort_order ASC, ma.id ASC
+                LIMIT 1
+            ");
+            $att->execute(array((int)$row['id']));
+            $attachment = $att->fetch(PDO::FETCH_ASSOC);
+            $mime = is_array($attachment) ? strtolower((string)$attachment['mime_type']) : '';
+            if (str_starts_with($mime, 'image/')) {
+                $body = 'Photo';
+            } elseif ($mime === 'application/pdf') {
+                $body = 'PDF';
+            } elseif (is_array($attachment) && trim((string)$attachment['original_filename']) !== '') {
+                $body = (string)$attachment['original_filename'];
+            } else {
+                $body = 'Attachment';
+            }
+        }
         if (mb_strlen($body) > 80) {
             $body = mb_substr($body, 0, 80);
         }

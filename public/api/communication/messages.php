@@ -22,11 +22,20 @@ try {
 
     CommunicationHttp::method('POST');
     $in = CommunicationHttp::input();
+    $attachmentUuids = $in['attachment_uuids'] ?? array();
+    if (!is_array($attachmentUuids)) {
+        $attachmentUuids = array();
+    }
     $message = $kernel->messages->send(
         $session,
         (string)($in['conversation_uuid'] ?? ''),
         (string)($in['client_id'] ?? ''),
-        (string)($in['body'] ?? '')
+        (string)($in['body'] ?? ''),
+        $attachmentUuids,
+        0,
+        isset($in['reply_to_message_uuid']) && (string)$in['reply_to_message_uuid'] !== ''
+            ? (string)$in['reply_to_message_uuid']
+            : null
     );
     CommunicationHttp::json(200, array('ok' => true, 'message' => $message));
 } catch (CommunicationException $e) {

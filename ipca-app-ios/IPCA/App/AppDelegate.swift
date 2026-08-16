@@ -8,6 +8,7 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
 
     private var pendingToken: String?
     private var pendingConversationUUID: String?
+    private var pendingCommunityPostUUID: String?
 
     func application(
         _ application: UIApplication,
@@ -16,6 +17,7 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         UNUserNotificationCenter.current().delegate = self
         if let info = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
             pendingConversationUUID = Self.conversationUUID(from: info)
+            pendingCommunityPostUUID = Self.communityPostUUID(from: info)
         }
         return true
     }
@@ -54,7 +56,10 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if let uuid = Self.conversationUUID(from: response.notification.request.content.userInfo) {
+        if let uuid = Self.communityPostUUID(from: response.notification.request.content.userInfo) {
+            pendingCommunityPostUUID = uuid
+            flushPending()
+        } else if let uuid = Self.conversationUUID(from: response.notification.request.content.userInfo) {
             pendingConversationUUID = uuid
             flushPending()
         }
@@ -79,10 +84,23 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
                 await session.syncNow()
             }
         }
+        if let uuid = pendingCommunityPostUUID {
+            pendingCommunityPostUUID = nil
+            Task { @MainActor in
+                session.openCommunityPost(uuid)
+            }
+        }
     }
 
     static func conversationUUID(from userInfo: [AnyHashable: Any]) -> String? {
         if let value = userInfo["conversation_uuid"] as? String, !value.isEmpty {
+            return value
+        }
+        return nil
+    }
+
+    static func communityPostUUID(from userInfo: [AnyHashable: Any]) -> String? {
+        if let value = userInfo["community_post_uuid"] as? String, !value.isEmpty {
             return value
         }
         return nil
