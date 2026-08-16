@@ -1351,7 +1351,10 @@ span.cpb-flow-page-break {
 }
 
 .cpb-table-page-spacer,
-.cpb-table-page-spacer > td {
+.cpb-table-page-spacer > td,
+.cpb-table-repeated-header,
+.cpb-table-repeated-header > th,
+.cpb-table-repeated-header > td {
   pointer-events: none !important;
   user-select: none !important;
 }

@@ -538,6 +538,7 @@ test('long paragraphs and table rows never enter repeated header or footer bands
       return {
         inlineSpacers: body.querySelectorAll('span.cpb-flow-page-break--automatic').length,
         tableSpacers: body.querySelectorAll('tr.cpb-table-page-spacer').length,
+        repeatedHeaders: body.querySelectorAll('tr.cpb-table-repeated-header').length,
         sourceRows: body.querySelectorAll(
           '[data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
         ).length,
@@ -547,8 +548,113 @@ test('long paragraphs and table rows never enter repeated header or footer bands
     });
     assert.ok(geometry.inlineSpacers >= 1, JSON.stringify(geometry));
     assert.ok(geometry.tableSpacers >= 1, JSON.stringify(geometry));
+    assert.ok(geometry.repeatedHeaders >= geometry.tableSpacers, JSON.stringify(geometry));
     assert.equal(geometry.savedRows, geometry.sourceRows);
     assert.deepEqual(geometry.violations, []);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('a 103-row emergency table starts without empty pages and keeps stable continuation geometry', async (browser) => {
+  const rows = Array.from({ length: 103 }, (_, index) => {
+    if (index % 12 === 0) {
+      return `<tr><td colspan="3" contenteditable="true">CATEGORY ${index / 12 + 1}</td></tr>`;
+    }
+    return `<tr>
+      <td contenteditable="true">${index}</td>
+      <td contenteditable="true">Emergency procedure description ${index}</td>
+      <td contenteditable="true">POH reference ${index}</td>
+    </tr>`;
+  }).join('');
+  const emergencyBlocks = `
+    <div class="cpb-block cpb-block--paragraph" data-block-id="20"
+      data-block-type="paragraph" data-stable-anchor="emergency-title"
+      style="min-height:0!important">
+      <div class="cpb-paragraph" contenteditable="true" data-field="html"
+        data-paragraph-style="title">3. EMERGENCY PROCEDURES</div>
+    </div>
+    <div class="cpb-block cpb-block--paragraph" data-block-id="21"
+      data-block-type="paragraph" data-stable-anchor="emergency-intro"
+      style="min-height:0!important">
+      <div class="cpb-paragraph" contenteditable="true" data-field="html"
+        data-paragraph-style="body">A detailed description follows in the table.</div>
+    </div>
+    <div class="cpb-block cpb-block--paragraph" data-block-id="22"
+      data-block-type="paragraph" data-stable-anchor="emergency-subtitle"
+      style="min-height:0!important">
+      <div class="cpb-paragraph" contenteditable="true" data-field="html"
+        data-paragraph-style="subtitle_1">3.1 Emergency Procedures - C172SP - G1000</div>
+    </div>
+    <div class="cpb-block cpb-block--table" data-block-id="23"
+      data-block-type="table" data-stable-anchor="emergency-table"
+      style="min-height:0!important">
+      <div class="cpb-table-block cpb-table-block--align-center">
+        <div class="cpb-table-wrap cpb-table-border-thin"
+          style="width:593px;max-width:100%;--cpb-table-border-color:#94a3b8">
+          <table class="cpb-table" data-field="table" style="width:593px">
+            <colgroup><col style="width:60px"><col style="width:364px"><col style="width:169px"></colgroup>
+            <thead><tr class="cpb-table-header-row">
+              <th contenteditable="true">#</th>
+              <th contenteditable="true">Description</th>
+              <th contenteditable="true">Reference</th>
+            </tr></thead>
+            <tbody data-table-part="body">${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  const { page, browserErrors } = await newEditorPage(
+    browser,
+    '',
+    previewResult(),
+    null,
+    emergencyBlocks,
+  );
+  try {
+    const observed = await page.evaluate(() => {
+      const sheet = document.querySelector('#cpbCanvas .cpb-sheet');
+      const table = document.querySelector('#cpbCanvas [data-block-id="23"] table');
+      const sourceRows = Array.from(table.querySelectorAll(
+        'tbody tr:not([data-auto-page-break="1"])'
+      ));
+      const stride = 1056 + 28;
+      const contentTop = 152;
+      const contentBottom = 152 + 744;
+      const sheetTop = sheet.getBoundingClientRect().top;
+      const positions = sourceRows.map((row) => {
+        const rect = row.getBoundingClientRect();
+        const top = rect.top - sheetTop;
+        const pageIndex = Math.max(0, Math.floor(top / stride));
+        return {
+          pageIndex,
+          localTop: top - pageIndex * stride,
+          localBottom: rect.bottom - sheetTop - pageIndex * stride,
+          width: rect.width,
+        };
+      });
+      return {
+        firstRowPage: positions[0]?.pageIndex,
+        pages: new Set(positions.map((position) => position.pageIndex)).size,
+        spacers: table.querySelectorAll('tr.cpb-table-page-spacer').length,
+        repeatedHeaders: table.querySelectorAll('tr.cpb-table-repeated-header').length,
+        tableWidth: table.getBoundingClientRect().width,
+        widthSpread: Math.max(...positions.map((position) => position.width))
+          - Math.min(...positions.map((position) => position.width)),
+        violations: positions.filter((position) =>
+          position.localTop < contentTop - 1
+          || position.localBottom > contentBottom + 1
+        ),
+      };
+    });
+    assert.equal(observed.firstRowPage, 0, JSON.stringify(observed));
+    assert.ok(observed.pages >= 4, JSON.stringify(observed));
+    assert.ok(observed.spacers >= 3, JSON.stringify(observed));
+    assert.equal(observed.repeatedHeaders, observed.spacers, JSON.stringify(observed));
+    assert.ok(Math.abs(observed.tableWidth - 593) <= 1, JSON.stringify(observed));
+    assert.ok(observed.widthSpread <= 1, JSON.stringify(observed));
+    assert.deepEqual(observed.violations, []);
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

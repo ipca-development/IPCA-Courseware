@@ -1084,6 +1084,7 @@
     var tbody = tableBody(block);
     if (!tbody) return false;
     var rows = tableSourceRows(tbody);
+    var colCount = Math.max(1, tableColCount(block));
     var stride = PRINT_PAGE.height + PRINT_PAGE.gap;
     for (var index = 0; index < rows.length; index++) {
       var row = rows[index];
@@ -1101,22 +1102,79 @@
         target = (pageIndex + 1) * stride + PRINT_PAGE.contentTop;
       }
       if (!target || target <= top + 1) continue;
+      var breakRow = tableContinuationGroupStart(rows, index, colCount);
+      var breakTop = printY(breakRow, sheet);
+      var breakPage = Math.max(0, Math.floor(breakTop / stride));
+      target = (breakPage + 1) * stride + PRINT_PAGE.contentTop;
+      if (target <= breakTop + 1) continue;
+      var repeatedRows = tableRepeatedHeaderRows(block);
+      var table = block.querySelector('table');
+      var tableHead = table ? table.querySelector('thead') : null;
+      var repeatedHeight = tableHead
+        ? Math.max(0, tableHead.getBoundingClientRect().height / printScale())
+        : 0;
       var spacerRow = document.createElement('tr');
       spacerRow.className = 'cpb-table-page-spacer';
       spacerRow.setAttribute('data-auto-page-break', '1');
       spacerRow.setAttribute('data-editor-only', '1');
       spacerRow.setAttribute('contenteditable', 'false');
       var spacerCell = document.createElement('td');
-      spacerCell.colSpan = Math.max(1, tableColCount(block));
+      spacerCell.colSpan = colCount;
       spacerCell.setAttribute('contenteditable', 'false');
-      spacerCell.style.cssText = 'height:' + Math.max(1, target - top)
+      spacerCell.style.cssText = 'height:' + Math.max(1, target - breakTop - repeatedHeight)
         + 'px!important;padding:0!important;border:0!important;line-height:0!important;'
         + 'background:transparent!important;';
       spacerRow.appendChild(spacerCell);
-      tbody.insertBefore(spacerRow, row);
+      tbody.insertBefore(spacerRow, breakRow);
+      repeatedRows.forEach(function (repeatedRow) {
+        tbody.insertBefore(repeatedRow, breakRow);
+      });
       return true;
     }
     return false;
+  }
+
+  function tableContinuationGroupStart(rows, rowIndex, colCount) {
+    var startIndex = rowIndex;
+    for (var priorIndex = 0; priorIndex < rowIndex; priorIndex++) {
+      var priorRow = rows[priorIndex];
+      var spansIntoTarget = Array.prototype.some.call(priorRow.cells, function (cell) {
+        return Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1)
+          > rowIndex - priorIndex;
+      });
+      if (spansIntoTarget) startIndex = Math.min(startIndex, priorIndex);
+    }
+    if (startIndex === rowIndex && rowIndex > 0) {
+      var previousRow = rows[rowIndex - 1];
+      var previousSpan = Array.prototype.reduce.call(previousRow.cells, function (total, cell) {
+        if (cell.hidden || cell.getAttribute('data-rowspan-covered') === '1') return total;
+        return total + Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
+      }, 0);
+      if (previousRow.cells.length === 1 && previousSpan >= colCount) {
+        startIndex = rowIndex - 1;
+      }
+    }
+    return rows[startIndex];
+  }
+
+  function tableRepeatedHeaderRows(block) {
+    var table = block.querySelector('table');
+    var head = table ? table.querySelector('thead') : null;
+    if (!head) return [];
+    return Array.prototype.map.call(head.rows, function (sourceRow) {
+      var clone = sourceRow.cloneNode(true);
+      clone.classList.add('cpb-table-repeated-header');
+      clone.setAttribute('data-auto-page-break', '1');
+      clone.setAttribute('data-editor-only', '1');
+      clone.setAttribute('contenteditable', 'false');
+      clone.querySelectorAll('[contenteditable]').forEach(function (element) {
+        element.setAttribute('contenteditable', 'false');
+      });
+      clone.querySelectorAll('.cpb-col-resize, button, input, select').forEach(function (control) {
+        control.remove();
+      });
+      return clone;
+    });
   }
 
   function insertTocRowPageBreak(block, sheet) {
@@ -1324,10 +1382,9 @@
           inserted = true;
           break;
         }
-        if (
-          (block.getAttribute('data-block-type') || '') === 'table'
-          && insertTableRowPageBreak(block, sheet)
-        ) {
+        var isTableBlock = (block.getAttribute('data-block-type') || '') === 'table'
+          || !!block.querySelector('.cpb-table tbody[data-table-part="body"]');
+        if (isTableBlock && insertTableRowPageBreak(block, sheet)) {
           inserted = true;
           break;
         }
@@ -1338,6 +1395,7 @@
           break;
         }
         if (bottom <= contentBottom + 0.5) continue;
+        if (isTableBlock) continue;
         if (isTocBlock) continue;
         var flowingFields = Array.prototype.slice.call(block.querySelectorAll(
           '.cpb-paragraph[contenteditable="true"],'
