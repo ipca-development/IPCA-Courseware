@@ -361,6 +361,12 @@
     var images = Array.prototype.slice.call(canvasEl.querySelectorAll('img'));
     if (!images.length) return Promise.resolve();
     return Promise.all(images.map(function (image) {
+      // Pagination needs the dimensions of every source image, including images
+      // several pages below the viewport. Lazy loading leaves those images at
+      // zero height until the author scrolls near them and invalidates geometry.
+      image.loading = 'eager';
+      image.setAttribute('loading', 'eager');
+      image.setAttribute('fetchpriority', 'high');
       if (image.complete) {
         return typeof image.decode === 'function'
           ? image.decode().catch(function () { return null; })
@@ -2839,7 +2845,7 @@
       );
       var imagesReady = settleWithin(
         waitForCanvasImages().then(function () { return true; }),
-        6000
+        20000
       );
       var rulesReady = settleWithin(
         loadUnifiedManualBreaks(false).then(function () { return true; }),

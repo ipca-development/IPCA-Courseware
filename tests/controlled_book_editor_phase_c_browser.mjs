@@ -144,8 +144,9 @@ function renderDocument(search = '') {
   };
 }
 
-async function installMock(page, initialPreview = previewResult()) {
-  await page.evaluate(({ sourceBlocks, initialPreview }) => {
+async function installMock(page, initialPreview = previewResult(), blocksHtml = sourceBlocks) {
+  await page.evaluate(({ sourceBlocks: suppliedBlocks, initialPreview }) => {
+    const sourceBlocks = suppliedBlocks;
     const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
       status,
       headers: { 'Content-Type': 'application/json' },
@@ -270,7 +271,7 @@ async function installMock(page, initialPreview = previewResult()) {
       }
       return jsonResponse({ ok: true });
     };
-  }, { sourceBlocks, initialPreview });
+  }, { sourceBlocks: blocksHtml, initialPreview });
 }
 
 async function newEditorPage(
@@ -278,6 +279,7 @@ async function newEditorPage(
   search = 'live_projection=1',
   initialPreview = previewResult(),
   initialPageRules = null,
+  blocksHtml = sourceBlocks,
 ) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const browserErrors = [];
@@ -289,7 +291,7 @@ async function newEditorPage(
     body: document.html,
   }));
   await page.goto(document.url, { waitUntil: 'domcontentloaded' });
-  await installMock(page, initialPreview);
+  await installMock(page, initialPreview, blocksHtml);
   if (initialPageRules) {
     await page.evaluate((payload) => {
       window.__phaseC.queuePageRules({ payload });
@@ -608,11 +610,25 @@ test('manual break before a styled heading is not duplicated by heading flow', a
     }],
     candidates: [],
   };
+  const imageBeforeHeading = `
+    <div class="cpb-block cpb-block--image" data-block-id="4"
+      data-block-type="image" data-stable-anchor="image-before-heading">
+      <figure class="cpb-image" data-field="image" style="width:43%">
+        <div class="cpb-image-frame">
+          <img loading="lazy" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='430' height='160'%3E%3Crect width='430' height='160' fill='navy'/%3E%3C/svg%3E">
+        </div>
+      </figure>
+    </div>`;
+  const blocksWithImage = sourceBlocks.replace(
+    '<div class="cpb-block cpb-block--paragraph" data-block-id="2"',
+    `${imageBeforeHeading}<div class="cpb-block cpb-block--paragraph" data-block-id="2"`,
+  );
   const { page, browserErrors } = await newEditorPage(
     browser,
     '',
     previewResult(),
     pageRules,
+    blocksWithImage,
   );
   try {
     await page.evaluate(() => {
@@ -640,8 +656,16 @@ test('manual break before a styled heading is not duplicated by heading flow', a
       return {
         precedingBreaks,
         inlineSpacers: heading.querySelectorAll('[data-auto-page-break="1"]').length,
+        imageLoading: document.querySelector(
+          '#cpbCanvas [data-block-id="4"] img'
+        )?.getAttribute('loading'),
+        imageWidth: document.querySelector(
+          '#cpbCanvas [data-block-id="4"] img'
+        )?.naturalWidth,
       };
     });
+    assert.equal(observed.imageLoading, 'eager', JSON.stringify(observed));
+    assert.equal(observed.imageWidth, 430, JSON.stringify(observed));
     assert.equal(observed.inlineSpacers, 0, JSON.stringify(observed));
     assert.equal(observed.precedingBreaks.length, 1, JSON.stringify(observed));
     assert.equal(observed.precedingBreaks[0].manual, '1', JSON.stringify(observed));
