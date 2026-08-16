@@ -203,6 +203,10 @@ async function main() {
           #pagination-measure-host{position:absolute;inset:0 auto auto 0;visibility:hidden;pointer-events:none}
           .reader-semantic-piece{break-inside:avoid;max-width:100%}
           .reader-semantic-piece table{width:100%;max-width:100%;table-layout:fixed}
+          .reader-semantic-piece .cpb-table-wrap{
+            width:calc(100% - var(--cpb-table-border-width,1px))!important;
+            max-width:calc(100% - var(--cpb-table-border-width,1px))!important
+          }
           .reader-semantic-piece img{max-width:100%;height:auto}
           .reader-canonical-page.cpb-sheet{
             padding:0!important;margin:0!important;zoom:1;max-width:none;

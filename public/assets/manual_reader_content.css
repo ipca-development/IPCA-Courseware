@@ -42,6 +42,10 @@
   margin: 0;
   box-sizing: border-box;
 }
+.reader-semantic-piece .cpb-table-wrap {
+  width: calc(100% - var(--cpb-table-border-width, 1px)) !important;
+  max-width: calc(100% - var(--cpb-table-border-width, 1px)) !important;
+}
 .cpb-sheet {
   box-sizing: border-box;
   width: 816px;

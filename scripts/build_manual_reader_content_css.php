@@ -22,7 +22,8 @@ $source = (string)preg_replace('#/\*.*?\*/#s', '', $source);
 $forbidden = '/(?:editor|toolbar|dialog|overlay|picker|chrome|dropzone|resize|rotate|'
     . 'workspace|fullscreen|modal|submit|import|upload|table-tools|empty-state|'
     . 'textarea|style-input|level-check|token|add-|delete|remove|sign-btn|'
-    . 'page-layout|print-layout|paginated-page|change-marker|is-cell-selected|contenteditable|:hover|:focus|'
+    . 'page-layout|page-spacer|repeated-header|print-layout|paginated-page|'
+    . 'change-marker|is-cell-selected|contenteditable|:hover|:focus|'
     . '\.cmp-page|control|button)/i';
 $publicationSelector = '/\.cpb-(?:sheet(?:\b|-)|page-(?:header|footer)|block(?:\b|--)|'
     . 'heading|paragraph|cross-ref|section-number|regulatory-ref|font-|line-indent|list|'
@@ -104,6 +105,10 @@ $header = <<<'CSS'
   height: 100%;
   margin: 0;
   box-sizing: border-box;
+}
+.reader-semantic-piece .cpb-table-wrap {
+  width: calc(100% - var(--cpb-table-border-width, 1px)) !important;
+  max-width: calc(100% - var(--cpb-table-border-width, 1px)) !important;
 }
 
 CSS;
