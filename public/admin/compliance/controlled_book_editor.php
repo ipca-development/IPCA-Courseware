@@ -96,7 +96,6 @@ compliance_page_open(array(
     <aside class="cpb-tree-panel">
       <div class="cpb-tree-head">
         <h2 id="cpbTreeHeadTitle">Manual sections</h2>
-        <button type="button" id="cpbEditOutline" class="cpb-tree-toggle-all" title="Edit PART and MAIN chapter titles">Edit outline</button>
         <button type="button" id="cpbTreeToggleAll" class="cpb-tree-toggle-all" aria-pressed="false" title="Expand or collapse all sections">Expand all</button>
       </div>
       <div class="cpb-tree-scroll" id="cpbSectionTree">
@@ -107,6 +106,7 @@ compliance_page_open(array(
         <div id="cpbOutlineBody"></div>
       </div>
       <div class="cpb-tree-actions">
+        <button type="button" id="cpbEditOutline" class="cpb-tree-outline-btn" title="Edit PART and MAIN chapter titles">Edit outline</button>
         <span id="cpbAddSubsection" class="cpb-tree-add" role="button" tabindex="0" style="display:none;">+ Add subsection</span>
       </div>
     </aside>

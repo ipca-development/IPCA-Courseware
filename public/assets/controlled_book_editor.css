@@ -322,8 +322,56 @@
 }
 
 .cpb-tree-actions {
-  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.cpb-tree-outline-btn {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0f2744;
+  background: #e2e8f0;
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.cpb-tree-outline-btn:hover {
+  background: #fff;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel button.cpb-tree-outline-btn {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: #0f2744 !important;
+  background: #e2e8f0 !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  padding: 9px 12px !important;
+  cursor: pointer !important;
+  text-align: center !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel button.cpb-tree-outline-btn:hover {
+  background: #fff !important;
 }
 
 .cpb-tree-add {

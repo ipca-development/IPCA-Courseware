@@ -3149,7 +3149,8 @@
 
   function updateOutlineButton() {
     if (!editOutlineBtn) return;
-    var show = documentType !== 'form' && !!state.editable;
+    var status = String((state.versionInfo && state.versionInfo.lifecycle_status) || '');
+    var show = documentType !== 'form' && status !== 'released';
     editOutlineBtn.style.display = show ? '' : 'none';
     if (!show && state.outlineOpen) setOutlineMode(false);
   }
@@ -3202,6 +3203,9 @@
       treeHeadTitleEl.textContent = state.outlineOpen ? 'Edit outline' : 'Manual sections';
     }
     if (addSubBtn && state.outlineOpen) addSubBtn.style.display = 'none';
+    if (editOutlineBtn) {
+      editOutlineBtn.style.display = documentType === 'form' ? 'none' : '';
+    }
   }
 
   function applyOutlineResult(res) {

@@ -104,6 +104,7 @@ foreach (array(
 }
 foreach (array(
     'id="cpbEditOutline"',
+    'class="cpb-tree-outline-btn"',
     'id="cpbOutlinePanel"',
     'Cover, Part 0, and Annexes stay fixed',
 ) as $marker) {
@@ -115,10 +116,15 @@ foreach (array(
     'openOutlinePanel(',
     'rename_outline_part',
     '+ Add MAIN chapter',
+    "status !== 'released'",
 ) as $marker) {
     if (!is_string($js) || !str_contains($js, $marker)) {
         $failures[] = 'Missing editor JS marker: ' . $marker;
     }
+}
+$css = file_get_contents($root . '/public/assets/controlled_book_editor.css');
+if (!is_string($css) || !str_contains($css, '.cpb-tree-outline-btn')) {
+    $failures[] = 'Missing editor CSS marker: .cpb-tree-outline-btn';
 }
 if (!is_string($structure) || !str_contains($structure, "\$meta['outline_locked']")) {
     $failures[] = 'Import overlay must not overwrite author-locked MAIN titles.';
