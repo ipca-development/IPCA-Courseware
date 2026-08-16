@@ -6,6 +6,7 @@ require_once __DIR__ . '/CommunicationObjectStore.php';
 require_once __DIR__ . '/CommunicationSupport.php';
 require_once __DIR__ . '/CommunicationTrainingMediaLibraryService.php';
 require_once __DIR__ . '/CommunicationTrainingThumbnailRenderer.php';
+require_once __DIR__ . '/CommunicationTrainingVideoAnalyzer.php';
 
 /**
  * Private training-video library. Isolated from messages, Community CDN media,
@@ -31,16 +32,19 @@ final class CommunicationTrainingVideoService
     private array $columnCache = array();
     private CommunicationTrainingMediaLibraryService $mediaLibrary;
     private CommunicationTrainingThumbnailRenderer $renderer;
+    private CommunicationTrainingVideoAnalyzer $analyzer;
 
     public function __construct(
         private PDO $pdo,
         private CommunicationConfigService $config,
         private CommunicationObjectStore $store,
         ?CommunicationTrainingMediaLibraryService $mediaLibrary = null,
-        ?CommunicationTrainingThumbnailRenderer $renderer = null
+        ?CommunicationTrainingThumbnailRenderer $renderer = null,
+        ?CommunicationTrainingVideoAnalyzer $analyzer = null
     ) {
         $this->mediaLibrary = $mediaLibrary ?? new CommunicationTrainingMediaLibraryService($pdo, $store);
         $this->renderer = $renderer ?? new CommunicationTrainingThumbnailRenderer();
+        $this->analyzer = $analyzer ?? new CommunicationTrainingVideoAnalyzer($store);
     }
 
     /** @param array<string,mixed> $session @return array<string,mixed> */
@@ -320,6 +324,11 @@ final class CommunicationTrainingVideoService
             ));
         }
         $this->saveOptionalVideoFields($videoUuid, $input, is_array($existing) ? $existing : array());
+        if (is_array($existing)
+            && $description !== trim((string)($existing['description'] ?? ''))
+        ) {
+            $this->updateVideoFields((int)$existing['id'], array('description_source' => 'custom'));
+        }
         $row = $this->requireAdminVideo($videoUuid);
         $this->replaceGrants((int)$row['id'], $normalizedGrants);
         if (trim((string)($row['storage_key'] ?? '')) !== ''
@@ -559,6 +568,44 @@ final class CommunicationTrainingVideoService
             $mime = 'image/jpeg';
         }
         return array('bytes' => $bytes, 'mime_type' => $mime);
+    }
+
+    /**
+     * Analyze the uploaded video and write a short "what you'll learn" description.
+     *
+     * @return array<string,mixed>
+     */
+    public function generateAdminExplanation(string $videoUuid, bool $force = false): array
+    {
+        @set_time_limit(180);
+        $row = $this->requireAdminVideo($videoUuid);
+        if (trim((string)($row['storage_key'] ?? '')) === '') {
+            throw new CommunicationException('validation_error', 'Upload the video before writing the explanation.', 400);
+        }
+        $existing = trim((string)($row['description'] ?? ''));
+        $source = strtolower(trim((string)($row['description_source'] ?? '')));
+        if (!$force && $existing !== '' && $source === 'custom') {
+            return array(
+                'video' => $this->adminVideo($row),
+                'grants' => $this->grantsFor((int)$row['id']),
+            );
+        }
+        $result = $this->analyzer->explain($row);
+        $explanation = trim((string)($result['explanation'] ?? ''));
+        if ($explanation === '') {
+            throw new CommunicationException('server_error', 'The video explanation could not be written.', 500);
+        }
+        $this->pdo->prepare(
+            'UPDATE ipca_training_videos SET description = ?, updated_at_utc = ? WHERE id = ?'
+        )->execute(array($explanation, CommunicationSupport::nowUtc(), (int)$row['id']));
+        $this->updateVideoFields((int)$row['id'], array('description_source' => 'generated'));
+        $fresh = $this->requireAdminVideo($videoUuid);
+        return array(
+            'video' => $this->adminVideo($fresh),
+            'grants' => $this->grantsFor((int)$fresh['id']),
+            'used_video' => !empty($result['used_video']),
+            'used_ai' => !empty($result['used_ai']),
+        );
     }
 
     /** @param array<string,mixed> $session @return array<string,mixed> */
@@ -840,6 +887,7 @@ final class CommunicationTrainingVideoService
             'video_uuid' => (string)$row['video_uuid'],
             'title' => (string)$row['title'],
             'description' => (string)($row['description'] ?? ''),
+            'description_source' => (string)($row['description_source'] ?? ''),
             'category' => (string)($row['category'] ?? ''),
             'aircraft' => (string)($row['aircraft'] ?? ''),
             'program' => (string)($row['program'] ?? ''),

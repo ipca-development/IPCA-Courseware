@@ -296,6 +296,7 @@ function comm_sqlite(): PDO
       video_uuid TEXT NOT NULL UNIQUE,
       title TEXT NOT NULL,
       description TEXT NULL,
+      description_source TEXT NULL,
       category TEXT NULL,
       aircraft TEXT NULL,
       program TEXT NULL,
@@ -1098,6 +1099,8 @@ comm_assert(
     && str_contains($adminThumbPage, 'Regenerate')
     && str_contains($adminThumbPage, 'Choose Another Image')
     && str_contains($adminThumbPage, 'Upload Custom')
+    && str_contains($adminThumbPage, 'Rewrite from video')
+    && str_contains($adminThumbPage, 'generate_explanation')
 );
 comm_assert('IPCA Media Library admin page exists', is_file($root . '/public/admin/ipca_media_library.php'));
 comm_assert(
@@ -1412,6 +1415,15 @@ comm_assert(
     && (string)($autoUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') === (string)($libraryCockpit['asset']['asset_uuid'] ?? '')
     && str_contains((string)($autoUploaded['video']['poster_preview_url'] ?? ''), 'training_videos_preview.php')
     && str_starts_with($kernel->trainingVideos->adminPosterBytes($autoUuid)['bytes'], "\xff\xd8")
+);
+$explained = $kernel->trainingVideos->generateAdminExplanation($autoUuid, true);
+$explainedText = trim((string)($explained['video']['description'] ?? ''));
+comm_assert(
+    'training videos can write a short what-you-will-learn explanation',
+    $explainedText !== ''
+    && mb_strlen($explainedText) >= 20
+    && (string)($explained['video']['description_source'] ?? '') === 'generated'
+    && is_file($root . '/src/communication/CommunicationTrainingVideoAnalyzer.php')
 );
 
 $portraitVideo = $kernel->trainingVideos->saveAdmin(array(

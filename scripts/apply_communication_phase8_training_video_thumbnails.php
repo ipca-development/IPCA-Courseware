@@ -36,6 +36,7 @@ $videoColumns = array(
     'poster_library_asset_id' => "BIGINT UNSIGNED NULL AFTER poster_template",
     'poster_candidate_json' => "JSON NULL AFTER poster_library_asset_id",
     'poster_candidate_index' => "INT UNSIGNED NOT NULL DEFAULT 0 AFTER poster_candidate_json",
+    'description_source' => "VARCHAR(32) NULL AFTER description",
 );
 
 foreach ($videoColumns as $column => $definition) {

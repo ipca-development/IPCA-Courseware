@@ -94,6 +94,10 @@ try {
                 $videoUuid,
                 (string)($input['asset_uuid'] ?? '')
             ),
+            'generate_explanation' => $service->generateAdminExplanation(
+                $videoUuid,
+                (bool)($input['force'] ?? false)
+            ),
             default => throw new CommunicationException('validation_error', 'Unknown action.', 400),
     };
     training_videos_admin_json(200, array_merge(array('ok' => true), $result));

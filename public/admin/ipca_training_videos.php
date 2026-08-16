@@ -68,7 +68,12 @@ cw_header('Training Videos');
         <input type="hidden" id="video-uuid">
         <div id="tv-visibility" class="tv-banner tv-banner-draft">Draft — upload a video file, then publish.</div>
         <div class="tv-field"><label>Title</label><input id="title" required maxlength="255"></div>
-        <div class="tv-field"><label>Description / topic</label><textarea id="description" rows="4"></textarea></div>
+        <div class="tv-field">
+          <label>What you'll learn</label>
+          <textarea id="description" rows="4" placeholder="Written automatically from the video after upload."></textarea>
+          <p class="tv-muted" id="desc-source">A short, practical explanation is generated from the video. You can edit it.</p>
+          <button type="button" class="btn" id="tv-rewrite" style="margin-top:8px;">Rewrite from video</button>
+        </div>
         <div class="tv-field"><label>Category</label><input id="category" maxlength="128" placeholder="Private Pilot, Instrument, ..."></div>
         <div class="tv-field"><label>Aircraft / program</label><input id="aircraft" maxlength="128" placeholder="Cessna 172, G1000, ..."></div>
         <div class="tv-field">
@@ -364,6 +369,14 @@ cw_header('Training Videos');
     document.getElementById('category').value = current.category || '';
     document.getElementById('aircraft').value = current.aircraft || '';
     document.getElementById('status').value = current.status || 'draft';
+    const descSource = document.getElementById('desc-source');
+    if (current.description_source === 'generated') {
+      descSource.textContent = 'Written from the video. Edit freely, or rewrite.';
+    } else if (current.description) {
+      descSource.textContent = 'You can rewrite this from the video at any time.';
+    } else {
+      descSource.textContent = 'A short, practical explanation is generated from the video. You can edit it.';
+    }
     document.getElementById('video-file-status').textContent = fileStatus('video', current);
     document.getElementById('poster-file-status').textContent = fileStatus('poster', current);
     setThumb(current);
@@ -426,6 +439,13 @@ cw_header('Training Videos');
       setProgress(kind, null);
       fillForm(complete.video, collectGrants());
       await loadList();
+      if (kind === 'video' && !(complete.video.description || '').trim()) {
+        setMessage('Writing what students will learn from the video…');
+        const explained = await post({ action: 'generate_explanation', video_uuid: uuid, force: false });
+        if (explained.ok) {
+          fillForm(explained.video, explained.grants || collectGrants());
+        }
+      }
       if (kind === 'video' && complete.video.app_visible) {
         setMessage('Video uploaded and published on the app.', 'ok');
       } else if (kind === 'video') {
@@ -491,6 +511,19 @@ cw_header('Training Videos');
   });
   document.getElementById('video-file').addEventListener('change', (event) => queueUpload('video', event.target.files[0]));
   document.getElementById('poster-file').addEventListener('change', (event) => queueUpload('poster', event.target.files[0]));
+  document.getElementById('tv-rewrite').addEventListener('click', async () => {
+    const uuid = document.getElementById('video-uuid').value;
+    if (!uuid || !(current && current.has_video)) {
+      setMessage('Upload the video first.', 'err');
+      return;
+    }
+    setMessage('Writing what students will learn from the video…');
+    const result = await post({ action: 'generate_explanation', video_uuid: uuid, force: true });
+    if (result.ok) {
+      fillForm(result.video, result.grants || collectGrants());
+      setMessage(result.used_video ? 'Explanation rewritten from the video.' : 'Explanation written from the video title and topic.', 'ok');
+    } else setMessage(result.error || 'Could not write the explanation.', 'err');
+  });
   document.getElementById('thumb-regenerate').addEventListener('click', async () => {
     const uuid = document.getElementById('video-uuid').value;
     if (!uuid) {
