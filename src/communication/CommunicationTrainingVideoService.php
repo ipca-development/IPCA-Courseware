@@ -247,10 +247,30 @@ final class CommunicationTrainingVideoService
             'SELECT * FROM ipca_training_videos WHERE deleted_at_utc IS NULL ORDER BY id DESC'
         );
         $videos = array();
+        $published = 0;
+        $drafts = 0;
+        $views = 0;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $videos[] = $this->adminVideo($row);
+            $video = $this->adminVideo($row);
+            $videos[] = $video;
+            if (!empty($video['app_visible'])) {
+                $published++;
+            } elseif ((string)$video['status'] !== 'archived') {
+                $drafts++;
+            }
+            $views += (int)($video['view_count'] ?? 0);
         }
-        return array('videos' => $videos, 'options' => $this->adminOptions());
+        return array(
+            'videos' => $videos,
+            'options' => $this->adminOptions(),
+            'categories' => $this->listCategories(false),
+            'stats' => array(
+                'total' => count($videos),
+                'published' => $published,
+                'drafts' => $drafts,
+                'views' => $views,
+            ),
+        );
     }
 
     /** @return array<string,mixed> */
@@ -287,6 +307,10 @@ final class CommunicationTrainingVideoService
         $now = CommunicationSupport::nowUtc();
         $videoUuid = trim((string)($input['video_uuid'] ?? ''));
         $existing = null;
+        $titleSource = strtolower(trim((string)($input['title_source'] ?? '')));
+        if (!in_array($titleSource, array('custom', 'filename', 'generated'), true)) {
+            $titleSource = 'custom';
+        }
         if ($videoUuid === '') {
             $videoUuid = CommunicationSupport::uuid();
             $this->pdo->prepare(
@@ -322,13 +346,21 @@ final class CommunicationTrainingVideoService
                 $status === 'archived' ? $now : null,
                 (int)$existing['id'],
             ));
+            if ($title !== trim((string)($existing['title'] ?? ''))) {
+                $titleSource = 'custom';
+            } elseif (trim((string)($existing['title_source'] ?? '')) !== '') {
+                $titleSource = strtolower(trim((string)$existing['title_source']));
+            }
         }
         $this->saveOptionalVideoFields($videoUuid, $input, is_array($existing) ? $existing : array());
+        $rowForMeta = $this->requireAdminVideo($videoUuid);
+        $fields = array('title_source' => $titleSource);
         if (is_array($existing)
             && $description !== trim((string)($existing['description'] ?? ''))
         ) {
-            $this->updateVideoFields((int)$existing['id'], array('description_source' => 'custom'));
+            $fields['description_source'] = 'custom';
         }
+        $this->updateVideoFields((int)$rowForMeta['id'], $fields);
         $row = $this->requireAdminVideo($videoUuid);
         $this->replaceGrants((int)$row['id'], $normalizedGrants);
         if (trim((string)($row['storage_key'] ?? '')) !== ''
@@ -590,21 +622,82 @@ final class CommunicationTrainingVideoService
                 'grants' => $this->grantsFor((int)$row['id']),
             );
         }
-        $result = $this->analyzer->explain($row);
+        $result = $this->analyzer->analyze($row, $this->listCategories(true));
         $explanation = trim((string)($result['explanation'] ?? ''));
         if ($explanation === '') {
             throw new CommunicationException('server_error', 'The video explanation could not be written.', 500);
         }
+        $titleSource = strtolower(trim((string)($row['title_source'] ?? '')));
+        $canWriteTitle = $force || in_array($titleSource, array('', 'filename', 'generated'), true);
+        $canWriteCategory = (int)($row['category_id'] ?? 0) < 1
+            || strtolower(trim((string)($row['category'] ?? ''))) === ''
+            || strtolower(trim((string)($row['category'] ?? ''))) === 'uncategorized';
         $this->pdo->prepare(
             'UPDATE ipca_training_videos SET description = ?, updated_at_utc = ? WHERE id = ?'
         )->execute(array($explanation, CommunicationSupport::nowUtc(), (int)$row['id']));
-        $this->updateVideoFields((int)$row['id'], array('description_source' => 'generated'));
+        $fields = array('description_source' => 'generated');
+        $newTitle = trim((string)($result['title'] ?? ''));
+        if ($canWriteTitle && $newTitle !== '') {
+            $this->pdo->prepare(
+                'UPDATE ipca_training_videos SET title = ?, updated_at_utc = ? WHERE id = ?'
+            )->execute(array($newTitle, CommunicationSupport::nowUtc(), (int)$row['id']));
+            $fields['title_source'] = 'generated';
+        }
+        if ($canWriteCategory) {
+            $resolved = $this->categoryBySlug((string)($result['category_slug'] ?? 'uncategorized'));
+            if ($resolved !== null) {
+                $fields['category_id'] = (int)$resolved['id'];
+                $fields['category'] = (string)$resolved['name'];
+            }
+        }
+        $this->updateVideoFields((int)$row['id'], $fields);
         $fresh = $this->requireAdminVideo($videoUuid);
         return array(
             'video' => $this->adminVideo($fresh),
             'grants' => $this->grantsFor((int)$fresh['id']),
             'used_video' => !empty($result['used_video']),
             'used_ai' => !empty($result['used_ai']),
+        );
+    }
+
+    /**
+     * Member watch progress. Isolated from the messaging outbox.
+     *
+     * @param array<string,mixed> $session
+     * @return array<string,mixed>
+     */
+    public function progress(array $session, string $videoUuid, int $positionMs, int $durationMs = 0): array
+    {
+        $this->config->requireTrainingVideos();
+        $row = $this->requireAccessible($session, $videoUuid);
+        $this->recordProgress(
+            (int)$row['id'],
+            (int)$session['user']['id'],
+            $positionMs,
+            $durationMs > 0 ? $durationMs : (int)$row['duration_ms']
+        );
+        $fresh = $this->findByUuid($videoUuid) ?? $row;
+        $until = $this->activeUntil($session['user'], (int)$fresh['id']);
+        return array('video' => $this->publicVideo($fresh, $session['user'], $until ?? CommunicationSupport::nowUtc()));
+    }
+
+    /**
+     * Same-origin admin playback. The browser must not load private Spaces URLs
+     * in a video element (Range + CORS). The play endpoint proxies this privately.
+     *
+     * @return array{url:string,mime_type:string,byte_size:int}
+     */
+    public function adminVideoOrigin(string $videoUuid): array
+    {
+        $row = $this->requireAdminVideo($videoUuid);
+        $key = trim((string)($row['storage_key'] ?? ''));
+        if ($key === '') {
+            throw new CommunicationException('not_found', 'That video is not on the server yet.', 404);
+        }
+        return array(
+            'url' => $this->store->presignGet($key, 3600),
+            'mime_type' => (string)($row['mime_type'] ?: 'video/mp4'),
+            'byte_size' => (int)$row['byte_size'],
         );
     }
 
@@ -830,6 +923,82 @@ final class CommunicationTrainingVideoService
         )->execute(array($now, $videoId, $userId));
     }
 
+    private function recordProgress(int $videoId, int $userId, int $positionMs, int $durationMs): void
+    {
+        $this->recordView($videoId, $userId);
+        if (!$this->hasColumn('ipca_training_video_views', 'position_ms')) {
+            return;
+        }
+        $durationMs = max(0, $durationMs);
+        $positionMs = max(0, $positionMs);
+        if ($durationMs > 0) {
+            $positionMs = min($positionMs, $durationMs);
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT position_ms, max_position_ms, progress_percent, completed_at_utc
+             FROM ipca_training_video_views WHERE video_id = ? AND user_id = ? LIMIT 1'
+        );
+        $stmt->execute(array($videoId, $userId));
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($existing)) {
+            return;
+        }
+        $maxPosition = max((int)($existing['max_position_ms'] ?? 0), $positionMs);
+        $percent = 0;
+        if ($durationMs > 0) {
+            $percent = (int)min(100, (int)round(($maxPosition * 100) / $durationMs));
+        }
+        $completedAt = trim((string)($existing['completed_at_utc'] ?? ''));
+        $now = CommunicationSupport::nowUtc();
+        if ($percent >= 95 && $completedAt === '') {
+            $completedAt = $now;
+            $percent = 100;
+        } elseif ($completedAt !== '') {
+            $percent = 100;
+        }
+        $this->pdo->prepare(
+            'UPDATE ipca_training_video_views
+             SET position_ms = ?, max_position_ms = ?, progress_percent = ?, completed_at_utc = ?,
+                 last_viewed_at_utc = ?, updated_at_utc = ?
+             WHERE video_id = ? AND user_id = ?'
+        )->execute(array(
+            $positionMs,
+            $maxPosition,
+            $percent,
+            $completedAt === '' ? null : $completedAt,
+            $now,
+            $now,
+            $videoId,
+            $userId,
+        ));
+    }
+
+    /**
+     * @return array{position_ms:int,progress_percent:int,completed:bool}
+     */
+    private function watchState(int $videoId, int $userId): array
+    {
+        $empty = array('position_ms' => 0, 'progress_percent' => 0, 'completed' => false);
+        if ($userId < 1 || !$this->hasColumn('ipca_training_video_views', 'progress_percent')) {
+            return $empty;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT position_ms, progress_percent, completed_at_utc
+             FROM ipca_training_video_views WHERE video_id = ? AND user_id = ? LIMIT 1'
+        );
+        $stmt->execute(array($videoId, $userId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return $empty;
+        }
+        $completed = trim((string)($row['completed_at_utc'] ?? '')) !== '' || (int)($row['progress_percent'] ?? 0) >= 95;
+        return array(
+            'position_ms' => (int)($row['position_ms'] ?? 0),
+            'progress_percent' => $completed ? 100 : (int)($row['progress_percent'] ?? 0),
+            'completed' => $completed,
+        );
+    }
+
     /**
      * @param array<string,mixed> $row
      * @param array<string,mixed> $user
@@ -846,11 +1015,15 @@ final class CommunicationTrainingVideoService
             $like->execute(array($videoId, $userId));
             $liked = $like->fetchColumn() !== false;
         }
+        $watch = $this->watchState($videoId, $userId);
+        $category = $this->categoryPayload($row);
         return array(
             'id' => $videoId,
             'video_uuid' => (string)$row['video_uuid'],
             'title' => (string)$row['title'],
             'description' => (string)($row['description'] ?? ''),
+            'category' => (string)$category['name'],
+            'category_slug' => (string)$category['slug'],
             'duration_ms' => (int)$row['duration_ms'],
             'duration_seconds' => (int)round(((int)$row['duration_ms']) / 1000),
             'byte_size' => (int)$row['byte_size'],
@@ -863,6 +1036,9 @@ final class CommunicationTrainingVideoService
             'downloadable' => trim((string)($row['storage_key'] ?? '')) !== '',
             'available_until' => $availableUntil,
             'created_at_utc' => (string)$row['created_at_utc'],
+            'watch_percent' => (int)$watch['progress_percent'],
+            'watch_completed' => !empty($watch['completed']),
+            'resume_position_ms' => !empty($watch['completed']) ? 0 : (int)$watch['position_ms'],
         );
     }
 
@@ -882,13 +1058,17 @@ final class CommunicationTrainingVideoService
             'branded_fallback' => 'IPCA template',
             default => $posterKey !== '' ? 'Custom upload' : '',
         };
+        $category = $this->categoryPayload($row);
         return array(
             'id' => (int)$row['id'],
             'video_uuid' => (string)$row['video_uuid'],
             'title' => (string)$row['title'],
+            'title_source' => (string)($row['title_source'] ?? ''),
             'description' => (string)($row['description'] ?? ''),
             'description_source' => (string)($row['description_source'] ?? ''),
-            'category' => (string)($row['category'] ?? ''),
+            'category' => (string)$category['name'],
+            'category_id' => (int)$category['id'],
+            'category_slug' => (string)$category['slug'],
             'aircraft' => (string)($row['aircraft'] ?? ''),
             'program' => (string)($row['program'] ?? ''),
             'status' => (string)$row['status'],
@@ -905,12 +1085,16 @@ final class CommunicationTrainingVideoService
             'poster_preview_url' => $posterKey !== ''
                 ? '/admin/api/training_videos_preview.php?video_uuid=' . rawurlencode((string)$row['video_uuid'])
                 : '',
+            'video_play_url' => $videoKey !== ''
+                ? '/admin/api/training_videos_play.php?video_uuid=' . rawurlencode((string)$row['video_uuid'])
+                : '',
             'poster_source' => $source,
             'poster_source_label' => $sourceLabel,
             'poster_template' => (string)($row['poster_template'] ?? ''),
             'thumbnail_candidates' => $this->thumbnailCandidates($row),
             'thumbnail_candidate_index' => (int)($row['poster_candidate_index'] ?? 0),
             'view_count' => $this->countViews((int)$row['id']),
+            'completion_count' => $this->countCompletions((int)$row['id']),
             'like_count' => $this->countLikes((int)$row['id']),
             'comment_count' => $this->countComments((int)$row['id']),
             'created_at_utc' => (string)$row['created_at_utc'],
@@ -1106,6 +1290,16 @@ final class CommunicationTrainingVideoService
             }
             $fields[$column] = $value === '' ? null : mb_substr($value, 0, 128);
         }
+        $resolved = $this->resolveCategory(
+            isset($input['category_id']) ? (int)$input['category_id'] : (int)($existing['category_id'] ?? 0),
+            (string)($fields['category'] ?? '')
+        );
+        if ($resolved !== null) {
+            $fields['category_id'] = (int)$resolved['id'];
+            $fields['category'] = (string)$resolved['name'];
+        } elseif (array_key_exists('category_id', $input) && (int)$input['category_id'] === 0) {
+            $fields['category_id'] = null;
+        }
         $this->updateVideoFields((int)$row['id'], $fields);
     }
 
@@ -1163,6 +1357,164 @@ final class CommunicationTrainingVideoService
         }
         $this->columnCache[$column] = $ok;
         return $ok;
+    }
+
+    private function hasColumn(string $table, string $column): bool
+    {
+        $cacheKey = $table . '.' . $column;
+        if (array_key_exists($cacheKey, $this->columnCache)) {
+            return $this->columnCache[$cacheKey];
+        }
+        $ok = false;
+        if (!preg_match('/^[a-z0-9_]+$/', $table) || !preg_match('/^[a-z0-9_]+$/', $column)) {
+            $this->columnCache[$cacheKey] = false;
+            return false;
+        }
+        try {
+            $driver = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+            if ($driver === 'sqlite') {
+                $stmt = $this->pdo->query('PRAGMA table_info(' . $table . ')');
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    if ((string)($row['name'] ?? '') === $column) {
+                        $ok = true;
+                        break;
+                    }
+                }
+            } else {
+                $stmt = $this->pdo->prepare(
+                    'SELECT 1 FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+                );
+                $stmt->execute(array($table, $column));
+                $ok = $stmt->fetchColumn() !== false;
+            }
+        } catch (Throwable) {
+            $ok = false;
+        }
+        $this->columnCache[$cacheKey] = $ok;
+        return $ok;
+    }
+
+    /**
+     * @return list<array{id:int,slug:string,name:string,sort_order:int,is_active:bool}>
+     */
+    public function listCategories(bool $activeOnly = true): array
+    {
+        if (!$this->tableExists('ipca_training_video_categories')) {
+            return array();
+        }
+        $sql = 'SELECT id, slug, name, sort_order, is_active FROM ipca_training_video_categories';
+        if ($activeOnly) {
+            $sql .= ' WHERE is_active = 1';
+        }
+        $sql .= ' ORDER BY sort_order ASC, id ASC';
+        $out = array();
+        foreach ($this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[] = array(
+                'id' => (int)$row['id'],
+                'slug' => (string)$row['slug'],
+                'name' => (string)$row['name'],
+                'sort_order' => (int)$row['sort_order'],
+                'is_active' => (int)$row['is_active'] === 1,
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @return array{id:int,slug:string,name:string}|null
+     */
+    private function categoryBySlug(string $slug): ?array
+    {
+        $slug = strtolower(trim($slug));
+        if ($slug === '' || !$this->tableExists('ipca_training_video_categories')) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT id, slug, name FROM ipca_training_video_categories WHERE slug = ? AND is_active = 1 LIMIT 1'
+        );
+        $stmt->execute(array($slug));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? array(
+            'id' => (int)$row['id'],
+            'slug' => (string)$row['slug'],
+            'name' => (string)$row['name'],
+        ) : null;
+    }
+
+    /**
+     * @return array{id:int,slug:string,name:string}|null
+     */
+    private function resolveCategory(int $categoryId, string $text): ?array
+    {
+        if (!$this->tableExists('ipca_training_video_categories')) {
+            return null;
+        }
+        if ($categoryId > 0) {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, slug, name FROM ipca_training_video_categories WHERE id = ? LIMIT 1'
+            );
+            $stmt->execute(array($categoryId));
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (is_array($row)) {
+                return array(
+                    'id' => (int)$row['id'],
+                    'slug' => (string)$row['slug'],
+                    'name' => (string)$row['name'],
+                );
+            }
+        }
+        $text = strtolower(trim($text));
+        if ($text !== '') {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, slug, name FROM ipca_training_video_categories
+                 WHERE is_active = 1 AND (LOWER(name) = ? OR LOWER(slug) = ?)
+                 LIMIT 1'
+            );
+            $stmt->execute(array($text, str_replace(' ', '-', $text)));
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (is_array($row)) {
+                return array(
+                    'id' => (int)$row['id'],
+                    'slug' => (string)$row['slug'],
+                    'name' => (string)$row['name'],
+                );
+            }
+        }
+        return $this->categoryBySlug('uncategorized');
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array{id:int,slug:string,name:string}
+     */
+    private function categoryPayload(array $row): array
+    {
+        $resolved = $this->resolveCategory(
+            (int)($row['category_id'] ?? 0),
+            (string)($row['category'] ?? '')
+        );
+        if ($resolved !== null) {
+            return $resolved;
+        }
+        $name = trim((string)($row['category'] ?? ''));
+        return array(
+            'id' => 0,
+            'slug' => $name === '' ? 'uncategorized' : strtolower(str_replace(' ', '-', $name)),
+            'name' => $name === '' ? 'Uncategorized' : $name,
+        );
+    }
+
+    private function countCompletions(int $videoId): int
+    {
+        if (!$this->hasColumn('ipca_training_video_views', 'completed_at_utc')) {
+            return 0;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ipca_training_video_views WHERE video_id = ? AND completed_at_utc IS NOT NULL'
+        );
+        $stmt->execute(array($videoId));
+        return (int)$stmt->fetchColumn();
     }
 
     /**

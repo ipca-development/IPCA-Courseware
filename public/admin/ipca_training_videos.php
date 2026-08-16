@@ -13,24 +13,61 @@ $csrf = (string)$_SESSION['training_videos_csrf'];
 
 cw_header('Training Videos');
 ?>
+<link rel="stylesheet" href="/instructor/css/tcc_ia_shared.css">
 <style>
-.tv-page { max-width: 1100px; }
-.tv-grid { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
-.tv-list button { display: block; width: 100%; text-align: left; margin: 0 0 8px; }
-.tv-list button.tv-selected { box-shadow: inset 0 0 0 2px #1f6feb; }
+.tv-page { max-width: 1180px; display: flex; flex-direction: column; gap: 18px; }
+.ia-hero-banner{
+    padding:20px 22px;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;overflow:hidden;
+    border-radius:22px;border:1px solid rgba(15,23,42,.08);box-shadow:0 14px 30px rgba(15,23,42,.06);
+}
+.ia-hero-banner-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.ia-hero-banner-main{min-width:0;flex:1 1 280px}
+.ia-hero-banner-actions{flex:0 0 auto;padding-top:2px;display:flex;gap:8px;flex-wrap:wrap}
+.ia-hero-back-btn{
+    display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 18px;border-radius:12px;
+    font-size:13px;font-weight:900;text-decoration:none;white-space:nowrap;
+    background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.32);
+}
+.ia-hero-back-btn:hover{background:rgba(255,255,255,.22);color:#fff}
+.ia-hero-banner-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;font-weight:900;color:rgba(255,255,255,.72)}
+.ia-hero-banner h1{margin:6px 0 0;font-size:30px;line-height:1.02;letter-spacing:-.04em;color:#fff;font-weight:900}
+.ia-hero-banner-sub{margin-top:8px;font-size:13px;line-height:1.55;color:rgba(255,255,255,.84);max-width:860px}
+.ia-hero-banner-chips{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.ia-chip--hero{
+    display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:0 10px;border-radius:999px;
+    font-size:11px;font-weight:800;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.12);color:#fff;
+}
+.ia-chip-row{display:flex;gap:8px;flex-wrap:wrap}
+.ia-chip{
+    display:inline-flex;align-items:center;justify-content:center;min-height:30px;
+    padding:0 12px;border-radius:999px;font-size:11px;font-weight:800;cursor:pointer;
+    border:1px solid rgba(15,23,42,.08);background:#f8fafc;color:#334155;
+}
+.ia-chip.active{background:#12355f;color:#fff;border-color:#12355f}
 .tv-muted { color: #728198; }
-.tv-kicker { font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #728198; }
+.tv-ok { color: #0f6d32; font-weight: 700; }
+.tv-err { color: #b42318; font-weight: 700; }
+.tv-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.tv-card { background:#fff; border:1px solid rgba(15,23,42,.08); border-radius:18px; overflow:hidden; box-shadow:0 8px 20px rgba(15,23,42,.04); display:flex; flex-direction:column; }
+.tv-card-thumb { position:relative; background:#071b35; aspect-ratio:16/9; }
+.tv-card-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.tv-card-thumb .tv-duration { position:absolute; right:8px; bottom:8px; background:rgba(7,27,53,.8); color:#fff; font-size:11px; font-weight:800; padding:3px 7px; border-radius:999px; }
+.tv-card-body { padding:12px 14px 14px; display:flex; flex-direction:column; gap:8px; flex:1; }
+.tv-card-title { font-size:16px; font-weight:900; color:#102845; line-height:1.25; }
+.tv-card-copy { font-size:13px; color:#64748b; line-height:1.45; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.tv-card-pills { display:flex; gap:6px; flex-wrap:wrap; }
+.tv-badge { display:inline-flex; font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; padding:3px 8px; border-radius:999px; }
+.tv-badge-live { background:#d8f3dc; color:#0f6d32; }
+.tv-badge-draft { background:#eef2f6; color:#4b5d73; }
+.tv-badge-warn { background:#fff3cd; color:#8a6d00; }
+.tv-card-meta { font-size:12px; font-weight:700; color:#64748b; display:flex; gap:12px; }
+.tv-card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; }
 .tv-field { margin: 0 0 12px; }
 .tv-field label { display: block; font-size: 12px; font-weight: 700; margin: 0 0 4px; color: #728198; }
 .tv-field input, .tv-field textarea, .tv-field select { width: 100%; }
 .tv-grants { display: grid; gap: 10px; }
 .tv-grant { display: grid; grid-template-columns: 140px 1fr 1fr 1fr auto; gap: 8px; align-items: end; }
 .tv-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-.tv-status { font-size: 12px; font-weight: 700; text-transform: uppercase; }
-.tv-badge { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; }
-.tv-badge-live { background: #d8f3dc; color: #0f6d32; }
-.tv-badge-draft { background: #eef2f6; color: #4b5d73; }
-.tv-badge-warn { background: #fff3cd; color: #8a6d00; }
 .tv-banner { padding: 10px 12px; border-radius: 8px; margin: 0 0 14px; font-weight: 700; }
 .tv-banner-live { background: #d8f3dc; color: #0f6d32; }
 .tv-banner-draft { background: #eef2f6; color: #4b5d73; }
@@ -38,32 +75,84 @@ cw_header('Training Videos');
 .tv-progress { height: 8px; background: #e6edf5; border-radius: 999px; overflow: hidden; margin: 8px 0 0; }
 .tv-progress[hidden] { display: none; }
 .tv-progress-bar { height: 100%; width: 0; background: #1f6feb; transition: width .12s linear; }
-.tv-ok { color: #0f6d32; font-weight: 700; }
-.tv-err { color: #b42318; font-weight: 700; }
 .tv-thumb { width: 100%; max-width: 420px; height: auto; border-radius: 10px; background: #071b35; display: block; object-fit: contain; }
 .tv-thumb-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.tv-player { width:100%; max-height:58vh; background:#071b35; border-radius:14px; }
+.tv-drop { border:2px dashed rgba(15,23,42,.16); border-radius:16px; padding:28px 18px; text-align:center; background:#fbfdff; }
+.tv-drop.drag { border-color:#12355f; background:#eff6ff; }
+.tv-bulk-list { display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+.tv-bulk-row { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:10px 12px; border-radius:12px; border:1px solid rgba(15,23,42,.08); background:#fff; }
 .tv-picker { position: fixed; inset: 0; background: rgba(7,27,53,.45); display: none; align-items: center; justify-content: center; z-index: 40; padding: 24px; }
 .tv-picker.open { display: flex; }
 .tv-picker-card { background: #fff; border-radius: 12px; max-width: 860px; width: 100%; max-height: 80vh; overflow: auto; padding: 16px; }
 .tv-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
 .tv-picker-grid img { width: 100%; height: 110px; object-fit: cover; border-radius: 8px; cursor: pointer; }
+#tv-edit-modal .tcc-modal-card, #tv-bulk-modal .tcc-modal-card { width:min(920px,96vw); }
 @media (max-width: 900px) {
-  .tv-grid, .tv-grant { grid-template-columns: 1fr; }
+  .tv-grant { grid-template-columns: 1fr; }
+  .ia-hero-banner h1 { font-size:25px; }
 }
 </style>
 
 <div class="tv-page">
-  <div class="card">
-    <div class="tv-kicker">IPCA App</div>
-    <h2 style="margin:6px 0 8px;">Training Videos</h2>
-    <p class="tv-muted">Private videos for the IPCA app. A thumbnail is generated automatically from the IPCA Media Library after the video is uploaded. Custom thumbnail upload is optional. A video is on the app only after the file is on the server and status is Published.</p>
-  </div>
-  <div class="tv-grid">
-    <div class="card">
-      <button type="button" class="btn" id="tv-new">New video</button>
-      <div id="tv-list" style="margin-top:12px;"></div>
+  <section class="ia-hero-banner" aria-label="Training Videos">
+    <div class="ia-hero-banner-head">
+      <div class="ia-hero-banner-main">
+        <div class="ia-hero-banner-kicker">IPCA App · Training Videos</div>
+        <h1>Training Videos</h1>
+        <p class="ia-hero-banner-sub">Private videos for the IPCA app. A thumbnail is generated automatically from the IPCA Media Library after the video is uploaded. Custom thumbnail upload is optional. A video is on the app only after the file is on the server and status is Published.</p>
+      </div>
+      <div class="ia-hero-banner-actions">
+        <button type="button" class="ia-hero-back-btn" id="tv-bulk">Bulk upload</button>
+        <button type="button" class="ia-hero-back-btn" id="tv-new">New video</button>
+        <a class="ia-hero-back-btn" href="/admin/ipca_media_library.php">Media Library</a>
+      </div>
     </div>
-    <div class="card">
+    <div class="ia-hero-banner-chips" id="tv-stats">
+      <span class="ia-chip--hero">0 videos</span>
+      <span class="ia-chip--hero">0 published</span>
+      <span class="ia-chip--hero">0 drafts</span>
+      <span class="ia-chip--hero">0 views</span>
+    </div>
+  </section>
+
+  <div class="ia-chip-row" id="tv-cat-pills"></div>
+  <div class="ia-chip-row" id="tv-sort-pills">
+    <button type="button" class="ia-chip active" data-sort="newest">Newest</button>
+    <button type="button" class="ia-chip" data-sort="views">Most viewed</button>
+    <button type="button" class="ia-chip" data-sort="likes">Most liked</button>
+  </div>
+  <div class="tv-catalog" id="tv-catalog"></div>
+  <p id="tv-empty" class="tv-muted" hidden>No videos yet.</p>
+</div>
+
+<div class="tcc-modal-overlay" id="tv-play-modal">
+  <div class="tcc-modal-card">
+    <div class="tcc-modal-head">
+      <div>
+        <div class="tcc-modal-kicker">Play</div>
+        <div class="tcc-modal-title" id="tv-play-title">Training video</div>
+      </div>
+      <button type="button" class="tcc-modal-close" data-close="tv-play-modal" aria-label="Close">&times;</button>
+    </div>
+    <div class="tcc-modal-body">
+      <video id="tv-player" class="tv-player" controls playsinline></video>
+      <p class="tcc-modal-readable" id="tv-play-copy" style="margin-top:12px;"></p>
+      <div class="tv-card-meta" id="tv-play-stats" style="margin-top:10px;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="tcc-modal-overlay" id="tv-edit-modal">
+  <div class="tcc-modal-card">
+    <div class="tcc-modal-head">
+      <div>
+        <div class="tcc-modal-kicker">Edit</div>
+        <div class="tcc-modal-title" id="tv-edit-heading">Video</div>
+      </div>
+      <button type="button" class="tcc-modal-close" data-close="tv-edit-modal" aria-label="Close">&times;</button>
+    </div>
+    <div class="tcc-modal-body">
       <form id="tv-form">
         <input type="hidden" id="video-uuid">
         <div id="tv-visibility" class="tv-banner tv-banner-draft">Draft — upload a video file, then publish.</div>
@@ -72,9 +161,12 @@ cw_header('Training Videos');
           <label>What you'll learn</label>
           <textarea id="description" rows="4" placeholder="Written automatically from the video after upload."></textarea>
           <p class="tv-muted" id="desc-source">A short, practical explanation is generated from the video. You can edit it.</p>
-          <button type="button" class="btn" id="tv-rewrite" style="margin-top:8px;">Rewrite from video</button>
+          <button type="button" class="tcc-btn" id="tv-rewrite" style="margin-top:8px;">Rewrite from video</button>
         </div>
-        <div class="tv-field"><label>Category</label><input id="category" maxlength="128" placeholder="Private Pilot, Instrument, ..."></div>
+        <div class="tv-field">
+          <label>Category</label>
+          <select id="category_id"></select>
+        </div>
         <div class="tv-field"><label>Aircraft / program</label><input id="aircraft" maxlength="128" placeholder="Cessna 172, G1000, ..."></div>
         <div class="tv-field">
           <label>Status</label>
@@ -90,9 +182,9 @@ cw_header('Training Videos');
           <p class="tv-muted" id="poster-file-status">No thumbnail yet. Upload a video and one will be generated automatically.</p>
           <p class="tv-muted" id="thumb-source"></p>
           <div class="tv-thumb-actions">
-            <button type="button" class="btn" id="thumb-regenerate">Regenerate</button>
-            <button type="button" class="btn" id="thumb-choose">Choose Another Image</button>
-            <label class="btn">Upload Custom
+            <button type="button" class="tcc-btn" id="thumb-regenerate">Regenerate</button>
+            <button type="button" class="tcc-btn" id="thumb-choose">Choose Another Image</button>
+            <label class="tcc-btn">Upload Custom
               <input id="poster-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
             </label>
           </div>
@@ -107,24 +199,54 @@ cw_header('Training Videos');
         <h3>Who can watch</h3>
         <p class="tv-muted">A person needs at least one currently active grant. Both access times are required and interpreted as UTC.</p>
         <div id="tv-grants" class="tv-grants"></div>
-        <button type="button" class="btn" id="tv-add-grant">Add access</button>
+        <button type="button" class="tcc-btn" id="tv-add-grant">Add access</button>
         <div class="tv-actions">
-          <button type="submit" class="btn">Save</button>
-          <button type="button" class="btn" id="tv-publish">Publish to app</button>
-          <button type="button" class="btn" id="tv-archive">Archive</button>
-          <button type="button" class="btn" id="tv-delete">Delete</button>
+          <button type="submit" class="tcc-btn primary">Save</button>
+          <button type="button" class="tcc-btn primary" id="tv-publish">Publish to app</button>
+          <button type="button" class="tcc-btn" id="tv-archive">Archive</button>
+          <button type="button" class="tcc-btn warn" id="tv-delete">Delete</button>
         </div>
         <p id="tv-message" class="tv-muted"></p>
       </form>
     </div>
   </div>
 </div>
+
+<div class="tcc-modal-overlay" id="tv-bulk-modal">
+  <div class="tcc-modal-card">
+    <div class="tcc-modal-head">
+      <div>
+        <div class="tcc-modal-kicker">Bulk upload</div>
+        <div class="tcc-modal-title">Drop MP4 files</div>
+      </div>
+      <button type="button" class="tcc-modal-close" data-close="tv-bulk-modal" aria-label="Close">&times;</button>
+    </div>
+    <div class="tcc-modal-body">
+      <p class="tv-muted">Each file is stored privately, then a thumbnail, title, category, and what-you’ll-learn copy are written. Edit any video afterward.</p>
+      <div class="tv-field"><label>Default access</label>
+        <select id="bulk-grant-type">
+          <option value="all" selected>Everyone</option>
+          <option value="roles">Role</option>
+        </select>
+      </div>
+      <div class="tv-field"><label>Available from (UTC)</label><input id="bulk-from" type="datetime-local"></div>
+      <div class="tv-field"><label>Available until (UTC)</label><input id="bulk-until" type="datetime-local"></div>
+      <div class="tv-drop" id="tv-drop">
+        <strong>Drop many MP4s here</strong>
+        <p class="tv-muted">or choose files</p>
+        <input id="bulk-files" type="file" accept="video/mp4,video/quicktime" multiple>
+      </div>
+      <div class="tv-bulk-list" id="tv-bulk-list"></div>
+    </div>
+  </div>
+</div>
+
 <div class="tv-picker" id="tv-picker">
   <div class="tv-picker-card">
     <h3 style="margin-top:0;">Choose Another Image</h3>
     <p class="tv-muted">Orientation-matched photographs from the IPCA Media Library.</p>
     <div class="tv-picker-grid" id="tv-picker-grid"></div>
-    <button type="button" class="btn" id="tv-picker-close" style="margin-top:12px;">Close</button>
+    <button type="button" class="tcc-btn" id="tv-picker-close" style="margin-top:12px;">Close</button>
   </div>
 </div>
 
@@ -132,12 +254,15 @@ cw_header('Training Videos');
 (() => {
   const api = '/admin/api/training_videos_api.php';
   const csrf = <?= json_encode($csrf) ?>;
-  const listEl = document.getElementById('tv-list');
   const grantsEl = document.getElementById('tv-grants');
   const messageEl = document.getElementById('tv-message');
   const visibilityEl = document.getElementById('tv-visibility');
   let options = { users: [], cohorts: [], programs: [], roles: [] };
+  let categories = [];
+  let videos = [];
   let current = null;
+  let filterCategory = 'all';
+  let sortMode = 'newest';
   let uploadChain = Promise.resolve();
   let busy = false;
 
@@ -148,6 +273,13 @@ cw_header('Training Videos');
     if (value < 1073741824) return (value / 1048576).toFixed(1) + ' MB';
     return (value / 1073741824).toFixed(2) + ' GB';
   };
+  const formatDuration = (ms) => {
+    const seconds = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+    return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+  };
+  const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
 
   const visibilityLabel = (video) => {
     if (video && video.app_visible) return 'On the app';
@@ -156,6 +288,7 @@ cw_header('Training Videos');
     if (video && video.has_video) return 'Draft · file ready';
     return 'Draft · no file';
   };
+  const badgeClass = (video) => video && video.app_visible ? 'tv-badge-live' : (video && video.has_video ? 'tv-badge-warn' : 'tv-badge-draft');
 
   const setVisibility = (video) => {
     visibilityEl.className = 'tv-banner';
@@ -219,7 +352,7 @@ cw_header('Training Videos');
     const url = (video && (video.poster_preview_url || video.poster_url)) || '';
     if (url) {
       img.hidden = false;
-      img.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+      img.src = url;
     } else {
       img.hidden = true;
       img.removeAttribute('src');
@@ -260,7 +393,7 @@ cw_header('Training Videos');
     const opts = items.map((item) => {
       const selected = String(item.id) === String(grant.grant_value) ? ' selected' : '';
       const label = item.email ? `${item.name} (${item.email})` : item.name;
-      return `<option value="${item.id}"${selected}>${label}</option>`;
+      return `<option value="${item.id}"${selected}>${escapeHtml(label)}</option>`;
     }).join('');
     return `<select class="grant-value">${opts}</select>`;
   };
@@ -295,7 +428,7 @@ cw_header('Training Videos');
         </div>
         <div class="tv-field"><label>Available from</label><input class="grant-from" type="datetime-local" required value="${toLocal(grant.available_from_utc)}"></div>
         <div class="tv-field"><label>Available until</label><input class="grant-until" type="datetime-local" required value="${toLocal(grant.available_until_utc)}"></div>
-        <button type="button" class="btn grant-remove">Remove</button>
+        <button type="button" class="tcc-btn grant-remove">Remove</button>
       `;
       row.querySelector('.grant-type').addEventListener('change', (event) => {
         grant.grant_type = event.target.value;
@@ -345,20 +478,101 @@ cw_header('Training Videos');
     xhr.send(file);
   });
 
+  const fillCategories = (selected) => {
+    const select = document.getElementById('category_id');
+    select.innerHTML = categories.map((category) => {
+      const isSelected = String(category.id) === String(selected || '') ? ' selected' : '';
+      return `<option value="${category.id}"${isSelected}>${escapeHtml(category.name)}</option>`;
+    }).join('');
+  };
+
+  const visibleVideos = () => {
+    let list = videos.slice();
+    if (filterCategory === 'uncategorized') {
+      list = list.filter((video) => !video.category_slug || video.category_slug === 'uncategorized' || !video.category);
+    } else if (filterCategory !== 'all') {
+      list = list.filter((video) => String(video.category_id) === String(filterCategory) || video.category_slug === filterCategory);
+    }
+    if (sortMode === 'views') list.sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
+    else if (sortMode === 'likes') list.sort((a, b) => (b.like_count || 0) - (a.like_count || 0));
+    else list.sort((a, b) => (b.id || 0) - (a.id || 0));
+    return list;
+  };
+
+  const renderPills = () => {
+    const counts = { all: videos.length, uncategorized: 0 };
+    categories.forEach((category) => { counts[category.id] = 0; });
+    videos.forEach((video) => {
+      if (video.category_id && counts[video.category_id] !== undefined) counts[video.category_id] += 1;
+      else counts.uncategorized += 1;
+    });
+    const pills = [`<button type="button" class="ia-chip${filterCategory === 'all' ? ' active' : ''}" data-cat="all">All (${counts.all})</button>`];
+    categories.forEach((category) => {
+      if (category.slug === 'uncategorized') return;
+      pills.push(`<button type="button" class="ia-chip${String(filterCategory) === String(category.id) ? ' active' : ''}" data-cat="${category.id}">${escapeHtml(category.name)} (${counts[category.id] || 0})</button>`);
+    });
+    pills.push(`<button type="button" class="ia-chip${filterCategory === 'uncategorized' ? ' active' : ''}" data-cat="uncategorized">Uncategorized (${counts.uncategorized})</button>`);
+    document.getElementById('tv-cat-pills').innerHTML = pills.join('');
+    document.getElementById('tv-cat-pills').querySelectorAll('button[data-cat]').forEach((button) => {
+      button.addEventListener('click', () => {
+        filterCategory = button.dataset.cat;
+        renderCatalog();
+      });
+    });
+  };
+
+  const renderCatalog = () => {
+    renderPills();
+    const list = visibleVideos();
+    document.getElementById('tv-empty').hidden = list.length > 0;
+    document.getElementById('tv-catalog').innerHTML = list.map((video) => `
+      <article class="tv-card" data-uuid="${video.video_uuid}">
+        <div class="tv-card-thumb">
+          ${video.poster_preview_url ? `<img src="${escapeHtml(video.poster_preview_url)}" alt="">` : ''}
+          <span class="tv-duration">${formatDuration(video.duration_ms)}</span>
+        </div>
+        <div class="tv-card-body">
+          <div class="tv-card-title">${escapeHtml(video.title || 'Untitled')}</div>
+          <div class="tv-card-copy">${escapeHtml(video.description || '')}</div>
+          <div class="tv-card-pills">
+            <span class="tv-badge">${escapeHtml(video.category || 'Uncategorized')}</span>
+            <span class="tv-badge ${badgeClass(video)}">${visibilityLabel(video)}</span>
+          </div>
+          <div class="tv-card-meta">
+            <span>${video.view_count || 0} views</span>
+            <span>${video.like_count || 0} likes</span>
+          </div>
+          <div class="tv-card-actions">
+            <button type="button" class="tcc-btn primary tv-play" ${video.has_video ? '' : 'disabled'}>Play</button>
+            <button type="button" class="tcc-btn tv-edit">Edit</button>
+          </div>
+        </div>
+      </article>
+    `).join('');
+    document.getElementById('tv-catalog').querySelectorAll('.tv-card').forEach((card) => {
+      const uuid = card.dataset.uuid;
+      card.querySelector('.tv-play').addEventListener('click', () => openPlay(uuid));
+      card.querySelector('.tv-edit').addEventListener('click', () => loadVideo(uuid, true));
+    });
+  };
+
+  const renderStats = (stats) => {
+    document.getElementById('tv-stats').innerHTML = `
+      <span class="ia-chip--hero">${stats.total || 0} videos</span>
+      <span class="ia-chip--hero">${stats.published || 0} published</span>
+      <span class="ia-chip--hero">${stats.drafts || 0} drafts</span>
+      <span class="ia-chip--hero">${stats.views || 0} views</span>
+    `;
+  };
+
   const loadList = async () => {
     const data = await fetch(api + '?action=list').then((r) => r.json());
     options = data.options || options;
-    const selected = document.getElementById('video-uuid').value;
-    listEl.innerHTML = (data.videos || []).map((video) => `
-      <button type="button" data-uuid="${video.video_uuid}" class="${video.video_uuid === selected ? 'tv-selected' : ''}">
-        <strong>${video.title || 'Untitled'}</strong><br>
-        <span class="tv-badge ${video.app_visible ? 'tv-badge-live' : (video.has_video ? 'tv-badge-warn' : 'tv-badge-draft')}">${visibilityLabel(video)}</span>
-        <span class="tv-muted"> · ${video.view_count || 0} views</span>
-      </button>
-    `).join('') || '<p class="tv-muted">No videos yet.</p>';
-    listEl.querySelectorAll('button[data-uuid]').forEach((button) => {
-      button.addEventListener('click', () => loadVideo(button.dataset.uuid));
-    });
+    categories = data.categories || categories;
+    videos = data.videos || [];
+    renderStats(data.stats || {});
+    fillCategories(current && current.category_id);
+    renderCatalog();
   };
 
   const fillForm = (video, grants) => {
@@ -366,9 +580,10 @@ cw_header('Training Videos');
     document.getElementById('video-uuid').value = current.video_uuid || '';
     document.getElementById('title').value = current.title || '';
     document.getElementById('description').value = current.description || '';
-    document.getElementById('category').value = current.category || '';
     document.getElementById('aircraft').value = current.aircraft || '';
     document.getElementById('status').value = current.status || 'draft';
+    document.getElementById('tv-edit-heading').textContent = current.title || 'New video';
+    fillCategories(current.category_id);
     const descSource = document.getElementById('desc-source');
     if (current.description_source === 'generated') {
       descSource.textContent = 'Written from the video. Edit freely, or rewrite.';
@@ -384,11 +599,34 @@ cw_header('Training Videos');
     renderGrants(grants || []);
   };
 
-  const loadVideo = async (uuid) => {
+  const openModal = (id) => document.getElementById(id).classList.add('open');
+  const closeModal = (id) => {
+    document.getElementById(id).classList.remove('open');
+    if (id === 'tv-play-modal') {
+      const player = document.getElementById('tv-player');
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+    }
+  };
+
+  const loadVideo = async (uuid, open) => {
     const data = await fetch(api + '?action=detail&video_uuid=' + encodeURIComponent(uuid)).then((r) => r.json());
     fillForm(data.video, data.grants);
     setMessage('');
-    await loadList();
+    if (open) openModal('tv-edit-modal');
+  };
+
+  const openPlay = (uuid) => {
+    const video = videos.find((item) => item.video_uuid === uuid);
+    if (!video || !video.video_play_url) return;
+    document.getElementById('tv-play-title').textContent = video.title || 'Training video';
+    document.getElementById('tv-play-copy').textContent = video.description || '';
+    document.getElementById('tv-play-stats').textContent = (video.view_count || 0) + ' views · ' + (video.like_count || 0) + ' likes';
+    const player = document.getElementById('tv-player');
+    player.src = video.video_play_url || ('/admin/api/training_videos_play.php?video_uuid=' + encodeURIComponent(uuid));
+    openModal('tv-play-modal');
+    player.play().catch(() => {});
   };
 
   const save = async (statusOverride) => {
@@ -397,7 +635,7 @@ cw_header('Training Videos');
       video_uuid: document.getElementById('video-uuid').value,
       title: document.getElementById('title').value,
       description: document.getElementById('description').value,
-      category: document.getElementById('category').value,
+      category_id: Number(document.getElementById('category_id').value || 0),
       aircraft: document.getElementById('aircraft').value,
       status: statusOverride || document.getElementById('status').value,
       grants: collectGrants(),
@@ -427,9 +665,7 @@ cw_header('Training Videos');
       }
       const mime = file.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg');
       let extra = {};
-      if (kind === 'video') {
-        extra = await probeVideo(file);
-      }
+      if (kind === 'video') extra = await probeVideo(file);
       setProgress(kind, 0, 'Preparing ' + kind + ' upload…');
       setMessage('Uploading ' + kind + '…');
       const complete = await putWithProgress(kind, uuid, file, mime, (loaded, total) => {
@@ -439,20 +675,15 @@ cw_header('Training Videos');
       setProgress(kind, null);
       fillForm(complete.video, collectGrants());
       await loadList();
-      if (kind === 'video' && !(complete.video.description || '').trim()) {
-        setMessage('Writing what students will learn from the video…');
+      if (kind === 'video') {
+        setMessage('Writing copy…');
         const explained = await post({ action: 'generate_explanation', video_uuid: uuid, force: false });
-        if (explained.ok) {
-          fillForm(explained.video, explained.grants || collectGrants());
-        }
+        if (explained.ok) fillForm(explained.video, explained.grants || collectGrants());
+        await loadList();
       }
-      if (kind === 'video' && complete.video.app_visible) {
-        setMessage('Video uploaded and published on the app.', 'ok');
-      } else if (kind === 'video') {
-        setMessage('Video file is on the server. Publish to show it in the app.', 'ok');
-      } else {
-        setMessage('Custom thumbnail uploaded.', 'ok');
-      }
+      if (kind === 'video' && complete.video.app_visible) setMessage('Video uploaded and published on the app.', 'ok');
+      else if (kind === 'video') setMessage('Video file is on the server. Publish to show it in the app.', 'ok');
+      else setMessage('Custom thumbnail uploaded.', 'ok');
     } catch (error) {
       setProgress(kind, null);
       setMessage(error.message || 'Upload failed.', 'err');
@@ -469,6 +700,75 @@ cw_header('Training Videos');
     uploadChain = uploadChain.then(() => upload(kind, file));
   };
 
+  const defaultBulkRange = () => {
+    const from = new Date();
+    const until = new Date();
+    until.setFullYear(until.getFullYear() + 5);
+    const stamp = (date) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+    };
+    document.getElementById('bulk-from').value = stamp(from);
+    document.getElementById('bulk-until').value = stamp(until);
+  };
+
+  const bulkGrants = () => [{
+    grant_type: document.getElementById('bulk-grant-type').value || 'all',
+    grant_value: '',
+    available_from_utc: document.getElementById('bulk-from').value ? new Date(document.getElementById('bulk-from').value + 'Z').toISOString() : '',
+    available_until_utc: document.getElementById('bulk-until').value ? new Date(document.getElementById('bulk-until').value + 'Z').toISOString() : '',
+  }];
+
+  const setBulkStatus = (row, text) => {
+    row.querySelector('.tv-bulk-status').textContent = text;
+  };
+
+  const uploadBulkFile = async (file, row) => {
+    setBulkStatus(row, 'Queued');
+    const title = file.name.replace(/\.(mp4|mov|m4v)$/i, '').replace(/[_-]+/g, ' ').trim() || file.name;
+    const saved = await post({
+      action: 'save',
+      title,
+      title_source: 'filename',
+      description: '',
+      status: 'draft',
+      grants: bulkGrants(),
+    });
+    if (!saved.ok) {
+      setBulkStatus(row, 'Failed');
+      throw new Error(saved.error || 'Could not create the draft.');
+    }
+    const uuid = saved.video.video_uuid;
+    const extra = await probeVideo(file);
+    setBulkStatus(row, 'Uploading 0%');
+    await putWithProgress('video', uuid, file, file.type || 'video/mp4', (loaded, total) => {
+      const pct = total ? Math.round((loaded / total) * 100) : 0;
+      setBulkStatus(row, 'Uploading ' + pct + '%');
+    }, extra);
+    setBulkStatus(row, 'Thumbnail');
+    setBulkStatus(row, 'Writing copy');
+    const explained = await post({ action: 'generate_explanation', video_uuid: uuid, force: false });
+    if (!explained.ok) {
+      setBulkStatus(row, 'Failed');
+      return;
+    }
+    setBulkStatus(row, 'Ready');
+  };
+
+  const queueBulkFiles = (fileList) => {
+    const files = Array.from(fileList || []).filter((file) => file && file.type.startsWith('video/'));
+    files.forEach((file) => {
+      const row = document.createElement('div');
+      row.className = 'tv-bulk-row';
+      row.innerHTML = `<span>${escapeHtml(file.name)}</span><span class="tv-badge tv-badge-draft tv-bulk-status">Queued</span>`;
+      document.getElementById('tv-bulk-list').appendChild(row);
+      uploadChain = uploadChain.then(() => uploadBulkFile(file, row).catch((error) => {
+        setBulkStatus(row, 'Failed');
+        console.error(error);
+      }).then(() => loadList()));
+    });
+  };
+
   document.getElementById('tv-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     await save();
@@ -476,7 +776,11 @@ cw_header('Training Videos');
   document.getElementById('tv-new').addEventListener('click', () => {
     fillForm({ title: '', description: '', category: '', aircraft: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
     setMessage('');
-    loadList();
+    openModal('tv-edit-modal');
+  });
+  document.getElementById('tv-bulk').addEventListener('click', () => {
+    defaultBulkRange();
+    openModal('tv-bulk-modal');
   });
   document.getElementById('tv-add-grant').addEventListener('click', () => {
     renderGrants(collectGrants().concat([{ grant_type: 'all', grant_value: '', available_from_utc: '', available_until_utc: '' }]));
@@ -506,6 +810,7 @@ cw_header('Training Videos');
     if (result.ok) {
       fillForm({ title: '', description: '', category: '', aircraft: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
       await loadList();
+      closeModal('tv-edit-modal');
       setMessage('Deleted.', 'ok');
     } else setMessage(result.error || 'Could not delete.', 'err');
   });
@@ -521,6 +826,7 @@ cw_header('Training Videos');
     const result = await post({ action: 'generate_explanation', video_uuid: uuid, force: true });
     if (result.ok) {
       fillForm(result.video, result.grants || collectGrants());
+      await loadList();
       setMessage(result.used_video ? 'Explanation rewritten from the video.' : 'Explanation written from the video title and topic.', 'ok');
     } else setMessage(result.error || 'Could not write the explanation.', 'err');
   });
@@ -565,6 +871,30 @@ cw_header('Training Videos');
   document.getElementById('tv-picker-close').addEventListener('click', () => {
     document.getElementById('tv-picker').classList.remove('open');
   });
+  document.querySelectorAll('[data-close]').forEach((button) => {
+    button.addEventListener('click', () => closeModal(button.dataset.close));
+  });
+  document.querySelectorAll('.tcc-modal-overlay').forEach((overlay) => {
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) closeModal(overlay.id);
+    });
+  });
+  document.getElementById('tv-sort-pills').querySelectorAll('button[data-sort]').forEach((button) => {
+    button.addEventListener('click', () => {
+      sortMode = button.dataset.sort;
+      document.getElementById('tv-sort-pills').querySelectorAll('.ia-chip').forEach((chip) => chip.classList.toggle('active', chip === button));
+      renderCatalog();
+    });
+  });
+  const drop = document.getElementById('tv-drop');
+  drop.addEventListener('dragover', (event) => { event.preventDefault(); drop.classList.add('drag'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+  drop.addEventListener('drop', (event) => {
+    event.preventDefault();
+    drop.classList.remove('drag');
+    queueBulkFiles(event.dataTransfer.files);
+  });
+  document.getElementById('bulk-files').addEventListener('change', (event) => queueBulkFiles(event.target.files));
 
   fillForm({ title: '', description: '', category: '', aircraft: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
   loadList();

@@ -184,3 +184,50 @@ enum TrainingVideoDate {
         return nil
     }
 }
+
+struct TrainingVideoWatchItem: Codable, Equatable {
+    var videoUUID: String
+    var ownerUserUUID: String
+    var positionMs: Int
+    var durationMs: Int
+}
+
+final class TrainingVideoWatchStore {
+    static let shared = TrainingVideoWatchStore()
+
+    private let defaults = UserDefaults.standard
+    private let key = "training.ipca.app.watch-progress"
+
+    private init() {}
+
+    func pending(ownerUserUUID: String) -> [TrainingVideoWatchItem] {
+        load().filter { $0.ownerUserUUID == ownerUserUUID }
+    }
+
+    func queue(videoUUID: String, positionMs: Int, durationMs: Int, ownerUserUUID: String) {
+        guard !ownerUserUUID.isEmpty, !videoUUID.isEmpty else { return }
+        var items = load().filter { !($0.videoUUID == videoUUID && $0.ownerUserUUID == ownerUserUUID) }
+        items.append(TrainingVideoWatchItem(
+            videoUUID: videoUUID,
+            ownerUserUUID: ownerUserUUID,
+            positionMs: max(0, positionMs),
+            durationMs: max(0, durationMs)
+        ))
+        save(items)
+    }
+
+    func remove(videoUUID: String, ownerUserUUID: String) {
+        save(load().filter { !($0.videoUUID == videoUUID && $0.ownerUserUUID == ownerUserUUID) })
+    }
+
+    private func load() -> [TrainingVideoWatchItem] {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([TrainingVideoWatchItem].self, from: data)) ?? []
+    }
+
+    private func save(_ items: [TrainingVideoWatchItem]) {
+        if let data = try? JSONEncoder().encode(items) {
+            defaults.set(data, forKey: key)
+        }
+    }
+}

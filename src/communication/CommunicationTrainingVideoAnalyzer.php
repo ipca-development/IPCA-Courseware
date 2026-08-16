@@ -24,22 +24,69 @@ final class CommunicationTrainingVideoAnalyzer
      */
     public function explain(array $video): array
     {
+        $result = $this->analyze($video, array());
+        return array(
+            'explanation' => (string)$result['explanation'],
+            'used_video' => !empty($result['used_video']),
+            'used_ai' => !empty($result['used_ai']),
+        );
+    }
+
+    /**
+     * One pass: student title, an existing category slug, and the explanation.
+     * Never invents a category that is not in $categories.
+     *
+     * @param array<string,mixed> $video
+     * @param list<array<string,mixed>> $categories
+     * @return array{title:string,category_slug:string,explanation:string,used_video:bool,used_ai:bool}
+     */
+    public function analyze(array $video, array $categories = array()): array
+    {
         $context = $this->context($video);
         $probe = $this->probeVideo($video);
+        $slugs = array();
+        foreach ($categories as $category) {
+            if (!is_array($category)) {
+                continue;
+            }
+            $slug = strtolower(trim((string)($category['slug'] ?? '')));
+            if ($slug !== '') {
+                $slugs[] = $slug;
+            }
+        }
+        $slugs = array_values(array_unique($slugs));
+        if ($slugs === array()) {
+            $slugs = array('uncategorized');
+        }
         $usedAi = false;
+        $title = '';
+        $slug = '';
         $explanation = '';
         if (trim((string)getenv('CW_OPENAI_API_KEY')) !== '') {
             try {
-                $explanation = $this->openAiExplain($context, $probe);
-                $usedAi = $explanation !== '';
+                $ai = $this->openAiAnalyze($context, $probe, $slugs);
+                $title = trim((string)($ai['title'] ?? ''));
+                $slug = strtolower(trim((string)($ai['category_slug'] ?? '')));
+                $explanation = trim((string)($ai['explanation'] ?? ''));
+                $usedAi = $title !== '' || $slug !== '' || $explanation !== '';
             } catch (Throwable) {
+                $title = '';
+                $slug = '';
                 $explanation = '';
             }
         }
         if ($explanation === '') {
             $explanation = $this->fallbackExplain($context);
         }
+        if ($title === '') {
+            $title = $this->fallbackTitle($context);
+        }
+        if ($slug === '' || !in_array($slug, $slugs, true)) {
+            $slug = $this->guessCategorySlug($context, $slugs);
+        }
         return array(
+            'title' => $this->limitTitle($title),
+            'category_slug' => $slug,
             'explanation' => $this->limit($explanation),
             'used_video' => $probe['frames'] !== array() || $probe['transcript'] !== '',
             'used_ai' => $usedAi,
@@ -48,7 +95,7 @@ final class CommunicationTrainingVideoAnalyzer
 
     /**
      * @param array<string,mixed> $video
-     * @return array{title:string,description:string,category:string,aircraft:string,program:string,duration:string,orientation:string}
+     * @return array{title:string,description:string,category:string,aircraft:string,program:string,filename:string,duration:string,orientation:string}
      */
     private function context(array $video): array
     {
@@ -64,6 +111,7 @@ final class CommunicationTrainingVideoAnalyzer
             'category' => trim((string)($video['category'] ?? '')),
             'aircraft' => trim((string)($video['aircraft'] ?? '')),
             'program' => trim((string)($video['program'] ?? '')),
+            'filename' => trim((string)($video['original_filename'] ?? $video['filename'] ?? '')),
             'duration' => $duration,
             'orientation' => trim((string)($video['orientation'] ?? '')),
         );
@@ -151,24 +199,35 @@ final class CommunicationTrainingVideoAnalyzer
     /**
      * @param array<string,string> $context
      * @param array{frames:list<string>,transcript:string} $probe
+     * @param list<string> $slugs
+     * @return array{title:string,category_slug:string,explanation:string}
      */
-    private function openAiExplain(array $context, array $probe): string
+    private function openAiAnalyze(array $context, array $probe, array $slugs): array
     {
         $schema = array(
             'type' => 'object',
             'additionalProperties' => false,
             'properties' => array(
+                'title' => array('type' => 'string'),
+                'category_slug' => array(
+                    'type' => 'string',
+                    'enum' => $slugs,
+                ),
                 'explanation' => array('type' => 'string'),
             ),
-            'required' => array('explanation'),
+            'required' => array('title', 'category_slug', 'explanation'),
         );
-        $instructions = 'You write the student-facing summary for an IPCA flight-training video. '
-            . 'Describe what the pilot will be able to do after watching. '
+        $catalog = implode(', ', $slugs);
+        $instructions = 'You catalog an IPCA flight-training video for students. '
+            . 'Write a short student-facing title (no filename, no file extension, no all-caps dump). '
+            . 'Pick exactly one category_slug from this closed list: ' . $catalog . '. Never invent a category. '
+            . 'If unsure, use uncategorized when that slug exists, otherwise the closest listed slug. '
+            . 'Write the student-facing summary: what the pilot will be able to do after watching. '
             . 'Be catchy, concrete, and practical. No hashtags, no emoji, no marketing slogans, '
             . 'no "in this video we will". 2 sentences, 320 characters max. '
-            . 'Use the spoken audio and visible frames when they are provided. '
-            . 'If the recording is a cockpit or lesson demonstration, say the maneuver or procedure plainly.';
+            . 'Spoken audio and visible frames win over the filename when they are provided.';
         $userText = "Title: {$context['title']}\n"
+            . "Filename: {$context['filename']}\n"
             . "Category: {$context['category']}\n"
             . "Aircraft/program: {$context['aircraft']} {$context['program']}\n"
             . "Duration: {$context['duration']}\n"
@@ -195,7 +254,7 @@ final class CommunicationTrainingVideoAnalyzer
             'text' => array(
                 'format' => array(
                     'type' => 'json_schema',
-                    'name' => 'ipca_training_video_explain_v1',
+                    'name' => 'ipca_training_video_catalog_v1',
                     'schema' => $schema,
                     'strict' => true,
                 ),
@@ -203,7 +262,11 @@ final class CommunicationTrainingVideoAnalyzer
         );
         $resp = cw_openai_responses($payload, 90);
         $json = cw_openai_extract_json_text($resp);
-        return trim((string)($json['explanation'] ?? ''));
+        return array(
+            'title' => trim((string)($json['title'] ?? '')),
+            'category_slug' => strtolower(trim((string)($json['category_slug'] ?? ''))),
+            'explanation' => trim((string)($json['explanation'] ?? '')),
+        );
     }
 
     /**
@@ -218,6 +281,67 @@ final class CommunicationTrainingVideoAnalyzer
                 . '. Watch the demonstration, then fly the same sequence with the same calls and common errors in mind.';
         }
         return 'Learn ' . $title . ' the IPCA way. Watch the demonstration, then apply the same sequence, calls, and corrections in the aircraft.';
+    }
+
+    /**
+     * @param array<string,string> $context
+     */
+    private function fallbackTitle(array $context): string
+    {
+        $title = trim($context['title']);
+        if ($title !== '' && !preg_match('/\.(mp4|mov|m4v)$/i', $title) && str_contains($title, ' ')) {
+            return $title;
+        }
+        $source = $context['filename'] !== '' ? $context['filename'] : $title;
+        $source = preg_replace('/\.(mp4|mov|m4v)$/i', '', $source) ?? $source;
+        $source = str_replace(array('_', '-', '.'), ' ', $source);
+        $source = trim(preg_replace('/\s+/', ' ', $source) ?? $source);
+        return $source !== '' ? $source : 'Training video';
+    }
+
+    /**
+     * @param array<string,string> $context
+     * @param list<string> $slugs
+     */
+    private function guessCategorySlug(array $context, array $slugs): string
+    {
+        $hay = strtolower($context['title'] . ' ' . $context['filename'] . ' ' . $context['description'] . ' ' . $context['category']);
+        $map = array(
+            'private-pilot' => array('private pilot', 'private-pilot', 'ppl', 'sport pilot'),
+            'instrument' => array('instrument', 'ifr', 'approach', 'holds', 'ils', 'vor'),
+            'commercial' => array('commercial', 'cpl', 'complex', 'commercial pilot'),
+            'cfi' => array('cfi', 'instructor', 'foie', 'spin', 'endorsement'),
+            'systems' => array('systems', 'g1000', 'garmin', 'avionics', 'engine', 'electrical'),
+        );
+        foreach ($map as $slug => $needles) {
+            if (!in_array($slug, $slugs, true)) {
+                continue;
+            }
+            foreach ($needles as $needle) {
+                if ($needle !== '' && str_contains($hay, $needle)) {
+                    return $slug;
+                }
+            }
+        }
+        if (in_array('uncategorized', $slugs, true)) {
+            return 'uncategorized';
+        }
+        return $slugs[0];
+    }
+
+    private function limitTitle(string $text): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
+        $text = preg_replace('/\.(mp4|mov|m4v)$/i', '', $text) ?? $text;
+        if (mb_strlen($text) <= 80) {
+            return $text !== '' ? $text : 'Training video';
+        }
+        $cut = mb_substr($text, 0, 80);
+        $space = mb_strrpos($cut, ' ');
+        if (is_int($space) && $space > 24) {
+            $cut = mb_substr($cut, 0, $space);
+        }
+        return rtrim($cut, '.,;:');
     }
 
     private function transcribe(string $path): string

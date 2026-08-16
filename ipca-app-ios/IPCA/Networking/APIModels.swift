@@ -872,6 +872,7 @@ struct TrainingVideoDTO: Codable, Hashable, Identifiable {
     var videoUUID: String
     var title: String
     var description: String
+    var category: String
     var durationMs: Int
     var durationSeconds: Int
     var byteSize: Int
@@ -884,11 +885,14 @@ struct TrainingVideoDTO: Codable, Hashable, Identifiable {
     var downloadable: Bool
     var availableUntil: String
     var createdAtUTC: String
+    var watchPercent: Int
+    var watchCompleted: Bool
+    var resumePositionMs: Int
 
     var id: String { videoUUID }
 
     enum CodingKeys: String, CodingKey {
-        case title, description, liked, downloadable
+        case title, description, category, liked, downloadable
         case videoUUID = "video_uuid"
         case durationMs = "duration_ms"
         case durationSeconds = "duration_seconds"
@@ -900,6 +904,9 @@ struct TrainingVideoDTO: Codable, Hashable, Identifiable {
         case commentCount = "comment_count"
         case availableUntil = "available_until"
         case createdAtUTC = "created_at_utc"
+        case watchPercent = "watch_percent"
+        case watchCompleted = "watch_completed"
+        case resumePositionMs = "resume_position_ms"
     }
 
     init(from decoder: Decoder) throws {
@@ -907,6 +914,7 @@ struct TrainingVideoDTO: Codable, Hashable, Identifiable {
         videoUUID = try container.decode(String.self, forKey: .videoUUID)
         title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
         description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        category = try container.decodeIfPresent(String.self, forKey: .category) ?? ""
         durationMs = try container.decodeIfPresent(Int.self, forKey: .durationMs) ?? 0
         durationSeconds = try container.decodeIfPresent(Int.self, forKey: .durationSeconds) ?? Int((Double(durationMs) / 1000.0).rounded())
         byteSize = try container.decodeIfPresent(Int.self, forKey: .byteSize) ?? 0
@@ -919,6 +927,32 @@ struct TrainingVideoDTO: Codable, Hashable, Identifiable {
         downloadable = try container.decodeIfPresent(Bool.self, forKey: .downloadable) ?? false
         availableUntil = try container.decodeIfPresent(String.self, forKey: .availableUntil) ?? ""
         createdAtUTC = try container.decodeIfPresent(String.self, forKey: .createdAtUTC) ?? ""
+        watchPercent = try container.decodeIfPresent(Int.self, forKey: .watchPercent) ?? 0
+        watchCompleted = try container.decodeIfPresent(Bool.self, forKey: .watchCompleted) ?? false
+        resumePositionMs = try container.decodeIfPresent(Int.self, forKey: .resumePositionMs) ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(videoUUID, forKey: .videoUUID)
+        try container.encode(title, forKey: .title)
+        try container.encode(description, forKey: .description)
+        try container.encode(category, forKey: .category)
+        try container.encode(durationMs, forKey: .durationMs)
+        try container.encode(durationSeconds, forKey: .durationSeconds)
+        try container.encode(byteSize, forKey: .byteSize)
+        try container.encode(mimeType, forKey: .mimeType)
+        try container.encode(posterURL, forKey: .posterURL)
+        try container.encode(viewCount, forKey: .viewCount)
+        try container.encode(likeCount, forKey: .likeCount)
+        try container.encode(liked, forKey: .liked)
+        try container.encode(commentCount, forKey: .commentCount)
+        try container.encode(downloadable, forKey: .downloadable)
+        try container.encode(availableUntil, forKey: .availableUntil)
+        try container.encode(createdAtUTC, forKey: .createdAtUTC)
+        try container.encode(watchPercent, forKey: .watchPercent)
+        try container.encode(watchCompleted, forKey: .watchCompleted)
+        try container.encode(resumePositionMs, forKey: .resumePositionMs)
     }
 }
 

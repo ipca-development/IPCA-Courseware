@@ -291,13 +291,30 @@ function comm_sqlite(): PDO
       UNIQUE (post_id, reporter_user_id),
       FOREIGN KEY (post_id) REFERENCES ipca_community_posts(id)
     )");
+    $pdo->exec("CREATE TABLE ipca_training_video_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )");
+    $pdo->exec("INSERT INTO ipca_training_video_categories (slug, name, sort_order, is_active) VALUES
+      ('private-pilot', 'Private Pilot', 10, 1),
+      ('instrument', 'Instrument', 20, 1),
+      ('commercial', 'Commercial', 30, 1),
+      ('cfi', 'CFI', 40, 1),
+      ('systems', 'Systems', 50, 1),
+      ('uncategorized', 'Uncategorized', 90, 1)");
     $pdo->exec("CREATE TABLE ipca_training_videos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       video_uuid TEXT NOT NULL UNIQUE,
       title TEXT NOT NULL,
+      title_source TEXT NULL,
       description TEXT NULL,
       description_source TEXT NULL,
       category TEXT NULL,
+      category_id INTEGER NULL,
       aircraft TEXT NULL,
       program TEXT NULL,
       storage_key TEXT NULL UNIQUE,
@@ -338,6 +355,11 @@ function comm_sqlite(): PDO
       user_id INTEGER NOT NULL,
       first_viewed_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       last_viewed_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      position_ms INTEGER NOT NULL DEFAULT 0,
+      max_position_ms INTEGER NOT NULL DEFAULT 0,
+      progress_percent INTEGER NOT NULL DEFAULT 0,
+      completed_at_utc TEXT NULL,
+      updated_at_utc TEXT NULL,
       UNIQUE (video_id, user_id),
       FOREIGN KEY (video_id) REFERENCES ipca_training_videos(id) ON DELETE CASCADE
     )");
@@ -1102,6 +1124,43 @@ comm_assert(
     && str_contains($adminThumbPage, 'Rewrite from video')
     && str_contains($adminThumbPage, 'generate_explanation')
 );
+$phase9Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_16_communication_phase9_training_video_catalog.sql');
+$adminPlaySource = (string)file_get_contents($root . '/public/admin/api/training_videos_play.php');
+comm_assert(
+    'phase 9 SQL adds a closed training-video category catalog',
+    str_contains($phase9Sql, 'ipca_training_video_categories')
+    && str_contains($phase9Sql, 'private-pilot')
+    && str_contains($phase9Sql, 'uncategorized')
+    && !str_contains($phase9Sql, 'public-read')
+);
+comm_assert(
+    'training videos admin is a Hero Banner catalog without a left column',
+    str_contains($adminThumbPage, 'ia-hero-banner')
+    && str_contains($adminThumbPage, 'IPCA App · Training Videos')
+    && str_contains($adminThumbPage, 'Bulk upload')
+    && str_contains($adminThumbPage, 'Newest')
+    && str_contains($adminThumbPage, 'Most viewed')
+    && str_contains($adminThumbPage, 'Queued')
+    && str_contains($adminThumbPage, 'Writing copy')
+    && str_contains($adminThumbPage, 'training_videos_play.php')
+    && str_contains($adminThumbPage, 'tcc-modal-overlay')
+    && !str_contains($adminThumbPage, 'grid-template-columns: 300px 1fr')
+);
+comm_assert(
+    'admin training-video playback stays same-origin and private',
+    is_file($root . '/public/admin/api/training_videos_play.php')
+    && str_contains($adminPlaySource, 'adminVideoOrigin')
+    && !str_contains($adminPlaySource, 'public-read')
+    && !str_contains($adminPlaySource, 'publicUrl')
+);
+comm_assert(
+    'watch progress stays on training video views and the member API',
+    str_contains((string)file_get_contents($root . '/public/api/communication/training_videos.php'), "'progress'")
+    && str_contains($trainingVideoServiceSource, 'function progress')
+    && str_contains($trainingVideoServiceSource, 'max_position_ms')
+    && str_contains($trainingVideoServiceSource, 'watch_percent')
+    && str_contains((string)file_get_contents($root . '/src/communication/CommunicationTrainingVideoAnalyzer.php'), 'category_slug')
+);
 comm_assert('IPCA Media Library admin page exists', is_file($root . '/public/admin/ipca_media_library.php'));
 comm_assert(
     'admin navigation includes Media Library',
@@ -1317,6 +1376,20 @@ comm_assert(
     && (string)$videoComment['comment']['body'] === 'Clear and useful.'
     && count($kernel->trainingVideos->comments($sessionA, $trainingVideoUuid)['comments']) === 1
 );
+$started = $kernel->trainingVideos->progress($sessionA, $trainingVideoUuid, 25000, 125000);
+$rewound = $kernel->trainingVideos->progress($sessionA, $trainingVideoUuid, 8000, 125000);
+$finished = $kernel->trainingVideos->progress($sessionA, $trainingVideoUuid, 120000, 125000);
+comm_assert(
+    'watch progress records percent watched without treating open as complete',
+    (int)($started['video']['watch_percent'] ?? 0) === 20
+    && empty($started['video']['watch_completed'])
+    && (int)($rewound['video']['watch_percent'] ?? 0) === 20
+    && (int)($rewound['video']['resume_position_ms'] ?? 0) === 8000
+    && (int)($finished['video']['watch_percent'] ?? 0) === 100
+    && !empty($finished['video']['watch_completed'])
+    && (int)($finished['video']['resume_position_ms'] ?? -1) === 0
+    && (int)$pdo->query('SELECT COUNT(*) FROM ipca_training_video_views')->fetchColumn() === 1
+);
 
 $renderer = new CommunicationTrainingThumbnailRenderer();
 $landscapeJpeg = $renderer->render(
@@ -1424,6 +1497,16 @@ comm_assert(
     && mb_strlen($explainedText) >= 20
     && (string)($explained['video']['description_source'] ?? '') === 'generated'
     && is_file($root . '/src/communication/CommunicationTrainingVideoAnalyzer.php')
+);
+$catalog = $kernel->trainingVideos->adminCatalog();
+$catalogSlugs = array_map(static fn(array $row): string => (string)$row['slug'], $catalog['categories'] ?? array());
+comm_assert(
+    'admin catalog exposes the closed category list and card stats',
+    in_array('private-pilot', $catalogSlugs, true)
+    && in_array('uncategorized', $catalogSlugs, true)
+    && isset($catalog['stats']['published'], $catalog['stats']['drafts'], $catalog['stats']['views'])
+    && (string)($explained['video']['category'] ?? '') === 'Private Pilot'
+    && str_contains((string)($explained['video']['video_play_url'] ?? ''), 'training_videos_play.php')
 );
 
 $portraitVideo = $kernel->trainingVideos->saveAdmin(array(
@@ -1835,6 +1918,9 @@ if ($iosApp === '') {
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/TrainingVideosView.swift'), 'Comment')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/MainShellView.swift'), 'TrainingVideosView()')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIClient.swift'), 'training_videos.php')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIClient.swift'), '"action": "progress"')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIModels.swift'), 'watch_percent')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/TrainingVideosView.swift'), 'Watched')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Persistence/TrainingVideoDownloadManager.swift'), 'ownerUserUUID')
         && !str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Sync/OutboxWorker.swift'), 'training_videos.php')
     );

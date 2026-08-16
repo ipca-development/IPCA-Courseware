@@ -45,6 +45,12 @@ try {
             (string)($input['body'] ?? ''),
             isset($input['comment_uuid']) ? (string)$input['comment_uuid'] : null
         ),
+        'progress' => $kernel->trainingVideos->progress(
+            $session,
+            $videoUuid,
+            (int)($input['position_ms'] ?? 0),
+            (int)($input['duration_ms'] ?? 0)
+        ),
         default => throw new CommunicationException('validation_error', 'Unknown action.', 400),
     };
     CommunicationHttp::json(200, array_merge(array('ok' => true), $result));

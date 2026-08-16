@@ -98,6 +98,10 @@ try {
                 $videoUuid,
                 (bool)($input['force'] ?? false)
             ),
+            'generate_metadata' => $service->generateAdminExplanation(
+                $videoUuid,
+                (bool)($input['force'] ?? false)
+            ),
             default => throw new CommunicationException('validation_error', 'Unknown action.', 400),
     };
     training_videos_admin_json(200, array_merge(array('ok' => true), $result));

@@ -248,6 +248,16 @@ actor APIClient {
         return envelope.comment
     }
 
+    func trainingVideoProgress(videoUUID: String, positionMs: Int, durationMs: Int) async throws -> TrainingVideoDTO {
+        let envelope: TrainingVideoEnvelope = try await post("api/communication/training_videos.php", body: [
+            "action": "progress",
+            "video_uuid": videoUUID,
+            "position_ms": positionMs,
+            "duration_ms": durationMs
+        ])
+        return envelope.video
+    }
+
     func communityFeed(cursor: Int = 0) async throws -> CommunityFeedDTO {
         var query: [String: String] = ["action": "feed"]
         if cursor > 0 {

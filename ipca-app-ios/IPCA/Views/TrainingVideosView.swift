@@ -34,6 +34,19 @@ struct TrainingVideosView: View {
         .task { await reload() }
     }
 
+    private var groupedVideos: [(title: String, videos: [TrainingVideoDTO])] {
+        let order = ["Private Pilot", "Instrument", "Commercial", "CFI", "Systems"]
+        let grouped = Dictionary(grouping: videos) { video in
+            video.category.isEmpty ? "Videos" : video.category
+        }
+        return grouped.keys.sorted { left, right in
+            let leftRank = order.firstIndex(of: left) ?? (left == "Uncategorized" || left == "Videos" ? 90 : 50)
+            let rightRank = order.firstIndex(of: right) ?? (right == "Uncategorized" || right == "Videos" ? 90 : 50)
+            if leftRank != rightRank { return leftRank < rightRank }
+            return left < right
+        }.map { ($0, grouped[$0] ?? []) }
+    }
+
     private var selectedVideo: TrainingVideoDTO? {
         videos.first { $0.videoUUID == selectedVideoUUID }
     }
@@ -55,10 +68,18 @@ struct TrainingVideosView: View {
                         ContentUnavailableView("No training videos", systemImage: "play.rectangle")
                     } else {
                         ScrollView {
-                            LazyVStack(spacing: IPCATheme.Spacing.md) {
-                                ForEach(videos) { video in
-                                    TrainingVideoCard(video: video) {
-                                        selectedVideoUUID = video.videoUUID
+                            LazyVStack(alignment: .leading, spacing: IPCATheme.Spacing.md) {
+                                ForEach(groupedVideos, id: \.title) { group in
+                                    if groupedVideos.count > 1 {
+                                        Text(group.title)
+                                            .font(.headline)
+                                            .foregroundStyle(IPCATheme.Colors.textPrimary)
+                                            .padding(.top, 4)
+                                    }
+                                    ForEach(group.videos) { video in
+                                        TrainingVideoCard(video: video) {
+                                            selectedVideoUUID = video.videoUUID
+                                        }
                                     }
                                 }
                                 if nextCursor != nil {
@@ -89,6 +110,7 @@ struct TrainingVideosView: View {
 
     private func reload() async {
         loading = true
+        await session.flushTrainingVideoProgress()
         if let result = await session.loadTrainingVideoFeed() {
             videos = result.videos
             nextCursor = result.nextCursor
@@ -137,12 +159,22 @@ private struct TrainingVideoCard: View {
         VStack(alignment: .leading, spacing: IPCATheme.Spacing.sm) {
             ZStack(alignment: .topTrailing) {
                 TrainingVideoPoster(url: video.posterURL)
-                offlineButton
-                    .padding(10)
+                HStack(alignment: .top) {
+                    TrainingVideoWatchBadge(video: video)
+                        .padding(10)
+                    Spacer()
+                    offlineButton
+                        .padding(10)
+                }
             }
             Text(video.title)
                 .font(.headline)
                 .foregroundStyle(IPCATheme.Colors.textPrimary)
+            if !video.category.isEmpty {
+                Text(video.category)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+            }
             if !video.description.isEmpty {
                 Text(video.description)
                     .font(.subheadline)
@@ -242,12 +274,22 @@ struct TrainingVideoDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Play")
-                    offlineButton
-                        .padding(12)
+                    HStack(alignment: .top) {
+                        TrainingVideoWatchBadge(video: video)
+                            .padding(12)
+                        Spacer()
+                        offlineButton
+                            .padding(12)
+                    }
                 }
                 Text(video.title)
                     .font(.title2.weight(.bold))
                     .foregroundStyle(IPCATheme.Colors.textPrimary)
+                if !video.category.isEmpty {
+                    Text(video.category)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+                }
                 if !video.description.isEmpty {
                     Text(video.description)
                         .foregroundStyle(IPCATheme.Colors.textSecondary)
@@ -300,8 +342,19 @@ struct TrainingVideoDetailView: View {
         .task { await load() }
         .fullScreenCover(isPresented: $showingPlayer) {
             if let playbackURL {
-                TrainingVideoPlayer(url: playbackURL)
-                    .ignoresSafeArea()
+                TrainingVideoPlayer(url: playbackURL, video: video) { positionMs, durationMs in
+                    Task {
+                        if let updated = await session.reportTrainingVideoProgress(
+                            videoUUID: video.videoUUID,
+                            positionMs: positionMs,
+                            durationMs: durationMs
+                        ) {
+                            video = updated
+                            onChange(updated)
+                        }
+                    }
+                }
+                .ignoresSafeArea()
             }
         }
     }
@@ -391,6 +444,41 @@ struct TrainingVideoDetailView: View {
     }
 }
 
+private struct TrainingVideoWatchBadge: View {
+    let video: TrainingVideoDTO
+
+    var body: some View {
+        if video.watchCompleted {
+            Text("Watched")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(IPCATheme.Colors.ipcaBlue, in: Capsule())
+                .accessibilityLabel("Watched in full")
+        } else if video.watchPercent > 0 {
+            HStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .stroke(.white.opacity(0.35), lineWidth: 3)
+                    Circle()
+                        .trim(from: 0, to: min(1, CGFloat(video.watchPercent) / 100))
+                        .stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 16, height: 16)
+                Text("\(video.watchPercent)%")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.black.opacity(0.55), in: Capsule())
+            .accessibilityLabel("\(video.watchPercent) percent watched")
+        }
+    }
+}
+
 private struct TrainingVideoPoster: View {
     let url: String
 
@@ -428,6 +516,12 @@ private struct TrainingVideoPoster: View {
 
 private struct TrainingVideoPlayer: UIViewControllerRepresentable {
     let url: URL
+    let video: TrainingVideoDTO
+    let onProgress: (Int, Int) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(video: video, onProgress: onProgress)
+    }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
@@ -438,14 +532,85 @@ private struct TrainingVideoPlayer: UIViewControllerRepresentable {
         controller.player = player
         controller.entersFullScreenWhenPlaybackBegins = true
         controller.exitsFullScreenWhenPlaybackEnds = true
+        context.coordinator.attach(player)
+        if !video.watchCompleted, video.resumePositionMs > 1000 {
+            let resume = CMTime(milliseconds: video.resumePositionMs)
+            player.seek(to: resume, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
         player.play()
         return controller
     }
 
     func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
 
-    static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: ()) {
+    static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
+        coordinator.report(force: true)
+        coordinator.detach()
         controller.player?.pause()
         controller.player = nil
+    }
+
+    final class Coordinator {
+        let video: TrainingVideoDTO
+        let onProgress: (Int, Int) -> Void
+        private var player: AVPlayer?
+        private var timeObserver: Any?
+        private var endObserver: NSObjectProtocol?
+        private var lastSent = Date.distantPast
+
+        init(video: TrainingVideoDTO, onProgress: @escaping (Int, Int) -> Void) {
+            self.video = video
+            self.onProgress = onProgress
+        }
+
+        func attach(_ player: AVPlayer) {
+            self.player = player
+            timeObserver = player.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 5, preferredTimescale: 600),
+                queue: .main
+            ) { [weak self] _ in
+                self?.report(force: false)
+            }
+            endObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: player.currentItem,
+                queue: .main
+            ) { [weak self] _ in
+                self?.report(force: true)
+            }
+        }
+
+        func report(force: Bool) {
+            guard let player else { return }
+            if !force, Date().timeIntervalSince(lastSent) < 4.5 {
+                return
+            }
+            lastSent = Date()
+            let position = Int((player.currentTime().seconds * 1000).rounded())
+            let durationSeconds = player.currentItem?.duration.seconds ?? 0
+            let duration = durationSeconds.isFinite ? Int((durationSeconds * 1000).rounded()) : video.durationMs
+            if !force, position < 500, video.resumePositionMs > 1000, !video.watchCompleted {
+                return
+            }
+            onProgress(max(0, position), max(0, duration))
+        }
+
+        func detach() {
+            if let timeObserver, let player {
+                player.removeTimeObserver(timeObserver)
+            }
+            if let endObserver {
+                NotificationCenter.default.removeObserver(endObserver)
+            }
+            timeObserver = nil
+            endObserver = nil
+            player = nil
+        }
+    }
+}
+
+private extension CMTime {
+    init(milliseconds: Int) {
+        self.init(value: CMTimeValue(milliseconds), timescale: 1000)
     }
 }

@@ -341,6 +341,37 @@ final class AppSession: ObservableObject {
         }
     }
 
+    func reportTrainingVideoProgress(videoUUID: String, positionMs: Int, durationMs: Int) async -> TrainingVideoDTO? {
+        do {
+            let updated = try await api.trainingVideoProgress(
+                videoUUID: videoUUID,
+                positionMs: positionMs,
+                durationMs: durationMs
+            )
+            TrainingVideoWatchStore.shared.remove(videoUUID: videoUUID, ownerUserUUID: user?.uuid ?? "")
+            return updated
+        } catch {
+            TrainingVideoWatchStore.shared.queue(
+                videoUUID: videoUUID,
+                positionMs: positionMs,
+                durationMs: durationMs,
+                ownerUserUUID: user?.uuid ?? ""
+            )
+            return nil
+        }
+    }
+
+    func flushTrainingVideoProgress() async {
+        let owner = user?.uuid ?? ""
+        for item in TrainingVideoWatchStore.shared.pending(ownerUserUUID: owner) {
+            _ = await reportTrainingVideoProgress(
+                videoUUID: item.videoUUID,
+                positionMs: item.positionMs,
+                durationMs: item.durationMs
+            )
+        }
+    }
+
     func loadCommunityFeed(cursor: Int = 0) async -> CommunityFeedDTO? {
         do {
             return try await api.communityFeed(cursor: cursor)
