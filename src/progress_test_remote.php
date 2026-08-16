@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/progress_test_access.php';
 
-const PTR_AUTH_TTL_MINUTES = 60;
+const PTR_AUTH_TTL_MINUTES = 240;
+const PTR_RESEND_COOLDOWN_SECONDS = 120;
 const PTR_MAX_REQUESTS_PER_HOUR = 5;
 const PTR_MAX_CODE_FAILURES = 5;
 const PTR_ACTIVE_ATTEMPT_MINUTES = 15;

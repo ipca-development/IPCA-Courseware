@@ -454,12 +454,21 @@ trait CoursewareProgressionV2RemoteTrait
                 throw new RuntimeException('You already completed remote authentication. Click Enter Progress Test Code on the course page.');
             }
             if ((string)$existing['status'] === 'EMAIL_SENT') {
-                return [
-                    'ok' => true,
-                    'reused' => true,
-                    'authorization_id' => (int)$existing['id'],
-                    'message' => 'An active authentication request already exists. Check your email for the link.',
-                ];
+                $updatedAt = strtotime((string)($existing['updated_at'] ?? '') . ' UTC') ?: 0;
+                if ($updatedAt > 0 && (time() - $updatedAt) < PTR_RESEND_COOLDOWN_SECONDS) {
+                    return [
+                        'ok' => true,
+                        'reused' => true,
+                        'authorization_id' => (int)$existing['id'],
+                        'message' => 'An authentication email was already sent. Check your inbox and spam folder. You can request a new link in a couple of minutes if it has not arrived.',
+                    ];
+                }
+                return $this->ptr_rotate_and_send_remote_auth_email(
+                    $existing,
+                    $studentId,
+                    $cohortId,
+                    $lessonId
+                );
             }
             $this->pdo->prepare('DELETE FROM progress_test_remote_authorizations WHERE id = ?')
                 ->execute([(int)$existing['id']]);
@@ -494,6 +503,73 @@ trait CoursewareProgressionV2RemoteTrait
         ]);
         $authId = (int)$this->pdo->lastInsertId();
 
+        return $this->ptr_dispatch_remote_auth_email(
+            $authId,
+            $studentId,
+            $cohortId,
+            $lessonId,
+            $rawToken,
+            $expiresAt,
+            $titles,
+            false
+        );
+    }
+
+    private function ptr_rotate_and_send_remote_auth_email(
+        array $existing,
+        int $studentId,
+        int $cohortId,
+        int $lessonId
+    ): array {
+        if ($this->ptr_count_recent_requests($studentId, $cohortId) >= PTR_MAX_REQUESTS_PER_HOUR) {
+            throw new RuntimeException('Too many remote progress test requests. Please try again later.');
+        }
+
+        $authId = (int)$existing['id'];
+        $titles = $this->ptr_lesson_titles($lessonId);
+        $rawToken = ptr_generate_token();
+        $expiresAt = gmdate('Y-m-d H:i:s', time() + (PTR_AUTH_TTL_MINUTES * 60));
+
+        $this->pdo->prepare("
+            UPDATE progress_test_remote_authorizations
+            SET request_token_hash = ?,
+                status = 'REQUESTED',
+                valid_from = UTC_TIMESTAMP(),
+                expires_at = ?,
+                requested_ip = ?,
+                requested_user_agent_hash = ?,
+                updated_at = UTC_TIMESTAMP()
+            WHERE id = ?
+        ")->execute([
+            ptr_hash($rawToken),
+            $expiresAt,
+            cw_progress_test_client_ip(),
+            ptr_user_agent_hash() ?: null,
+            $authId,
+        ]);
+
+        return $this->ptr_dispatch_remote_auth_email(
+            $authId,
+            $studentId,
+            $cohortId,
+            $lessonId,
+            $rawToken,
+            $expiresAt,
+            $titles,
+            true
+        );
+    }
+
+    private function ptr_dispatch_remote_auth_email(
+        int $authId,
+        int $studentId,
+        int $cohortId,
+        int $lessonId,
+        string $rawToken,
+        string $expiresAt,
+        array $titles,
+        bool $resent
+    ): array {
         $authLink = ptr_app_base_url() . '/student/progress_test_auth.php?token=' . urlencode($rawToken);
 
         $stUser = $this->pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email) AS student_name, email FROM users WHERE id = ? LIMIT 1");
@@ -501,6 +577,7 @@ trait CoursewareProgressionV2RemoteTrait
         $userRow = $stUser->fetch(PDO::FETCH_ASSOC) ?: [];
         $studentEmail = trim((string)($userRow['email'] ?? ''));
         if ($studentEmail === '' || !filter_var($studentEmail, FILTER_VALIDATE_EMAIL)) {
+            $this->pdo->prepare('DELETE FROM progress_test_remote_authorizations WHERE id = ?')->execute([$authId]);
             throw new RuntimeException('Your account does not have a valid email address on file. Please update your profile or contact support.');
         }
 
@@ -524,12 +601,14 @@ trait CoursewareProgressionV2RemoteTrait
             'cohort_id' => $cohortId,
             'lesson_id' => $lessonId,
             'event_type' => 'progress_test',
-            'event_code' => 'REMOTE_PROGRESS_TEST_REQUESTED',
+            'event_code' => $resent ? 'REMOTE_PROGRESS_TEST_EMAIL_RESENT' : 'REMOTE_PROGRESS_TEST_REQUESTED',
             'event_status' => 'info',
             'actor_type' => 'student',
             'actor_user_id' => $studentId,
-            'payload' => ['authorization_id' => $authId],
-            'legal_note' => 'Student requested remote progress test authorization (no attempt created).',
+            'payload' => ['authorization_id' => $authId, 'resent' => $resent ? 1 : 0],
+            'legal_note' => $resent
+                ? 'Student requested a new remote progress test authentication email (token rotated).'
+                : 'Student requested remote progress test authorization (no attempt created).',
         ]);
 
         $automationResult = $this->dispatchAutomationEventIfAvailable(
@@ -557,6 +636,7 @@ trait CoursewareProgressionV2RemoteTrait
                     'authorization_id' => $authId,
                     'reason' => $failureReason,
                     'automation_result' => $automationResult,
+                    'resent' => $resent ? 1 : 0,
                 ],
                 'legal_note' => 'Remote progress test authentication email could not be sent; authorization row removed so student can retry.',
             ]);
@@ -577,14 +657,20 @@ trait CoursewareProgressionV2RemoteTrait
             'payload' => [
                 'authorization_id' => $authId,
                 'automation_result' => $automationResult,
+                'resent' => $resent ? 1 : 0,
             ],
-            'legal_note' => 'Remote progress test authentication email dispatched via automation.',
+            'legal_note' => $resent
+                ? 'Remote progress test authentication email re-dispatched via automation after token rotation.'
+                : 'Remote progress test authentication email dispatched via automation.',
         ]);
 
         return [
             'ok' => true,
             'authorization_id' => $authId,
-            'message' => 'Your progress test request was received. You will receive an email with your authentication link in a few moments.',
+            'resent' => $resent,
+            'message' => $resent
+                ? 'A new authentication email was sent. Check your inbox and spam folder for the link.'
+                : 'Your progress test request was received. You will receive an email with your authentication link in a few moments. Check your inbox and spam folder.',
         ];
     }
 
