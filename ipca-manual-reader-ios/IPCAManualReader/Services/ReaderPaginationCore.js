@@ -440,7 +440,23 @@
     const tableClasses = table.getAttribute("class") || "";
     const tableStyle = table.getAttribute("style") || "";
     const tableOpen = `<table class="${escapeHTML(tableClasses)}" style="${escapeHTML(tableStyle)}">`;
-    const prefix = tableOpen + (caption ? caption.outerHTML : "") + (colgroup ? colgroup.outerHTML : "");
+    const wrapperNodes = [];
+    for (let node = table.parentElement; node && node !== root; node = node.parentElement) {
+      wrapperNodes.unshift(node);
+    }
+    const wrapperOpen = wrapperNodes.map((node) => {
+      const attributes = Array.from(node.attributes || []).map((attribute) =>
+        ` ${attribute.name}="${escapeHTML(attribute.value)}"`
+      ).join("");
+      return `<${node.tagName.toLowerCase()}${attributes}>`;
+    }).join("");
+    const wrapperClose = wrapperNodes.slice().reverse().map((node) =>
+      `</${node.tagName.toLowerCase()}>`
+    ).join("");
+    const prefix = wrapperOpen + tableOpen
+      + (caption ? caption.outerHTML : "")
+      + (colgroup ? colgroup.outerHTML : "");
+    const suffix = `</table>${wrapperClose}`;
     const headerHTML = header ? header.outerHTML : "";
     const output = [];
 
@@ -450,14 +466,14 @@
         unit,
         "table-header",
         "tableHeader",
-        `${prefix}${headerHTML}</table>`,
+        `${prefix}${headerHTML}${suffix}`,
         header.textContent,
         {
           anchor: root.getAttribute("data-stable-anchor"),
           atomic: true,
           splittable: false,
           forceBreakBefore,
-          tableHeaderHTML: `${prefix}${headerHTML}</table>`,
+          tableHeaderHTML: `${prefix}${headerHTML}${suffix}`,
           tableShellHTML: root.outerHTML
         }
       ));
@@ -479,14 +495,14 @@
         unit,
         `table-row-${index}`,
         "tableRow",
-        `${prefix}<tbody>${rowHTML}</tbody></table>`,
+        `${prefix}<tbody>${rowHTML}</tbody>${suffix}`,
         rowText,
         {
           anchor: rowGroup[0].getAttribute("data-stable-anchor") || root.getAttribute("data-stable-anchor"),
           atomic: true,
           splittable: rowGroup.length === 1,
           forceBreakBefore: !header && forceBreakBefore && index === 0,
-          tableHeaderHTML: headerHTML ? `${prefix}${headerHTML}</table>` : "",
+          tableHeaderHTML: headerHTML ? `${prefix}${headerHTML}${suffix}` : "",
           tableShellHTML: root.outerHTML
         }
       ));

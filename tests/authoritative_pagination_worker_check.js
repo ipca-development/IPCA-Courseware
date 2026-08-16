@@ -451,6 +451,40 @@ cases.push(["H1. one-pixel Chromium table rounding does not invalidate a page", 
   assertContentFragmentGeometry(result.pages, "rounded-table-block");
 }]);
 
+cases.push(["H1b. table fragments preserve width and alignment wrappers", () => {
+  const widths = ["15.1344", ...Array(10).fill("8.4866")];
+  const cols = widths.map((width) => `<col style="width:${width}%">`).join("");
+  const cells = Array.from({ length: 11 }, (_, index) => `<td>Value ${index + 1}</td>`).join("");
+  const tableRows = Array.from({ length: 16 }, () => `<tr>${cells}</tr>`).join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "wrapped-table", "Training Standards", {}, [
+      unit(
+        "wrapped-table-block",
+        "table",
+        '<article class="cpb-block" data-block-id="9" data-block-type="table">'
+          + '<div class="cpb-table-block cpb-table-block--align-center">'
+          + '<div class="cpb-table-wrap cpb-table-border-thick" style="width:100%;max-width:100%">'
+          + `<table class="cpb-table" style="width:100%"><colgroup>${cols}</colgroup>`
+          + '<thead><tr class="cpb-table-title-row"><td colspan="11">Training title</td></tr>'
+          + '<tr class="cpb-table-header-row"><th>Item</th><th colspan="8">Instructor</th>'
+          + '<th colspan="2">TKI</th></tr></thead>'
+          + `<tbody>${tableRows}</tbody></table></div></div></article>`,
+        { block_id: 9 }
+      ),
+    ]),
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.ok(result.pages.length >= 2, "wrapped table must paginate normally");
+  assert.ok(result.pages.every((page) =>
+    page.page_html.includes("wrapped-table-block") === false
+    || (
+      page.page_html.includes("cpb-table-block--align-center")
+      && page.page_html.includes("cpb-table-wrap cpb-table-border-thick")
+    )
+  ), "every table fragment must retain its canonical sizing wrappers");
+  assertContentFragmentGeometry(result.pages, "wrapped-table-block");
+}]);
+
 cases.push(["H2. vertically merged table rows stay in one pagination fragment", () => {
   const { execution, result } = runWorker(sourceWith([
     section(1, "vertical-table", "Vertical table", {}, [
