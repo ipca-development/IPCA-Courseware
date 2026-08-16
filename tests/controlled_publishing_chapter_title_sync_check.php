@@ -21,8 +21,8 @@ $assert(
     'Title Case numbered lists must not become MAIN chapters without a heading style.'
 );
 $assert(
-    ControlledPublishingDocxReader::isPlausibleManualSectionRef('1', 'Course Enrollment', 1, true),
-    'Title Case chapter titles on a heading style must be accepted as MAIN sections.'
+    ControlledPublishingDocxReader::isPlausibleManualSectionRef('2', 'Training Records', 1, true),
+    'Flattened Title Case MAIN chapters such as 2. Training Records must remain valid excerpts.'
 );
 $assert(
     ControlledPublishingDocxReader::isPlausibleManualSectionRef('1.1', 'Course Enrollment', 1),
@@ -259,6 +259,7 @@ foreach (array(
     'self::sectionAllowsTitleCaseChapter($section)',
     'flattenGenericPartChapters(',
     'parsePartFile(',
+    'ensureChapterSection(',
 ) as $marker) {
     if (!str_contains($import, $marker)) {
         $failures[] = 'Missing DocxImportService marker: ' . $marker;

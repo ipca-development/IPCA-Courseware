@@ -698,6 +698,69 @@ final class ControlledPublishingManualStructureService
     }
 
     /**
+     * Find or create a MAIN chapter section so flattened 1.2 → chapter 2 imports have a home.
+     */
+    public function ensureChapterSection(
+        int $versionId,
+        int $manualPart,
+        int $chapterNumber,
+        string $title,
+        ?int $actorUserId = null
+    ): int {
+        $existing = $this->chapterSectionIdForPart($versionId, $manualPart, $chapterNumber);
+        if ($existing > 0) {
+            return $existing;
+        }
+
+        $partKey = 'part_' . max(1, $manualPart);
+        $parentId = $this->resolvePartParentSectionId($versionId, $partKey);
+        if ($parentId <= 0) {
+            return 0;
+        }
+        $parent = $this->sections->getSection($versionId, $parentId);
+        if ($parent === null) {
+            return 0;
+        }
+
+        $title = $this->formatChapterTitle($title !== '' ? $title : ('Chapter ' . $chapterNumber));
+        $navLabel = $chapterNumber . '. ' . $title;
+
+        return $this->insertChapterSection(
+            $versionId,
+            $parentId,
+            (string)($parent['stable_anchor'] ?? ''),
+            $this->chapterSectionKey($partKey, $chapterNumber),
+            $title,
+            $chapterNumber * 10,
+            array(
+                'chapter_number' => $chapterNumber,
+                'manual_part' => $manualPart,
+                'nav_label' => $navLabel,
+                'synced_from_canonical' => true,
+            ),
+            $actorUserId
+        );
+    }
+
+    public function chapterSectionIdForPart(int $versionId, int $manualPart, int $chapterNumber): int
+    {
+        foreach ($this->sections->listFlatSections($versionId) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $meta = $this->decodeMeta($row);
+            if ((int)($meta['manual_part'] ?? 0) !== $manualPart) {
+                continue;
+            }
+            if ((int)($meta['chapter_number'] ?? 0) === $chapterNumber) {
+                return (int)($row['id'] ?? 0);
+            }
+        }
+
+        return 0;
+    }
+
+    /**
      * @param array<string,mixed> $metadata
      */
     private function insertChapterSection(
@@ -709,7 +772,7 @@ final class ControlledPublishingManualStructureService
         int $sortOrder,
         array $metadata,
         ?int $actorUserId
-    ): void {
+    ): int {
         $stableAnchor = $this->childAnchor($parentAnchor, $sectionKey);
         $stmt = $this->pdo->prepare("
             INSERT INTO ipca_publishing_book_sections
@@ -729,6 +792,8 @@ final class ControlledPublishingManualStructureService
             ':metadata_json' => json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
             ':created_by' => $actorUserId,
         ));
+
+        return (int)$this->pdo->lastInsertId();
     }
 
     /**
@@ -1567,7 +1632,14 @@ final class ControlledPublishingManualStructureService
             return false;
         }
 
-        if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($sectionRef, $title, $manualPart)) {
+        $allowTitleCaseChapter = preg_match('/^\d+$/', $sectionRef) === 1
+            && ControlledPublishingDocxReader::isPlausibleSubtitleTitle($title);
+        if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef(
+            $sectionRef,
+            $title,
+            $manualPart,
+            $allowTitleCaseChapter
+        )) {
             return true;
         }
 

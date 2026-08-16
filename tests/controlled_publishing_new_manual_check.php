@@ -69,6 +69,8 @@ foreach (array(
     'overlayChapterTitlesFromImportedBlocks(',
     '$existingNav !== $navLabel',
     'refreshImportedChapterTitles(',
+    'ensureChapterSection(',
+    '$allowTitleCaseChapter = preg_match(\'/^\\d+$/\', $sectionRef) === 1',
     '$pruneStaleChapters || $this->canRemoveChapterSection($row)',
 ) as $marker) {
     if (!str_contains($structure, $marker)) {

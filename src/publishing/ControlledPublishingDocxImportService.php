@@ -742,6 +742,16 @@ final class ControlledPublishingDocxImportService
         foreach ($byChapter as $chapterNumber => $chapterSections) {
             $sectionId = $this->resolveChapterSectionId($versionId, $manualPart, $chapterNumber);
             if ($sectionId <= 0) {
+                $first = is_array($chapterSections[0] ?? null) ? $chapterSections[0] : array();
+                $sectionId = $this->manualStructure->ensureChapterSection(
+                    $versionId,
+                    $manualPart,
+                    $chapterNumber,
+                    (string)($first['title'] ?? ''),
+                    $actorUserId
+                );
+            }
+            if ($sectionId <= 0) {
                 $warnings[] = 'No chapter section found for part ' . $manualPart . ' chapter ' . $chapterNumber;
                 continue;
             }
