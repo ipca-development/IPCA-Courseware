@@ -438,7 +438,15 @@ function comm_training_schema(PDO $pdo): void
       mission_code TEXT NOT NULL DEFAULT '',
       aircraft_id INTEGER NULL,
       mission_id INTEGER NULL,
+      planned_departure_airport TEXT NOT NULL DEFAULT '',
+      planned_destination_airport TEXT NOT NULL DEFAULT '',
+      scheduler_record_id TEXT NULL,
       status TEXT NOT NULL DEFAULT 'scheduled'
+    )");
+    $pdo->exec("CREATE TABLE ipca_missions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT ''
     )");
     $pdo->exec("CREATE TABLE ipca_flight_schedule_crew (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1025,6 +1033,7 @@ $emptyTraining = $kernel->training->summary($sessionA);
 comm_assert(
     'training companion is honest when Courseware tables are absent',
     $emptyTraining['next_flight'] === null
+    && $emptyTraining['schedule'] === array()
     && $emptyTraining['theory']['enrolled'] === false
     && $emptyTraining['theory']['percent'] === 0
     && $emptyTraining['actions'] === array()
@@ -1038,15 +1047,25 @@ $sessionA = comm_session($kernel, $loginA);
 $sessionB = comm_session($kernel, $loginB);
 
 $pdo->exec("INSERT INTO ipca_aircraft_devices (id, registration) VALUES (1, 'N428EA')");
+$pdo->exec("INSERT INTO ipca_missions (id, code, name) VALUES (1, 'DUAL', 'Dual Local')");
 $start = (new DateTimeImmutable('+1 day', new DateTimeZone('America/Los_Angeles')))->setTime(10, 0);
 $end = $start->modify('+2 hours');
-$pdo->prepare("INSERT INTO ipca_flight_schedule_slots (id, scheduled_start_time, scheduled_end_time, reservation_type, mission_code, aircraft_id, status) VALUES (1, ?, ?, 'flight_training', 'DUAL', 1, 'scheduled')")
+$later = (new DateTimeImmutable('+3 days', new DateTimeZone('America/Los_Angeles')))->setTime(14, 0);
+$laterEnd = $later->modify('+2 hours');
+$pdo->prepare("INSERT INTO ipca_flight_schedule_slots (id, scheduled_start_time, scheduled_end_time, reservation_type, mission_code, aircraft_id, mission_id, planned_departure_airport, planned_destination_airport, status) VALUES (1, ?, ?, 'flight_training', 'DUAL', 1, 1, 'KTRM', 'KTRM', 'scheduled')")
     ->execute(array($start->format('Y-m-d H:i:s'), $end->format('Y-m-d H:i:s')));
+$pdo->prepare("INSERT INTO ipca_flight_schedule_slots (id, scheduled_start_time, scheduled_end_time, reservation_type, mission_code, aircraft_id, mission_id, planned_departure_airport, planned_destination_airport, status) VALUES (2, ?, ?, 'flight_training', 'NAV', 1, NULL, 'KTRM', 'KPSP', 'scheduled')")
+    ->execute(array($later->format('Y-m-d H:i:s'), $laterEnd->format('Y-m-d H:i:s')));
 $pdo->prepare('INSERT INTO ipca_flight_schedule_crew (schedule_slot_id, user_id, person_name_snapshot, crew_role) VALUES (1, ?, ?, ?)')
     ->execute(array($userA, 'Alice Student', 'student'));
 $pdo->prepare('INSERT INTO ipca_flight_schedule_crew (schedule_slot_id, user_id, person_name_snapshot, crew_role) VALUES (1, NULL, ?, ?)')
     ->execute(array('Dana Instructor', 'instructor'));
+$pdo->prepare('INSERT INTO ipca_flight_schedule_crew (schedule_slot_id, user_id, person_name_snapshot, crew_role) VALUES (2, ?, ?, ?)')
+    ->execute(array($userA, 'Alice Student', 'student'));
+$pdo->prepare('INSERT INTO ipca_flight_schedule_crew (schedule_slot_id, user_id, person_name_snapshot, crew_role) VALUES (2, NULL, ?, ?)')
+    ->execute(array('Riley Safety', 'safety_pilot'));
 $flight = $kernel->training->summary($sessionA);
+$expectedDate = $start->format('D M j, Y');
 comm_assert(
     'next scheduled flight is the student’s upcoming crew assignment',
     is_array($flight['next_flight'])
@@ -1054,6 +1073,17 @@ comm_assert(
     && $flight['next_flight']['reservation_label'] === 'Flight Training'
     && $flight['next_flight']['role'] === 'Student'
     && in_array('Dana Instructor', $flight['next_flight']['with_names'], true)
+);
+comm_assert(
+    'training schedule uses the online Flight Schedule for this user',
+    count($flight['schedule']) === 2
+    && (string)$flight['schedule'][0]['date_label'] === $expectedDate
+    && (string)$flight['schedule'][0]['route'] === 'KTRM → KTRM'
+    && (string)$flight['schedule'][0]['mission_code'] === 'DUAL'
+    && (string)$flight['schedule'][0]['mission_label'] === 'DUAL · Dual Local'
+    && (string)$flight['schedule'][0]['time_zone'] === 'America/Los_Angeles'
+    && (string)$flight['schedule'][1]['route'] === 'KTRM → KPSP'
+    && in_array('Riley Safety', $flight['schedule'][1]['with_names'], true)
 );
 $otherFlight = $kernel->training->summary($sessionB);
 comm_assert('another member does not inherit someone else’s next flight', $otherFlight['next_flight'] === null);
@@ -1548,6 +1578,10 @@ if ($iosApp === '') {
         'iOS Training tab is a companion of next flight, theory, actions, and deadlines',
         is_file($root . '/ipca-app-ios/IPCA/Views/TrainingView.swift')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/TrainingView.swift'), 'Next Flight')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/TrainingView.swift'), 'Schedule')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIModels.swift'), 'date_label')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIModels.swift'), 'mission_code')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIModels.swift'), 'airport_chain')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/MainShellView.swift'), 'TrainingView()')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIClient.swift'), 'training.php')
         && !str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Sync/OutboxWorker.swift'), 'training.php')

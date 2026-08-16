@@ -506,38 +506,119 @@ struct ActionsEnvelope: Decodable {
 struct TrainingSummaryDTO: Decodable {
     var ok: Bool
     var nextFlight: TrainingFlightDTO?
+    var schedule: [TrainingFlightDTO]
     var theory: TrainingTheoryDTO
     var actions: [TrainingActionDTO]
     var deadlines: [TrainingDeadlineDTO]
     var notes: [String]
 
     enum CodingKeys: String, CodingKey {
-        case ok, theory, actions, deadlines, notes
+        case ok, theory, actions, deadlines, notes, schedule
         case nextFlight = "next_flight"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decodeIfPresent(Bool.self, forKey: .ok) ?? true
+        nextFlight = try container.decodeIfPresent(TrainingFlightDTO.self, forKey: .nextFlight)
+        let decodedSchedule = try container.decodeIfPresent([TrainingFlightDTO].self, forKey: .schedule) ?? []
+        if decodedSchedule.isEmpty, let next = nextFlight {
+            schedule = [next]
+        } else {
+            schedule = decodedSchedule
+        }
+        theory = try container.decode(TrainingTheoryDTO.self, forKey: .theory)
+        actions = try container.decodeIfPresent([TrainingActionDTO].self, forKey: .actions) ?? []
+        deadlines = try container.decodeIfPresent([TrainingDeadlineDTO].self, forKey: .deadlines) ?? []
+        notes = try container.decodeIfPresent([String].self, forKey: .notes) ?? []
     }
 }
 
-struct TrainingFlightDTO: Decodable, Hashable {
+struct TrainingCrewDTO: Decodable, Hashable {
+    var name: String
+    var role: String
+    var roleLabel: String
+    var isSelf: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name, role
+        case roleLabel = "role_label"
+        case isSelf = "is_self"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        role = try container.decodeIfPresent(String.self, forKey: .role) ?? ""
+        roleLabel = try container.decodeIfPresent(String.self, forKey: .roleLabel) ?? ""
+        isSelf = try container.decodeIfPresent(Bool.self, forKey: .isSelf) ?? false
+    }
+}
+
+struct TrainingFlightDTO: Decodable, Hashable, Identifiable {
+    var id: String
     var startsAt: String
     var endsAt: String
+    var timeZone: String
+    var dateLabel: String
+    var timeLabel: String
     var whenLabel: String
     var aircraftRegistration: String
     var reservationType: String
     var reservationLabel: String
+    var missionCode: String
     var missionName: String
+    var missionLabel: String
+    var departureAirport: String
+    var destinationAirport: String
+    var airportChain: [String]
+    var route: String
     var role: String
+    var crew: [TrainingCrewDTO]
     var withNames: [String]
 
     enum CodingKeys: String, CodingKey {
-        case role
+        case id, role, crew, route
         case startsAt = "starts_at"
         case endsAt = "ends_at"
+        case timeZone = "time_zone"
+        case dateLabel = "date_label"
+        case timeLabel = "time_label"
         case whenLabel = "when_label"
         case aircraftRegistration = "aircraft_registration"
         case reservationType = "reservation_type"
         case reservationLabel = "reservation_label"
+        case missionCode = "mission_code"
         case missionName = "mission_name"
+        case missionLabel = "mission_label"
+        case departureAirport = "departure_airport"
+        case destinationAirport = "destination_airport"
+        case airportChain = "airport_chain"
         case withNames = "with_names"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startsAt = try container.decodeIfPresent(String.self, forKey: .startsAt) ?? ""
+        endsAt = try container.decodeIfPresent(String.self, forKey: .endsAt) ?? ""
+        timeZone = try container.decodeIfPresent(String.self, forKey: .timeZone) ?? "America/Los_Angeles"
+        dateLabel = try container.decodeIfPresent(String.self, forKey: .dateLabel) ?? ""
+        timeLabel = try container.decodeIfPresent(String.self, forKey: .timeLabel) ?? ""
+        whenLabel = try container.decodeIfPresent(String.self, forKey: .whenLabel) ?? ""
+        aircraftRegistration = try container.decodeIfPresent(String.self, forKey: .aircraftRegistration) ?? ""
+        reservationType = try container.decodeIfPresent(String.self, forKey: .reservationType) ?? ""
+        reservationLabel = try container.decodeIfPresent(String.self, forKey: .reservationLabel) ?? ""
+        missionCode = try container.decodeIfPresent(String.self, forKey: .missionCode) ?? ""
+        missionName = try container.decodeIfPresent(String.self, forKey: .missionName) ?? ""
+        missionLabel = try container.decodeIfPresent(String.self, forKey: .missionLabel) ?? ""
+        departureAirport = try container.decodeIfPresent(String.self, forKey: .departureAirport) ?? ""
+        destinationAirport = try container.decodeIfPresent(String.self, forKey: .destinationAirport) ?? ""
+        airportChain = try container.decodeIfPresent([String].self, forKey: .airportChain) ?? []
+        route = try container.decodeIfPresent(String.self, forKey: .route) ?? airportChain.joined(separator: " → ")
+        role = try container.decodeIfPresent(String.self, forKey: .role) ?? ""
+        crew = try container.decodeIfPresent([TrainingCrewDTO].self, forKey: .crew) ?? []
+        withNames = try container.decodeIfPresent([String].self, forKey: .withNames) ?? []
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? "\(startsAt)-\(aircraftRegistration)-\(missionCode)"
     }
 }
 

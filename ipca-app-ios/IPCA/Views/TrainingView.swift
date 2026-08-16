@@ -25,7 +25,7 @@ struct TrainingView: View {
                     } else if let summary {
                         ScrollView {
                             VStack(alignment: .leading, spacing: IPCATheme.Spacing.md) {
-                                nextFlightSection(summary.nextFlight)
+                                scheduleSection(summary)
                                 theorySection(summary.theory)
                                 actionsSection(summary.actions)
                                 deadlinesSection(summary.deadlines)
@@ -47,9 +47,38 @@ struct TrainingView: View {
     }
 
     @ViewBuilder
-    private func nextFlightSection(_ flight: TrainingFlightDTO?) -> some View {
-        IPCASectionHeader(title: "Next Flight")
-        if let flight {
+    private func scheduleSection(_ summary: TrainingSummaryDTO) -> some View {
+        IPCASectionHeader(title: "Schedule")
+        let flights = summary.schedule
+        if flights.isEmpty {
+            HStack(spacing: IPCATheme.Spacing.sm) {
+                Image(systemName: "airplane")
+                    .foregroundStyle(IPCATheme.Colors.textTertiary)
+                Text("No upcoming flights.")
+                    .foregroundStyle(IPCATheme.Colors.textSecondary)
+                Spacer()
+            }
+            .font(.subheadline)
+            .padding(.horizontal, IPCATheme.Spacing.screen)
+        } else {
+            VStack(alignment: .leading, spacing: IPCATheme.Spacing.md) {
+                ForEach(Array(scheduleDays(flights).enumerated()), id: \.offset) { _, day in
+                    VStack(alignment: .leading, spacing: IPCATheme.Spacing.xs) {
+                        Text(day.dateLabel)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(IPCATheme.Colors.textPrimary)
+                            .padding(.horizontal, IPCATheme.Spacing.screen)
+                        ForEach(day.flights) { flight in
+                            scheduleCard(flight, isNext: flight.id == flights.first?.id)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func scheduleCard(_ flight: TrainingFlightDTO, isNext: Bool) -> some View {
+        VStack(alignment: .leading, spacing: IPCATheme.Spacing.sm) {
             HStack(alignment: .top, spacing: IPCATheme.Spacing.sm) {
                 if let parts = flightDateParts(flight) {
                     VStack(spacing: 2) {
@@ -66,23 +95,49 @@ struct TrainingView: View {
                     .frame(width: 52)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "airplane")
-                            .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+                    HStack(spacing: 8) {
                         Text(flight.reservationLabel.isEmpty ? "Training Flight" : flight.reservationLabel)
                             .font(.headline)
                             .foregroundStyle(IPCATheme.Colors.lightText)
+                        if isNext {
+                            Text("Next Flight")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(IPCATheme.Colors.ipcaBlue, in: Capsule())
+                        }
                     }
-                    Text(flight.whenLabel)
-                        .font(.subheadline)
-                        .foregroundStyle(IPCATheme.Colors.lightSecondary)
+                    if !flight.timeLabel.isEmpty {
+                        Text(flight.timeLabel)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(IPCATheme.Colors.lightSecondary)
+                    } else if !flight.whenLabel.isEmpty {
+                        Text(flight.whenLabel)
+                            .font(.subheadline)
+                            .foregroundStyle(IPCATheme.Colors.lightSecondary)
+                    }
+                    if !flight.route.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "airplane")
+                                .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+                            Text(flight.route)
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(IPCATheme.Colors.lightText)
+                        }
+                    }
+                    if !displayedMission(flight).isEmpty {
+                        Text(displayedMission(flight))
+                            .font(.subheadline)
+                            .foregroundStyle(IPCATheme.Colors.lightSecondary)
+                    }
                     if !flight.aircraftRegistration.isEmpty {
                         Text(flight.aircraftRegistration)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(IPCATheme.Colors.ipcaBlue)
                     }
-                    if !flight.withNames.isEmpty {
-                        Text("Instructor: \(flight.withNames.joined(separator: ", "))")
+                    ForEach(crewLines(flight), id: \.self) { line in
+                        Text(line)
                             .font(.subheadline)
                             .foregroundStyle(IPCATheme.Colors.lightSecondary)
                     }
@@ -94,20 +149,50 @@ struct TrainingView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(IPCATheme.Spacing.md)
-            .background(IPCATheme.Colors.lightCard, in: RoundedRectangle(cornerRadius: IPCATheme.Radius.card, style: .continuous))
-            .padding(.horizontal, IPCATheme.Spacing.screen)
-        } else {
-            HStack(spacing: IPCATheme.Spacing.sm) {
-                Image(systemName: "airplane")
-                    .foregroundStyle(IPCATheme.Colors.textTertiary)
-                Text("No upcoming flights.")
-                    .foregroundStyle(IPCATheme.Colors.textSecondary)
-                Spacer()
-            }
-            .font(.subheadline)
-            .padding(.horizontal, IPCATheme.Spacing.screen)
         }
+        .padding(IPCATheme.Spacing.md)
+        .background(IPCATheme.Colors.lightCard, in: RoundedRectangle(cornerRadius: IPCATheme.Radius.card, style: .continuous))
+        .padding(.horizontal, IPCATheme.Spacing.screen)
+    }
+
+    private func scheduleDays(_ flights: [TrainingFlightDTO]) -> [(dateLabel: String, flights: [TrainingFlightDTO])] {
+        var grouped: [String: [TrainingFlightDTO]] = [:]
+        var order: [String] = []
+        for flight in flights {
+            let label = flight.dateLabel.isEmpty ? flight.whenLabel : flight.dateLabel
+            if grouped[label] == nil {
+                order.append(label)
+                grouped[label] = []
+            }
+            grouped[label, default: []].append(flight)
+        }
+        return order.map { (dateLabel: $0, flights: grouped[$0] ?? []) }
+    }
+
+    private func displayedMission(_ flight: TrainingFlightDTO) -> String {
+        if !flight.missionLabel.isEmpty {
+            return flight.missionLabel
+        }
+        if !flight.missionCode.isEmpty, !flight.missionName.isEmpty, flight.missionCode != flight.missionName {
+            return "\(flight.missionCode) · \(flight.missionName)"
+        }
+        return flight.missionName.isEmpty ? flight.missionCode : flight.missionName
+    }
+
+    private func crewLines(_ flight: TrainingFlightDTO) -> [String] {
+        let others = flight.crew.filter { !$0.isSelf && !$0.name.isEmpty }
+        if others.isEmpty {
+            return flight.withNames.map { "Instructor: \($0)" }
+        }
+        return others.map { member in
+            let label = member.roleLabel.isEmpty ? prettyCrewRole(member.role) : member.roleLabel
+            return "\(label): \(member.name)"
+        }
+    }
+
+    private func prettyCrewRole(_ role: String) -> String {
+        let trimmed = role.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+        return trimmed.split(separator: " ").map { $0.capitalized }.joined(separator: " ")
     }
 
     @ViewBuilder
@@ -240,14 +325,23 @@ struct TrainingView: View {
 
     private func flightDateParts(_ flight: TrainingFlightDTO) -> (weekday: String, day: String, month: String)? {
         let formats = ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"]
+        let zone = TimeZone(identifier: flight.timeZone.isEmpty ? "America/Los_Angeles" : flight.timeZone)
+            ?? TimeZone(identifier: "America/Los_Angeles")
         let parser = DateFormatter()
         parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = zone
         for format in formats {
             parser.dateFormat = format
             if let date = parser.date(from: flight.startsAt) {
-                let weekday = date.formatted(.dateTime.weekday(.abbreviated)).uppercased()
-                let day = date.formatted(.dateTime.day())
-                let month = date.formatted(.dateTime.month(.abbreviated)).uppercased()
+                let display = DateFormatter()
+                display.locale = Locale(identifier: "en_US_POSIX")
+                display.timeZone = zone
+                display.dateFormat = "EEE"
+                let weekday = display.string(from: date).uppercased()
+                display.dateFormat = "d"
+                let day = display.string(from: date)
+                display.dateFormat = "MMM"
+                let month = display.string(from: date).uppercased()
                 return (weekday, day, month)
             }
         }

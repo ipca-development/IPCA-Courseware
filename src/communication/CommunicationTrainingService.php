@@ -32,6 +32,8 @@ final class CommunicationTrainingService
 
     /** @var array<string,bool> */
     private array $tableCache = array();
+    /** @var array<string,bool> */
+    private array $columnCache = array();
 
     public function __construct(
         private PDO $pdo,
@@ -47,8 +49,10 @@ final class CommunicationTrainingService
     {
         $this->config->requireTraining();
         $userId = (int)$session['user']['id'];
+        $schedule = $this->upcomingFlights($userId);
         return array(
-            'next_flight' => $this->nextFlight($userId),
+            'next_flight' => $schedule[0] ?? null,
+            'schedule' => $schedule,
             'theory' => $this->theory($userId),
             'actions' => $this->actions($userId),
             'deadlines' => $this->deadlines($userId),
@@ -57,12 +61,14 @@ final class CommunicationTrainingService
     }
 
     /**
-     * @return array<string,mixed>|null
+     * Upcoming Flight Schedule rows for this person, in operational local time.
+     *
+     * @return list<array<string,mixed>>
      */
-    private function nextFlight(int $userId): ?array
+    private function upcomingFlights(int $userId): array
     {
         if (!$this->tableExists('ipca_flight_schedule_slots') || !$this->tableExists('ipca_flight_schedule_crew')) {
-            return null;
+            return array();
         }
         $now = (new DateTimeImmutable('now', new DateTimeZone('America/Los_Angeles')))->format('Y-m-d H:i:s');
         $aircraftJoin = $this->tableExists('ipca_aircraft_devices')
@@ -74,48 +80,115 @@ final class CommunicationTrainingService
         $missionJoin = $this->tableExists('ipca_missions')
             ? 'LEFT JOIN ipca_missions m ON m.id = s.mission_id'
             : '';
-        $missionSelect = $this->tableExists('ipca_missions')
-            ? 'COALESCE(NULLIF(m.name, \'\'), NULLIF(s.mission_code, \'\'), \'\') AS mission_name'
-            : 'COALESCE(s.mission_code, \'\') AS mission_name';
+        $missionNameSelect = $this->tableExists('ipca_missions')
+            ? 'COALESCE(NULLIF(m.name, \'\'), \'\') AS mission_name'
+            : '\'\' AS mission_name';
+        $hasAirports = $this->columnExists('ipca_flight_schedule_slots', 'planned_departure_airport')
+            && $this->columnExists('ipca_flight_schedule_slots', 'planned_destination_airport');
+        $airportSelect = $hasAirports
+            ? 'COALESCE(s.planned_departure_airport, \'\') AS planned_departure_airport,
+               COALESCE(s.planned_destination_airport, \'\') AS planned_destination_airport'
+            : '\'\' AS planned_departure_airport, \'\' AS planned_destination_airport';
+        $recordSelect = $this->columnExists('ipca_flight_schedule_slots', 'scheduler_record_id')
+            ? 'COALESCE(s.scheduler_record_id, \'\') AS scheduler_record_id'
+            : '\'\' AS scheduler_record_id';
         try {
             $stmt = $this->pdo->prepare("
                 SELECT s.id AS slot_id,
                        s.scheduled_start_time,
                        s.scheduled_end_time,
                        s.reservation_type,
-                       s.mission_code,
-                       c.crew_role,
+                       COALESCE(s.mission_code, '') AS mission_code,
+                       (
+                         SELECT c2.crew_role
+                         FROM ipca_flight_schedule_crew c2
+                         WHERE c2.schedule_slot_id = s.id
+                           AND c2.user_id = ?
+                         ORDER BY c2.id ASC
+                         LIMIT 1
+                       ) AS crew_role,
                        {$aircraftSelect},
-                       {$missionSelect}
-                FROM ipca_flight_schedule_crew c
-                INNER JOIN ipca_flight_schedule_slots s ON s.id = c.schedule_slot_id
+                       {$missionNameSelect},
+                       {$airportSelect},
+                       {$recordSelect}
+                FROM ipca_flight_schedule_slots s
                 {$aircraftJoin}
                 {$missionJoin}
-                WHERE c.user_id = ?
+                WHERE EXISTS (
+                        SELECT 1
+                        FROM ipca_flight_schedule_crew c
+                        WHERE c.schedule_slot_id = s.id
+                          AND c.user_id = ?
+                      )
                   AND LOWER(TRIM(COALESCE(s.status, ''))) NOT IN ('cancelled', 'canceled', 'superseded', 'completed')
                   AND s.scheduled_end_time >= ?
                 ORDER BY s.scheduled_start_time ASC
-                LIMIT 1
+                LIMIT 40
             ");
-            $stmt->execute(array($userId, $now));
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt->execute(array($userId, $userId, $now));
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         } catch (Throwable) {
-            return null;
+            return array();
         }
-        if (!is_array($row)) {
-            return null;
+        $flights = array();
+        foreach ($rows as $row) {
+            if (is_array($row)) {
+                $flights[] = $this->presentFlight($row, $userId);
+            }
         }
+        return $flights;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function presentFlight(array $row, int $userId): array
+    {
         $reservationType = (string)($row['reservation_type'] ?? 'flight_training');
+        $start = (string)$row['scheduled_start_time'];
+        $end = (string)$row['scheduled_end_time'];
+        $code = strtoupper(trim((string)($row['mission_code'] ?? '')));
+        $missionName = trim((string)($row['mission_name'] ?? ''));
+        if ($missionName === '') {
+            $missionName = $code;
+        }
+        $missionLabel = $code !== '' && $missionName !== '' && strcasecmp($code, $missionName) !== 0
+            ? $code . ' · ' . $missionName
+            : ($missionName !== '' ? $missionName : $code);
+        $chain = $this->airportChain($row);
+        $crew = $this->crewForSlot((int)$row['slot_id'], $userId);
+        $withNames = array();
+        foreach ($crew as $member) {
+            if (!empty($member['is_self'])) {
+                continue;
+            }
+            $name = trim((string)($member['name'] ?? ''));
+            if ($name !== '') {
+                $withNames[] = $name;
+            }
+        }
         return array(
-            'starts_at' => $this->localTimestamp((string)$row['scheduled_start_time']),
-            'ends_at' => $this->localTimestamp((string)$row['scheduled_end_time']),
-            'when_label' => $this->whenLabel((string)$row['scheduled_start_time'], (string)$row['scheduled_end_time']),
+            'id' => 'slot-' . (string)$row['slot_id'],
+            'starts_at' => $this->localTimestamp($start),
+            'ends_at' => $this->localTimestamp($end),
+            'time_zone' => 'America/Los_Angeles',
+            'date_label' => $this->dateLabel($start),
+            'time_label' => $this->timeLabel($start, $end),
+            'when_label' => $this->whenLabel($start, $end),
             'aircraft_registration' => (string)($row['aircraft_registration'] ?? ''),
             'reservation_type' => $reservationType,
             'reservation_label' => self::RESERVATION_LABELS[$reservationType] ?? 'Scheduled',
-            'mission_name' => (string)($row['mission_name'] ?? $row['mission_code'] ?? ''),
+            'mission_code' => $code,
+            'mission_name' => $missionName,
+            'mission_label' => $missionLabel,
+            'departure_airport' => $chain[0] ?? '',
+            'destination_airport' => $chain !== array() ? (string)$chain[count($chain) - 1] : '',
+            'airport_chain' => $chain,
+            'route' => implode(' → ', $chain),
             'role' => $this->prettyRole((string)($row['crew_role'] ?? '')),
-            'with_names' => $this->otherCrewNames((int)$row['slot_id'], $userId),
+            'crew' => $crew,
+            'with_names' => array_values(array_unique($withNames)),
         );
     }
 
@@ -353,29 +426,78 @@ final class CommunicationTrainingService
     }
 
     /**
-     * @return array<int,string>
+     * @param array<string,mixed> $row
+     * @return list<string>
      */
-    private function otherCrewNames(int $slotId, int $userId): array
+    private function airportChain(array $row): array
+    {
+        $recordId = strtolower(trim((string)($row['scheduler_record_id'] ?? '')));
+        if ($recordId !== '' && $this->tableExists('ipca_operational_reservation_legs')) {
+            try {
+                $stmt = $this->pdo->prepare(
+                    'SELECT origin_airport, destination_airport
+                     FROM ipca_operational_reservation_legs
+                     WHERE reservation_uuid = ?
+                     ORDER BY sequence_number ASC'
+                );
+                $stmt->execute(array($recordId));
+                $chain = array();
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $index => $leg) {
+                    $origin = strtoupper(trim((string)($leg['origin_airport'] ?? '')));
+                    $destination = strtoupper(trim((string)($leg['destination_airport'] ?? '')));
+                    if ($index === 0 && $origin !== '') {
+                        $chain[] = $origin;
+                    }
+                    if ($destination !== '') {
+                        $chain[] = $destination;
+                    }
+                }
+                if (count($chain) >= 2) {
+                    return $chain;
+                }
+            } catch (Throwable) {
+            }
+        }
+        $departure = strtoupper(trim((string)($row['planned_departure_airport'] ?? '')));
+        $arrival = strtoupper(trim((string)($row['planned_destination_airport'] ?? '')));
+        $chain = array();
+        if ($departure !== '') {
+            $chain[] = $departure;
+        }
+        if ($arrival !== '') {
+            $chain[] = $arrival;
+        }
+        return $chain;
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function crewForSlot(int $slotId, int $userId): array
     {
         try {
-            $stmt = $this->pdo->prepare("
-                SELECT person_name_snapshot, user_id
-                FROM ipca_flight_schedule_crew
-                WHERE schedule_slot_id = ?
-                ORDER BY id ASC
-            ");
+            $stmt = $this->pdo->prepare(
+                'SELECT person_name_snapshot, user_id, crew_role
+                 FROM ipca_flight_schedule_crew
+                 WHERE schedule_slot_id = ?
+                 ORDER BY id ASC'
+            );
             $stmt->execute(array($slotId));
-            $names = array();
+            $crew = array();
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                if ((int)($row['user_id'] ?? 0) === $userId) {
+                $name = trim((string)($row['person_name_snapshot'] ?? ''));
+                if ($name === '') {
                     continue;
                 }
-                $name = trim((string)$row['person_name_snapshot']);
-                if ($name !== '') {
-                    $names[] = $name;
-                }
+                $role = strtolower(trim((string)($row['crew_role'] ?? '')));
+                $crew[] = array(
+                    'name' => $name,
+                    'role' => $role,
+                    'role_label' => $this->prettyRole($role),
+                    'is_self' => (int)($row['user_id'] ?? 0) === $userId,
+                );
             }
-            return array_values(array_unique($names));
+            return $crew;
         } catch (Throwable) {
             return array();
         }
@@ -410,6 +532,41 @@ final class CommunicationTrainingService
         return $exists;
     }
 
+    private function columnExists(string $table, string $column): bool
+    {
+        $key = $table . '.' . $column;
+        if (array_key_exists($key, $this->columnCache)) {
+            return $this->columnCache[$key];
+        }
+        if (!preg_match('/^[a-z0-9_]+$/', $table) || !preg_match('/^[a-z0-9_]+$/', $column)) {
+            return false;
+        }
+        try {
+            $driver = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+            if ($driver === 'sqlite') {
+                $stmt = $this->pdo->query('PRAGMA table_info(' . $table . ')');
+                $exists = false;
+                foreach ($stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array() as $info) {
+                    if (strcasecmp((string)($info['name'] ?? ''), $column) === 0) {
+                        $exists = true;
+                        break;
+                    }
+                }
+            } else {
+                $stmt = $this->pdo->prepare(
+                    'SELECT COUNT(*) FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+                );
+                $stmt->execute(array($table, $column));
+                $exists = (int)$stmt->fetchColumn() > 0;
+            }
+        } catch (Throwable) {
+            $exists = false;
+        }
+        $this->columnCache[$key] = $exists;
+        return $exists;
+    }
+
     private function localTimestamp(string $value): string
     {
         $value = trim($value);
@@ -419,21 +576,47 @@ final class CommunicationTrainingService
         return str_replace(' ', 'T', substr($value, 0, 19));
     }
 
+    private function dateLabel(string $start): string
+    {
+        $startDt = $this->pacificDate($start);
+        return $startDt ? $startDt->format('D M j, Y') : $this->localTimestamp($start);
+    }
+
+    private function timeLabel(string $start, string $end): string
+    {
+        $startDt = $this->pacificDate($start);
+        if (!$startDt) {
+            return '';
+        }
+        $endDt = $this->pacificDate($end);
+        $label = $startDt->format('H:i');
+        if ($endDt) {
+            $label .= '–' . $endDt->format('H:i');
+        }
+        return $label;
+    }
+
     private function whenLabel(string $start, string $end): string
     {
-        $zone = new DateTimeZone('America/Los_Angeles');
-        $startDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', substr(trim($start), 0, 19), $zone)
-            ?: DateTimeImmutable::createFromFormat('Y-m-d\\TH:i:s', substr(trim($start), 0, 19), $zone);
+        $startDt = $this->pacificDate($start);
         if (!$startDt) {
             return $this->localTimestamp($start);
         }
-        $endDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', substr(trim($end), 0, 19), $zone)
-            ?: DateTimeImmutable::createFromFormat('Y-m-d\\TH:i:s', substr(trim($end), 0, 19), $zone);
+        $endDt = $this->pacificDate($end);
         $label = $startDt->format('D, M j · H:i');
         if ($endDt) {
             $label .= '–' . $endDt->format('H:i');
         }
         return $label;
+    }
+
+    private function pacificDate(string $value): ?DateTimeImmutable
+    {
+        $zone = new DateTimeZone('America/Los_Angeles');
+        $value = substr(trim($value), 0, 19);
+        $startDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $value, $zone)
+            ?: DateTimeImmutable::createFromFormat('Y-m-d\\TH:i:s', $value, $zone);
+        return $startDt ?: null;
     }
 
     private function deadlineLabel(string $due): string
