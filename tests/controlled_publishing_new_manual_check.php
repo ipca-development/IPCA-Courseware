@@ -23,6 +23,7 @@ $serviceMarkers = array(
     '$systemManagedOnly',
     '$oldBookKey',
     '$newBookKey',
+    'resetClonedChapterTitles(',
 );
 foreach ($serviceMarkers as $marker) {
     if (!str_contains($service, $marker)) {
@@ -65,6 +66,9 @@ foreach (array(
     'private function listOmmChapters(string $manualCode, int $sourceSetId, int $manualPart)',
     'AND manual_code = :manual_code',
     "\$manualCode === 'OM' && isset(self::OM_DEFAULT_CHAPTER_TITLES[\$number])",
+    'overlayChapterTitlesFromImportedBlocks(',
+    '$existingNav !== $navLabel',
+    'refreshImportedChapterTitles(',
 ) as $marker) {
     if (!str_contains($structure, $marker)) {
         fwrite(STDERR, "Missing resilient manual-source resolution marker: {$marker}\n");

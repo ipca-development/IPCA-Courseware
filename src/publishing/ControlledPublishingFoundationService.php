@@ -697,6 +697,9 @@ final class ControlledPublishingFoundationService
                 $bookKey,
                 !$copyContent
             );
+            if (!$copyContent) {
+                $this->resetClonedChapterTitles($versionId);
+            }
             $this->ensureManualImportSourceSet(
                 $versionId,
                 $bookKey,
@@ -1502,6 +1505,57 @@ final class ControlledPublishingFoundationService
         }
 
         return $map;
+    }
+
+    /**
+     * Structure-only clones keep OM chapter numbers but must not keep OM MAIN titles.
+     * Word import later fills the real titles from each part's depth-1 headings.
+     */
+    private function resetClonedChapterTitles(int $versionId): void
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT id, section_key, metadata_json
+            FROM ipca_publishing_book_sections
+            WHERE book_version_id = :version_id
+        ");
+        $stmt->execute(array(':version_id' => $versionId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+
+        $update = $this->pdo->prepare("
+            UPDATE ipca_publishing_book_sections
+            SET title = :title,
+                metadata_json = :metadata_json,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+        ");
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $meta = json_decode((string)($row['metadata_json'] ?? ''), true);
+            if (!is_array($meta)) {
+                $meta = array();
+            }
+            $number = (int)($meta['chapter_number'] ?? 0);
+            if ($number <= 0) {
+                $key = (string)($row['section_key'] ?? '');
+                if (preg_match('/_chapter_(\d+)$/', $key, $m) === 1) {
+                    $number = (int)$m[1];
+                }
+            }
+            if ($number <= 0) {
+                continue;
+            }
+            $title = 'Chapter ' . $number;
+            $meta['chapter_number'] = $number;
+            $meta['nav_label'] = $number . '. ' . $title;
+            $update->execute(array(
+                ':title' => $title,
+                ':metadata_json' => json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                ':id' => (int)$row['id'],
+            ));
+        }
     }
 
     /**

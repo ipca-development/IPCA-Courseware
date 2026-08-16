@@ -119,6 +119,8 @@ final class ControlledPublishingManualStructureService
             $removed += $result['removed'];
         }
 
+        $updated += $this->overlayChapterTitlesFromImportedBlocks($versionId);
+
         return array(
             'parts_synced' => $partsSynced,
             'chapters_created' => $created,
@@ -136,18 +138,31 @@ final class ControlledPublishingManualStructureService
     public function ensureVersionStructure(int $versionId, ?int $actorUserId = null): array
     {
         if (!$this->needsStructureSync($versionId)) {
-            return array(
-                'parts_synced' => 0,
-                'chapters_created' => 0,
-                'chapters_updated' => 0,
-                'chapters_removed' => 0,
-                'skipped' => true,
-            );
+            return $this->refreshImportedChapterTitles($versionId);
         }
 
         $result = $this->syncVersionStructure($versionId, $actorUserId);
         $result['skipped'] = false;
         return $result;
+    }
+
+    /**
+     * Refresh MAIN chapter titles from imported heading blocks even when the
+     * chapter shells already exist (typical after New Manual cloned OM titles).
+     *
+     * @return array{parts_synced:int,chapters_created:int,chapters_updated:int,chapters_removed:int,skipped:bool}
+     */
+    private function refreshImportedChapterTitles(int $versionId): array
+    {
+        $updated = $this->overlayChapterTitlesFromImportedBlocks($versionId);
+
+        return array(
+            'parts_synced' => 0,
+            'chapters_created' => 0,
+            'chapters_updated' => $updated,
+            'chapters_removed' => 0,
+            'skipped' => $updated === 0,
+        );
     }
 
     /**
@@ -480,7 +495,9 @@ final class ControlledPublishingManualStructureService
             if (isset($existingByNumber[$number])) {
                 $row = $existingByNumber[$number];
                 $meta = $this->decodeMeta($row);
+                $existingNav = trim((string)($meta['nav_label'] ?? ''));
                 $needsUpdate = ((string)($row['title'] ?? '') !== $title)
+                    || ($existingNav !== $navLabel)
                     || ((string)($row['section_key'] ?? '') !== $sectionKey)
                     || (int)($meta['manual_part'] ?? 0) !== $manualPart
                     || !$this->isCanonicalChapterSection($row);
@@ -1002,6 +1019,134 @@ final class ControlledPublishingManualStructureService
         }
 
         return $items;
+    }
+
+    /**
+     * MAIN chapter title taken from the imported depth-1 heading block on that page.
+     */
+    public function chapterTitleFromImportedBlocks(int $sectionId, int $chapterNumber): string
+    {
+        $title = $this->importedChapterTitleFromBlocks($sectionId, $chapterNumber);
+        if ($title === '') {
+            return '';
+        }
+
+        return $chapterNumber . '. ' . $title;
+    }
+
+    /**
+     * Rewrite cloned OM MAIN titles from imported heading blocks (title / 1. Title).
+     */
+    private function overlayChapterTitlesFromImportedBlocks(int $versionId): int
+    {
+        if ($this->blocks === null || $versionId <= 0) {
+            return 0;
+        }
+
+        $updated = 0;
+        foreach ($this->sections->listFlatSections($versionId) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $sectionId = (int)($row['id'] ?? 0);
+            $number = $this->chapterNumberFromSection($row);
+            if ($sectionId <= 0 || $number <= 0) {
+                continue;
+            }
+
+            $importedTitle = $this->importedChapterTitleFromBlocks($sectionId, $number);
+            if ($importedTitle === '') {
+                continue;
+            }
+
+            $navLabel = $number . '. ' . $importedTitle;
+            $meta = $this->decodeMeta($row);
+            $currentTitle = trim((string)($row['title'] ?? ''));
+            $currentNav = trim((string)($meta['nav_label'] ?? ''));
+            if ($currentTitle === $importedTitle && $currentNav === $navLabel) {
+                continue;
+            }
+
+            $partKey = $this->partKeyFromSection($row);
+            $manualPart = (int)($meta['manual_part'] ?? 0);
+            $sectionKey = (string)($row['section_key'] ?? '');
+            if ($partKey !== '' && $sectionKey === '') {
+                $sectionKey = $this->chapterSectionKey($partKey, $number);
+            } elseif ($sectionKey === '') {
+                $sectionKey = $this->chapterSectionKey('part_' . max(1, $manualPart), $number);
+            }
+
+            $meta['chapter_number'] = $number;
+            if ($manualPart > 0) {
+                $meta['manual_part'] = $manualPart;
+            }
+            $meta['nav_label'] = $navLabel;
+            $meta['synced_from_canonical'] = true;
+
+            $this->updateChapterSection(
+                $sectionId,
+                $sectionKey,
+                $importedTitle,
+                (int)($row['sort_order'] ?? ($number * 10)),
+                $meta
+            );
+            $updated++;
+        }
+
+        return $updated;
+    }
+
+    private function importedChapterTitleFromBlocks(int $sectionId, int $chapterNumber): string
+    {
+        if ($this->blocks === null || $sectionId <= 0 || $chapterNumber <= 0) {
+            return '';
+        }
+
+        $chapterRef = (string)$chapterNumber;
+        foreach ($this->blocks->listSectionBlocks($sectionId) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $payload = $this->blocks->decodePayload($row);
+            $style = $this->navBlockParagraphStyle((string)($row['block_type'] ?? ''), $payload);
+            $depth = ControlledPublishingSectionNumberService::NUMBERED_STYLE_DEPTHS[$style] ?? 0;
+            $text = $this->navBlockEntryText((string)($row['block_type'] ?? ''), $payload);
+            if ($text === '') {
+                continue;
+            }
+
+            $canonRef = rtrim(trim((string)($payload['canonical_section_ref'] ?? '')), '.');
+            if ($depth === 1 && $canonRef === $chapterRef) {
+                $title = $this->stripLeadingSectionRef($text, $chapterRef);
+                $title = $this->formatChapterTitle($title !== '' ? $title : $text);
+                if ($title !== '' && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)) {
+                    return $title;
+                }
+            }
+
+            $parsed = ControlledPublishingDocxReader::parseSectionHeading($text);
+            if ($parsed !== null && (string)$parsed['section_ref'] === $chapterRef) {
+                $title = $this->formatChapterTitle((string)$parsed['title']);
+                if ($title !== '' && !preg_match('/^Chapter\s+' . $chapterNumber . '$/i', $title)) {
+                    return $title;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function partKeyFromSection(array $row): string
+    {
+        $key = (string)($row['section_key'] ?? '');
+        if (preg_match('/^(part_\d+|main_content)_chapter_\d+$/', $key, $m) === 1) {
+            return (string)$m[1];
+        }
+
+        return '';
     }
 
     /**

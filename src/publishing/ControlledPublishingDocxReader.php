@@ -156,6 +156,8 @@ final class ControlledPublishingDocxReader
         $zip->close();
         $this->zip = null;
 
+        $nodes = self::promoteMissingChapterHeadings($nodes, $manualPart);
+
         return array(
             'manual_part' => $manualPart,
             'nodes' => $nodes,
@@ -262,7 +264,13 @@ final class ControlledPublishingDocxReader
         $paragraphStyle = 'body';
         if ($text !== '' && !$isBullet) {
             $parsed = self::parseSectionHeading($text);
-            if ($parsed !== null && self::isPlausibleManualSectionRef($parsed['section_ref'], $parsed['title'], $manualPart)) {
+            $isHeadingStyle = self::isHeadingParagraphStyle($styleId, $styleName);
+            if ($parsed !== null && self::isPlausibleManualSectionRef(
+                $parsed['section_ref'],
+                $parsed['title'],
+                $manualPart,
+                $isHeadingStyle
+            )) {
                 $sectionRef = $parsed['section_ref'];
                 $sectionTitle = $parsed['title'];
                 $paragraphStyle = self::sectionRefToParagraphStyle($sectionRef);
@@ -439,8 +447,12 @@ final class ControlledPublishingDocxReader
         return trim($text);
     }
 
-    public static function isPlausibleManualSectionRef(string $sectionRef, string $title, int $manualPart = -1): bool
-    {
+    public static function isPlausibleManualSectionRef(
+        string $sectionRef,
+        string $title,
+        int $manualPart = -1,
+        bool $allowTitleCaseChapter = false
+    ): bool {
         $sectionRef = trim($sectionRef);
         $title = trim($title);
         if ($sectionRef === '' || $title === '') {
@@ -485,7 +497,7 @@ final class ControlledPublishingDocxReader
                 if (preg_match('/^[\d\s.,\-\/]+$/u', $title)) {
                     return false;
                 }
-                if (!self::isChapterLevelTitle($title)) {
+                if (!self::isChapterLevelTitle($title) && !$allowTitleCaseChapter) {
                     return false;
                 }
                 if (!self::isPlausibleSubtitleTitle($title)) {
@@ -528,8 +540,188 @@ final class ControlledPublishingDocxReader
     }
 
     /**
+     * Word / Pages heading styles used for real chapter titles (Titel, Heading 1, Koptekst).
+     * Numbered body lists are not heading-styled, so Title Case chapter titles can be accepted
+     * without treating "1. Personal Data" as a MAIN section.
+     */
+    public static function isHeadingParagraphStyle(string $styleId, string $styleName): bool
+    {
+        $id = strtolower(trim($styleId));
+        $name = strtolower(trim($styleName));
+        if ($id === '' && $name === '') {
+            return false;
+        }
+        if (in_array($id, array('titel', 'title'), true) || in_array($name, array('titel', 'title'), true)) {
+            return true;
+        }
+        if (str_starts_with($name, 'heading') || str_starts_with($id, 'heading')) {
+            return true;
+        }
+        if (str_starts_with($name, 'koptekst') || str_starts_with($id, 'koptekst')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * When a Word part has 1.1 / 1.1.1 headings but no ALL-CAPS "1. TITLE" line,
+     * promote the first matching "1. Title" paragraph to a chapter heading.
+     *
+     * @param list<array<string,mixed>> $nodes
+     * @return list<array<string,mixed>>
+     */
+    public static function promoteMissingChapterHeadings(array $nodes, int $manualPart): array
+    {
+        if ($manualPart <= 0 || $nodes === array()) {
+            return $nodes;
+        }
+
+        $existingRefs = array();
+        $chaptersWithSubsections = array();
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $ref = trim((string)($node['section_ref'] ?? ''));
+            if ($ref === '') {
+                continue;
+            }
+            $existingRefs[$ref] = true;
+            if (preg_match('/^(\d+)\.\d/', $ref, $m) === 1) {
+                $chaptersWithSubsections[(int)$m[1]] = true;
+            }
+        }
+
+        if ($chaptersWithSubsections === array()) {
+            return $nodes;
+        }
+
+        $promote = static function (array &$nodes, array &$existingRefs, array $chaptersWithSubsections, bool $headingStyleOnly): void {
+            foreach ($nodes as &$node) {
+                if (!is_array($node) || (string)($node['type'] ?? '') !== 'paragraph') {
+                    continue;
+                }
+                if (trim((string)($node['section_ref'] ?? '')) !== '') {
+                    continue;
+                }
+                $isHeadingStyle = self::isHeadingParagraphStyle(
+                    (string)($node['style_id'] ?? ''),
+                    (string)($node['style_name'] ?? '')
+                );
+                if ($headingStyleOnly !== $isHeadingStyle) {
+                    continue;
+                }
+                $parsed = self::parseSectionHeading((string)($node['text'] ?? ''));
+                if ($parsed === null) {
+                    continue;
+                }
+                $ref = (string)$parsed['section_ref'];
+                if (preg_match('/^\d+$/', $ref) !== 1) {
+                    continue;
+                }
+                $number = (int)$ref;
+                if ($number < 1 || $number > self::MAX_CHAPTER_NUMBER || isset($existingRefs[$ref])) {
+                    continue;
+                }
+                if (empty($chaptersWithSubsections[$number])) {
+                    continue;
+                }
+                $title = (string)$parsed['title'];
+                if (!self::isPlausibleSubtitleTitle($title) || self::isLikelyTableOrMeasurementExcerpt($ref, $title)) {
+                    continue;
+                }
+                $node['section_ref'] = $ref;
+                $node['section_title'] = $title;
+                $node['paragraph_style'] = 'title';
+                $existingRefs[$ref] = true;
+            }
+            unset($node);
+        };
+
+        $promote($nodes, $existingRefs, $chaptersWithSubsections, true);
+        $promote($nodes, $existingRefs, $chaptersWithSubsections, false);
+
+        return self::promoteUnnumberedChapterTitles($nodes, $existingRefs, $chaptersWithSubsections);
+    }
+
+    /**
+     * Pages/Word often emit an unnumbered Titel/Heading 1 ("Course Enrollment")
+     * immediately before 1.1 / 1.1.1. Treat that as the MAIN chapter title.
+     *
+     * @param list<array<string,mixed>> $nodes
+     * @param array<string,bool> $existingRefs
+     * @param array<int,bool> $chaptersWithSubsections
+     * @return list<array<string,mixed>>
+     */
+    private static function promoteUnnumberedChapterTitles(
+        array $nodes,
+        array $existingRefs,
+        array $chaptersWithSubsections
+    ): array {
+        $firstSubsectionIndex = array();
+        foreach ($nodes as $index => $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $ref = trim((string)($node['section_ref'] ?? ''));
+            if (preg_match('/^(\d+)\.\d/', $ref, $m) !== 1) {
+                continue;
+            }
+            $chapter = (int)$m[1];
+            if (!isset($firstSubsectionIndex[$chapter])) {
+                $firstSubsectionIndex[$chapter] = $index;
+            }
+        }
+
+        foreach ($chaptersWithSubsections as $chapter => $flag) {
+            unset($flag);
+            $chapter = (int)$chapter;
+            $chapterRef = (string)$chapter;
+            if ($chapter <= 0 || isset($existingRefs[$chapterRef]) || !isset($firstSubsectionIndex[$chapter])) {
+                continue;
+            }
+            $limit = $firstSubsectionIndex[$chapter];
+            $candidateIndex = -1;
+            for ($i = $limit - 1; $i >= 0; $i--) {
+                $node = $nodes[$i] ?? null;
+                if (!is_array($node) || (string)($node['type'] ?? '') !== 'paragraph') {
+                    continue;
+                }
+                if (trim((string)($node['section_ref'] ?? '')) !== '') {
+                    break;
+                }
+                if (!self::isHeadingParagraphStyle(
+                    (string)($node['style_id'] ?? ''),
+                    (string)($node['style_name'] ?? '')
+                )) {
+                    continue;
+                }
+                $text = trim((string)($node['text'] ?? ''));
+                if ($text === '' || self::parseSectionHeading($text) !== null) {
+                    continue;
+                }
+                if (!self::isPlausibleSubtitleTitle($text) || self::isLikelyTableOrMeasurementExcerpt($chapterRef, $text)) {
+                    continue;
+                }
+                $candidateIndex = $i;
+                break;
+            }
+            if ($candidateIndex < 0) {
+                continue;
+            }
+            $nodes[$candidateIndex]['section_ref'] = $chapterRef;
+            $nodes[$candidateIndex]['section_title'] = trim((string)($nodes[$candidateIndex]['text'] ?? ''));
+            $nodes[$candidateIndex]['paragraph_style'] = 'title';
+            $existingRefs[$chapterRef] = true;
+        }
+
+        return $nodes;
+    }
+
+    /**
      * Chapter titles in OM/OMM use ALL CAPS (e.g. "1. INTRODUCTION").
-     * Numbered list items like "1. Personal Data" are rejected.
+     * Numbered list items like "1. Personal Data" are rejected unless they use a heading style.
      */
     public static function isChapterLevelTitle(string $title): bool
     {

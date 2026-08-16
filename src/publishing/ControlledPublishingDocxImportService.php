@@ -269,7 +269,12 @@ final class ControlledPublishingDocxImportService
         foreach ($sections as $section) {
             $ref = (string)($section['section_ref'] ?? '');
             $title = ControlledPublishingDocxReader::sanitizeSectionTitle((string)($section['title'] ?? ''));
-            if ($ref === '' || !ControlledPublishingDocxReader::isPlausibleManualSectionRef($ref, $title, $manualPart)) {
+            if ($ref === '' || !ControlledPublishingDocxReader::isPlausibleManualSectionRef(
+                $ref,
+                $title,
+                $manualPart,
+                self::sectionAllowsTitleCaseChapter($section)
+            )) {
                 continue;
             }
             $body = $this->buildCanonicalBodyText($section);
@@ -617,6 +622,27 @@ final class ControlledPublishingDocxImportService
     /**
      * @param array<string,mixed> $section
      */
+    private static function sectionAllowsTitleCaseChapter(array $section): bool
+    {
+        $ref = trim((string)($section['section_ref'] ?? ''));
+        if ($ref === '' || str_contains($ref, '.')) {
+            return false;
+        }
+        $nodes = is_array($section['nodes'] ?? null) ? $section['nodes'] : array();
+        $first = is_array($nodes[0] ?? null) ? $nodes[0] : array();
+        if ((string)($first['paragraph_style'] ?? '') === 'title') {
+            return true;
+        }
+
+        return ControlledPublishingDocxReader::isHeadingParagraphStyle(
+            (string)($first['style_id'] ?? ''),
+            (string)($first['style_name'] ?? '')
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
     private function buildCanonicalBodyText(array $section): string
     {
         $ref = (string)($section['section_ref'] ?? '');
@@ -683,7 +709,12 @@ final class ControlledPublishingDocxImportService
             if ($ref === '' || !preg_match('/^(\d+)/', $ref, $m)) {
                 continue;
             }
-            if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef($ref, $title, $manualPart)) {
+            if (!ControlledPublishingDocxReader::isPlausibleManualSectionRef(
+                $ref,
+                $title,
+                $manualPart,
+                self::sectionAllowsTitleCaseChapter($section)
+            )) {
                 continue;
             }
             $chapter = (int)$m[1];

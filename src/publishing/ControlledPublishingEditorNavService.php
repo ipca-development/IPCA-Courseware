@@ -222,10 +222,13 @@ final class ControlledPublishingEditorNavService
             if (!$this->manualStructure->isValidChapterNavEntry($row)) {
                 continue;
             }
-            $label = ControlledPublishingManualStructureService::navLabelForSection($row, true);
             $meta = $this->decodeMeta($row);
             $chapterNumber = (int)($meta['chapter_number'] ?? 0);
             $sectionId = (int)($row['id'] ?? 0);
+            $importedLabel = $this->manualStructure->chapterTitleFromImportedBlocks($sectionId, $chapterNumber);
+            $label = $importedLabel !== ''
+                ? ControlledPublishingManualStructureService::uppercaseNavLabel($importedLabel)
+                : ControlledPublishingManualStructureService::navLabelForSection($row, true);
 
             $navItems = $this->manualStructure->listNavSubsectionsFromChapterBlocks(
                 $sectionId,
