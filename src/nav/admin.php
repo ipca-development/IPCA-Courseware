@@ -330,6 +330,7 @@ return [
         'match_paths' => [
             '/admin/ipca_app.php',
             '/admin/ipca_training_videos.php',
+            '/admin/ipca_media_library.php',
         ],
         'items' => [
             [
@@ -343,6 +344,12 @@ return [
                 'label' => 'Training Videos',
                 'icon' => 'reviews',
                 'href' => '/admin/ipca_training_videos.php',
+            ],
+            [
+                'key' => 'ipca_media_library',
+                'label' => 'Media Library',
+                'icon' => 'slides',
+                'href' => '/admin/ipca_media_library.php',
             ],
         ],
     ],

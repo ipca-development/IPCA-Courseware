@@ -40,6 +40,13 @@ cw_header('Training Videos');
 .tv-progress-bar { height: 100%; width: 0; background: #1f6feb; transition: width .12s linear; }
 .tv-ok { color: #0f6d32; font-weight: 700; }
 .tv-err { color: #b42318; font-weight: 700; }
+.tv-thumb { width: 100%; max-width: 420px; border-radius: 10px; background: #071b35; display: block; }
+.tv-thumb-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.tv-picker { position: fixed; inset: 0; background: rgba(7,27,53,.45); display: none; align-items: center; justify-content: center; z-index: 40; padding: 24px; }
+.tv-picker.open { display: flex; }
+.tv-picker-card { background: #fff; border-radius: 12px; max-width: 860px; width: 100%; max-height: 80vh; overflow: auto; padding: 16px; }
+.tv-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.tv-picker-grid img { width: 100%; height: 110px; object-fit: cover; border-radius: 8px; cursor: pointer; }
 @media (max-width: 900px) {
   .tv-grid, .tv-grant { grid-template-columns: 1fr; }
 }
@@ -49,7 +56,7 @@ cw_header('Training Videos');
   <div class="card">
     <div class="tv-kicker">IPCA App</div>
     <h2 style="margin:6px 0 8px;">Training Videos</h2>
-    <p class="tv-muted">Private videos for the IPCA app. Upload the poster image and video one after the other; wait for each transfer to finish. A video is on the app only after the file is on the server and status is Published.</p>
+    <p class="tv-muted">Private videos for the IPCA app. A thumbnail is generated automatically from the IPCA Media Library after the video is uploaded. Custom thumbnail upload is optional. A video is on the app only after the file is on the server and status is Published.</p>
   </div>
   <div class="tv-grid">
     <div class="card">
@@ -61,7 +68,9 @@ cw_header('Training Videos');
         <input type="hidden" id="video-uuid">
         <div id="tv-visibility" class="tv-banner tv-banner-draft">Draft — upload a video file, then publish.</div>
         <div class="tv-field"><label>Title</label><input id="title" required maxlength="255"></div>
-        <div class="tv-field"><label>Description</label><textarea id="description" rows="4"></textarea></div>
+        <div class="tv-field"><label>Description / topic</label><textarea id="description" rows="4"></textarea></div>
+        <div class="tv-field"><label>Category</label><input id="category" maxlength="128" placeholder="Private Pilot, Instrument, ..."></div>
+        <div class="tv-field"><label>Aircraft / program</label><input id="aircraft" maxlength="128" placeholder="Cessna 172, G1000, ..."></div>
         <div class="tv-field">
           <label>Status</label>
           <select id="status">
@@ -71,10 +80,18 @@ cw_header('Training Videos');
           </select>
         </div>
         <div class="tv-field">
-          <label>Poster image</label>
-          <input id="poster-file" type="file" accept="image/jpeg,image/png,image/webp">
+          <label>THUMBNAIL</label>
+          <img id="thumb-preview" class="tv-thumb" alt="" hidden>
+          <p class="tv-muted" id="poster-file-status">No thumbnail yet. Upload a video and one will be generated automatically.</p>
+          <p class="tv-muted" id="thumb-source"></p>
+          <div class="tv-thumb-actions">
+            <button type="button" class="btn" id="thumb-regenerate">Regenerate</button>
+            <button type="button" class="btn" id="thumb-choose">Choose Another Image</button>
+            <label class="btn">Upload Custom
+              <input id="poster-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+            </label>
+          </div>
           <div class="tv-progress" id="poster-progress" hidden><div class="tv-progress-bar" id="poster-progress-bar"></div></div>
-          <p class="tv-muted" id="poster-file-status">No poster uploaded yet.</p>
         </div>
         <div class="tv-field">
           <label>Video file (MP4)</label>
@@ -95,6 +112,14 @@ cw_header('Training Videos');
         <p id="tv-message" class="tv-muted"></p>
       </form>
     </div>
+  </div>
+</div>
+<div class="tv-picker" id="tv-picker">
+  <div class="tv-picker-card">
+    <h3 style="margin-top:0;">Choose Another Image</h3>
+    <p class="tv-muted">Orientation-matched photographs from the IPCA Media Library.</p>
+    <div class="tv-picker-grid" id="tv-picker-grid"></div>
+    <button type="button" class="btn" id="tv-picker-close" style="margin-top:12px;">Close</button>
   </div>
 </div>
 
@@ -156,7 +181,7 @@ cw_header('Training Videos');
       }
       return 'No video uploaded yet.';
     }
-    return (video && video.has_poster) ? 'Poster image is on the server.' : 'No poster uploaded yet.';
+    return (video && video.has_poster) ? 'Generated thumbnail is ready.' : 'No thumbnail yet. Upload a video and one will be generated automatically.';
   };
 
   const setProgress = (kind, fraction, text) => {
@@ -172,6 +197,48 @@ cw_header('Training Videos');
     fill.style.width = Math.max(0, Math.min(100, Math.round(fraction * 100))) + '%';
     if (text) status.textContent = text;
   };
+
+  const sourceLabel = (video) => {
+    const source = (video && video.poster_source) || '';
+    if (source === 'media_library') return 'Source: IPCA Media Library';
+    if (source === 'ai_generated') return 'Source: AI Generated';
+    if (source === 'custom') return 'Source: Custom upload';
+    if (source === 'branded_fallback') return 'Source: IPCA Media Library / AI Generated';
+    if (video && video.has_poster) return 'Source: IPCA Media Library / AI Generated';
+    return '';
+  };
+
+  const setThumb = (video) => {
+    const img = document.getElementById('thumb-preview');
+    const source = document.getElementById('thumb-source');
+    if (video && video.poster_url) {
+      img.hidden = false;
+      img.src = video.poster_url + (video.poster_url.includes('?') ? '&' : '?') + 't=' + Date.now();
+    } else {
+      img.hidden = true;
+      img.removeAttribute('src');
+    }
+    source.textContent = sourceLabel(video);
+  };
+
+  const probeVideo = (file) => new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      resolve({
+        width: video.videoWidth || 0,
+        height: video.videoHeight || 0,
+        duration_ms: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : 0,
+      });
+      URL.revokeObjectURL(url);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: 0, height: 0, duration_ms: 0 });
+    };
+    video.src = url;
+  });
 
   const setMessage = (text, kind) => {
     messageEl.textContent = text || '';
@@ -250,10 +317,10 @@ cw_header('Training Videos');
     return response.json();
   };
 
-  const putWithProgress = (kind, uuid, file, mime, onProgress) => new Promise((resolve, reject) => {
+  const putWithProgress = (kind, uuid, file, mime, onProgress, extra) => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/admin/api/training_videos_upload.php?kind=' + encodeURIComponent(kind)
-      + '&video_uuid=' + encodeURIComponent(uuid));
+    const query = new URLSearchParams(Object.assign({ kind, video_uuid: uuid }, extra || {}));
+    xhr.open('POST', '/admin/api/training_videos_upload.php?' + query.toString());
     xhr.setRequestHeader('X-IPCA-CSRF', csrf);
     xhr.setRequestHeader('Content-Type', mime);
     xhr.upload.onprogress = (event) => {
@@ -293,9 +360,12 @@ cw_header('Training Videos');
     document.getElementById('video-uuid').value = current.video_uuid || '';
     document.getElementById('title').value = current.title || '';
     document.getElementById('description').value = current.description || '';
+    document.getElementById('category').value = current.category || '';
+    document.getElementById('aircraft').value = current.aircraft || '';
     document.getElementById('status').value = current.status || 'draft';
     document.getElementById('video-file-status').textContent = fileStatus('video', current);
     document.getElementById('poster-file-status').textContent = fileStatus('poster', current);
+    setThumb(current);
     setVisibility(current);
     renderGrants(grants || []);
   };
@@ -313,6 +383,8 @@ cw_header('Training Videos');
       video_uuid: document.getElementById('video-uuid').value,
       title: document.getElementById('title').value,
       description: document.getElementById('description').value,
+      category: document.getElementById('category').value,
+      aircraft: document.getElementById('aircraft').value,
       status: statusOverride || document.getElementById('status').value,
       grants: collectGrants(),
     };
@@ -340,12 +412,16 @@ cw_header('Training Videos');
         uuid = saved.video.video_uuid;
       }
       const mime = file.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg');
+      let extra = {};
+      if (kind === 'video') {
+        extra = await probeVideo(file);
+      }
       setProgress(kind, 0, 'Preparing ' + kind + ' upload…');
       setMessage('Uploading ' + kind + '…');
       const complete = await putWithProgress(kind, uuid, file, mime, (loaded, total) => {
         const pct = total ? Math.round((loaded / total) * 100) : 0;
         setProgress(kind, total ? loaded / total : 0, 'Uploading ' + kind + '… ' + pct + '% · ' + formatBytes(loaded) + ' of ' + formatBytes(total));
-      });
+      }, extra);
       setProgress(kind, null);
       fillForm(complete.video, collectGrants());
       await loadList();
@@ -354,7 +430,7 @@ cw_header('Training Videos');
       } else if (kind === 'video') {
         setMessage('Video file is on the server. Publish to show it in the app.', 'ok');
       } else {
-        setMessage('Poster uploaded. You can upload the video next.', 'ok');
+        setMessage('Custom thumbnail uploaded.', 'ok');
       }
     } catch (error) {
       setProgress(kind, null);
@@ -377,7 +453,7 @@ cw_header('Training Videos');
     await save();
   });
   document.getElementById('tv-new').addEventListener('click', () => {
-    fillForm({ title: '', description: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
+    fillForm({ title: '', description: '', category: '', aircraft: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
     setMessage('');
     loadList();
   });
@@ -407,15 +483,56 @@ cw_header('Training Videos');
     if (!uuid) return;
     const result = await post({ action: 'delete', video_uuid: uuid });
     if (result.ok) {
-      fillForm({ title: '', description: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
+      fillForm({ title: '', description: '', category: '', aircraft: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
       await loadList();
       setMessage('Deleted.', 'ok');
     } else setMessage(result.error || 'Could not delete.', 'err');
   });
   document.getElementById('video-file').addEventListener('change', (event) => queueUpload('video', event.target.files[0]));
   document.getElementById('poster-file').addEventListener('change', (event) => queueUpload('poster', event.target.files[0]));
+  document.getElementById('thumb-regenerate').addEventListener('click', async () => {
+    const uuid = document.getElementById('video-uuid').value;
+    if (!uuid) {
+      setMessage('Save and upload a video first.', 'err');
+      return;
+    }
+    const result = await post({ action: 'regenerate_thumbnail', video_uuid: uuid });
+    if (result.ok) {
+      fillForm(result.video, result.grants || collectGrants());
+      setMessage('Thumbnail updated from the next matching photograph.', 'ok');
+    } else setMessage(result.error || 'Could not regenerate.', 'err');
+  });
+  document.getElementById('thumb-choose').addEventListener('click', async () => {
+    const uuid = document.getElementById('video-uuid').value;
+    if (!uuid) {
+      setMessage('Save and upload a video first.', 'err');
+      return;
+    }
+    const orientation = (current && current.orientation) || 'landscape';
+    const data = await fetch('/admin/api/media_library_api.php?action=list&orientation=' + encodeURIComponent(orientation)).then((r) => r.json());
+    const picker = document.getElementById('tv-picker');
+    const grid = document.getElementById('tv-picker-grid');
+    const assets = data.assets || [];
+    grid.innerHTML = assets.map((asset) => `
+      <img src="${asset.preview_url || ''}" data-uuid="${asset.asset_uuid}" alt="${asset.filename || ''}">
+    `).join('') || '<p class="tv-muted">No matching photographs yet. Upload some in Media Library.</p>';
+    grid.querySelectorAll('img[data-uuid]').forEach((img) => {
+      img.addEventListener('click', async () => {
+        const result = await post({ action: 'choose_thumbnail', video_uuid: uuid, asset_uuid: img.dataset.uuid });
+        if (result.ok) {
+          fillForm(result.video, result.grants || collectGrants());
+          picker.classList.remove('open');
+          setMessage('Thumbnail updated from the selected photograph.', 'ok');
+        } else setMessage(result.error || 'Could not use that photograph.', 'err');
+      });
+    });
+    picker.classList.add('open');
+  });
+  document.getElementById('tv-picker-close').addEventListener('click', () => {
+    document.getElementById('tv-picker').classList.remove('open');
+  });
 
-  fillForm({ title: '', description: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
+  fillForm({ title: '', description: '', category: '', aircraft: '', status: 'draft', has_video: false, has_poster: false, app_visible: false }, []);
   loadList();
 })();
 </script>

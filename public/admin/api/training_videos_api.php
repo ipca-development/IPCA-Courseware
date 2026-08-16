@@ -71,21 +71,30 @@ try {
             (int)($input['byte_size'] ?? 0),
             (string)($input['filename'] ?? '')
         ),
-        'complete_video' => $service->completeAdminUpload(
-            $videoUuid,
-            'video',
-            (int)($input['duration_ms'] ?? 0),
-            (int)($input['byte_size'] ?? 0),
-            (string)($input['mime_type'] ?? '')
-        ),
-        'complete_poster' => $service->completeAdminUpload(
-            $videoUuid,
-            'poster',
-            0,
-            (int)($input['byte_size'] ?? 0),
-            (string)($input['mime_type'] ?? '')
-        ),
-        default => throw new CommunicationException('validation_error', 'Unknown action.', 400),
+            'complete_video' => $service->completeAdminUpload(
+                $videoUuid,
+                'video',
+                (int)($input['duration_ms'] ?? 0),
+                (int)($input['byte_size'] ?? 0),
+                (string)($input['mime_type'] ?? ''),
+                array(
+                    'width' => (int)($input['width'] ?? 0),
+                    'height' => (int)($input['height'] ?? 0),
+                )
+            ),
+            'complete_poster' => $service->completeAdminUpload(
+                $videoUuid,
+                'poster',
+                0,
+                (int)($input['byte_size'] ?? 0),
+                (string)($input['mime_type'] ?? '')
+            ),
+            'regenerate_thumbnail' => $service->regenerateAdminThumbnail($videoUuid),
+            'choose_thumbnail' => $service->chooseAdminThumbnailAsset(
+                $videoUuid,
+                (string)($input['asset_uuid'] ?? '')
+            ),
+            default => throw new CommunicationException('validation_error', 'Unknown action.', 400),
     };
     training_videos_admin_json(200, array_merge(array('ok' => true), $result));
 } catch (CommunicationException $e) {

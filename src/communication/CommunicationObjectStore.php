@@ -19,6 +19,8 @@ interface CommunicationObjectStore
      * @param resource $stream
      */
     public function putStream(string $key, $stream, int $byteSize, string $contentType): void;
+
+    public function getBytes(string $key, int $maxBytes = 20971520): ?string;
 }
 
 final class CommunicationMemoryObjectStore implements CommunicationObjectStore
@@ -61,6 +63,19 @@ final class CommunicationMemoryObjectStore implements CommunicationObjectStore
     {
         $bytes = stream_get_contents($stream);
         $this->put($key, is_string($bytes) ? $bytes : '', $contentType);
+    }
+
+    public function getBytes(string $key, int $maxBytes = 20971520): ?string
+    {
+        $row = $this->objects[$key] ?? null;
+        if ($row === null) {
+            return null;
+        }
+        $bytes = (string)$row['bytes'];
+        if ($maxBytes > 0 && strlen($bytes) > $maxBytes) {
+            throw new RuntimeException('Object exceeds the allowed download size.');
+        }
+        return $bytes;
     }
 
     public function head(string $key): ?array
@@ -122,5 +137,10 @@ final class CommunicationSpacesObjectStore implements CommunicationObjectStore
     public function putStream(string $key, $stream, int $byteSize, string $contentType): void
     {
         cw_spaces_put_private_stream($key, $stream, $byteSize, $contentType);
+    }
+
+    public function getBytes(string $key, int $maxBytes = 20971520): ?string
+    {
+        return cw_spaces_get_object($key, $maxBytes);
     }
 }

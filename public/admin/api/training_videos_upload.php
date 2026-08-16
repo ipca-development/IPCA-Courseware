@@ -53,7 +53,11 @@ try {
             $mimeType,
             $byteSize,
             $stream,
-            (int)($_GET['duration_ms'] ?? 0)
+            (int)($_GET['duration_ms'] ?? 0),
+            array(
+                'width' => (int)($_GET['width'] ?? 0),
+                'height' => (int)($_GET['height'] ?? 0),
+            )
         );
     } finally {
         fclose($stream);

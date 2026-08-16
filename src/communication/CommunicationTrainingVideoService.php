@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/CommunicationConfigService.php';
 require_once __DIR__ . '/CommunicationObjectStore.php';
 require_once __DIR__ . '/CommunicationSupport.php';
+require_once __DIR__ . '/CommunicationTrainingMediaLibraryService.php';
+require_once __DIR__ . '/CommunicationTrainingThumbnailRenderer.php';
 
 /**
  * Private training-video library. Isolated from messages, Community CDN media,
@@ -25,12 +27,20 @@ final class CommunicationTrainingVideoService
 
     /** @var array<string,bool> */
     private array $tableCache = array();
+    /** @var array<string,bool> */
+    private array $columnCache = array();
+    private CommunicationTrainingMediaLibraryService $mediaLibrary;
+    private CommunicationTrainingThumbnailRenderer $renderer;
 
     public function __construct(
         private PDO $pdo,
         private CommunicationConfigService $config,
-        private CommunicationObjectStore $store
+        private CommunicationObjectStore $store,
+        ?CommunicationTrainingMediaLibraryService $mediaLibrary = null,
+        ?CommunicationTrainingThumbnailRenderer $renderer = null
     ) {
+        $this->mediaLibrary = $mediaLibrary ?? new CommunicationTrainingMediaLibraryService($pdo, $store);
+        $this->renderer = $renderer ?? new CommunicationTrainingThumbnailRenderer();
     }
 
     /** @param array<string,mixed> $session @return array<string,mixed> */
@@ -272,6 +282,7 @@ final class CommunicationTrainingVideoService
         $normalizedGrants = $this->normalizeGrants($grants);
         $now = CommunicationSupport::nowUtc();
         $videoUuid = trim((string)($input['video_uuid'] ?? ''));
+        $existing = null;
         if ($videoUuid === '') {
             $videoUuid = CommunicationSupport::uuid();
             $this->pdo->prepare(
@@ -308,10 +319,17 @@ final class CommunicationTrainingVideoService
                 (int)$existing['id'],
             ));
         }
+        $this->saveOptionalVideoFields($videoUuid, $input, is_array($existing) ? $existing : array());
         $row = $this->requireAdminVideo($videoUuid);
         $this->replaceGrants((int)$row['id'], $normalizedGrants);
+        if (trim((string)($row['storage_key'] ?? '')) !== ''
+            && strtolower(trim((string)($row['poster_source'] ?? ''))) !== 'custom'
+        ) {
+            $this->ensureGeneratedThumbnail($videoUuid, 'ensure');
+            $row = $this->requireAdminVideo($videoUuid);
+        }
         return array(
-            'video' => $this->adminVideo($this->requireAdminVideo($videoUuid)),
+            'video' => $this->adminVideo($row),
             'grants' => $this->grantsFor((int)$row['id']),
         );
     }
@@ -319,12 +337,16 @@ final class CommunicationTrainingVideoService
     /** @return array<string,mixed> */
     public function archiveAdmin(string $videoUuid, int $adminUserId): array
     {
+        $row = $this->requireAdminVideo($videoUuid);
         return $this->saveAdmin(array(
             'video_uuid' => $videoUuid,
-            'title' => (string)($this->requireAdminVideo($videoUuid)['title'] ?? ''),
-            'description' => (string)($this->requireAdminVideo($videoUuid)['description'] ?? ''),
+            'title' => (string)($row['title'] ?? ''),
+            'description' => (string)($row['description'] ?? ''),
+            'category' => (string)($row['category'] ?? ''),
+            'aircraft' => (string)($row['aircraft'] ?? ''),
+            'program' => (string)($row['program'] ?? ''),
             'status' => 'archived',
-        ), $this->grantsFor((int)$this->requireAdminVideo($videoUuid)['id']), $adminUserId);
+        ), $this->grantsFor((int)$row['id']), $adminUserId);
     }
 
     /** @return array<string,mixed> */
@@ -378,6 +400,7 @@ final class CommunicationTrainingVideoService
      * browser does not need Spaces CORS.
      *
      * @param resource $stream
+     * @param array<string,mixed> $options
      * @return array<string,mixed>
      */
     public function putAdminObject(
@@ -386,21 +409,26 @@ final class CommunicationTrainingVideoService
         string $mimeType,
         int $byteSize,
         $stream,
-        int $durationMs = 0
+        int $durationMs = 0,
+        array $options = array()
     ): array {
         $prepared = $this->presignAdminUpload($videoUuid, $kind, $mimeType, $byteSize);
         $key = (string)$prepared['storage_key'];
         $this->store->putStream($key, $stream, $byteSize, strtolower(trim($mimeType)));
-        return $this->completeAdminUpload($videoUuid, $kind, $durationMs, $byteSize, $mimeType);
+        return $this->completeAdminUpload($videoUuid, $kind, $durationMs, $byteSize, $mimeType, $options);
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
     public function completeAdminUpload(
         string $videoUuid,
         string $kind,
         int $durationMs = 0,
         int $byteSize = 0,
-        string $mimeType = ''
+        string $mimeType = '',
+        array $options = array()
     ): array {
         $row = $this->requireAdminVideo($videoUuid);
         $kind = strtolower(trim($kind));
@@ -425,6 +453,9 @@ final class CommunicationTrainingVideoService
         }
         $now = CommunicationSupport::nowUtc();
         if ($kind === 'video') {
+            $width = max(0, (int)($options['width'] ?? 0));
+            $height = max(0, (int)($options['height'] ?? 0));
+            $orientation = CommunicationTrainingThumbnailRenderer::videoOrientation($width, $height);
             $this->pdo->prepare(
                 'UPDATE ipca_training_videos
                  SET storage_key = ?, mime_type = ?, byte_size = ?, duration_ms = ?, updated_at_utc = ?
@@ -437,6 +468,14 @@ final class CommunicationTrainingVideoService
                 $now,
                 (int)$row['id'],
             ));
+            $this->updateVideoFields((int)$row['id'], array(
+                'width' => $width,
+                'height' => $height,
+                'orientation' => $orientation === '' ? null : $orientation,
+            ));
+            if (strtolower(trim((string)($row['poster_source'] ?? ''))) !== 'custom') {
+                $this->ensureGeneratedThumbnail($videoUuid, 'ensure');
+            }
         } else {
             $this->pdo->prepare(
                 'UPDATE ipca_training_videos
@@ -448,8 +487,54 @@ final class CommunicationTrainingVideoService
                 $now,
                 (int)$row['id'],
             ));
+            $this->updateVideoFields((int)$row['id'], array(
+                'poster_source' => 'custom',
+                'poster_template' => null,
+                'poster_library_asset_id' => null,
+                'poster_candidate_json' => null,
+                'poster_candidate_index' => 0,
+            ));
         }
         return array('video' => $this->adminVideo($this->requireAdminVideo($videoUuid)));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function ensureGeneratedThumbnail(string $videoUuid, string $mode = 'ensure'): array
+    {
+        try {
+            $this->renderGeneratedThumbnail($videoUuid, $mode, '');
+        } catch (Throwable) {
+            // Video upload/save must not fail if thumbnail rendering is unavailable.
+        }
+        return array('video' => $this->adminVideo($this->requireAdminVideo($videoUuid)));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function regenerateAdminThumbnail(string $videoUuid): array
+    {
+        $this->renderGeneratedThumbnail($videoUuid, 'regenerate', '');
+        $row = $this->requireAdminVideo($videoUuid);
+        return array(
+            'video' => $this->adminVideo($row),
+            'grants' => $this->grantsFor((int)$row['id']),
+        );
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function chooseAdminThumbnailAsset(string $videoUuid, string $assetUuid): array
+    {
+        $this->renderGeneratedThumbnail($videoUuid, 'choose', $assetUuid);
+        $row = $this->requireAdminVideo($videoUuid);
+        return array(
+            'video' => $this->adminVideo($row),
+            'grants' => $this->grantsFor((int)$row['id']),
+        );
     }
 
     /** @param array<string,mixed> $session @return array<string,mixed> */
@@ -718,19 +803,38 @@ final class CommunicationTrainingVideoService
     {
         $posterKey = trim((string)($row['poster_storage_key'] ?? ''));
         $videoKey = trim((string)($row['storage_key'] ?? ''));
+        $source = strtolower(trim((string)($row['poster_source'] ?? '')));
+        $sourceLabel = match ($source) {
+            'custom' => 'Custom upload',
+            'media_library' => 'IPCA Media Library',
+            'ai_generated' => 'AI Generated',
+            'branded_fallback' => 'IPCA template',
+            default => $posterKey !== '' ? 'Custom upload' : '',
+        };
         return array(
             'id' => (int)$row['id'],
             'video_uuid' => (string)$row['video_uuid'],
             'title' => (string)$row['title'],
             'description' => (string)($row['description'] ?? ''),
+            'category' => (string)($row['category'] ?? ''),
+            'aircraft' => (string)($row['aircraft'] ?? ''),
+            'program' => (string)($row['program'] ?? ''),
             'status' => (string)$row['status'],
             'duration_ms' => (int)$row['duration_ms'],
             'byte_size' => (int)$row['byte_size'],
+            'width' => (int)($row['width'] ?? 0),
+            'height' => (int)($row['height'] ?? 0),
+            'orientation' => (string)($row['orientation'] ?? ''),
             'mime_type' => (string)$row['mime_type'],
             'has_video' => $videoKey !== '',
             'has_poster' => $posterKey !== '',
             'app_visible' => $videoKey !== '' && (string)$row['status'] === 'published',
             'poster_url' => $posterKey !== '' ? $this->store->presignGet($posterKey, self::GET_EXPIRES) : '',
+            'poster_source' => $source,
+            'poster_source_label' => $sourceLabel,
+            'poster_template' => (string)($row['poster_template'] ?? ''),
+            'thumbnail_candidates' => $this->thumbnailCandidates($row),
+            'thumbnail_candidate_index' => (int)($row['poster_candidate_index'] ?? 0),
             'view_count' => $this->countViews((int)$row['id']),
             'like_count' => $this->countLikes((int)$row['id']),
             'comment_count' => $this->countComments((int)$row['id']),
@@ -909,5 +1013,276 @@ final class CommunicationTrainingVideoService
         }
         $this->tableCache[$name] = $exists;
         return $exists;
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $existing
+     */
+    private function saveOptionalVideoFields(string $videoUuid, array $input, array $existing): void
+    {
+        $row = $this->requireAdminVideo($videoUuid);
+        $fields = array();
+        foreach (array('category', 'aircraft', 'program') as $column) {
+            if (array_key_exists($column, $input)) {
+                $value = trim((string)$input[$column]);
+            } else {
+                $value = trim((string)($existing[$column] ?? ''));
+            }
+            $fields[$column] = $value === '' ? null : mb_substr($value, 0, 128);
+        }
+        $this->updateVideoFields((int)$row['id'], $fields);
+    }
+
+    /**
+     * @param array<string,mixed> $fields
+     */
+    private function updateVideoFields(int $videoId, array $fields): void
+    {
+        $sets = array();
+        $args = array();
+        foreach ($fields as $column => $value) {
+            if (!$this->hasVideoColumn($column)) {
+                continue;
+            }
+            $sets[] = $column . ' = ?';
+            $args[] = $value;
+        }
+        if ($sets === array()) {
+            return;
+        }
+        $sets[] = 'updated_at_utc = ?';
+        $args[] = CommunicationSupport::nowUtc();
+        $args[] = $videoId;
+        $this->pdo->prepare(
+            'UPDATE ipca_training_videos SET ' . implode(', ', $sets) . ' WHERE id = ?'
+        )->execute($args);
+    }
+
+    private function hasVideoColumn(string $column): bool
+    {
+        if (array_key_exists($column, $this->columnCache)) {
+            return $this->columnCache[$column];
+        }
+        $ok = false;
+        try {
+            $driver = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+            if ($driver === 'sqlite') {
+                $stmt = $this->pdo->query('PRAGMA table_info(ipca_training_videos)');
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    if ((string)($row['name'] ?? '') === $column) {
+                        $ok = true;
+                        break;
+                    }
+                }
+            } else {
+                $stmt = $this->pdo->prepare(
+                    'SELECT 1 FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+                );
+                $stmt->execute(array('ipca_training_videos', $column));
+                $ok = $stmt->fetchColumn() !== false;
+            }
+        } catch (Throwable) {
+            $ok = false;
+        }
+        $this->columnCache[$column] = $ok;
+        return $ok;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return list<array<string,mixed>>
+     */
+    private function thumbnailCandidates(array $row): array
+    {
+        $raw = json_decode((string)($row['poster_candidate_json'] ?? ''), true);
+        if (!is_array($raw)) {
+            return array();
+        }
+        $out = array();
+        foreach ($raw as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $uuid = (string)($item['asset_uuid'] ?? '');
+            $asset = $uuid !== '' ? $this->mediaLibrary->findByUuid($uuid) : null;
+            $preview = '';
+            if (is_array($asset)) {
+                $preview = (string)($this->mediaLibrary->adminAsset($asset)['preview_url'] ?? '');
+            }
+            $out[] = array(
+                'asset_uuid' => $uuid,
+                'score' => (float)($item['score'] ?? 0),
+                'preview_url' => $preview,
+                'orientation' => (string)($item['orientation'] ?? ''),
+                'filename' => (string)($item['filename'] ?? ''),
+            );
+        }
+        return $out;
+    }
+
+    private function renderGeneratedThumbnail(string $videoUuid, string $mode, string $chosenAssetUuid): void
+    {
+        if (!extension_loaded('gd')) {
+            return;
+        }
+        $row = $this->requireAdminVideo($videoUuid);
+        $orientation = strtolower(trim((string)($row['orientation'] ?? '')));
+        if ($orientation !== 'portrait' && $orientation !== 'landscape') {
+            $orientation = CommunicationTrainingThumbnailRenderer::videoOrientation(
+                (int)($row['width'] ?? 0),
+                (int)($row['height'] ?? 0)
+            );
+        }
+        if ($orientation === '') {
+            $orientation = 'landscape';
+        }
+        $template = CommunicationTrainingThumbnailRenderer::templateForOrientation($orientation);
+        $context = array(
+            'title' => (string)($row['title'] ?? ''),
+            'description' => (string)($row['description'] ?? ''),
+            'category' => (string)($row['category'] ?? ''),
+            'aircraft' => (string)($row['aircraft'] ?? ''),
+            'program' => (string)($row['program'] ?? ''),
+        );
+        $candidates = $this->resolvedCandidates($row, $context, $orientation, $mode === 'ensure');
+        $index = (int)($row['poster_candidate_index'] ?? 0);
+        if ($mode === 'regenerate' && $candidates !== array()) {
+            $index = ($index + 1) % count($candidates);
+        } elseif ($mode === 'choose' && $chosenAssetUuid !== '') {
+            $chosen = $this->mediaLibrary->findByUuid($chosenAssetUuid);
+            if ($chosen === null) {
+                throw new CommunicationException('not_found', 'That photograph was not found.', 404);
+            }
+            if (!$this->orientationAllowed($orientation, (string)$chosen['orientation'])) {
+                throw new CommunicationException('validation_error', 'That photograph does not match the video orientation.', 400);
+            }
+            array_unshift($candidates, $this->candidateFromRow($chosen, 100.0));
+            $seen = array();
+            $unique = array();
+            foreach ($candidates as $candidate) {
+                $uuid = (string)$candidate['asset_uuid'];
+                if (isset($seen[$uuid])) {
+                    continue;
+                }
+                $seen[$uuid] = true;
+                $unique[] = $candidate;
+            }
+            $candidates = array_slice($unique, 0, 3);
+            $index = 0;
+        } elseif ($index < 0 || $index >= max(1, count($candidates))) {
+            $index = 0;
+        }
+
+        $background = null;
+        $source = 'branded_fallback';
+        $assetId = null;
+        $focalX = 0.5;
+        $focalY = $orientation === 'portrait' ? 0.38 : 0.48;
+        if (isset($candidates[$index])) {
+            $asset = $this->mediaLibrary->findByUuid((string)$candidates[$index]['asset_uuid']);
+            if (is_array($asset) && $this->orientationAllowed($orientation, (string)$asset['orientation'])) {
+                $bytes = $this->mediaLibrary->getImageBytes((string)$asset['asset_uuid']);
+                if (is_string($bytes) && $bytes !== '') {
+                    $background = $bytes;
+                    $source = 'media_library';
+                    $assetId = (int)$asset['id'];
+                    $analysis = json_decode((string)($asset['analysis_json'] ?? ''), true);
+                    if (is_array($analysis)) {
+                        $focalX = (float)($analysis['focal_x'] ?? $focalX);
+                        $focalY = (float)($analysis['focal_y'] ?? $focalY);
+                    }
+                }
+            }
+        }
+        if ($background === null) {
+            $aiBackground = $this->mediaLibrary->generateAiBackground($context, $orientation);
+            if (is_string($aiBackground) && $aiBackground !== '') {
+                $background = $aiBackground;
+                $source = 'ai_generated';
+            }
+        }
+
+        $jpeg = $this->renderer->render($template, array(
+            'title' => (string)$row['title'],
+            'category' => trim((string)($row['category'] ?? '') . ((string)($row['aircraft'] ?? '') !== '' ? ' · ' . $row['aircraft'] : '')),
+            'focal_x' => $focalX,
+            'focal_y' => $focalY,
+        ), $background);
+        $posterKey = 'training-videos/1/' . $row['video_uuid'] . '.poster';
+        $stream = fopen('php://memory', 'rb+');
+        if ($stream === false) {
+            throw new RuntimeException('Could not buffer the generated thumbnail.');
+        }
+        fwrite($stream, $jpeg);
+        rewind($stream);
+        $this->store->putStream($posterKey, $stream, strlen($jpeg), 'image/jpeg');
+        fclose($stream);
+        $this->pdo->prepare(
+            'UPDATE ipca_training_videos SET poster_storage_key = ?, poster_mime_type = ?, updated_at_utc = ? WHERE id = ?'
+        )->execute(array($posterKey, 'image/jpeg', CommunicationSupport::nowUtc(), (int)$row['id']));
+        $this->updateVideoFields((int)$row['id'], array(
+            'poster_source' => $source,
+            'poster_template' => $template,
+            'poster_library_asset_id' => $assetId,
+            'poster_candidate_json' => json_encode($candidates, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'poster_candidate_index' => $index,
+        ));
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param array<string,mixed> $context
+     * @return list<array<string,mixed>>
+     */
+    private function resolvedCandidates(array $row, array $context, string $orientation, bool $reuseStored): array
+    {
+        $stored = json_decode((string)($row['poster_candidate_json'] ?? ''), true);
+        if ($reuseStored && is_array($stored) && $stored !== array()) {
+            $out = array();
+            foreach ($stored as $item) {
+                if (is_array($item) && CommunicationSupport::isUuid((string)($item['asset_uuid'] ?? ''))) {
+                    $out[] = $item;
+                }
+            }
+            if ($out !== array()) {
+                return $out;
+            }
+        }
+        $ranked = $this->mediaLibrary->rankForVideo($context, $orientation, 3);
+        $out = array();
+        foreach ($ranked as $asset) {
+            $out[] = array(
+                'asset_uuid' => (string)$asset['asset_uuid'],
+                'score' => (float)($asset['score'] ?? 0),
+                'orientation' => (string)($asset['orientation'] ?? ''),
+                'filename' => (string)($asset['filename'] ?? ''),
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function candidateFromRow(array $row, float $score): array
+    {
+        return array(
+            'asset_uuid' => (string)$row['asset_uuid'],
+            'score' => $score,
+            'orientation' => (string)($row['orientation'] ?? ''),
+            'filename' => (string)($row['original_filename'] ?? ''),
+        );
+    }
+
+    private function orientationAllowed(string $videoOrientation, string $assetOrientation): bool
+    {
+        $assetOrientation = strtolower(trim($assetOrientation));
+        if ($assetOrientation === $videoOrientation) {
+            return true;
+        }
+        return $assetOrientation === 'square';
     }
 }

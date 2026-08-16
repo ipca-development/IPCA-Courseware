@@ -23,6 +23,16 @@ function comm_uuid(): string
     return CommunicationSupport::uuid();
 }
 
+function comm_jpeg(int $width, int $height, int $r = 40, int $g = 80, int $b = 120): string
+{
+    $image = imagecreatetruecolor($width, $height);
+    imagefilledrectangle($image, 0, 0, $width, $height, imagecolorallocate($image, $r, $g, $b));
+    ob_start();
+    imagejpeg($image, null, 80);
+    $bytes = (string)ob_get_clean();
+    return $bytes;
+}
+
 function comm_sqlite(): PDO
 {
     $pdo = new PDO('sqlite::memory:');
@@ -286,12 +296,23 @@ function comm_sqlite(): PDO
       video_uuid TEXT NOT NULL UNIQUE,
       title TEXT NOT NULL,
       description TEXT NULL,
+      category TEXT NULL,
+      aircraft TEXT NULL,
+      program TEXT NULL,
       storage_key TEXT NULL UNIQUE,
       mime_type TEXT NOT NULL DEFAULT 'video/mp4',
       poster_storage_key TEXT NULL,
       poster_mime_type TEXT NULL,
+      poster_source TEXT NULL,
+      poster_template TEXT NULL,
+      poster_library_asset_id INTEGER NULL,
+      poster_candidate_json TEXT NULL,
+      poster_candidate_index INTEGER NOT NULL DEFAULT 0,
       duration_ms INTEGER NOT NULL DEFAULT 0,
       byte_size INTEGER NOT NULL DEFAULT 0,
+      width INTEGER NOT NULL DEFAULT 0,
+      height INTEGER NOT NULL DEFAULT 0,
+      orientation TEXT NULL,
       status TEXT NOT NULL DEFAULT 'draft',
       created_by_user_id INTEGER NOT NULL,
       updated_by_user_id INTEGER NOT NULL,
@@ -336,6 +357,23 @@ function comm_sqlite(): PDO
       created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       deleted_at_utc TEXT NULL,
       FOREIGN KEY (video_id) REFERENCES ipca_training_videos(id) ON DELETE CASCADE
+    )");
+    $pdo->exec("CREATE TABLE ipca_training_media_library (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_uuid TEXT NOT NULL UNIQUE,
+      storage_key TEXT NOT NULL UNIQUE,
+      original_filename TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+      byte_size INTEGER NOT NULL DEFAULT 0,
+      width INTEGER NOT NULL DEFAULT 0,
+      height INTEGER NOT NULL DEFAULT 0,
+      orientation TEXT NOT NULL DEFAULT 'landscape',
+      analysis_json TEXT NULL,
+      analysis_text TEXT NULL,
+      analysis_status TEXT NOT NULL DEFAULT 'pending',
+      created_by_user_id INTEGER NOT NULL,
+      created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      deleted_at_utc TEXT NULL
     )");
     $flags = array(
         'protocol_version' => '1',
@@ -1028,6 +1066,45 @@ comm_assert(
     && !str_contains($trainingVideoServiceSource, 'publicUrl')
     && !str_contains($trainingVideoServiceSource, 'presignPublicPut')
 );
+$phase8Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_16_communication_phase8_training_video_thumbnails.sql');
+$adminThumbPage = (string)file_get_contents($root . '/public/admin/ipca_training_videos.php');
+$mediaLibrarySource = (string)file_get_contents($root . '/src/communication/CommunicationTrainingMediaLibraryService.php');
+$rendererSource = (string)file_get_contents($root . '/src/communication/CommunicationTrainingThumbnailRenderer.php');
+comm_assert(
+    'phase 8 SQL adds a private Media Library',
+    str_contains($phase8Sql, 'ipca_training_media_library')
+    && str_contains($phase8Sql, 'analysis_json')
+    && !str_contains($phase8Sql, 'public-read')
+);
+comm_assert(
+    'training video thumbnails keep locked IPCA templates out of the image model',
+    str_contains($rendererSource, 'IPCA_ALPHA_LANDSCAPE_V1')
+    && str_contains($rendererSource, 'IPCA_ALPHA_PORTRAIT_V1')
+    && str_contains($rendererSource, 'ALPHA TRAINER PRO')
+    && str_contains($mediaLibrarySource, 'generateAiBackground')
+    && str_contains($mediaLibrarySource, 'return null')
+);
+comm_assert(
+    'training videos admin generates thumbnails without requiring a custom poster',
+    str_contains($adminThumbPage, 'THUMBNAIL')
+    && str_contains($adminThumbPage, 'IPCA Media Library')
+    && str_contains($adminThumbPage, 'AI Generated')
+    && str_contains($adminThumbPage, 'Regenerate')
+    && str_contains($adminThumbPage, 'Choose Another Image')
+    && str_contains($adminThumbPage, 'Upload Custom')
+);
+comm_assert('IPCA Media Library admin page exists', is_file($root . '/public/admin/ipca_media_library.php'));
+comm_assert(
+    'admin navigation includes Media Library',
+    str_contains((string)file_get_contents($root . '/src/nav/admin.php'), '/admin/ipca_media_library.php')
+);
+comm_assert(
+    'Media Library stays on private object storage',
+    str_contains($mediaLibrarySource, 'presignGet')
+    && !str_contains($mediaLibrarySource, 'publicUrl')
+    && !str_contains($mediaLibrarySource, 'presignPublicPut')
+    && str_contains((string)file_get_contents($root . '/src/spaces.php'), 'function cw_spaces_get_object')
+);
 
 $emptyTraining = $kernel->training->summary($sessionA);
 comm_assert(
@@ -1229,6 +1306,130 @@ comm_assert(
     && (int)$videoLikeAgain['video']['like_count'] === 1
     && (string)$videoComment['comment']['body'] === 'Clear and useful.'
     && count($kernel->trainingVideos->comments($sessionA, $trainingVideoUuid)['comments']) === 1
+);
+
+$renderer = new CommunicationTrainingThumbnailRenderer();
+$landscapeJpeg = $renderer->render(
+    CommunicationTrainingThumbnailRenderer::LANDSCAPE,
+    array('title' => 'Steep Turns', 'category' => 'Private Pilot'),
+    comm_jpeg(1600, 900, 30, 60, 110)
+);
+$portraitJpeg = $renderer->render(
+    CommunicationTrainingThumbnailRenderer::PORTRAIT,
+    array('title' => 'Cockpit Scan', 'category' => 'Instrument'),
+    comm_jpeg(900, 1600, 20, 40, 80)
+);
+$landscapeInfo = getimagesizefromstring($landscapeJpeg);
+$portraitInfo = getimagesizefromstring($portraitJpeg);
+comm_assert(
+    'locked IPCA templates render independent landscape and portrait masters',
+    is_array($landscapeInfo)
+    && (int)$landscapeInfo[0] === 1280
+    && (int)$landscapeInfo[1] === 720
+    && is_array($portraitInfo)
+    && (int)$portraitInfo[0] === 720
+    && (int)$portraitInfo[1] === 1280
+    && str_starts_with($landscapeJpeg, "\xff\xd8")
+    && str_starts_with($portraitJpeg, "\xff\xd8")
+    && CommunicationTrainingThumbnailRenderer::videoOrientation(1920, 1080) === 'landscape'
+    && CommunicationTrainingThumbnailRenderer::videoOrientation(1080, 1920) === 'portrait'
+);
+
+$landscapeCockpit = comm_jpeg(1280, 720, 10, 20, 40);
+$portraitCockpit = comm_jpeg(720, 1280, 12, 24, 48);
+$landscapeRamp = comm_jpeg(1280, 720, 80, 90, 100);
+$cockpitStream = fopen('php://memory', 'rb+');
+fwrite($cockpitStream, $landscapeCockpit);
+rewind($cockpitStream);
+$libraryCockpit = $kernel->mediaLibrary->putAdminAsset($cockpitStream, 'image/jpeg', strlen($landscapeCockpit), 'cessna_172_cockpit_steep_turns.jpg', $userB);
+fclose($cockpitStream);
+$portraitStream = fopen('php://memory', 'rb+');
+fwrite($portraitStream, $portraitCockpit);
+rewind($portraitStream);
+$libraryPortrait = $kernel->mediaLibrary->putAdminAsset($portraitStream, 'image/jpeg', strlen($portraitCockpit), 'cessna_172_cockpit_portrait.jpg', $userB);
+fclose($portraitStream);
+$rampStream = fopen('php://memory', 'rb+');
+fwrite($rampStream, $landscapeRamp);
+rewind($rampStream);
+$kernel->mediaLibrary->putAdminAsset($rampStream, 'image/jpeg', strlen($landscapeRamp), 'ramp_sunset_exterior.jpg', $userB);
+fclose($rampStream);
+$rankedLandscape = $kernel->mediaLibrary->rankForVideo(array(
+    'title' => 'Cessna 172 steep turns',
+    'description' => 'Cockpit demonstration of steep turns',
+    'category' => 'Private Pilot',
+    'aircraft' => 'Cessna 172',
+), 'landscape', 3);
+$rankedPortrait = $kernel->mediaLibrary->rankForVideo(array(
+    'title' => 'Cessna 172 steep turns',
+    'description' => 'Cockpit demonstration of steep turns',
+    'aircraft' => 'Cessna 172',
+), 'portrait', 3);
+$rankedLandscapeUuids = array_map(static fn(array $asset): string => (string)$asset['asset_uuid'], $rankedLandscape);
+$rankedPortraitUuids = array_map(static fn(array $asset): string => (string)$asset['asset_uuid'], $rankedPortrait);
+comm_assert(
+    'Media Library ranking uses orientation as a hard filter',
+    ($rankedLandscape[0]['asset_uuid'] ?? '') === ($libraryCockpit['asset']['asset_uuid'] ?? '')
+    && !in_array((string)($libraryPortrait['asset']['asset_uuid'] ?? ''), $rankedLandscapeUuids, true)
+    && ($rankedPortrait[0]['asset_uuid'] ?? '') === ($libraryPortrait['asset']['asset_uuid'] ?? '')
+    && !in_array((string)($libraryCockpit['asset']['asset_uuid'] ?? ''), $rankedPortraitUuids, true)
+);
+
+$autoThumb = $kernel->trainingVideos->saveAdmin(array(
+    'title' => 'Cessna 172 steep turns',
+    'description' => 'Cockpit demonstration of steep turns',
+    'category' => 'Private Pilot',
+    'aircraft' => 'Cessna 172',
+    'status' => 'draft',
+), array(), $userB);
+$autoUuid = (string)$autoThumb['video']['video_uuid'];
+$autoStream = fopen('php://memory', 'rb+');
+fwrite($autoStream, str_repeat('v', 2048));
+rewind($autoStream);
+$autoUploaded = $kernel->trainingVideos->putAdminObject(
+    $autoUuid,
+    'video',
+    'video/mp4',
+    2048,
+    $autoStream,
+    60000,
+    array('width' => 1920, 'height' => 1080)
+);
+fclose($autoStream);
+comm_assert(
+    'uploading a landscape video auto-renders an IPCA Media Library thumbnail',
+    !empty($autoUploaded['video']['has_poster'])
+    && (string)($autoUploaded['video']['orientation'] ?? '') === 'landscape'
+    && (string)($autoUploaded['video']['poster_source'] ?? '') === 'media_library'
+    && (string)($autoUploaded['video']['poster_template'] ?? '') === 'IPCA_ALPHA_LANDSCAPE_V1'
+    && count($autoUploaded['video']['thumbnail_candidates'] ?? array()) >= 1
+    && (string)($autoUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') === (string)($libraryCockpit['asset']['asset_uuid'] ?? '')
+);
+
+$portraitVideo = $kernel->trainingVideos->saveAdmin(array(
+    'title' => 'Handheld cockpit scan',
+    'description' => 'Portrait cockpit scan',
+    'aircraft' => 'Cessna 172',
+    'status' => 'draft',
+), array(), $userB);
+$portraitUuid = (string)$portraitVideo['video']['video_uuid'];
+$portraitVideoStream = fopen('php://memory', 'rb+');
+fwrite($portraitVideoStream, str_repeat('p', 2048));
+rewind($portraitVideoStream);
+$portraitUploaded = $kernel->trainingVideos->putAdminObject(
+    $portraitUuid,
+    'video',
+    'video/mp4',
+    2048,
+    $portraitVideoStream,
+    45000,
+    array('width' => 1080, 'height' => 1920)
+);
+fclose($portraitVideoStream);
+comm_assert(
+    'uploading a portrait video never uses a landscape thumbnail template',
+    (string)($portraitUploaded['video']['orientation'] ?? '') === 'portrait'
+    && (string)($portraitUploaded['video']['poster_template'] ?? '') === 'IPCA_ALPHA_PORTRAIT_V1'
+    && (string)($portraitUploaded['video']['poster_source'] ?? '') === 'media_library'
 );
 
 $baseVideo = array(

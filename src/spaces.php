@@ -352,6 +352,78 @@ function cw_spaces_head_object(string $objectKey): ?array
     );
 }
 
+/**
+ * Private server-side GET. Returns object bytes or null if missing.
+ */
+function cw_spaces_get_object(string $objectKey, int $maxBytes = 20971520): ?string
+{
+    $cfg = cw_spaces_config();
+    $method = 'GET';
+    $service = 's3';
+    $host = $cfg['bucket'] . '.' . $cfg['endpoint'];
+    $canonicalUri = '/' . str_replace('%2F', '/', cw_spaces_uri_encode(ltrim($objectKey, '/')));
+    $amzDate = gmdate('Ymd\THis\Z');
+    $date = substr($amzDate, 0, 8);
+    $payloadHash = 'UNSIGNED-PAYLOAD';
+    $signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+    $canonicalHeaders =
+        'host:' . $host . "\n" .
+        'x-amz-content-sha256:' . $payloadHash . "\n" .
+        'x-amz-date:' . $amzDate . "\n";
+
+    $canonicalRequest =
+        $method . "\n" .
+        $canonicalUri . "\n" .
+        '' . "\n" .
+        $canonicalHeaders . "\n" .
+        $signedHeaders . "\n" .
+        $payloadHash;
+
+    $credentialScope = $date . '/' . $cfg['region'] . '/' . $service . '/aws4_request';
+    $stringToSign =
+        "AWS4-HMAC-SHA256\n" .
+        $amzDate . "\n" .
+        $credentialScope . "\n" .
+        hash('sha256', $canonicalRequest);
+    $signingKey = cw_sigv4_signing_key($cfg['secret'], $date, $cfg['region'], $service);
+    $signature = hash_hmac('sha256', $stringToSign, $signingKey);
+    $authorization =
+        'AWS4-HMAC-SHA256 ' .
+        'Credential=' . $cfg['key'] . '/' . $credentialScope . ', ' .
+        'SignedHeaders=' . $signedHeaders . ', ' .
+        'Signature=' . $signature;
+
+    $ch = curl_init('https://' . $host . $canonicalUri);
+    curl_setopt($ch, CURLOPT_HTTPGET, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+        'Authorization: ' . $authorization,
+        'x-amz-date: ' . $amzDate,
+        'x-amz-content-sha256: ' . $payloadHash,
+        'Host: ' . $host,
+    ));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 120);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
+    $resp = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $size = (int)curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
+    curl_close($ch);
+    if ($code === 404 || $code === 403) {
+        return null;
+    }
+    if ($resp === false || $code < 200 || $code >= 300) {
+        return null;
+    }
+    if (!is_string($resp)) {
+        return null;
+    }
+    if ($maxBytes > 0 && strlen($resp) > $maxBytes) {
+        throw new RuntimeException('Private Spaces object exceeds the allowed download size.');
+    }
+    unset($size);
+    return $resp;
+}
+
 function cw_spaces_public_url(string $objectKey): string
 {
     $cfg = cw_spaces_config();
