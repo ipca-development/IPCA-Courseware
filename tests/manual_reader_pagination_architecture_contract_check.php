@@ -64,6 +64,8 @@ require_markers(
         'book-style-css-v2',
         'case original',
         'value == "light" ? .original',
+        'enum ReaderHighlightColor',
+        'struct TextHighlightAnchor',
     ),
     $failures
 );
@@ -92,6 +94,8 @@ require_markers(
         'return [safeIndex, right]',
         'if !pageNumber.isMultiple(of: 2)',
         'pageNumber.isMultiple(of: 2) == false',
+        'Image(systemName: "bookmark.fill")',
+        'zoomedPositions',
     ),
     $failures
 );
@@ -102,6 +106,9 @@ require_markers(
         'onNavigateToAnchor(fragment)',
         'onNavigateToSection(sectionID)',
         'onExternalLink(url)',
+        'maximumZoomScale = 4',
+        'WKScriptMessageHandler',
+        'readerSelection',
     ),
     $failures
 );
@@ -110,7 +117,10 @@ require_markers(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ReaderView.swift',
     array(
         '"Open External Website?"',
-        '"Preparing page \\(viewModel.currentIndex + 1)…"',
+        'viewModel.openingProgress',
+        '"Highlight Selected Text"',
+        'bookmarksPopover',
+        '.preferredColorScheme(.light)',
     ),
     $failures
 );
@@ -121,6 +131,9 @@ require_markers(
         'private var apiClient: ManualReaderAPIClient?',
         'if let apiClient, apiClient.baseURL == baseURL',
         'catch ManualReaderAPIError.unauthorized',
+        'settings.theme = .original',
+        'settings.zoom = .fitWidth',
+        'func addHighlight(',
     ),
     $failures
 );
@@ -130,6 +143,26 @@ require_markers(
     array(
         'http.url?.path.hasSuffix("/login.php")',
         'throw ManualReaderAPIError.unauthorized',
+        'enum ReaderHTMLAnnotationService',
+        '.mr-search-hit',
+        'user-scalable=yes',
+    ),
+    $failures
+);
+
+$readerView = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ReaderView.swift'
+);
+foreach (array('ReaderSettingsView', '"Reader theme"', '"Reader settings"') as $removedControl) {
+    if (str_contains($readerView, $removedControl)) {
+        $failures[] = "ReaderView.swift still exposes removed setting control: {$removedControl}";
+    }
+}
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/LibraryView.swift',
+    array(
+        'private struct BookmarksByManualSection',
+        'onSelectBookmark(book, bookmark)',
     ),
     $failures
 );

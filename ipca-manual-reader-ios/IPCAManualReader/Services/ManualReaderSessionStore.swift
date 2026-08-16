@@ -11,10 +11,12 @@ final class ManualReaderSessionStore: ObservableObject {
     @Published private(set) var isLoggedIn = false
     @Published var settings = ReaderSettings()
     @Published var bookmarks: [LocalBookmark] = []
+    @Published var highlights: [TextHighlightAnchor] = []
 
     private let baseURLKey = "ipca.manual_reader.base_url"
     private let settingsKey = "ipca.manual_reader.settings"
     private let bookmarksKey = "ipca.manual_reader.bookmarks"
+    private let highlightsKey = "ipca.manual_reader.highlights"
     private let offlineUserKey = "ipca.manual_reader.offline_user"
     private let credentialService = "com.europilotcenter.IPCAManualReader.credentials"
     private let credentialAccount = "manual-reader-login"
@@ -36,9 +38,16 @@ final class ManualReaderSessionStore: ObservableObject {
            let decoded = try? JSONDecoder().decode(ReaderSettings.self, from: data) {
             settings = decoded
         }
+        settings.theme = .original
+        settings.zoom = .fitWidth
+        settings.fontSize = .standard
         if let data = UserDefaults.standard.data(forKey: bookmarksKey),
            let decoded = try? JSONDecoder().decode([LocalBookmark].self, from: data) {
             bookmarks = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: highlightsKey),
+           let decoded = try? JSONDecoder().decode([TextHighlightAnchor].self, from: data) {
+            highlights = decoded
         }
         if let data = UserDefaults.standard.data(forKey: offlineUserKey),
            let decoded = try? JSONDecoder().decode(ReaderUser.self, from: data) {
@@ -81,6 +90,9 @@ final class ManualReaderSessionStore: ObservableObject {
     }
 
     func saveSettings() {
+        settings.theme = .original
+        settings.zoom = .fitWidth
+        settings.fontSize = .standard
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: settingsKey)
         }
@@ -132,6 +144,47 @@ final class ManualReaderSessionStore: ObservableObject {
     private func persistBookmarks() {
         if let data = try? JSONEncoder().encode(bookmarks) {
             UserDefaults.standard.set(data, forKey: bookmarksKey)
+        }
+    }
+
+    func addHighlight(
+        bookKey: String,
+        versionID: Int?,
+        pageNumber: Int,
+        selection: ReaderTextSelection,
+        color: ReaderHighlightColor
+    ) {
+        let highlight = TextHighlightAnchor(
+            id: UUID(),
+            bookKey: bookKey,
+            versionID: versionID,
+            pageNumber: pageNumber,
+            selectedText: selection.selectedText,
+            sourceFragmentID: selection.sourceFragmentID,
+            stableAnchor: selection.stableAnchor,
+            startOffset: selection.startOffset,
+            endOffset: selection.endOffset,
+            prefix: selection.prefix,
+            suffix: selection.suffix,
+            color: color,
+            createdAt: Date()
+        )
+        highlights.insert(highlight, at: 0)
+        persistHighlights()
+    }
+
+    func highlights(for bookKey: String, pageNumber: Int) -> [TextHighlightAnchor] {
+        highlights.filter { $0.bookKey == bookKey && $0.pageNumber == pageNumber }
+    }
+
+    func removeHighlight(_ highlight: TextHighlightAnchor) {
+        highlights.removeAll { $0.id == highlight.id }
+        persistHighlights()
+    }
+
+    private func persistHighlights() {
+        if let data = try? JSONEncoder().encode(highlights) {
+            UserDefaults.standard.set(data, forKey: highlightsKey)
         }
     }
 

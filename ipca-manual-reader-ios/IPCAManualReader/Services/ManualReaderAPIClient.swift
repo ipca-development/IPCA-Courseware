@@ -457,21 +457,27 @@ extension ManualReaderAPIClient {
         bookStyleCSS: String,
         readerCSS: String,
         layout: PageLayoutConfiguration? = nil,
-        publicationLayout: PublicationLayout
+        publicationLayout: PublicationLayout,
+        highlights: [TextHighlightAnchor] = [],
+        searchTerm: String? = nil
     ) -> String {
         let safeBookStyleCSS = bookStyleCSS.replacingOccurrences(of: "</style", with: "<\\/style")
         let safeReaderCSS = readerCSS.replacingOccurrences(of: "</style", with: "<\\/style")
-        let theme = settings.theme.rawValue
+        let theme = ReaderTheme.original.rawValue
         let pageWidth = layout?.pageWidth ?? publicationLayout.pageWidthPX
         let pageHeight = layout?.pageHeight ?? publicationLayout.pageHeightPX
         let isValidatedPersonalPage = layout != nil
+        let annotationScript = ReaderHTMLAnnotationService.script(
+            highlights: highlights,
+            searchTerm: searchTerm
+        )
 
         return """
         <!DOCTYPE html>
         <html lang="en">
         <head>
           <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4, user-scalable=yes">
           <style id="book-style-css">\(safeBookStyleCSS)</style>
           <style id="reader-frame-css">\(safeReaderCSS)</style>
           <style>
@@ -507,13 +513,14 @@ extension ManualReaderAPIClient {
               margin: 0 !important;
               box-sizing: border-box !important;
             }
-            .mr-body[data-mr-theme="sepia"] .reader-generated-page,
-            .mr-body[data-mr-theme="sepia"] .cpb-sheet { background-color: #f4ecd8 !important; }
-            .mr-body[data-mr-theme="sepia"] .reader-generated-page * { color: #3d3428 !important; border-color: #8a7658 !important; }
-            .mr-body[data-mr-theme="dark"] .reader-generated-page,
-            .mr-body[data-mr-theme="dark"] .cpb-sheet { background-color: #2c2c2e !important; }
-            .mr-body[data-mr-theme="dark"] .reader-generated-page * { color: #f5f5f7 !important; border-color: #77777c !important; }
             .mr-app .cpb-block-chrome, .mr-app .cpb-dropzone, .mr-app .cpb-change-marker, .mr-app .cpb-page-layout-toggle { display: none !important; }
+            .mr-user-highlight, .mr-search-hit {
+              color: #000 !important;
+              border-radius: 2px;
+              box-decoration-break: clone;
+              -webkit-box-decoration-break: clone;
+            }
+            .mr-search-hit { background: #fff34d !important; }
           </style>
         </head>
         <body class="mr-body" data-mr-theme="\(theme)" data-reader-validated="\(isValidatedPersonalPage ? "1" : "0")">
@@ -524,8 +531,105 @@ extension ManualReaderAPIClient {
               </div>
             </div>
           </div>
+          \(annotationScript)
         </body>
         </html>
+        """
+    }
+}
+
+enum ReaderHTMLAnnotationService {
+    static func script(highlights: [TextHighlightAnchor], searchTerm: String?) -> String {
+        let payload: [[String: Any]] = highlights.map {
+            [
+                "text": $0.selectedText,
+                "fragment": $0.sourceFragmentID ?? "",
+                "anchor": $0.stableAnchor ?? "",
+                "start": $0.startOffset,
+                "color": $0.color.cssColor,
+            ]
+        }
+        let payloadData = try? JSONSerialization.data(withJSONObject: payload)
+        let payloadJSON = payloadData.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let searchData = try? JSONSerialization.data(withJSONObject: [searchTerm ?? ""])
+        let searchJSON = searchData.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
+        return """
+        <script>
+        (function() {
+          const highlights = \(payloadJSON.replacingOccurrences(of: "</script", with: "<\\/script"));
+          const searchTerm = \(searchJSON)[0];
+          const root = document.querySelector('.mr-ios-frame') || document.body;
+          const blocked = new Set(['SCRIPT', 'STYLE', 'MARK']);
+          function textNodes(scope) {
+            const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+              acceptNode(node) {
+                return node.nodeValue && node.nodeValue.length && !blocked.has(node.parentElement?.tagName)
+                  ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+              }
+            });
+            const nodes = [];
+            while (walker.nextNode()) nodes.push(walker.currentNode);
+            return nodes;
+          }
+          function wrap(node, start, length, className, color) {
+            if (!node || length <= 0) return;
+            const range = document.createRange();
+            range.setStart(node, start);
+            range.setEnd(node, start + length);
+            const mark = document.createElement('mark');
+            mark.className = className;
+            if (color) mark.style.backgroundColor = color;
+            range.surroundContents(mark);
+          }
+          function highlightExact(item) {
+            let scope = root;
+            if (item.fragment) {
+              const escaped = CSS.escape(item.fragment);
+              scope = root.querySelector('[data-source-fragment-id="' + escaped + '"],'
+                + '[data-fragment-id="' + escaped + '"],'
+                + '[data-source-fragment="' + escaped + '"]') || scope;
+            } else if (item.anchor) {
+              scope = document.getElementById(item.anchor)
+                || root.querySelector('[data-stable-anchor="' + CSS.escape(item.anchor) + '"]')
+                || scope;
+            }
+            const nodes = textNodes(scope);
+            let consumed = 0;
+            for (const node of nodes) {
+              const local = item.start - consumed;
+              if (local >= 0 && local + item.text.length <= node.nodeValue.length
+                  && node.nodeValue.substr(local, item.text.length) === item.text) {
+                wrap(node, local, item.text.length, 'mr-user-highlight', item.color);
+                return;
+              }
+              consumed += node.nodeValue.length;
+            }
+            for (const node of nodes) {
+              const found = node.nodeValue.indexOf(item.text);
+              if (found >= 0) {
+                wrap(node, found, item.text.length, 'mr-user-highlight', item.color);
+                return;
+              }
+            }
+          }
+          highlights.forEach(highlightExact);
+          if (searchTerm && searchTerm.trim()) {
+            const needle = searchTerm.toLocaleLowerCase();
+            let count = 0;
+            for (const node of textNodes(root)) {
+              if (count >= 200) break;
+              let offset = 0;
+              while (count < 200) {
+                const found = node.nodeValue.toLocaleLowerCase().indexOf(needle, offset);
+                if (found < 0) break;
+                wrap(node, found, searchTerm.length, 'mr-search-hit', null);
+                count += 1;
+                break;
+              }
+            }
+          }
+        })();
+        </script>
         """
     }
 }

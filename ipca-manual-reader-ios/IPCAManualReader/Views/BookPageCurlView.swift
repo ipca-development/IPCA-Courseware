@@ -8,12 +8,14 @@ struct BookPageCurlView: UIViewControllerRepresentable {
     let isLandscape: Bool
     let pageSize: CGSize
     let pageBackground: Color
+    let bookKey: String
     @Binding var currentIndex: Int
     let onTap: () -> Void
     let onPageReady: (Int) -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
     let onExternalLink: (URL) -> Void
+    let onTextSelection: (ReaderTextSelection) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -53,6 +55,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
         var parent: BookPageCurlView
         weak var controller: UIPageViewController?
         fileprivate var cache: [Int: PageHostController] = [:]
+        private var zoomedPositions: Set<Int> = []
         var isTransitioning = false
 
         init(parent: BookPageCurlView) {
@@ -78,12 +81,17 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     baseURL: parent.baseURL,
                     isLandscape: parent.isLandscape,
                     pageNumber: parent.pages[position].pageNumber,
+                    bookKey: parent.bookKey,
                     pageSize: parent.pageSize,
                     pageBackground: parent.pageBackground,
                     onReady: { [weak self] in self?.parent.onPageReady(position) },
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
-                    onExternalLink: parent.onExternalLink
+                    onExternalLink: parent.onExternalLink,
+                    onTextSelection: parent.onTextSelection,
+                    onZoomChanged: { [weak self] zoomed in
+                        self?.setZoomed(zoomed, at: position)
+                    }
                 )
             }
         }
@@ -149,12 +157,17 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     baseURL: parent.baseURL,
                     isLandscape: parent.isLandscape,
                     pageNumber: parent.pages[position].pageNumber,
+                    bookKey: parent.bookKey,
                     pageSize: parent.pageSize,
                     pageBackground: parent.pageBackground,
                     onReady: { [weak self] in self?.parent.onPageReady(position) },
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
-                    onExternalLink: parent.onExternalLink
+                    onExternalLink: parent.onExternalLink,
+                    onTextSelection: parent.onTextSelection,
+                    onZoomChanged: { [weak self] zoomed in
+                        self?.setZoomed(zoomed, at: position)
+                    }
                 )
             } else {
                 host = PageHostController(
@@ -166,11 +179,20 @@ struct BookPageCurlView: UIViewControllerRepresentable {
             return host
         }
 
+        private func setZoomed(_ zoomed: Bool, at position: Int) {
+            if zoomed {
+                zoomedPositions.insert(position)
+            } else {
+                zoomedPositions.remove(position)
+            }
+        }
+
         func pageViewController(
             _ pageViewController: UIPageViewController,
             viewControllerBefore viewController: UIViewController
         ) -> UIViewController? {
             guard let page = viewController as? PageHostController else { return nil }
+            guard !zoomedPositions.contains(page.position) else { return nil }
             let previous = page.position - 1
             guard previous >= 0 else { return nil }
             return pageController(at: previous)
@@ -181,6 +203,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
             viewControllerAfter viewController: UIViewController
         ) -> UIViewController? {
             guard let page = viewController as? PageHostController else { return nil }
+            guard !zoomedPositions.contains(page.position) else { return nil }
             let next = page.position + 1
             guard next < parent.pages.count else {
                 // A trailing blank is only needed when the final authoritative
@@ -240,6 +263,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         baseURL: URL? = nil,
         isLandscape: Bool = false,
         pageNumber: Int = 0,
+        bookKey: String = "",
         pageSize: CGSize = CGSize(
             width: ManualPageLayout.width,
             height: ManualPageLayout.height
@@ -248,7 +272,9 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         onReady: @escaping () -> Void = {},
         onNavigateToAnchor: @escaping (String) -> Void = { _ in },
         onNavigateToSection: @escaping (Int) -> Void = { _ in },
-        onExternalLink: @escaping (URL) -> Void = { _ in }
+        onExternalLink: @escaping (URL) -> Void = { _ in },
+        onTextSelection: @escaping (ReaderTextSelection) -> Void = { _ in },
+        onZoomChanged: @escaping (Bool) -> Void = { _ in }
     ) {
         self.position = position
         super.init(rootView: AnyView(pageBackground))
@@ -259,12 +285,15 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 baseURL: baseURL,
                 isLandscape: isLandscape,
                 pageNumber: pageNumber,
+                bookKey: bookKey,
                 pageSize: pageSize,
                 pageBackground: pageBackground,
                 onReady: onReady,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
-                onExternalLink: onExternalLink
+                onExternalLink: onExternalLink,
+                onTextSelection: onTextSelection,
+                onZoomChanged: onZoomChanged
             )
         }
     }
@@ -278,12 +307,15 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         baseURL: URL,
         isLandscape: Bool,
         pageNumber: Int,
+        bookKey: String,
         pageSize: CGSize,
         pageBackground: Color,
         onReady: @escaping () -> Void,
         onNavigateToAnchor: @escaping (String) -> Void,
         onNavigateToSection: @escaping (Int) -> Void,
-        onExternalLink: @escaping (URL) -> Void
+        onExternalLink: @escaping (URL) -> Void,
+        onTextSelection: @escaping (ReaderTextSelection) -> Void,
+        onZoomChanged: @escaping (Bool) -> Void
     ) {
         view.backgroundColor = UIColor(pageBackground)
         rootView = AnyView(
@@ -292,12 +324,16 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 baseURL: baseURL,
                 isLandscape: isLandscape,
                 isLeftPage: !pageNumber.isMultiple(of: 2),
+                pageNumber: pageNumber,
+                bookKey: bookKey,
                 pageSize: pageSize,
                 pageBackground: pageBackground,
                 onReady: onReady,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
-                onExternalLink: onExternalLink
+                onExternalLink: onExternalLink,
+                onTextSelection: onTextSelection,
+                onZoomChanged: onZoomChanged
             )
         )
     }
@@ -310,12 +346,16 @@ private struct PhysicalManualPage: View {
     let baseURL: URL
     let isLandscape: Bool
     let isLeftPage: Bool
+    let pageNumber: Int
+    let bookKey: String
     let pageSize: CGSize
     let pageBackground: Color
     let onReady: () -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
     let onExternalLink: (URL) -> Void
+    let onTextSelection: (ReaderTextSelection) -> Void
+    let onZoomChanged: (Bool) -> Void
 
     var body: some View {
         GeometryReader { proxy in
@@ -329,7 +369,9 @@ private struct PhysicalManualPage: View {
                 onReady: onReady,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
-                onExternalLink: onExternalLink
+                onExternalLink: onExternalLink,
+                onZoomChanged: onZoomChanged,
+                onTextSelection: onTextSelection
             )
             .background(pageBackground)
             .overlay {
@@ -344,6 +386,18 @@ private struct PhysicalManualPage: View {
                     .frame(width: 4)
                     .frame(maxWidth: .infinity, alignment: isLeftPage ? .trailing : .leading)
                     .allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if session.bookmarks(for: bookKey).contains(where: { $0.pageNumber == pageNumber }) {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 34, weight: .bold))
+                        .foregroundStyle(IPCAReaderTheme.navy)
+                        .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
+                        .padding(.top, 4)
+                        .padding(.trailing, 8)
+                        .allowsHitTesting(false)
+                        .accessibilityLabel("Bookmarked page")
                 }
             }
         }

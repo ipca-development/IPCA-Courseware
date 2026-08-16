@@ -11,6 +11,8 @@ struct LibraryView: View {
     @State private var selectedFilter: LibraryFilter = .all
     @State private var selectedCategory: ManualCategory?
     @State private var utilityDestination: LibraryDestination?
+    @State private var openingBook: LibraryBook?
+    @State private var openingBookmark: LocalBookmark?
 
     var body: some View {
         GeometryReader { proxy in
@@ -23,11 +25,36 @@ struct LibraryView: View {
             }
         }
         .background(IPCAReaderTheme.shelfBackground.ignoresSafeArea())
+        .overlay {
+            if let openingBook {
+                ZStack {
+                    Color.black.opacity(0.34)
+                        .ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("Opening manual…")
+                            .font(.headline)
+                        Text(openingBook.displayTitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 30)
+                    .padding(.vertical, 24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+                .transition(.opacity)
+                .zIndex(100)
+            }
+        }
         .task { await viewModel.load() }
         .fullScreenCover(item: $selectedBook) { book in
-            ReaderView(book: book) {
+            ReaderView(book: book, initialBookmark: openingBookmark) {
                 selectedBook = nil
+                openingBookmark = nil
             }
+            .onAppear { openingBook = nil }
         }
         .sheet(item: $utilityDestination) { destination in
             NavigationStack {
@@ -111,8 +138,6 @@ struct LibraryView: View {
         availableWidth: CGFloat
     ) -> some View {
         switch destination {
-        case .settings:
-            ReaderSettingsView(showServer: false)
         case .help:
             LibraryPlaceholderView(
                 title: "Help & Support",
@@ -138,18 +163,31 @@ struct LibraryView: View {
                 searchText: $searchText,
                 selectedFilter: $selectedFilter,
                 selectedCategory: $selectedCategory,
-                onSelectBook: presentReader,
+                onSelectBook: { presentReader($0) },
+                onSelectBookmark: { book, bookmark in
+                    presentReader(book, bookmark: bookmark)
+                },
                 onRetry: { Task { await viewModel.load() } }
             )
         }
     }
 
-    private func presentReader(_ book: LibraryBook) {
+    private func presentReader(_ book: LibraryBook, bookmark: LocalBookmark? = nil) {
 #if DEBUG
         print("READER_PRESENT_REQUEST book=\(book.id)")
 #endif
-        selectedBook = book
+        guard openingBook == nil, selectedBook == nil else { return }
+        openingBookmark = bookmark
+        openingBook = book
+        Task { @MainActor in
+            // Give SwiftUI one frame to paint immediate tap feedback before
+            // constructing and presenting the full-screen reader.
+            try? await Task.sleep(for: .milliseconds(80))
+            guard openingBook?.id == book.id else { return }
+            selectedBook = book
+        }
     }
+
 }
 
 private enum LibraryDestination: String, CaseIterable, Identifiable {
@@ -158,7 +196,6 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
     case categories = "Categories"
     case downloads = "Downloads"
     case bookmarks = "Bookmarks"
-    case settings = "Settings"
     case help = "Help & Support"
     case more = "More"
 
@@ -171,7 +208,6 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
         case .categories: "square.grid.2x2"
         case .downloads: "arrow.down.to.line"
         case .bookmarks: "bookmark"
-        case .settings: "gearshape"
         case .help: "questionmark.circle"
         case .more: "ellipsis"
         }
@@ -219,7 +255,7 @@ private struct LibrarySidebar: View {
     let onSignOut: () -> Void
 
     private let primaryItems: [LibraryDestination] = [
-        .home, .library, .categories, .downloads, .bookmarks, .settings, .help,
+        .home, .library, .categories, .downloads, .bookmarks, .help,
     ]
 
     var body: some View {
@@ -256,7 +292,6 @@ private struct LibrarySidebar: View {
             Spacer(minLength: 24)
 
             Menu {
-                Button("Settings") { selection = .settings }
                 Button("Sign Out", role: .destructive, action: onSignOut)
             } label: {
                 UserProfileCard(user: user, compact: width < 220)
@@ -351,6 +386,7 @@ private struct LibraryContentView: View {
     @Binding var selectedFilter: LibraryFilter
     @Binding var selectedCategory: ManualCategory?
     let onSelectBook: (LibraryBook) -> Void
+    let onSelectBookmark: (LibraryBook, LocalBookmark) -> Void
     let onRetry: () -> Void
 
     private var coverWidth: CGFloat {
@@ -459,35 +495,43 @@ private struct LibraryContentView: View {
                     ContentUnavailableView.search(text: searchText)
                         .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
-                    if !continueReading.isEmpty {
-                        ManualShelf(
-                            title: "Continue Reading",
-                            books: continueReading,
-                            cardWidth: coverWidth,
-                            baseURL: baseURL,
-                            showsProgress: true,
-                            onSelect: onSelectBook
+                    if destination == .bookmarks {
+                        BookmarksByManualSection(
+                            books: visibleBooks,
+                            onSelectBook: onSelectBook,
+                            onSelectBookmark: onSelectBookmark
                         )
-                    }
+                    } else {
+                        if !continueReading.isEmpty {
+                            ManualShelf(
+                                title: "Continue Reading",
+                                books: continueReading,
+                                cardWidth: coverWidth,
+                                baseURL: baseURL,
+                                showsProgress: true,
+                                onSelect: onSelectBook
+                            )
+                        }
 
-                    if !availableCategories.isEmpty {
-                        CategoriesSection(
-                            categories: availableCategories,
-                            selectedCategory: $selectedCategory,
-                            availableWidth: availableWidth,
-                            isPhone: isPhone
-                        )
-                    }
+                        if !availableCategories.isEmpty {
+                            CategoriesSection(
+                                categories: availableCategories,
+                                selectedCategory: $selectedCategory,
+                                availableWidth: availableWidth,
+                                isPhone: isPhone
+                            )
+                        }
 
-                    ForEach(categoryGroups, id: \.0.id) { category, categoryBooks in
-                        ManualShelf(
-                            title: category.title,
-                            books: categoryBooks,
-                            cardWidth: coverWidth,
-                            baseURL: baseURL,
-                            showsProgress: false,
-                            onSelect: onSelectBook
-                        )
+                        ForEach(categoryGroups, id: \.0.id) { category, categoryBooks in
+                            ManualShelf(
+                                title: category.title,
+                                books: categoryBooks,
+                                cardWidth: coverWidth,
+                                baseURL: baseURL,
+                                showsProgress: false,
+                                onSelect: onSelectBook
+                            )
+                        }
                     }
                 }
             }
@@ -890,6 +934,63 @@ private struct DownloadStatusIndicator: View {
     }
 }
 
+private struct BookmarksByManualSection: View {
+    @ObservedObject private var session = ManualReaderSessionStore.shared
+    let books: [LibraryBook]
+    let onSelectBook: (LibraryBook) -> Void
+    let onSelectBookmark: (LibraryBook, LocalBookmark) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(books) { book in
+                let bookmarks = session.bookmarks(for: book.bookKey)
+                VStack(alignment: .leading, spacing: 10) {
+                    Button { onSelectBook(book) } label: {
+                        HStack {
+                            Image(systemName: "book.closed.fill")
+                                .foregroundStyle(IPCAReaderTheme.navy)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(book.displayTitle)
+                                    .font(.headline)
+                                    .foregroundStyle(Color.black)
+                                Text("\(book.manualCode) · \(bookmarks.count) bookmark\(bookmarks.count == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach(bookmarks) { bookmark in
+                        Button { onSelectBookmark(book, bookmark) } label: {
+                            HStack {
+                                Image(systemName: "bookmark.fill")
+                                    .foregroundStyle(IPCAReaderTheme.navy)
+                                Text(bookmark.label)
+                                    .foregroundStyle(Color.black)
+                                Spacer()
+                                Text("p. \(bookmark.pageNumber)")
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                            .padding(.leading, 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.white)
+                )
+            }
+        }
+    }
+}
+
 private struct CategoriesSection: View {
     let categories: [(ManualCategory, Int)]
     @Binding var selectedCategory: ManualCategory?
@@ -982,9 +1083,6 @@ private struct MoreView: View {
             Section {
                 Button { onOpen(.bookmarks) } label: {
                     Label("Bookmarks", systemImage: "bookmark")
-                }
-                Button { onOpen(.settings) } label: {
-                    Label("Settings", systemImage: "gearshape")
                 }
                 Button { onOpen(.help) } label: {
                     Label("Help & Support", systemImage: "questionmark.circle")

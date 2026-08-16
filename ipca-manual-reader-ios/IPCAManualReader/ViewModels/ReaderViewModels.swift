@@ -64,6 +64,9 @@ final class ReaderViewModel: ObservableObject {
     @Published private(set) var paginationValidation: PaginationValidationSummary?
     @Published var searchResults: [SearchResult] = []
     @Published var isSearching = false
+    @Published private(set) var activeSearchTerm: String?
+    @Published private(set) var openingProgress = 0.05
+    @Published private(set) var openingMessage = "Opening manual…"
 
     private var progressTimer: Task<Void, Never>?
     private var offlinePackage: OfflineManualPackage?
@@ -101,6 +104,8 @@ final class ReaderViewModel: ObservableObject {
         print("READER_LOAD_START book=\(book.id)")
 #endif
         isLoading = true
+        openingProgress = 0.05
+        openingMessage = "Loading offline manual…"
         errorMessage = nil
         defer {
             isLoading = false
@@ -113,6 +118,8 @@ final class ReaderViewModel: ObservableObject {
         }
 
         if let cachedPackage = await ManualDownloadManager.shared.package(for: book) {
+            openingProgress = 0.20
+            openingMessage = "Loading contents…"
             let openingPageNumber = preferredOpeningPageNumber(in: cachedPackage)
 #if DEBUG
             print(
@@ -148,6 +155,8 @@ final class ReaderViewModel: ObservableObject {
                 client: client,
                 forceRefresh: false
             )
+            openingProgress = 0.55
+            openingMessage = "Preparing downloaded manual…"
             await applyPackage(package)
 #if DEBUG
             print("READER_DOWNLOAD_COMPLETE htmlPages=\(pageHTMLByIndex.count)")
@@ -174,13 +183,11 @@ final class ReaderViewModel: ObservableObject {
                 result[id] = pair.value
             }
         }
-        tocReferencePageIndex = makeTOCReferencePageIndex(
-            package.pages.compactMap { page in
-                guard let pageNumber = page.pageNumber, let html = page.pageHtml else { return nil }
-                return (pageNumber, html)
-            }
-        )
-        stableAnchorPageIndex = officialPageLookups(package: package).byAnchor
+        openingProgress = max(openingProgress, 0.30)
+        openingMessage = "Indexing manual pages…"
+        let indexes = await buildOpeningIndexes(package: package)
+        tocReferencePageIndex = indexes.references
+        stableAnchorPageIndex = indexes.anchors
         var startIndex = 0
         if !isPreview,
            let anchor = book.continueStableAnchor, !anchor.isEmpty,
@@ -193,7 +200,18 @@ final class ReaderViewModel: ObservableObject {
                   package.page(number: pageNum)?.pageHtml != nil {
             startIndex = match
         }
-        await goToIndex(startIndex, persistProgress: false)
+        currentIndex = startIndex
+        openingMessage = "Preparing visible pages…"
+        let openingIndexes = [startIndex, startIndex + 1].filter { pages.indices.contains($0) }
+        for (offset, index) in openingIndexes.enumerated() {
+            preparePageHTML(at: index)
+            openingProgress = 0.62
+                + (0.18 * Double(offset + 1) / Double(max(openingIndexes.count, 1)))
+            await Task.yield()
+        }
+        currentPageHTML = pageHTMLByIndex[startIndex] ?? ""
+        openingProgress = 0.85
+        openingMessage = "Rendering visible pages…"
 #if DEBUG
         print(
             "READER_PACKAGE_APPLIED pages=\(pages.count) start=\(startIndex) "
@@ -245,6 +263,20 @@ final class ReaderViewModel: ObservableObject {
         if let page = pages.first(where: { $0.stableAnchor == normalized }) {
             await goToPageNumber(page.pageNumber)
         }
+    }
+
+    func goToBookmark(_ bookmark: LocalBookmark) async {
+        if let blockAnchor = bookmark.blockAnchor, !blockAnchor.isEmpty,
+           let pageNumber = stableAnchorPageIndex[blockAnchor] {
+            await goToPageNumber(pageNumber)
+            return
+        }
+        if let stableAnchor = bookmark.stableAnchor, !stableAnchor.isEmpty,
+           let pageNumber = stableAnchorPageIndex[stableAnchor] {
+            await goToPageNumber(pageNumber)
+            return
+        }
+        await goToPageNumber(bookmark.pageNumber)
     }
 
     func goToSection(_ sectionId: Int) async {
@@ -414,6 +446,33 @@ final class ReaderViewModel: ObservableObject {
         searchResults = Array(matches.prefix(40))
     }
 
+    func selectSearchResult(_ result: SearchResult, query: String) async {
+        activeSearchTerm = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        pageHTMLByIndex.removeAll()
+        if let pageNumber = result.pageNumber {
+            await goToPageNumber(pageNumber)
+        } else {
+            await goToSection(result.sectionId)
+        }
+    }
+
+    func addHighlight(_ selection: ReaderTextSelection, color: ReaderHighlightColor) async {
+        guard let page = currentPage,
+              !selection.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        ManualReaderSessionStore.shared.addHighlight(
+            bookKey: book.bookKey,
+            versionID: book.versionId,
+            pageNumber: page.pageNumber,
+            selection: selection,
+            color: color
+        )
+        pageHTMLByIndex[currentIndex] = nil
+        preparePageHTML(at: currentIndex)
+        currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
+    }
+
     func toggleBookmark(label: String) {
         guard let page = currentPage else { return }
         let store = ManualReaderSessionStore.shared
@@ -488,7 +547,12 @@ final class ReaderViewModel: ObservableObject {
             bookStyleCSS: bookStyleCSS,
             readerCSS: "",
             layout: nil,
-            publicationLayout: publicationLayout
+            publicationLayout: publicationLayout,
+            highlights: ManualReaderSessionStore.shared.highlights(
+                for: book.bookKey,
+                pageNumber: pageNumber
+            ),
+            searchTerm: activeSearchTerm
         )
     }
 
@@ -700,6 +764,73 @@ final class ReaderViewModel: ObservableObject {
         }
         byAnchor = byAnchor.filter { !$0.key.isEmpty && $0.value > 0 }
         return (byAnchor, bySection)
+    }
+
+    private func buildOpeningIndexes(
+        package: OfflineManualPackage
+    ) async -> (references: [String: Int], anchors: [String: Int]) {
+        var references: [String: Int] = [:]
+        var anchors: [String: Int] = [:]
+
+        for page in package.pageMap.pages.sorted(by: { $0.pageNumber < $1.pageNumber }) {
+            if let anchor = page.stableAnchor, !anchor.isEmpty {
+                anchors[anchor] = anchors[anchor] ?? page.pageNumber
+            }
+        }
+
+        let documents: [(pageNumber: Int, html: String)] = package.pages
+            .sorted { ($0.pageNumber ?? 0) < ($1.pageNumber ?? 0) }
+            .compactMap {
+                guard let pageNumber = $0.pageNumber, let html = $0.pageHtml else { return nil }
+                return (pageNumber, html)
+            }
+        for batchStart in stride(from: 0, to: documents.count, by: 4) {
+            let batchEnd = min(batchStart + 4, documents.count)
+            let batch = Array(documents[batchStart..<batchEnd])
+            let batchIndexes = await Task.detached(priority: .userInitiated) {
+                let sectionPattern = #"data-section-number\s*=\s*["']([^"']+)["']"#
+                let anchorPattern = #"data-stable-anchor\s*=\s*["']([^"']+)["']"#
+                let sectionExpression = try? NSRegularExpression(pattern: sectionPattern)
+                let anchorExpression = try? NSRegularExpression(pattern: anchorPattern)
+                var batchReferences: [String: Int] = [:]
+                var batchAnchors: [String: Int] = [:]
+                for page in batch {
+                    let range = NSRange(page.html.startIndex..<page.html.endIndex, in: page.html)
+                    sectionExpression?.matches(in: page.html, range: range).forEach { match in
+                        guard match.numberOfRanges > 1,
+                              let valueRange = Range(match.range(at: 1), in: page.html) else {
+                            return
+                        }
+                        let value = String(page.html[valueRange])
+                            .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+                        if !value.isEmpty {
+                            batchReferences[value] = batchReferences[value] ?? page.pageNumber
+                        }
+                    }
+                    anchorExpression?.matches(in: page.html, range: range).forEach { match in
+                        guard match.numberOfRanges > 1,
+                              let valueRange = Range(match.range(at: 1), in: page.html) else {
+                            return
+                        }
+                        let value = String(page.html[valueRange])
+                        if !value.isEmpty {
+                            batchAnchors[value] = batchAnchors[value] ?? page.pageNumber
+                        }
+                    }
+                }
+                return (batchReferences, batchAnchors)
+            }.value
+            for (reference, pageNumber) in batchIndexes.0 {
+                references[reference] = references[reference] ?? pageNumber
+            }
+            for (anchor, pageNumber) in batchIndexes.1 {
+                anchors[anchor] = anchors[anchor] ?? pageNumber
+            }
+            openingProgress = 0.35
+                + (0.25 * Double(batchEnd) / Double(max(documents.count, 1)))
+            openingMessage = "Indexing page \(batchEnd) of \(documents.count)…"
+        }
+        return (references, anchors)
     }
 
     private func makeTOCReferencePageIndex(

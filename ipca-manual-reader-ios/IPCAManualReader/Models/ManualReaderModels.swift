@@ -666,6 +666,59 @@ struct LocalBookmark: Codable, Identifiable, Hashable {
     var personalReaderPageNumber: Int?
 }
 
+enum ReaderHighlightColor: String, Codable, CaseIterable, Identifiable {
+    case fluorescentYellow
+    case fluorescentGreen
+    case fluorescentBlue
+    case fluorescentRed
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .fluorescentYellow: "Fluo Yellow"
+        case .fluorescentGreen: "Fluo Green"
+        case .fluorescentBlue: "Fluo Blue"
+        case .fluorescentRed: "Fluo Red"
+        }
+    }
+
+    var cssColor: String {
+        switch self {
+        case .fluorescentYellow: "#fff34d"
+        case .fluorescentGreen: "#67ff75"
+        case .fluorescentBlue: "#65dfff"
+        case .fluorescentRed: "#ff7180"
+        }
+    }
+}
+
+struct ReaderTextSelection: Codable, Hashable {
+    var selectedText: String
+    var sourceFragmentID: String?
+    var stableAnchor: String?
+    var startOffset: Int
+    var endOffset: Int
+    var prefix: String?
+    var suffix: String?
+}
+
+struct TextHighlightAnchor: Codable, Identifiable, Hashable {
+    var id: UUID
+    var bookKey: String
+    var versionID: Int?
+    var pageNumber: Int
+    var selectedText: String
+    var sourceFragmentID: String?
+    var stableAnchor: String?
+    var startOffset: Int
+    var endOffset: Int
+    var prefix: String?
+    var suffix: String?
+    var color: ReaderHighlightColor
+    var createdAt: Date
+}
+
 // Official frozen page dimensions (matches ControlledPublishingReaderLayoutProfile)
 enum ManualPageLayout {
     static let width: CGFloat = 816
