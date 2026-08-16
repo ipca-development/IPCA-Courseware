@@ -242,28 +242,47 @@
 }
 
 .cmp-page .cpb-editor-root .cpb-tree-panel button.cpb-outline-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
-  color: #e2e8f0;
-  border-radius: 4px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 5px;
-  font-size: 10px;
+  box-sizing: border-box;
+  width: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 3px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+  box-shadow: none !important;
+  font-size: 9px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
   cursor: pointer;
+  transform: none !important;
 }
 
 .cmp-page .cpb-editor-root .cpb-tree-panel button.cpb-outline-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+  transform: none !important;
+  background: rgba(255, 255, 255, 0.16) !important;
+  color: #fff !important;
 }
 
 .cmp-page .cpb-editor-root .cpb-tree-panel button.cpb-outline-btn:disabled {
   opacity: 0.35;
   cursor: default;
+  transform: none !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel button.cpb-outline-btn.cpb-outline-btn--danger:hover {
+  background: rgba(239, 68, 68, 0.35) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
 }
 
 .cpb-tree-toggle {
@@ -430,64 +449,85 @@
 }
 
 .cpb-outline-part {
-  margin: 0 0 14px;
-  padding: 10px;
+  margin: 0 0 10px;
+  padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(15, 39, 68, 0.4);
+  min-width: 0;
 }
 
 .cpb-outline-part-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 6px;
+  margin-bottom: 6px;
+  min-width: 0;
 }
 
 .cpb-outline-part-num {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: #93c5fd;
 }
 
 .cpb-outline-part input,
-.cpb-outline-chapter input {
-  width: 100%;
+.cpb-outline-chapter input,
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-outline-part input[type=text],
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-outline-chapter input[type=text] {
+  display: block;
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 22px !important;
+  min-height: 22px !important;
+  max-height: 22px !important;
   box-sizing: border-box;
-  font: inherit;
-  font-size: 11px;
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
-  padding: 6px 8px;
+  padding: 0 6px !important;
+  border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  border-radius: 4px !important;
+  background: #f8fafc !important;
+  color: #0f2744 !important;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  line-height: 22px !important;
+  letter-spacing: 0 !important;
+  box-shadow: none !important;
 }
 
 .cpb-outline-part input:focus,
-.cpb-outline-chapter input:focus {
+.cpb-outline-chapter input:focus,
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-outline-part input[type=text]:focus,
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-outline-chapter input[type=text]:focus {
   outline: none;
-  border-color: #60a5fa;
+  border-color: #60a5fa !important;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25) !important;
 }
 
 .cpb-outline-chapter {
-  display: grid;
-  grid-template-columns: 28px 1fr auto;
-  gap: 6px;
+  display: flex;
   align-items: center;
-  margin: 6px 0;
+  gap: 4px;
+  margin: 3px 0;
+  min-width: 0;
 }
 
 .cpb-outline-chapter-num {
-  font-size: 11px;
+  flex: 0 0 16px;
+  font-size: 10px;
   font-weight: 700;
   color: #cbd5e1;
   text-align: right;
+  line-height: 1;
 }
 
 .cpb-outline-chapter-actions {
   display: flex;
+  flex: 0 0 auto;
   gap: 2px;
 }
 
@@ -496,11 +536,12 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.05);
   color: #e2e8f0;
-  border-radius: 4px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 5px;
-  font-size: 10px;
+  border-radius: 3px;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 9px;
   cursor: pointer;
 }
 

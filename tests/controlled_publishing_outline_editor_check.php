@@ -126,6 +126,12 @@ $css = file_get_contents($root . '/public/assets/controlled_book_editor.css');
 if (!is_string($css) || !str_contains($css, '.cpb-tree-outline-btn')) {
     $failures[] = 'Missing editor CSS marker: .cpb-tree-outline-btn';
 }
+if (!is_string($css) || !str_contains($css, 'min-height: 22px !important')) {
+    $failures[] = 'Outline inputs must stay compact against global compliance field styles.';
+}
+if (!is_string($css) || !str_contains($css, 'width: 18px !important')) {
+    $failures[] = 'Outline move/delete buttons must stay compact against global compliance button styles.';
+}
 if (!is_string($structure) || !str_contains($structure, "\$meta['outline_locked']")) {
     $failures[] = 'Import overlay must not overwrite author-locked MAIN titles.';
 }
