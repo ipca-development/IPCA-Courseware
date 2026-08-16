@@ -720,6 +720,118 @@ final class ControlledPublishingDocxReader
     }
 
     /**
+     * Non-OM parts often number MAIN sections as 1.1, 1.2 under a generic
+     * "1. GENERAL" wrapper. Promote those to chapters 1, 2, 3 and rewrite
+     * 1.1.1 → 1.1 so the editor sidebar matches the real manual.
+     *
+     * @param list<array<string,mixed>> $nodes
+     * @return list<array<string,mixed>>
+     */
+    public static function flattenGenericPartChapters(array $nodes, int $manualPart): array
+    {
+        if ($manualPart <= 0 || $nodes === array()) {
+            return $nodes;
+        }
+
+        $prefix = self::genericPartFlattenPrefix($nodes);
+        if ($prefix === '') {
+            return $nodes;
+        }
+
+        $prefixDot = $prefix . '.';
+        $out = array();
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $ref = trim((string)($node['section_ref'] ?? ''));
+            if ($ref === $prefix) {
+                continue;
+            }
+            if ($ref !== '' && str_starts_with($ref, $prefixDot)) {
+                $stripped = substr($ref, strlen($prefixDot));
+                if ($stripped !== '' && preg_match('/^\d+(?:\.\d+)*$/', $stripped) === 1) {
+                    $node['section_ref'] = $stripped;
+                    $node['paragraph_style'] = self::sectionRefToParagraphStyle($stripped);
+                }
+            }
+            $out[] = $node;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $nodes
+     */
+    private static function genericPartFlattenPrefix(array $nodes): string
+    {
+        $depth1 = array();
+        $depth2Prefixes = array();
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $ref = trim((string)($node['section_ref'] ?? ''));
+            if ($ref === '' || preg_match('/^\d+(?:\.\d+)*$/', $ref) !== 1) {
+                continue;
+            }
+            $segments = explode('.', $ref);
+            if (count($segments) === 1) {
+                $depth1[$ref] = trim((string)($node['section_title'] ?? $node['text'] ?? ''));
+                continue;
+            }
+            if (count($segments) === 2) {
+                $depth2Prefixes[$segments[0]][$segments[1]] = true;
+            }
+        }
+
+        if (count($depth2Prefixes) !== 1) {
+            return '';
+        }
+        $prefix = (string)array_key_first($depth2Prefixes);
+        if ($prefix === '' || ($depth2Prefixes[$prefix] ?? array()) === array()) {
+            return '';
+        }
+
+        foreach ($depth1 as $ref => $title) {
+            unset($title);
+            if ((string)$ref !== $prefix) {
+                return '';
+            }
+        }
+
+        $wrapperTitle = (string)($depth1[$prefix] ?? '');
+        if ($wrapperTitle !== '' && !self::isGenericPartWrapperTitle($wrapperTitle)) {
+            return '';
+        }
+
+        return $prefix;
+    }
+
+    public static function isGenericPartWrapperTitle(string $title): bool
+    {
+        $title = trim($title);
+        $title = preg_replace('/^\d+(?:\.\d+)*\.?\s+/u', '', $title) ?? $title;
+        $normalized = strtolower(trim($title));
+        if ($normalized === '') {
+            return true;
+        }
+        if (preg_match('/^chapter\s+\d+$/i', $normalized) === 1) {
+            return true;
+        }
+
+        return in_array($normalized, array(
+            'general',
+            'introduction',
+            'outline',
+            'part 1 – general',
+            'part 1 - general',
+            'part 1 general',
+        ), true);
+    }
+
+    /**
      * Chapter titles in OM/OMM use ALL CAPS (e.g. "1. INTRODUCTION").
      * Numbered list items like "1. Personal Data" are rejected unless they use a heading style.
      */

@@ -69,6 +69,7 @@ foreach (array(
     'overlayChapterTitlesFromImportedBlocks(',
     '$existingNav !== $navLabel',
     'refreshImportedChapterTitles(',
+    '$pruneStaleChapters || $this->canRemoveChapterSection($row)',
 ) as $marker) {
     if (!str_contains($structure, $marker)) {
         fwrite(STDERR, "Missing resilient manual-source resolution marker: {$marker}\n");

@@ -111,7 +111,8 @@ final class ControlledPublishingManualStructureService
                 $partKey,
                 $chapters,
                 $partIndex + 1,
-                $actorUserId
+                $actorUserId,
+                !in_array($manualCode, array('OM', 'OMM'), true)
             );
             $partsSynced++;
             $created += $result['created'];
@@ -456,7 +457,8 @@ final class ControlledPublishingManualStructureService
         string $partKey,
         array $chapters,
         int $manualPart,
-        ?int $actorUserId
+        ?int $actorUserId,
+        bool $pruneStaleChapters = false
     ): array {
         $existing = $this->listChildSections($versionId, $parentSectionId);
         $existingByNumber = array();
@@ -529,14 +531,14 @@ final class ControlledPublishingManualStructureService
         }
 
         foreach ($existingByNumber as $row) {
-            if ($this->canRemoveChapterSection($row)) {
+            if ($pruneStaleChapters || $this->canRemoveChapterSection($row)) {
                 $this->deleteSection((int)$row['id']);
                 $removed++;
             }
         }
 
         foreach ($orphans as $row) {
-            if ($this->canRemoveChapterSection($row)) {
+            if ($pruneStaleChapters || $this->canRemoveChapterSection($row)) {
                 $this->deleteSection((int)$row['id']);
                 $removed++;
             }

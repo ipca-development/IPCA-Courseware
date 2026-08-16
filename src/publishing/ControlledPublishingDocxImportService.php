@@ -59,7 +59,7 @@ final class ControlledPublishingDocxImportService
         $summary = $this->emptySummary($version);
 
         foreach ($partFiles as $manualPart => $path) {
-            $parsed = $this->reader->parseFile($path, (int)$manualPart);
+            $parsed = $this->parsePartFile($path, (int)$manualPart, $version);
             $partSummary = $this->summarizeParsedPart($parsed);
             $summary['parts'][(int)$manualPart] = $partSummary;
             $summary['totals']['headings'] += $partSummary['headings'];
@@ -112,7 +112,7 @@ final class ControlledPublishingDocxImportService
         ksort($partFiles);
         foreach ($partFiles as $manualPart => $path) {
             $manualPart = (int)$manualPart;
-            $parsed = $this->reader->parseFile($path, $manualPart);
+            $parsed = $this->parsePartFile($path, $manualPart, $version);
             $stats['warnings'] = array_merge($stats['warnings'], $parsed['warnings']);
 
             if ($manualPart === 0) {
@@ -153,7 +153,7 @@ final class ControlledPublishingDocxImportService
             if ($manualPart <= 0) {
                 continue;
             }
-            $parsed = $this->reader->parseFile($path, $manualPart);
+            $parsed = $this->parsePartFile($path, $manualPart, $version);
             $result = $this->importContentPartBlocks(
                 $versionId,
                 $version,
@@ -252,6 +252,21 @@ final class ControlledPublishingDocxImportService
             throw new RuntimeException('Released versions cannot be imported.');
         }
         return $version;
+    }
+
+    /**
+     * @return array{manual_part:int,nodes:list<array<string,mixed>>,warnings:list<string>}
+     */
+    private function parsePartFile(string $path, int $manualPart, array $version): array
+    {
+        $parsed = $this->reader->parseFile($path, $manualPart);
+        $manualCode = strtoupper(trim((string)($version['manual_code'] ?? $version['book_key'] ?? 'OM')));
+        if ($manualPart > 0 && !in_array($manualCode, array('OM', 'OMM'), true)) {
+            $nodes = is_array($parsed['nodes'] ?? null) ? $parsed['nodes'] : array();
+            $parsed['nodes'] = ControlledPublishingDocxReader::flattenGenericPartChapters($nodes, $manualPart);
+        }
+
+        return $parsed;
     }
 
     /**
