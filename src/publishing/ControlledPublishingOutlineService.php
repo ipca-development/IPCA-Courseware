@@ -155,6 +155,13 @@ final class ControlledPublishingOutlineService
                     'nav_label' => $nav !== '' ? $nav : self::formatChapterNavTitle($chapterNumber, $title),
                     'block_count' => (int)($child['block_count'] ?? 0),
                     'sort_order' => (int)($child['sort_order'] ?? 0),
+                    'headings' => self::headingTreeFromNavItems(
+                        $this->manualStructure->listNavSubsectionsFromChapterBlocks(
+                            (int)($child['id'] ?? 0),
+                            array(),
+                            $partNumber
+                        )
+                    ),
                 );
             }
             usort($chapters, static function (array $a, array $b): int {
@@ -260,6 +267,213 @@ final class ControlledPublishingOutlineService
         if ($parentId > 0) {
             $this->renumberChapters($versionId, $parentId);
         }
+    }
+
+    /**
+     * Lift a nested heading (4.1, 1.1, …) onto the PART as a MAIN chapter.
+     */
+    public function promoteHeading(
+        int $versionId,
+        int $sectionId,
+        string $sectionRef,
+        int $insertBeforeSectionId = 0,
+        ?int $actorUserId = null
+    ): int {
+        $source = $this->requireEditableOutlineSection($versionId, $sectionId);
+        $parentId = (int)($source['parent_section_id'] ?? 0);
+        if ($parentId <= 0 || $this->chapterNumberFromRow($source) <= 0) {
+            throw new RuntimeException('Headings can only be promoted from a MAIN chapter.');
+        }
+        $sectionRef = trim($sectionRef);
+        if ($sectionRef === '' || preg_match('/^\d+(?:\.\d+)+$/', $sectionRef) !== 1) {
+            throw new RuntimeException('Choose a heading under a MAIN chapter.');
+        }
+
+        $chapters = $this->listChapterChildren($versionId, $parentId);
+        $insertAt = count($chapters);
+        if ($insertBeforeSectionId > 0) {
+            foreach ($chapters as $index => $child) {
+                if ((int)($child['id'] ?? 0) === $insertBeforeSectionId) {
+                    $insertAt = $index;
+                    break;
+                }
+            }
+        } else {
+            foreach ($chapters as $index => $child) {
+                if ((int)($child['id'] ?? 0) !== $sectionId) {
+                    continue;
+                }
+                $headingIndex = 0;
+                foreach (self::headingTreeFromNavItems(
+                    $this->manualStructure->listNavSubsectionsFromChapterBlocks($sectionId, array())
+                ) as $siblingIndex => $heading) {
+                    if ((string)($heading['section_ref'] ?? '') === $sectionRef) {
+                        $headingIndex = (int)$siblingIndex;
+                        break;
+                    }
+                }
+                $insertAt = $index + $headingIndex;
+                break;
+            }
+        }
+
+        $newId = $this->manualStructure->promoteHeadingToMainChapter(
+            $versionId,
+            $sectionId,
+            $sectionRef,
+            $actorUserId
+        );
+        if ($newId <= 0) {
+            throw new RuntimeException('Could not make that heading a MAIN chapter.');
+        }
+
+        $ordered = array();
+        foreach ($this->listChapterChildren($versionId, $parentId) as $child) {
+            if ((int)($child['id'] ?? 0) === $newId) {
+                continue;
+            }
+            $ordered[] = $child;
+        }
+        $newRow = $this->sections->getSection($versionId, $newId);
+        if (!is_array($newRow)) {
+            throw new RuntimeException('Promoted MAIN chapter could not be loaded.');
+        }
+        array_splice($ordered, max(0, min($insertAt, count($ordered))), 0, array($newRow));
+        $this->writeChapterOrder($versionId, $parentId, $ordered);
+
+        $remaining = $this->manualStructure->listNavSubsectionsFromChapterBlocks($sectionId, array());
+        $sourceRow = $this->sections->getSection($versionId, $sectionId);
+        $blockCount = is_array($sourceRow) ? (int)($sourceRow['block_count'] ?? 0) : 1;
+        if ($remaining === array() && $blockCount <= 0) {
+            $this->deleteChapter($versionId, $sectionId, $actorUserId);
+        }
+
+        return $newId;
+    }
+
+    /**
+     * @param list<array{section_ref?:string,title?:string,nav_label?:string}> $items
+     * @return list<array{section_ref:string,title:string,nav_label:string,can_promote:bool,headings:list<array<string,mixed>>}>
+     */
+    public static function headingTreeFromNavItems(array $items): array
+    {
+        $nodes = array();
+        foreach ($items as $item) {
+            $ref = trim((string)($item['section_ref'] ?? ''));
+            if ($ref === '') {
+                continue;
+            }
+            $title = trim((string)($item['title'] ?? ''));
+            $nodes[$ref] = array(
+                'section_ref' => $ref,
+                'title' => $title,
+                'nav_label' => trim((string)($item['nav_label'] ?? '')) !== ''
+                    ? (string)$item['nav_label']
+                    : $ref . ' ' . $title,
+                'can_promote' => false,
+                'headings' => array(),
+            );
+        }
+
+        $childRefs = array();
+        $rootRefs = array();
+        foreach ($nodes as $ref => $node) {
+            unset($node);
+            $parent = self::parentHeadingRef((string)$ref);
+            if ($parent !== '' && isset($nodes[$parent])) {
+                $childRefs[$parent][] = (string)$ref;
+            } else {
+                $rootRefs[] = (string)$ref;
+            }
+        }
+
+        $build = static function (string $ref) use (&$build, $nodes, $childRefs): array {
+            $node = $nodes[$ref];
+            $node['headings'] = array();
+            foreach ($childRefs[$ref] ?? array() as $childRef) {
+                $node['headings'][] = $build((string)$childRef);
+            }
+            return $node;
+        };
+
+        $roots = array();
+        foreach ($rootRefs as $ref) {
+            $node = $build((string)$ref);
+            $node['can_promote'] = true;
+            $roots[] = $node;
+        }
+
+        return $roots;
+    }
+
+    public static function parentHeadingRef(string $sectionRef): string
+    {
+        $sectionRef = trim($sectionRef);
+        $pos = strrpos($sectionRef, '.');
+        if ($pos === false) {
+            return '';
+        }
+
+        return substr($sectionRef, 0, $pos);
+    }
+
+    public static function rewritePromotedSectionRef(string $oldRef, string $blockRef, int $newChapter): string
+    {
+        $oldRef = trim($oldRef);
+        $blockRef = trim($blockRef);
+        if ($oldRef === '' || $newChapter <= 0) {
+            return $blockRef;
+        }
+        if ($blockRef === $oldRef) {
+            return (string)$newChapter;
+        }
+        $prefix = $oldRef . '.';
+        if (str_starts_with($blockRef, $prefix)) {
+            $rest = substr($blockRef, strlen($prefix));
+
+            return $rest === '' ? (string)$newChapter : $newChapter . '.' . $rest;
+        }
+
+        return $blockRef;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $nodes
+     * @return list<array<string,mixed>>
+     */
+    public static function headingBlockSlice(array $nodes, string $sectionRef): array
+    {
+        $sectionRef = trim($sectionRef);
+        $start = -1;
+        foreach ($nodes as $index => $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            if (trim((string)($node['section_ref'] ?? '')) === $sectionRef) {
+                $start = (int)$index;
+                break;
+            }
+        }
+        if ($start < 0) {
+            return array();
+        }
+
+        $prefix = $sectionRef . '.';
+        $slice = array();
+        $count = count($nodes);
+        for ($index = $start; $index < $count; $index++) {
+            $node = $nodes[$index];
+            if (!is_array($node)) {
+                continue;
+            }
+            $ref = trim((string)($node['section_ref'] ?? ''));
+            if ($index > $start && $ref !== '' && $ref !== $sectionRef && !str_starts_with($ref, $prefix)) {
+                break;
+            }
+            $slice[] = $node;
+        }
+
+        return $slice;
     }
 
     public function moveChapter(int $versionId, int $sectionId, string $direction, ?int $actorUserId = null): void

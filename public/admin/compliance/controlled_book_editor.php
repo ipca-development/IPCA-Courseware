@@ -101,10 +101,6 @@ compliance_page_open(array(
       <div class="cpb-tree-scroll" id="cpbSectionTree">
         <p style="padding:12px 16px;margin:0;font-size:12px;color:#94a3b8;">Loading outline…</p>
       </div>
-      <div class="cpb-outline-panel" id="cpbOutlinePanel" hidden>
-        <p class="cpb-outline-note">Cover, Part 0, and Annexes stay fixed. Rename PARTs and add, remove, or reorder MAIN chapters.</p>
-        <div id="cpbOutlineBody"></div>
-      </div>
       <div class="cpb-tree-actions">
         <button type="button" id="cpbEditOutline" class="cpb-tree-outline-btn" title="Edit PART and MAIN chapter titles">Edit outline</button>
         <span id="cpbAddSubsection" class="cpb-tree-add" role="button" tabindex="0" style="display:none;">+ Add subsection</span>
@@ -304,6 +300,23 @@ compliance_page_open(array(
         <button type="button" class="cpb-tool-btn" id="cpbDefinitionsImportCancel">Cancel</button>
         <button type="button" class="cpb-tool-btn cpb-definitions-import__submit" id="cpbDefinitionsImportSubmit">Import</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="cpb-struct-overlay" id="cpbStructModal" hidden>
+  <div class="cpb-struct-card" role="dialog" aria-modal="true" aria-labelledby="cpbStructTitle">
+    <div class="cpb-struct-head">
+      <div>
+        <div class="cpb-struct-kicker">Controlled publishing</div>
+        <h2 id="cpbStructTitle" class="cpb-struct-title">Edit outline</h2>
+      </div>
+      <button type="button" class="cpb-struct-close" id="cpbStructClose" aria-label="Close">&times;</button>
+    </div>
+    <p class="cpb-struct-lead">Cover, Part 0, and Annexes stay fixed. Drag a heading onto a PART to make it a MAIN chapter, or use <strong>Make this a MAIN chapter</strong>.</p>
+    <div class="cpb-struct-body" id="cpbOutlineBody"></div>
+    <div class="cpb-struct-foot">
+      <button type="button" class="cpb-struct-done" id="cpbStructDone">Done</button>
     </div>
   </div>
 </div>

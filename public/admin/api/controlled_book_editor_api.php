@@ -246,6 +246,9 @@ try {
         case 'move_outline_chapter':
             cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'move_chapter');
             break;
+        case 'promote_outline_heading':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'promote_heading');
+            break;
         case 'upload_image':
             cp_editor_handle_upload_image($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
             break;
@@ -2812,6 +2815,14 @@ function cp_editor_handle_outline_mutate(
             $outlineSvc->deleteChapter($versionId, $sectionId, $uid);
         } elseif ($op === 'move_chapter') {
             $outlineSvc->moveChapter($versionId, $sectionId, (string)($in['direction'] ?? ''), $uid);
+        } elseif ($op === 'promote_heading') {
+            $createdId = $outlineSvc->promoteHeading(
+                $versionId,
+                $sectionId,
+                (string)($in['section_ref'] ?? ''),
+                (int)($in['insert_before_section_id'] ?? 0),
+                $uid
+            );
         } else {
             cp_editor_json(400, array('ok' => false, 'error' => 'Unknown outline action.'));
         }

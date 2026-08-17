@@ -27,8 +27,10 @@
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
   var editOutlineBtn = document.getElementById('cpbEditOutline');
-  var outlinePanelEl = document.getElementById('cpbOutlinePanel');
+  var outlinePanelEl = document.getElementById('cpbStructModal');
   var outlineBodyEl = document.getElementById('cpbOutlineBody');
+  var structCloseBtn = document.getElementById('cpbStructClose');
+  var structDoneBtn = document.getElementById('cpbStructDone');
   var treeHeadTitleEl = document.getElementById('cpbTreeHeadTitle');
   var imageInput = document.getElementById('cpbImageInput');
   var paragraphStyleSelect = document.getElementById('cpbParagraphStyleSelect');
@@ -589,6 +591,7 @@
     add_outline_chapter: 'global',
     delete_outline_chapter: 'global',
     move_outline_chapter: 'global',
+    promote_outline_heading: 'global',
     save_book_styles: 'global',
     copy_book_styles: 'global',
     save_page_header: 'global',
@@ -3143,7 +3146,7 @@
     var isNestable = ['part_1', 'part_2', 'part_3', 'part_4', 'main_content', 'annexes'].indexOf(key) >= 0
       || !!section.parent_section_id
       || documentType === 'form';
-    addSubBtn.style.display = state.editable && isNestable && !state.outlineOpen ? 'block' : 'none';
+    addSubBtn.style.display = state.editable && isNestable ? 'block' : 'none';
     addSubBtn.setAttribute('data-parent-id', String(section.id || state.sectionId));
   }
 
@@ -3192,19 +3195,13 @@
 
   function setOutlineMode(open) {
     state.outlineOpen = !!open;
-    if (treeEl) treeEl.hidden = state.outlineOpen;
-    if (outlinePanelEl) outlinePanelEl.hidden = !state.outlineOpen;
-    if (treeToggleAllBtn) treeToggleAllBtn.style.display = state.outlineOpen ? 'none' : '';
+    if (outlinePanelEl) {
+      outlinePanelEl.hidden = !state.outlineOpen;
+      if (state.outlineOpen) outlinePanelEl.classList.add('is-open');
+      else outlinePanelEl.classList.remove('is-open');
+    }
     if (editOutlineBtn) {
-      editOutlineBtn.textContent = state.outlineOpen ? 'Done' : 'Edit outline';
       editOutlineBtn.setAttribute('aria-pressed', state.outlineOpen ? 'true' : 'false');
-    }
-    if (treeHeadTitleEl) {
-      treeHeadTitleEl.textContent = state.outlineOpen ? 'Edit outline' : 'Manual sections';
-    }
-    if (addSubBtn && state.outlineOpen) addSubBtn.style.display = 'none';
-    if (editOutlineBtn) {
-      editOutlineBtn.style.display = documentType === 'form' ? 'none' : '';
     }
   }
 
@@ -3212,7 +3209,7 @@
     if (!res || !res.ok) throw new Error((res && res.error) || 'Could not update outline');
     if (res.sections_tree) {
       state.sectionsTree = res.sections_tree;
-      if (!state.outlineOpen) renderTree(state.sectionsTree, state.sectionId);
+      renderTree(state.sectionsTree, state.sectionId);
     }
     renderOutlinePanel(res);
     setStatus('Outline saved', 'saved');
@@ -3223,16 +3220,94 @@
     return apiPost(action, Object.assign({ version_id: state.versionId }, payload || {})).then(applyOutlineResult);
   }
 
+  function outlineSmallBtn(label, className, disabled, onClick) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cpb-outline-btn' + (className ? ' ' + className : '');
+    btn.textContent = label;
+    btn.disabled = !!disabled;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  function renderOutlineHeadings(box, part, chapter, headings, nested) {
+    (headings || []).forEach(function (heading) {
+      var row = document.createElement('div');
+      row.className = 'cpb-struct-heading' + (nested ? ' is-nested' : '');
+      if (heading.can_promote) {
+        row.draggable = true;
+        row.setAttribute('data-drag-kind', 'heading');
+        row.setAttribute('data-section-id', String(chapter.section_id));
+        row.setAttribute('data-section-ref', heading.section_ref || '');
+        row.setAttribute('data-part-id', String(part.section_id));
+        var handle = document.createElement('span');
+        handle.className = 'cpb-struct-handle';
+        handle.textContent = '⋮⋮';
+        handle.title = 'Drag onto a PART to make this a MAIN chapter';
+        row.appendChild(handle);
+      }
+      var label = document.createElement('span');
+      label.className = 'cpb-struct-heading-label';
+      label.textContent = heading.nav_label || heading.title || heading.section_ref;
+      row.appendChild(label);
+      if (heading.can_promote) {
+        var promote = document.createElement('button');
+        promote.type = 'button';
+        promote.className = 'cpb-struct-promote';
+        promote.textContent = 'Make this a MAIN chapter';
+        promote.addEventListener('click', function () {
+          outlinePost('promote_outline_heading', {
+            section_id: chapter.section_id,
+            section_ref: heading.section_ref,
+          }).then(function (res) {
+            if (res.section_id) loadSection(res.section_id);
+          }).catch(showError);
+        });
+        row.appendChild(promote);
+      }
+      box.appendChild(row);
+      if (heading.headings && heading.headings.length) {
+        renderOutlineHeadings(box, part, chapter, heading.headings, true);
+      }
+    });
+  }
+
+  function wireOutlineDrag(row) {
+    row.addEventListener('dragstart', function (event) {
+      if (event.target && event.target.closest && event.target.closest('input,button')) {
+        event.preventDefault();
+        return;
+      }
+      row.classList.add('is-dragging');
+      var payload = {
+        kind: row.getAttribute('data-drag-kind') || '',
+        section_id: parseInt(row.getAttribute('data-section-id') || '0', 10),
+        section_ref: row.getAttribute('data-section-ref') || '',
+        part_id: parseInt(row.getAttribute('data-part-id') || '0', 10),
+      };
+      event.dataTransfer.setData('application/json', JSON.stringify(payload));
+      event.dataTransfer.setData('text/plain', JSON.stringify(payload));
+      event.dataTransfer.effectAllowed = payload.kind === 'heading' ? 'move' : 'move';
+    });
+    row.addEventListener('dragend', function () {
+      row.classList.remove('is-dragging');
+      if (outlineBodyEl) {
+        outlineBodyEl.querySelectorAll('.is-drop-target').forEach(function (el) {
+          el.classList.remove('is-drop-target');
+        });
+      }
+    });
+  }
+
   function renderOutlinePanel(data) {
     if (!outlineBodyEl) return;
     outlineBodyEl.innerHTML = '';
     var locked = document.createElement('div');
-    locked.className = 'cpb-outline-locked';
+    locked.className = 'cpb-struct-locked';
     (data.locked || []).forEach(function (item) {
       var row = document.createElement('div');
-      row.className = 'cpb-outline-locked-item';
+      row.className = 'cpb-struct-locked-item';
       var icon = document.createElement('span');
-      icon.className = 'cpb-outline-lock';
       icon.textContent = '🔒';
       var label = document.createElement('span');
       label.textContent = item.title || item.kind;
@@ -3244,12 +3319,13 @@
 
     (data.parts || []).forEach(function (part) {
       var box = document.createElement('div');
-      box.className = 'cpb-outline-part';
+      box.className = 'cpb-struct-part';
+      box.setAttribute('data-part-id', String(part.section_id));
 
       var head = document.createElement('div');
-      head.className = 'cpb-outline-part-head';
+      head.className = 'cpb-struct-part-head';
       var num = document.createElement('span');
-      num.className = 'cpb-outline-part-num';
+      num.className = 'cpb-struct-part-num';
       num.textContent = 'PART ' + part.part_number;
       var partInput = document.createElement('input');
       partInput.type = 'text';
@@ -3267,9 +3343,16 @@
 
       (part.chapters || []).forEach(function (chapter, index) {
         var row = document.createElement('div');
-        row.className = 'cpb-outline-chapter';
+        row.className = 'cpb-struct-chapter';
+        row.draggable = true;
+        row.setAttribute('data-drag-kind', 'chapter');
+        row.setAttribute('data-section-id', String(chapter.section_id));
+        row.setAttribute('data-part-id', String(part.section_id));
+        var handle = document.createElement('span');
+        handle.className = 'cpb-struct-handle';
+        handle.textContent = '⋮⋮';
         var chNum = document.createElement('span');
-        chNum.className = 'cpb-outline-chapter-num';
+        chNum.className = 'cpb-struct-num';
         chNum.textContent = chapter.chapter_number + '.';
         var chInput = document.createElement('input');
         chInput.type = 'text';
@@ -3282,23 +3365,14 @@
           }).catch(showError);
         });
         var actions = document.createElement('div');
-        actions.className = 'cpb-outline-chapter-actions';
-        function smallBtn(label, className, disabled, onClick) {
-          var btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'cpb-outline-btn' + (className ? ' ' + className : '');
-          btn.textContent = label;
-          btn.disabled = !!disabled;
-          btn.addEventListener('click', onClick);
-          return btn;
-        }
-        actions.appendChild(smallBtn('↑', '', index === 0, function () {
+        actions.className = 'cpb-struct-actions';
+        actions.appendChild(outlineSmallBtn('↑', '', index === 0, function () {
           outlinePost('move_outline_chapter', { section_id: chapter.section_id, direction: 'up' }).catch(showError);
         }));
-        actions.appendChild(smallBtn('↓', '', index === part.chapters.length - 1, function () {
+        actions.appendChild(outlineSmallBtn('↓', '', index === part.chapters.length - 1, function () {
           outlinePost('move_outline_chapter', { section_id: chapter.section_id, direction: 'down' }).catch(showError);
         }));
-        actions.appendChild(smallBtn('×', 'cpb-outline-btn--danger', false, function () {
+        actions.appendChild(outlineSmallBtn('×', 'cpb-outline-btn--danger', false, function () {
           if (!window.confirm('Remove MAIN chapter “' + (chapter.title || chapter.nav_label) + '”?')) return;
           outlinePost('delete_outline_chapter', { section_id: chapter.section_id }).then(function () {
             if (state.sectionId === chapter.section_id) {
@@ -3306,14 +3380,17 @@
             }
           }).catch(showError);
         }));
+        row.appendChild(handle);
         row.appendChild(chNum);
         row.appendChild(chInput);
         row.appendChild(actions);
+        wireOutlineDrag(row);
         box.appendChild(row);
+        renderOutlineHeadings(box, part, chapter, chapter.headings || [], false);
       });
 
       var add = document.createElement('span');
-      add.className = 'cpb-outline-add';
+      add.className = 'cpb-struct-add';
       add.setAttribute('role', 'button');
       add.tabIndex = 0;
       add.textContent = '+ Add MAIN chapter';
@@ -3328,12 +3405,50 @@
         }).catch(showError);
       });
       box.appendChild(add);
+
+      box.addEventListener('dragover', function (event) {
+        var draggingHeading = outlineBodyEl && outlineBodyEl.querySelector('.cpb-struct-heading.is-dragging');
+        if (!draggingHeading) return;
+        event.preventDefault();
+        box.classList.add('is-drop-target');
+      });
+      box.addEventListener('dragleave', function (event) {
+        if (event.target === box) box.classList.remove('is-drop-target');
+      });
+      box.addEventListener('drop', function (event) {
+        event.preventDefault();
+        box.classList.remove('is-drop-target');
+        var payload = parseOutlineDrag(event);
+        if (!payload || payload.kind !== 'heading') return;
+        if (payload.part_id !== part.section_id) return;
+        outlinePost('promote_outline_heading', {
+          section_id: payload.section_id,
+          section_ref: payload.section_ref,
+          insert_before_section_id: 0,
+        }).then(function (res) {
+          if (res.section_id) loadSection(res.section_id);
+        }).catch(showError);
+      });
+
       outlineBodyEl.appendChild(box);
     });
+
+    if (outlineBodyEl) {
+      outlineBodyEl.querySelectorAll('.cpb-struct-heading[draggable="true"]').forEach(wireOutlineDrag);
+    }
+  }
+
+  function parseOutlineDrag(event) {
+    try {
+      var raw = event.dataTransfer.getData('application/json') || event.dataTransfer.getData('text/plain') || '';
+      var payload = JSON.parse(raw);
+      return payload && typeof payload === 'object' ? payload : null;
+    } catch (err) {
+      return null;
+    }
   }
 
   function openOutlinePanel() {
-    if (!state.editable) return;
     setOutlineMode(true);
     apiPost('get_outline', { version_id: state.versionId }).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Could not load outline');
@@ -10830,6 +10945,16 @@
       else openOutlinePanel();
     });
   }
+  if (structCloseBtn) structCloseBtn.addEventListener('click', closeOutlinePanel);
+  if (structDoneBtn) structDoneBtn.addEventListener('click', closeOutlinePanel);
+  if (outlinePanelEl) {
+    outlinePanelEl.addEventListener('click', function (event) {
+      if (event.target === outlinePanelEl) closeOutlinePanel();
+    });
+  }
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && state.outlineOpen) closeOutlinePanel();
+  });
 
   if (addSubBtn) {
     addSubBtn.addEventListener('click', function () {

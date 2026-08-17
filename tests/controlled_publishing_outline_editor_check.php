@@ -70,6 +70,37 @@ $assert(
     'Sidebar PART labels must use the stored outline title.'
 );
 
+$tree = ControlledPublishingOutlineService::headingTreeFromNavItems(array(
+    array('section_ref' => '4.1', 'title' => 'Theory Training Syllabus', 'nav_label' => '4.1 Theory Training Syllabus'),
+    array('section_ref' => '4.1.1', 'title' => 'Application', 'nav_label' => '4.1.1 Application'),
+    array('section_ref' => '4.2', 'title' => 'Test and Examination', 'nav_label' => '4.2 Test and Examination'),
+));
+$assert(count($tree) === 2, 'First-level headings 4.1 and 4.2 must be promotable MAIN-chapter candidates.');
+$assert(!empty($tree[0]['can_promote']), '4.1 must be promotable to a MAIN chapter.');
+$assert(($tree[0]['headings'][0]['section_ref'] ?? '') === '4.1.1', '4.1.1 must stay nested under 4.1.');
+$assert(empty($tree[0]['headings'][0]['can_promote']), 'Nested 4.1.1 must not promote in one step.');
+
+$assert(
+    ControlledPublishingOutlineService::rewritePromotedSectionRef('4.1', '4.1', 1) === '1',
+    'Promoted heading 4.1 must become MAIN chapter 1.'
+);
+$assert(
+    ControlledPublishingOutlineService::rewritePromotedSectionRef('4.1', '4.1.1', 1) === '1.1',
+    'Child 4.1.1 must become 1.1 after promotion.'
+);
+
+$slice = ControlledPublishingOutlineService::headingBlockSlice(array(
+    array('section_ref' => '4', 'block_id' => 1),
+    array('section_ref' => '4.1', 'block_id' => 2),
+    array('section_ref' => '4.1.1', 'block_id' => 3),
+    array('section_ref' => '', 'block_id' => 4),
+    array('section_ref' => '4.2', 'block_id' => 5),
+), '4.1');
+$assert(
+    array_column($slice, 'block_id') === array(2, 3, 4),
+    'Promoting 4.1 must take that heading, its children, and following body until 4.2.'
+);
+
 $outline = file_get_contents($root . '/src/publishing/ControlledPublishingOutlineService.php');
 $nav = file_get_contents($root . '/src/publishing/ControlledPublishingEditorNavService.php');
 $api = file_get_contents($root . '/public/admin/api/controlled_book_editor_api.php');
@@ -79,6 +110,9 @@ $structure = file_get_contents($root . '/src/publishing/ControlledPublishingManu
 
 if (!is_string($outline) || !str_contains($outline, 'Cover, Part 0, and Annexes cannot be edited in the outline.')) {
     $failures[] = 'Outline service must refuse edits to Cover, Part 0, and Annexes.';
+}
+if (!is_string($outline) || !str_contains($outline, 'function promoteHeading(')) {
+    $failures[] = 'Outline service must promote a nested heading to a MAIN chapter.';
 }
 
 foreach (array(
@@ -97,6 +131,7 @@ foreach (array(
     'add_outline_chapter',
     'delete_outline_chapter',
     'move_outline_chapter',
+    'promote_outline_heading',
 ) as $marker) {
     if (!is_string($api) || !str_contains($api, $marker)) {
         $failures[] = 'Missing editor API marker: ' . $marker;
@@ -105,8 +140,8 @@ foreach (array(
 foreach (array(
     'id="cpbEditOutline"',
     'class="cpb-tree-outline-btn"',
-    'id="cpbOutlinePanel"',
-    'Cover, Part 0, and Annexes stay fixed',
+    'id="cpbStructModal"',
+    'Make this a MAIN chapter',
 ) as $marker) {
     if (!is_string($page) || !str_contains($page, $marker)) {
         $failures[] = 'Missing editor page marker: ' . $marker;
@@ -116,6 +151,8 @@ foreach (array(
     'openOutlinePanel(',
     'rename_outline_part',
     '+ Add MAIN chapter',
+    'promote_outline_heading',
+    'Make this a MAIN chapter',
     "status !== 'released'",
 ) as $marker) {
     if (!is_string($js) || !str_contains($js, $marker)) {
@@ -126,6 +163,9 @@ $css = file_get_contents($root . '/public/assets/controlled_book_editor.css');
 if (!is_string($css) || !str_contains($css, '.cpb-tree-outline-btn')) {
     $failures[] = 'Missing editor CSS marker: .cpb-tree-outline-btn';
 }
+if (!is_string($css) || !str_contains($css, '.cpb-struct-overlay')) {
+    $failures[] = 'Missing structure modal CSS.';
+}
 if (!is_string($css) || !str_contains($css, 'min-height: 22px !important')) {
     $failures[] = 'Outline inputs must stay compact against global compliance field styles.';
 }
@@ -134,6 +174,9 @@ if (!is_string($css) || !str_contains($css, 'width: 18px !important')) {
 }
 if (!is_string($structure) || !str_contains($structure, "\$meta['outline_locked']")) {
     $failures[] = 'Import overlay must not overwrite author-locked MAIN titles.';
+}
+if (!is_string($structure) || !str_contains($structure, 'function promoteHeadingToMainChapter(')) {
+    $failures[] = 'Structure service must move heading blocks onto a new MAIN chapter.';
 }
 
 if ($failures !== array()) {
@@ -145,4 +188,4 @@ if ($failures !== array()) {
 }
 
 echo "Controlled publishing outline editor: PASS\n";
-echo "PART/MAIN outline is editable; Cover, Part 0, and Annexes stay locked\n";
+echo "PART/MAIN outline is editable; nested headings can become MAIN chapters; Cover, Part 0, and Annexes stay locked\n";

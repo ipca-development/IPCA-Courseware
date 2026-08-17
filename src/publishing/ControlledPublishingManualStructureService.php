@@ -1296,6 +1296,127 @@ final class ControlledPublishingManualStructureService
     }
 
     /**
+     * Move one nested heading and the blocks under it onto a new MAIN chapter.
+     */
+    public function promoteHeadingToMainChapter(
+        int $versionId,
+        int $sourceSectionId,
+        string $sectionRef,
+        ?int $actorUserId = null
+    ): int {
+        if ($this->blocks === null || $sourceSectionId <= 0) {
+            throw new RuntimeException('Could not move that heading.');
+        }
+        $sectionRef = trim($sectionRef);
+        $source = $this->sections->getSection($versionId, $sourceSectionId);
+        if (!is_array($source) || $this->chapterNumberFromSection($source) <= 0) {
+            throw new RuntimeException('Headings can only be promoted from a MAIN chapter.');
+        }
+        $flat = $this->sections->listFlatSections($versionId);
+        $manualPart = $this->manualPartForSection($source, $flat);
+        if ($manualPart <= 0) {
+            throw new RuntimeException('That heading is not under a PART.');
+        }
+
+        $nodes = $this->flattenNodesFromSectionBlocks($this->blocks->listSectionBlocks($sourceSectionId));
+        $slice = ControlledPublishingOutlineService::headingBlockSlice($nodes, $sectionRef);
+        if ($slice === array()) {
+            throw new RuntimeException('That heading was not found in this chapter.');
+        }
+        $title = ControlledPublishingOutlineService::stripChapterNumberPrefix(
+            trim((string)($slice[0]['section_title'] ?? ''))
+        );
+        if ($title === '') {
+            $title = 'Chapter';
+        }
+
+        $parentId = (int)($source['parent_section_id'] ?? 0);
+        $nextNumber = 1;
+        foreach ($flat as $row) {
+            if (!is_array($row) || (int)($row['parent_section_id'] ?? 0) !== $parentId) {
+                continue;
+            }
+            $nextNumber = max($nextNumber, $this->chapterNumberFromSection($row) + 1);
+        }
+        $newId = $this->ensureChapterSection($versionId, $manualPart, $nextNumber, $title, $actorUserId);
+
+        $sortOrder = 10;
+        foreach ($slice as $index => $node) {
+            $blockId = (int)($node['block_id'] ?? 0);
+            if ($blockId <= 0) {
+                continue;
+            }
+            $payload = is_array($node['payload'] ?? null) ? $node['payload'] : array();
+            $oldRef = trim((string)($node['section_ref'] ?? ''));
+            $newRef = $oldRef !== ''
+                ? ControlledPublishingOutlineService::rewritePromotedSectionRef($sectionRef, $oldRef, $nextNumber)
+                : '';
+            $style = strtolower(trim((string)($node['paragraph_style'] ?? '')));
+            if ($newRef !== '' && preg_match('/^\d+(?:\.\d+)*$/', $newRef) === 1) {
+                $payload['canonical_section_ref'] = $newRef;
+                $payload['paragraph_style'] = ControlledPublishingDocxReader::sectionRefToParagraphStyle($newRef);
+            } elseif ($style !== '') {
+                $payload['paragraph_style'] = $style;
+            }
+            if ($index === 0) {
+                $payload['paragraph_style'] = 'title';
+                if (isset($payload['text']) && is_string($payload['text'])) {
+                    $payload['text'] = $title;
+                }
+                if (isset($payload['html']) && is_string($payload['html'])) {
+                    $payload['html'] = htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                }
+            }
+            $this->blocks->relocateBlock($blockId, $newId, $sortOrder, $payload, $actorUserId);
+            $sortOrder += 10;
+        }
+
+        $this->deleteLeftoverGenericWrapperHeading($sourceSectionId, $actorUserId);
+
+        return $newId;
+    }
+
+    private function deleteLeftoverGenericWrapperHeading(int $sectionId, ?int $actorUserId): void
+    {
+        if ($this->blocks === null || $sectionId <= 0) {
+            return;
+        }
+        $remaining = $this->listNavSubsectionsFromChapterBlocks($sectionId, array());
+        if ($remaining !== array()) {
+            return;
+        }
+        foreach ($this->blocks->listSectionBlocks($sectionId) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $payload = $this->blocks->decodePayload($row);
+            $text = $this->navBlockEntryText((string)($row['block_type'] ?? ''), $payload);
+            if ($text === '') {
+                continue;
+            }
+            if (!ControlledPublishingDocxReader::isGenericPartWrapperTitle($text)
+                && !ControlledPublishingDocxReader::isStrayPartHeadingTitle($text)
+            ) {
+                return;
+            }
+        }
+        foreach ($this->blocks->listSectionBlocks($sectionId) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $blockId = (int)($row['id'] ?? 0);
+            if ($blockId <= 0) {
+                continue;
+            }
+            try {
+                $this->blocks->deleteBlock($blockId, $actorUserId);
+            } catch (Throwable $e) {
+                unset($e);
+            }
+        }
+    }
+
+    /**
      * @param list<array<string,mixed>> $chapters
      */
     private function partHasPopulatedSiblingChapters(array $chapters, int $wrapperSectionId): bool
