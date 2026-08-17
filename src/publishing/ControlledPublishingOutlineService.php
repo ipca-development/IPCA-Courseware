@@ -371,6 +371,53 @@ final class ControlledPublishingOutlineService
         return $newId;
     }
 
+    public function demoteChapter(
+        int $versionId,
+        int $sectionId,
+        int $targetSectionId,
+        ?int $actorUserId = null
+    ): int {
+        $source = $this->requireEditableOutlineSection($versionId, $sectionId);
+        $target = $this->requireEditableOutlineSection($versionId, $targetSectionId);
+        $parentId = (int)($source['parent_section_id'] ?? 0);
+        if ($this->isPartRow($source) || $this->isPartRow($target)
+            || $this->chapterNumberFromRow($source) <= 0
+            || $this->chapterNumberFromRow($target) <= 0
+            || $parentId <= 0
+            || $parentId !== (int)($target['parent_section_id'] ?? 0)) {
+            throw new RuntimeException('Choose two MAIN chapters in the same PART.');
+        }
+
+        $startedTransaction = !$this->pdo->inTransaction();
+        if ($startedTransaction) {
+            $this->pdo->beginTransaction();
+        }
+        try {
+            $this->manualStructure->demoteMainChapterToSubchapter(
+                $versionId,
+                $sectionId,
+                $targetSectionId,
+                $actorUserId
+            );
+            $stmt = $this->pdo->prepare(
+                'DELETE FROM ipca_publishing_book_sections
+                 WHERE id = :id AND book_version_id = :version_id'
+            );
+            $stmt->execute(array(':id' => $sectionId, ':version_id' => $versionId));
+            $this->renumberChapters($versionId, $parentId);
+            if ($startedTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($startedTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $targetSectionId;
+    }
+
     /**
      * @param list<array{section_ref?:string,title?:string,nav_label?:string}> $items
      * @return list<array{section_ref:string,title:string,nav_label:string,can_promote:bool,headings:list<array<string,mixed>>}>
@@ -452,6 +499,27 @@ final class ControlledPublishingOutlineService
             $rest = substr($blockRef, strlen($prefix));
 
             return $rest === '' ? (string)$newChapter : $newChapter . '.' . $rest;
+        }
+
+        return $blockRef;
+    }
+
+    public static function rewriteDemotedSectionRef(
+        int $sourceChapter,
+        string $blockRef,
+        string $targetRef
+    ): string {
+        $blockRef = trim($blockRef);
+        $targetRef = trim($targetRef);
+        if ($sourceChapter <= 0 || $targetRef === '' || $blockRef === '') {
+            return $blockRef;
+        }
+        if ($blockRef === (string)$sourceChapter) {
+            return $targetRef;
+        }
+        $prefix = $sourceChapter . '.';
+        if (str_starts_with($blockRef, $prefix)) {
+            return $targetRef . substr($blockRef, strlen((string)$sourceChapter));
         }
 
         return $blockRef;
@@ -660,6 +728,15 @@ final class ControlledPublishingOutlineService
             $name = self::stripChapterNumberPrefix((string)($row['title'] ?? ''));
             if ($name === '') {
                 $name = 'Chapter ' . $number;
+            }
+            $oldNumber = $this->chapterNumberFromRow($row);
+            if ($oldNumber > 0 && $oldNumber !== $number) {
+                $this->manualStructure->renumberMainChapterContent(
+                    $versionId,
+                    $sectionId,
+                    $oldNumber,
+                    $number
+                );
             }
             $navLabel = self::formatChapterNavTitle($number, $name);
             $meta = $this->lockedMeta($row, array(

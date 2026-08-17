@@ -31,11 +31,55 @@ final class ControlledPublishingHtmlSanitizer
         }
 
         self::sanitizeNode($root, $allowed);
+        self::deduplicateAdjacentHyperlinks($root);
         $out = '';
         foreach ($root->childNodes as $child) {
             $out .= $doc->saveHTML($child);
         }
         return trim($out);
+    }
+
+    private static function deduplicateAdjacentHyperlinks(DOMElement $root): void
+    {
+        $doc = $root->ownerDocument;
+        if (!$doc instanceof DOMDocument) {
+            return;
+        }
+        $anchors = array();
+        foreach ($doc->getElementsByTagName('a') as $anchor) {
+            if ($anchor instanceof DOMElement) {
+                $anchors[] = $anchor;
+            }
+        }
+        foreach ($anchors as $anchor) {
+            if ($anchor->parentNode === null) {
+                continue;
+            }
+            $href = trim((string)$anchor->getAttribute('href'));
+            $label = trim((string)$anchor->textContent);
+            if ($href === '' || $label === '') {
+                continue;
+            }
+            $next = $anchor->nextSibling;
+            if ($next instanceof DOMElement && strtolower($next->tagName) === 'a') {
+                if (trim((string)$next->getAttribute('href')) === $href
+                    && trim((string)$next->textContent) === $label) {
+                    $next->parentNode?->removeChild($next);
+                }
+                continue;
+            }
+            if (!$next instanceof DOMText || preg_match('/^(?:https?:\/\/|www\.)/i', $label) !== 1) {
+                continue;
+            }
+            $trailing = (string)$next->nodeValue;
+            if (!str_starts_with($trailing, $label)) {
+                continue;
+            }
+            $next->nodeValue = substr($trailing, strlen($label));
+            if ($next->nodeValue === '') {
+                $next->parentNode?->removeChild($next);
+            }
+        }
     }
 
     /**

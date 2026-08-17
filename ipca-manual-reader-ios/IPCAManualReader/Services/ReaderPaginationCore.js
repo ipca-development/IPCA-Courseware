@@ -396,7 +396,11 @@
   function normalizeList(section, unit, root, forceBreakBefore) {
     const list = root.matches("ol,ul") ? root : root.querySelector("ol,ul");
     if (!list) return [];
-    const items = Array.from(list.children).filter((node) => node.matches("li"));
+    const items = Array.from(list.children).filter((node) => {
+      if (!node.matches("li")) return false;
+      return canonicalText([node.textContent]) !== ""
+        || Boolean(node.querySelector("img,figure,table,.cpb-callout"));
+    });
     const ordered = list.tagName.toLowerCase() === "ol";
     const initialStart = Number(list.getAttribute("start") || 1);
     const output = items.map((item, index) => {
@@ -1197,6 +1201,33 @@
     return root.outerHTML;
   }
 
+  function listGroupMarkup(values) {
+    if (!values.length) return "";
+    const root = contentRootFromHTML(values[0].html).cloneNode(true);
+    const list = root.matches("ol,ul") ? root : root.querySelector("ol,ul");
+    if (!list) return values.map(pieceMarkup).join("");
+    list.querySelectorAll(":scope > li").forEach((item) => item.remove());
+    values.forEach((value) => {
+      const sourceRoot = contentRootFromHTML(value.html);
+      const sourceList = sourceRoot.matches("ol,ul")
+        ? sourceRoot
+        : sourceRoot.querySelector("ol,ul");
+      const item = sourceList ? sourceList.querySelector(":scope > li") : null;
+      if (!item) return;
+      const clone = item.cloneNode(true);
+      annotateCoverage(clone, value);
+      list.appendChild(clone);
+    });
+    if (list.tagName.toLowerCase() === "ol") {
+      list.setAttribute("start", String(values[0].fragment.orderedStart || 1));
+    }
+    root.classList.add("reader-semantic-piece", "reader-list-group");
+    root.style.setProperty("align-self", "start");
+    annotateSourceBinding(root, values[0].fragment);
+    root.setAttribute("data-semantic-type", "list");
+    return root.outerHTML;
+  }
+
   function lepGroupMarkup(values) {
     if (!values.length) return "";
     const root = contentRootFromHTML(values[0].html).cloneNode(true);
@@ -1257,6 +1288,20 @@
     let index = 0;
     while (index < values.length) {
       const value = values[index];
+      if (value.fragment.type === "listItem") {
+        const group = [];
+        const blockId = value.fragment.blockId;
+        while (
+          index < values.length
+          && values[index].fragment.type === "listItem"
+          && values[index].fragment.blockId === blockId
+        ) {
+          group.push(values[index]);
+          index++;
+        }
+        output.push(listGroupMarkup(group));
+        continue;
+      }
       if (value.fragment.type === "tocRow") {
         const group = [];
         while (index < values.length && values[index].fragment.type === "tocRow") {

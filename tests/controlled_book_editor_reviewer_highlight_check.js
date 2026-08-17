@@ -30,10 +30,14 @@ function extractFunction(source, name, nextName) {
   try {
     const page = await browser.newPage();
     await page.setContent(
-      '<div id="target"><p>His/Her <strong>responsibilities</strong> are:</p></div>'
+      '<div id="target" class="cpb-block" data-block-id="7" '
+        + 'data-stable-anchor="block-7"><p>His/Her <strong>responsibilities</strong> are:</p></div>'
     );
     await page.addScriptTag({
       content: `
+        var state = { sectionId: 3, sectionPageStarts: { 3: 12 } };
+        var PRINT_PAGE = { height: 1056, gap: 28 };
+        function printY() { return 0; }
         function escapeHtml(value) {
           return String(value == null ? "" : value)
             .replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -51,6 +55,7 @@ function extractFunction(source, name, nextName) {
         end_offset: 1000,
       });
       if (!range) throw new Error("Reviewer range was not resolved.");
+      const anchor = reviewSelectionAnchor(range);
       CSS.highlights.set("cpb-review-remarks", new Highlight(range));
       const panel = document.createElement("div");
       panel.id = "cpbReviewThreadPanel";
@@ -73,6 +78,7 @@ function extractFunction(source, name, nextName) {
         liveReply: panel.querySelector(".cpb-review-thread-message p")?.textContent,
         timestamp: panel.querySelector(".cpb-review-thread-message time")?.textContent,
         draft: panel.querySelector("textarea")?.value,
+        anchor,
       };
     });
 
@@ -90,6 +96,14 @@ function extractFunction(source, name, nextName) {
     }
     if (result.draft !== "Unsent draft") {
       throw new Error("Live reviewer refresh replaced the unsent draft.");
+    }
+    if (
+      result.anchor?.stable_anchor !== "block-7"
+      || result.anchor?.selected_text !== "His/Her responsibilities are:"
+      || result.anchor?.page_number !== 12
+      || result.anchor?.end_offset <= result.anchor?.start_offset
+    ) {
+      throw new Error("Editor reviewer selection did not produce a stable source anchor.");
     }
     process.stdout.write("Controlled book editor reviewer highlight check: PASS\n");
   } finally {

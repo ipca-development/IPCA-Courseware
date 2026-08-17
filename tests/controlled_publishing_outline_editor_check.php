@@ -88,6 +88,14 @@ $assert(
     ControlledPublishingOutlineService::rewritePromotedSectionRef('4.1', '4.1.1', 1) === '1.1',
     'Child 4.1.1 must become 1.1 after promotion.'
 );
+$assert(
+    ControlledPublishingOutlineService::rewriteDemotedSectionRef(4, '4', '3.3') === '3.3',
+    'Demoted MAIN chapter 4 must become subchapter 3.3.'
+);
+$assert(
+    ControlledPublishingOutlineService::rewriteDemotedSectionRef(4, '4.1.2', '3.3') === '3.3.1.2',
+    'Nested refs must remain nested after MAIN chapter demotion.'
+);
 
 $slice = ControlledPublishingOutlineService::headingBlockSlice(array(
     array('section_ref' => '4', 'block_id' => 1),
@@ -107,6 +115,7 @@ $api = file_get_contents($root . '/public/admin/api/controlled_book_editor_api.p
 $page = file_get_contents($root . '/public/admin/compliance/controlled_book_editor.php');
 $js = file_get_contents($root . '/public/assets/controlled_book_editor.js');
 $structure = file_get_contents($root . '/src/publishing/ControlledPublishingManualStructureService.php');
+$toc = file_get_contents($root . '/src/publishing/ControlledPublishingTocService.php');
 
 if (!is_string($outline) || !str_contains($outline, 'Cover, Part 0, and Annexes cannot be edited in the outline.')) {
     $failures[] = 'Outline service must refuse edits to Cover, Part 0, and Annexes.';
@@ -141,6 +150,7 @@ foreach (array(
     'delete_outline_chapter',
     'move_outline_chapter',
     'promote_outline_heading',
+    'demote_outline_chapter',
 ) as $marker) {
     if (!is_string($api) || !str_contains($api, $marker)) {
         $failures[] = 'Missing editor API marker: ' . $marker;
@@ -162,6 +172,8 @@ foreach (array(
     '+ Add MAIN chapter',
     'promote_outline_heading',
     'Make this a MAIN chapter',
+    'demote_outline_chapter',
+    'Make subchapter',
     "status !== 'released'",
 ) as $marker) {
     if (!is_string($js) || !str_contains($js, $marker)) {
@@ -186,6 +198,20 @@ if (!is_string($structure) || !str_contains($structure, "\$meta['outline_locked'
 }
 if (!is_string($structure) || !str_contains($structure, 'function promoteHeadingToMainChapter(')) {
     $failures[] = 'Structure service must move heading blocks onto a new MAIN chapter.';
+}
+if (!is_string($structure) || !str_contains($structure, 'function demoteMainChapterToSubchapter(')) {
+    $failures[] = 'Structure service must move a MAIN chapter back under an earlier chapter.';
+}
+if (!is_string($outline) || !str_contains($outline, 'function demoteChapter(')) {
+    $failures[] = 'Outline service must expose MAIN chapter demotion.';
+}
+if (!is_string($toc)
+    || !str_contains($toc, "array('part_1', 'main_content')")
+    || !str_contains($toc, 'ControlledPublishingOutlineService::partNavTitle(')) {
+    $failures[] = 'Generated TOC PART labels must use the same resolver as editor/iOS navigation.';
+}
+if (!is_string($api) || !str_contains($api, "\$tocSvc->regenerateTocSection(\$versionId, \$uid)")) {
+    $failures[] = 'Outline mutations must refresh the generated TOC automatically.';
 }
 
 if ($failures !== array()) {

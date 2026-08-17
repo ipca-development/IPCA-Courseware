@@ -5073,6 +5073,24 @@ ol.cpb-list > li[data-indent-level="8"] {
   color: inherit;
 }
 
+.cpb-review-selection-action {
+  position: fixed;
+  z-index: 10020;
+  min-height: 34px;
+  border: 1px solid #0b2f57;
+  border-radius: 17px;
+  padding: 6px 13px;
+  background: #0b2f57;
+  color: #fff;
+  font: 700 12px/1.2 system-ui, sans-serif;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
+  cursor: pointer;
+}
+
+.cpb-review-selection-action[hidden] {
+  display: none;
+}
+
 .cpb-review-thread-pin {
   position: absolute;
   top: 4px;

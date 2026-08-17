@@ -111,6 +111,30 @@ try {
                 ),
             ));
             break;
+        case 'review_thread_create':
+            $versionId = (int)($_POST['version_id'] ?? 0);
+            if ($versionId <= 0) {
+                throw new InvalidArgumentException('version_id required.');
+            }
+            $version = $foundation->getVersion($versionId);
+            if ($version === null) {
+                throw new RuntimeException('Version not found.');
+            }
+            if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+                throw new RuntimeException('Reviewer comments can only be added to draft manuals.');
+            }
+            $anchor = is_array($_POST['anchor'] ?? null) ? $_POST['anchor'] : array();
+            cp_editor_json(200, array(
+                'ok' => true,
+                'thread' => $readerAnnotationSvc->createReviewThread(
+                    $uid,
+                    $versionId,
+                    (string)($version['book_key'] ?? ''),
+                    $anchor,
+                    (string)($_POST['body'] ?? '')
+                ),
+            ));
+            break;
         case 'load':
             cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $editorNavSvc, $manualStructureSvc, $annexSvc, $uid);
             break;
@@ -232,22 +256,25 @@ try {
             cp_editor_handle_get_outline($foundation, $outlineSvc);
             break;
         case 'rename_outline_part':
-            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'rename_part');
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'rename_part');
             break;
         case 'rename_outline_chapter':
-            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'rename_chapter');
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'rename_chapter');
             break;
         case 'add_outline_chapter':
-            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'add_chapter');
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'add_chapter');
             break;
         case 'delete_outline_chapter':
-            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'delete_chapter');
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'delete_chapter');
             break;
         case 'move_outline_chapter':
-            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'move_chapter');
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'move_chapter');
             break;
         case 'promote_outline_heading':
-            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $uid, 'promote_heading');
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'promote_heading');
+            break;
+        case 'demote_outline_chapter':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'demote_chapter');
             break;
         case 'upload_image':
             cp_editor_handle_upload_image($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
@@ -2531,6 +2558,12 @@ function cp_editor_handle_create_block(
     $sectionId = (int)($in['section_id'] ?? 0);
     $blockType = (string)($in['block_type'] ?? 'paragraph');
     $payload = is_array($in['payload'] ?? null) ? $in['payload'] : array();
+    // Keep the established client request contract while storing a truly empty
+    // insertion. Older editor builds use this placeholder for the same action.
+    if ($blockType === 'paragraph'
+        && trim((string)($payload['html'] ?? '')) === '<p>New paragraph</p>') {
+        $payload['html'] = '<p><br></p>';
+    }
 
     if ($versionId <= 0 || $sectionId <= 0) {
         cp_editor_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
@@ -2781,6 +2814,7 @@ function cp_editor_handle_outline_mutate(
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingOutlineService $outlineSvc,
     ControlledPublishingEditorNavService $editorNavSvc,
+    ControlledPublishingTocService $tocSvc,
     int $uid,
     string $op
 ): void {
@@ -2823,6 +2857,13 @@ function cp_editor_handle_outline_mutate(
                 (int)($in['insert_before_section_id'] ?? 0),
                 $uid
             );
+        } elseif ($op === 'demote_chapter') {
+            $createdId = $outlineSvc->demoteChapter(
+                $versionId,
+                $sectionId,
+                (int)($in['target_section_id'] ?? 0),
+                $uid
+            );
         } else {
             cp_editor_json(400, array('ok' => false, 'error' => 'Unknown outline action.'));
         }
@@ -2830,10 +2871,20 @@ function cp_editor_handle_outline_mutate(
         cp_editor_json(400, array('ok' => false, 'error' => $e->getMessage()));
     }
 
+    $tocRefreshError = '';
+    try {
+        $tocSvc->regenerateTocSection($versionId, $uid);
+    } catch (Throwable $e) {
+        $tocRefreshError = $e->getMessage();
+    }
     $payload = array_merge(array('ok' => true), $outlineSvc->getOutline($versionId));
     $payload['sections_tree'] = $editorNavSvc->buildNavTree($versionId, (string)($version['book_key'] ?? 'OM'));
     if ($createdId > 0) {
         $payload['section_id'] = $createdId;
+    }
+    $payload['toc_refreshed'] = $tocRefreshError === '';
+    if ($tocRefreshError !== '') {
+        $payload['toc_refresh_warning'] = $tocRefreshError;
     }
     cp_editor_json(200, $payload);
 }

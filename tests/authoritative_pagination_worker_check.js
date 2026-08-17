@@ -558,6 +558,27 @@ cases.push(["J. oversized single block may split", () => {
   assert.ok(result.pages.length >= 2, "one oversized block may continue");
   const listCoverage = sourceCoverage(result).filter((item) => item.source_fragment_id.includes("/block-list/li-"));
   assert.strictEqual(listCoverage.length, 28, "list items appear exactly once");
+  result.pages.forEach((page) => {
+    const wrappers = page.page_html.match(/class="[^"]*\bcpb-list\b[^"]*"/g) || [];
+    assert.ok(wrappers.length <= 1, "consecutive list items must share one list wrapper per page");
+  });
+}]);
+
+cases.push(["J2. empty trailing list item is discarded", () => {
+  const { execution, result } = runWorker(sourceWith([
+    section(1, "empty-list", "Empty list", {}, [
+      unit("empty-list-block", "list",
+        '<article data-block-id="66" data-stable-anchor="empty-list-block">'
+          + '<ul class="cpb-list"><li>First</li><li>Second</li><li>&nbsp;</li></ul></article>',
+        { block_id: 66 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  const coverage = sourceCoverage(result).filter((item) =>
+    item.source_fragment_id.includes("/empty-list-block/li-")
+  );
+  assert.strictEqual(coverage.length, 2, "empty list items must not become page fragments");
+  assert.ok(!result.pages.map((page) => page.page_html).join("").includes("&nbsp;</li>"));
 }]);
 
 cases.push(["K. every page has header, footer, and sequential numbers", () => {

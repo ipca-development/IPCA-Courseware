@@ -6,6 +6,7 @@ require_once __DIR__ . '/ControlledPublishingBlockService.php';
 require_once __DIR__ . '/ControlledPublishingDocxReader.php';
 require_once __DIR__ . '/ControlledPublishingSectionNumberService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
+require_once __DIR__ . '/ControlledPublishingOutlineService.php';
 
 /**
  * Builds the Table of Contents section from Title / Subtitle paragraph styles.
@@ -247,20 +248,22 @@ final class ControlledPublishingTocService
 
     private function resolvePartTitle(int $versionId, string $partKey): string
     {
+        $candidateKeys = $partKey === 'part_1'
+            ? array('part_1', 'main_content')
+            : array($partKey);
+        $placeholders = implode(',', array_fill(0, count($candidateKeys), '?'));
         $stmt = $this->pdo->prepare("
-            SELECT title
+            SELECT *
             FROM ipca_publishing_book_sections
-            WHERE book_version_id = :version_id
-              AND section_key = :section_key
-            LIMIT 1
+            WHERE book_version_id = ?
+              AND section_key IN ({$placeholders})
         ");
-        $stmt->execute(array(
-            ':version_id' => $versionId,
-            ':section_key' => $partKey,
-        ));
-        $title = trim((string)$stmt->fetchColumn());
-        if ($title !== '') {
-            return ControlledPublishingPart0PageService::formatPartLabel($title);
+        $stmt->execute(array_merge(array($versionId), $candidateKeys));
+        $rows = array();
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            if (is_array($row)) {
+                $rows[(string)($row['section_key'] ?? '')] = $row;
+            }
         }
 
         $defaults = array(
@@ -270,8 +273,13 @@ final class ControlledPublishingTocService
             'part_4' => 'PART 4 – Personnel Training',
             'annexes' => 'Annexes',
         );
+        $fallback = $defaults[$partKey] ?? '';
+        $row = $rows[$partKey] ?? ($partKey === 'part_1' ? ($rows['main_content'] ?? null) : null);
+        if (is_array($row)) {
+            return ControlledPublishingOutlineService::partNavTitle($row, $fallback);
+        }
 
-        return $defaults[$partKey] ?? '';
+        return $fallback;
     }
 
     /**

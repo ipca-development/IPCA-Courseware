@@ -203,6 +203,18 @@ annotation_require(
         'reviewCommentTimestamp',
         'data-thread-uuid',
         'messages.scrollTop = messages.scrollHeight',
+        'reviewSelectionAnchor',
+        'Add Reviewer Comment',
+        "apiPost(actionName, request)",
+    ),
+    $failures
+);
+annotation_require(
+    $root . '/public/admin/api/controlled_book_editor_api.php',
+    array(
+        "case 'review_thread_create':",
+        '$readerAnnotationSvc->createReviewThread(',
+        'Reviewer comments can only be added to draft manuals.',
     ),
     $failures
 );
@@ -215,6 +227,7 @@ annotation_require(
         'width: min(644px, calc(100vw - 64px))',
         'height: min(720px, calc(100vh - 96px))',
         'grid-template-rows: auto minmax(0, 1fr) auto',
+        '.cpb-review-selection-action',
     ),
     $failures
 );

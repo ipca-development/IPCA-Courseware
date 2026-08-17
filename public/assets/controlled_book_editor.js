@@ -3020,6 +3020,122 @@
     return range.collapsed ? null : range;
   }
 
+  function reviewUUID() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (char) {
+      var value = Math.random() * 16 | 0;
+      return (char === 'x' ? value : (value & 3 | 8)).toString(16);
+    });
+  }
+
+  function reviewSelectionAnchor(range) {
+    if (!range || range.collapsed) return null;
+    var startElement = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer
+      : range.startContainer.parentElement;
+    var endElement = range.endContainer.nodeType === Node.ELEMENT_NODE
+      ? range.endContainer
+      : range.endContainer.parentElement;
+    var block = startElement && startElement.closest
+      ? startElement.closest('.cpb-block')
+      : null;
+    if (!block || !endElement || block !== endElement.closest('.cpb-block')) return null;
+    var selectedText = range.toString().trim();
+    if (!selectedText) return null;
+
+    var nodes = [];
+    var walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        var parent = node.parentElement;
+        if (!parent || parent.closest(
+          '.cpb-block-controls,.cpb-review-thread-pin,button,input,select,textarea'
+        ) || !node.nodeValue) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    var node;
+    while ((node = walker.nextNode())) nodes.push(node);
+    var total = 0;
+    var startOffset = -1;
+    var endOffset = -1;
+    nodes.forEach(function (textNode) {
+      var length = textNode.nodeValue.length;
+      if (range.intersectsNode(textNode)) {
+        var localStart = textNode === range.startContainer ? range.startOffset : 0;
+        var localEnd = textNode === range.endContainer ? range.endOffset : length;
+        if (startOffset < 0) startOffset = total + localStart;
+        endOffset = total + localEnd;
+      }
+      total += length;
+    });
+    if (startOffset < 0 || endOffset <= startOffset) return null;
+    var sheet = block.closest('.cpb-sheet');
+    var sectionStart = parseInt(state.sectionPageStarts[state.sectionId] || '1', 10);
+    var localPage = sheet
+      ? Math.max(0, Math.floor(printY(block, sheet) / (PRINT_PAGE.height + PRINT_PAGE.gap)))
+      : 0;
+    var stableAnchor = String(block.getAttribute('data-stable-anchor') || '');
+    return {
+      thread_uuid: reviewUUID(),
+      comment_uuid: reviewUUID(),
+      page_number: sectionStart + localPage,
+      selected_text: selectedText,
+      source_fragment_id: String(
+        block.getAttribute('data-source-fragment-id')
+          || block.getAttribute('data-fragment-id')
+          || stableAnchor
+      ),
+      stable_anchor: stableAnchor,
+      start_offset: startOffset,
+      end_offset: endOffset,
+    };
+  }
+
+  function updateReviewerSelectionAction() {
+    var action = document.getElementById('cpbAddReviewerComment');
+    var selection = window.getSelection();
+    var range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+    var anchor = selectionInCanvas() ? reviewSelectionAnchor(range) : null;
+    if (!anchor) {
+      if (action) action.hidden = true;
+      state.pendingReviewAnchor = null;
+      return;
+    }
+    state.pendingReviewAnchor = anchor;
+    if (!action) {
+      action = document.createElement('button');
+      action.type = 'button';
+      action.id = 'cpbAddReviewerComment';
+      action.className = 'cpb-review-selection-action';
+      action.textContent = 'Add Reviewer Comment';
+      action.addEventListener('mousedown', function (event) {
+        event.preventDefault();
+      });
+      action.addEventListener('click', function () {
+        var pending = state.pendingReviewAnchor;
+        if (!pending) return;
+        action.hidden = true;
+        showReviewThreadPanel({
+          thread_uuid: pending.thread_uuid,
+          selected_text: pending.selected_text,
+          comments: [],
+          is_new: true,
+          anchor: pending,
+        });
+      });
+      document.body.appendChild(action);
+    }
+    var rect = range.getBoundingClientRect();
+    action.style.left = Math.max(12, Math.min(
+      window.innerWidth - action.offsetWidth - 12,
+      rect.left + (rect.width / 2) - (action.offsetWidth / 2)
+    )) + 'px';
+    action.style.top = Math.min(window.innerHeight - 48, rect.bottom + 8) + 'px';
+    action.hidden = false;
+  }
+
   function reviewCommentTimestamp(value) {
     var raw = String(value || '').trim();
     if (!raw) return '';
@@ -3178,17 +3294,18 @@
         if (!body) return;
         var submit = form.querySelector('button');
         if (submit) submit.disabled = true;
-        apiPost('review_comment_add', {
+        var actionName = thread.is_new ? 'review_thread_create' : 'review_comment_add';
+        var request = thread.is_new ? {
+          version_id: state.versionId,
+          anchor: thread.anchor,
+          body: body,
+        } : {
           version_id: state.versionId,
           thread_uuid: thread.thread_uuid,
-          comment_uuid: (window.crypto && window.crypto.randomUUID)
-            ? window.crypto.randomUUID()
-            : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (char) {
-              var value = Math.random() * 16 | 0;
-              return (char === 'x' ? value : (value & 3 | 8)).toString(16);
-            }),
+          comment_uuid: reviewUUID(),
           body: body,
-        }).then(function (res) {
+        };
+        apiPost(actionName, request).then(function (res) {
           if (!res || !res.ok || !res.thread) {
             throw new Error((res && res.error) || 'Unable to add reviewer comment.');
           }
@@ -3432,8 +3549,15 @@
       renderTree(state.sectionsTree, state.sectionId);
     }
     renderOutlinePanel(res);
-    setOutlineStatus('');
-    setStatus('Outline saved', 'saved');
+    if (res.toc_refreshed === false) {
+      setOutlineStatus('Outline saved; TOC refresh needs attention: ' + String(
+        res.toc_refresh_warning || 'unknown error'
+      ), 'error');
+      setStatus('Outline saved · TOC refresh failed', 'warn');
+    } else {
+      setOutlineStatus('');
+      setStatus('Outline and TOC saved', 'saved');
+    }
     return res;
   }
 
@@ -3600,6 +3724,20 @@
         }));
         actions.appendChild(outlineSmallBtn('↓', '', index === part.chapters.length - 1, function () {
           outlinePost('move_outline_chapter', { section_id: chapter.section_id, direction: 'down' }).catch(showError);
+        }));
+        actions.appendChild(outlineSmallBtn('Make subchapter', '', index === 0, function () {
+          var target = part.chapters[index - 1];
+          if (!target) return;
+          if (!window.confirm(
+            'Move MAIN chapter “' + (chapter.title || chapter.nav_label)
+              + '” under “' + (target.title || target.nav_label) + '” as a subchapter?'
+          )) return;
+          outlinePost('demote_outline_chapter', {
+            section_id: chapter.section_id,
+            target_section_id: target.section_id,
+          }).then(function (res) {
+            if (res.section_id) loadSection(res.section_id);
+          }).catch(showError);
         }));
         actions.appendChild(outlineSmallBtn('×', 'cpb-outline-btn--danger', false, function () {
           if (!window.confirm('Remove MAIN chapter “' + (chapter.title || chapter.nav_label) + '”?')) return;
@@ -9460,6 +9598,29 @@
     }
     return apiPost('create_block', req).then(function (res) {
       if (!res.ok) throw new Error(res.error || 'Create failed');
+      var createdBlockId = parseInt(
+        (res.block && res.block.id) || res.block_id || '0',
+        10
+      );
+      function focusCreatedBlock() {
+        if (createdBlockId <= 0) return;
+        var created = canvasEl.querySelector(
+          '.cpb-block[data-block-id="' + String(createdBlockId) + '"]'
+        );
+        var field = created ? created.querySelector('[contenteditable="true"]') : null;
+        if (!field) return;
+        try {
+          field.focus({ preventScroll: true });
+        } catch (err) {
+          field.focus();
+        }
+        var range = document.createRange();
+        range.selectNodeContents(field);
+        range.collapse(true);
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
       var anchor = liveInsertAfter || (focusedBlock && isConnectedEl(focusedBlock) ? focusedBlock : null);
       var body = canvasEl.querySelector('[data-blocks-root]');
       if (anchor && res.block_html) {
@@ -9467,16 +9628,14 @@
         wireCanvas();
         var newBlock = anchor.nextElementSibling;
         if (newBlock && newBlock.classList.contains('cpb-block')) {
-          var field = newBlock.querySelector('[contenteditable="true"]');
-          if (field) field.focus();
+          focusCreatedBlock();
         }
       } else if (body && res.block_html) {
         body.insertAdjacentHTML('beforeend', res.block_html);
         wireCanvas();
         var lastBlock = body.querySelector('.cpb-block:last-child');
         if (lastBlock) {
-          var field2 = lastBlock.querySelector('[contenteditable="true"]');
-          if (field2) field2.focus();
+          focusCreatedBlock();
         }
       }
       setStatus('Added', 'saved');
@@ -9490,7 +9649,10 @@
         }
       }
       if (blockType === 'paragraph' || blockType === 'heading') {
-        return recomputeSectionNumbers().catch(showError).then(function () { return res; });
+        return recomputeSectionNumbers().catch(showError).then(function () {
+          focusCreatedBlock();
+          return res;
+        });
       }
       return res;
     });
@@ -10666,10 +10828,15 @@
   }
 
   document.addEventListener('selectionchange', function () {
+    updateReviewerSelectionAction();
     if (!selectionInCanvas()) return;
     saveSelectionRange();
     rememberStyleTarget();
   });
+  canvasEl.addEventListener('scroll', function () {
+    var action = document.getElementById('cpbAddReviewerComment');
+    if (action) action.hidden = true;
+  }, { passive: true });
 
   if (toolbarEl) {
     toolbarEl.addEventListener('mousedown', function (e) {

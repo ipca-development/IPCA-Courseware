@@ -1376,6 +1376,145 @@ final class ControlledPublishingManualStructureService
         return $newId;
     }
 
+    /**
+     * Move a MAIN chapter and all of its content under an earlier MAIN chapter.
+     */
+    public function demoteMainChapterToSubchapter(
+        int $versionId,
+        int $sourceSectionId,
+        int $targetSectionId,
+        ?int $actorUserId = null
+    ): void {
+        if ($this->blocks === null || $sourceSectionId <= 0 || $targetSectionId <= 0) {
+            throw new RuntimeException('Could not convert that MAIN chapter.');
+        }
+        if ($sourceSectionId === $targetSectionId) {
+            throw new RuntimeException('Choose a different target MAIN chapter.');
+        }
+        $source = $this->sections->getSection($versionId, $sourceSectionId);
+        $target = $this->sections->getSection($versionId, $targetSectionId);
+        $sourceChapter = is_array($source) ? $this->chapterNumberFromSection($source) : 0;
+        $targetChapter = is_array($target) ? $this->chapterNumberFromSection($target) : 0;
+        if (!is_array($source) || !is_array($target)
+            || $sourceChapter <= 0 || $targetChapter <= 0
+            || (int)($source['parent_section_id'] ?? 0) !== (int)($target['parent_section_id'] ?? 0)) {
+            throw new RuntimeException('Both chapters must be MAIN chapters in the same PART.');
+        }
+        if ($targetChapter >= $sourceChapter) {
+            throw new RuntimeException('A MAIN chapter can only be moved under an earlier MAIN chapter.');
+        }
+
+        $nextSubchapter = 1;
+        foreach ($this->listNavSubsectionsFromChapterBlocks($targetSectionId, array()) as $item) {
+            $ref = trim((string)($item['section_ref'] ?? ''));
+            if (preg_match('/^' . preg_quote((string)$targetChapter, '/') . '\.(\d+)$/', $ref, $match) === 1) {
+                $nextSubchapter = max($nextSubchapter, (int)$match[1] + 1);
+            }
+        }
+        $targetRef = $targetChapter . '.' . $nextSubchapter;
+        $targetBlocks = $this->blocks->listSectionBlocks($targetSectionId);
+        $sortOrder = 10;
+        foreach ($targetBlocks as $block) {
+            $sortOrder = max($sortOrder, (int)($block['sort_order'] ?? 0) + 10);
+        }
+
+        $sourceBlocks = $this->blocks->listSectionBlocks($sourceSectionId);
+        if ($sourceBlocks === array()) {
+            throw new RuntimeException('The MAIN chapter has no content to move.');
+        }
+        $hasTitleBlock = false;
+        foreach ($sourceBlocks as $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            $candidatePayload = $this->blocks->decodePayload($block);
+            if (strtolower(trim((string)($candidatePayload['paragraph_style'] ?? ''))) === 'title') {
+                $hasTitleBlock = true;
+                break;
+            }
+        }
+        if (!$hasTitleBlock) {
+            throw new RuntimeException('The MAIN chapter title block could not be identified.');
+        }
+        $titleMoved = false;
+        foreach ($sourceBlocks as $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            $blockId = (int)($block['id'] ?? 0);
+            if ($blockId <= 0) {
+                continue;
+            }
+            $payload = $this->blocks->decodePayload($block);
+            $style = strtolower(trim((string)($payload['paragraph_style'] ?? '')));
+            $oldRef = trim((string)($payload['canonical_section_ref'] ?? ''));
+            if (!$titleMoved && $style === 'title') {
+                $payload['paragraph_style'] = 'subtitle_1';
+                $payload['canonical_section_ref'] = $targetRef;
+                $titleMoved = true;
+            } elseif ($oldRef !== '') {
+                $newRef = ControlledPublishingOutlineService::rewriteDemotedSectionRef(
+                    $sourceChapter,
+                    $oldRef,
+                    $targetRef
+                );
+                $payload['canonical_section_ref'] = $newRef;
+                if ($newRef === $targetRef) {
+                    $payload['paragraph_style'] = 'subtitle_1';
+                } elseif ($newRef !== $oldRef) {
+                    $payload['paragraph_style'] = ControlledPublishingDocxReader::sectionRefToParagraphStyle($newRef);
+                }
+            }
+            $this->blocks->relocateBlock(
+                $blockId,
+                $targetSectionId,
+                $sortOrder,
+                $payload,
+                $actorUserId
+            );
+            $sortOrder += 10;
+        }
+    }
+
+    public function renumberMainChapterContent(
+        int $versionId,
+        int $sectionId,
+        int $oldChapter,
+        int $newChapter,
+        ?int $actorUserId = null
+    ): void {
+        if ($this->blocks === null || $sectionId <= 0 || $oldChapter <= 0
+            || $newChapter <= 0 || $oldChapter === $newChapter) {
+            return;
+        }
+        $section = $this->sections->getSection($versionId, $sectionId);
+        if (!is_array($section) || $this->chapterNumberFromSection($section) !== $oldChapter) {
+            throw new RuntimeException('Could not renumber MAIN chapter content.');
+        }
+        foreach ($this->blocks->listSectionBlocks($sectionId) as $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            $blockId = (int)($block['id'] ?? 0);
+            if ($blockId <= 0) {
+                continue;
+            }
+            $payload = $this->blocks->decodePayload($block);
+            $oldRef = trim((string)($payload['canonical_section_ref'] ?? ''));
+            $newRef = ControlledPublishingOutlineService::rewritePromotedSectionRef(
+                (string)$oldChapter,
+                $oldRef,
+                $newChapter
+            );
+            if ($newRef === $oldRef) {
+                continue;
+            }
+            $payload['canonical_section_ref'] = $newRef;
+            $payload['paragraph_style'] = ControlledPublishingDocxReader::sectionRefToParagraphStyle($newRef);
+            $this->blocks->updateBlock($blockId, $payload, $actorUserId);
+        }
+    }
+
     private function deleteLeftoverGenericWrapperHeading(int $sectionId, ?int $actorUserId): void
     {
         if ($this->blocks === null || $sectionId <= 0) {
