@@ -314,6 +314,7 @@ compliance_page_open(array(
       <button type="button" class="cpb-struct-close" id="cpbStructClose" aria-label="Close">&times;</button>
     </div>
     <p class="cpb-struct-lead">Cover, Part 0, and Annexes stay fixed. Drag a heading onto a PART to make it a MAIN chapter, or use <strong>Make this a MAIN chapter</strong>.</p>
+    <p class="cpb-struct-status" id="cpbStructStatus" hidden></p>
     <div class="cpb-struct-body" id="cpbOutlineBody"></div>
     <div class="cpb-struct-foot">
       <button type="button" class="cpb-struct-done" id="cpbStructDone">Done</button>

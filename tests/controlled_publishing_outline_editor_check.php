@@ -114,6 +114,9 @@ if (!is_string($outline) || !str_contains($outline, 'Cover, Part 0, and Annexes 
 if (!is_string($outline) || !str_contains($outline, 'function promoteHeading(')) {
     $failures[] = 'Outline service must promote a nested heading to a MAIN chapter.';
 }
+if (!is_string($outline) || !str_contains($outline, '_chapter_tmp_')) {
+    $failures[] = 'Chapter reorder must use temporary section keys to avoid unique-key collisions.';
+}
 
 foreach (array(
     'ControlledPublishingOutlineService::partNavTitle(',

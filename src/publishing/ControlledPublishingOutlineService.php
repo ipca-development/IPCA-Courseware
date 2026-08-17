@@ -630,6 +630,7 @@ final class ControlledPublishingOutlineService
         if ($partKey === 'main_content') {
             $partKey = 'part_1';
         }
+        $pending = array();
         $number = 1;
         foreach ($chapters as $row) {
             $sectionId = (int)($row['id'] ?? 0);
@@ -645,9 +646,32 @@ final class ControlledPublishingOutlineService
                 'chapter_number' => $number,
                 'manual_part' => $partNumber,
             ));
-            $sectionKey = substr($partKey . '_chapter_' . $number, 0, 120);
-            $this->updateOutlineSection($sectionId, $name, $navLabel, $meta, $sectionKey, $number * 10);
+            $this->updateOutlineSection(
+                $sectionId,
+                $name,
+                $navLabel,
+                $meta,
+                substr($partKey . '_chapter_tmp_' . $sectionId, 0, 120),
+                $number * 10
+            );
+            $pending[] = array(
+                'section_id' => $sectionId,
+                'name' => $name,
+                'nav_label' => $navLabel,
+                'meta' => $meta,
+                'number' => $number,
+            );
             $number++;
+        }
+        foreach ($pending as $item) {
+            $this->updateOutlineSection(
+                (int)$item['section_id'],
+                (string)$item['name'],
+                (string)$item['nav_label'],
+                $item['meta'],
+                substr($partKey . '_chapter_' . (int)$item['number'], 0, 120),
+                (int)$item['number'] * 10
+            );
         }
     }
 

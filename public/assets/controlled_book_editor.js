@@ -31,6 +31,7 @@
   var outlineBodyEl = document.getElementById('cpbOutlineBody');
   var structCloseBtn = document.getElementById('cpbStructClose');
   var structDoneBtn = document.getElementById('cpbStructDone');
+  var structStatusEl = document.getElementById('cpbStructStatus');
   var treeHeadTitleEl = document.getElementById('cpbTreeHeadTitle');
   var imageInput = document.getElementById('cpbImageInput');
   var paragraphStyleSelect = document.getElementById('cpbParagraphStyleSelect');
@@ -3205,6 +3206,14 @@
     }
   }
 
+  function setOutlineStatus(message, kind) {
+    if (!structStatusEl) return;
+    var text = String(message || '');
+    structStatusEl.hidden = text === '';
+    structStatusEl.textContent = text;
+    structStatusEl.className = 'cpb-struct-status' + (kind ? ' is-' + kind : '');
+  }
+
   function applyOutlineResult(res) {
     if (!res || !res.ok) throw new Error((res && res.error) || 'Could not update outline');
     if (res.sections_tree) {
@@ -3212,12 +3221,19 @@
       renderTree(state.sectionsTree, state.sectionId);
     }
     renderOutlinePanel(res);
+    setOutlineStatus('');
     setStatus('Outline saved', 'saved');
     return res;
   }
 
   function outlinePost(action, payload) {
-    return apiPost(action, Object.assign({ version_id: state.versionId }, payload || {})).then(applyOutlineResult);
+    setOutlineStatus('Saving…', 'busy');
+    return apiPost(action, Object.assign({ version_id: state.versionId }, payload || {}))
+      .then(applyOutlineResult)
+      .catch(function (error) {
+        setOutlineStatus(error && error.message ? error.message : 'Could not update outline', 'error');
+        throw error;
+      });
   }
 
   function outlineSmallBtn(label, className, disabled, onClick) {
@@ -3255,7 +3271,9 @@
         promote.type = 'button';
         promote.className = 'cpb-struct-promote';
         promote.textContent = 'Make this a MAIN chapter';
-        promote.addEventListener('click', function () {
+        promote.addEventListener('click', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
           outlinePost('promote_outline_heading', {
             section_id: chapter.section_id,
             section_ref: heading.section_ref,
