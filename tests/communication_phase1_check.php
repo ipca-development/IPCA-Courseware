@@ -1126,6 +1126,12 @@ comm_assert(
     && str_contains($mediaLibrarySource, 'return null')
 );
 comm_assert(
+    'training video overlays composite the official IPCA lockup PNG',
+    str_contains($rendererSource, 'public/assets/logo/ipca_logo_white.png')
+    && str_contains($rendererSource, 'imagecopyresampled')
+    && !str_contains($rendererSource, "drawText(\$canvas, 'IPCA'")
+);
+comm_assert(
     'training videos admin generates thumbnails without requiring a custom poster',
     str_contains($adminThumbPage, 'THUMBNAIL')
     && str_contains($adminThumbPage, 'IPCA Media Library')
@@ -1135,6 +1141,19 @@ comm_assert(
     && str_contains($adminThumbPage, 'Upload Custom')
     && str_contains($adminThumbPage, 'Rewrite from video')
     && str_contains($adminThumbPage, 'generate_explanation')
+);
+comm_assert(
+    'training video thumbnails keep orientation frames uncropped and show regenerate progress',
+    str_contains($adminThumbPage, 'Matching a ')
+    && str_contains($adminThumbPage, ' photo…')
+    && str_contains($adminThumbPage, 'Drawing the IPCA overlay…')
+    && str_contains($adminThumbPage, 'aspect-ratio:9/16')
+    && str_contains($adminThumbPage, 'object-fit:contain')
+    && str_contains($adminThumbPage, 'tcc-modal-foot')
+    && str_contains($trainingVideoServiceSource, "'&v='")
+    && str_contains($trainingVideoServiceSource, 'publicOrientation')
+    && str_contains($trainingVideoServiceSource, 'regenerateGeneratedThumbnails')
+    && is_file($root . '/scripts/regenerate_training_video_thumbnails.php')
 );
 $phase9Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_16_communication_phase9_training_video_catalog.sql');
 $adminPlaySource = (string)file_get_contents($root . '/public/admin/api/training_videos_play.php');
@@ -1390,6 +1409,7 @@ comm_assert(
     && !empty($videoFeed['videos'][0]['downloadable'])
     && (int)($videoFeed['videos'][0]['duration_seconds'] ?? 0) === 125
     && (string)($videoFeed['videos'][0]['available_until'] ?? '') !== ''
+    && in_array((string)($videoFeed['videos'][0]['orientation'] ?? ''), array('landscape', 'portrait'), true)
 );
 $firstPlay = $kernel->trainingVideos->playback($sessionA, $trainingVideoUuid);
 $secondPlay = $kernel->trainingVideos->playback($sessionA, $trainingVideoUuid);
@@ -1534,6 +1554,7 @@ comm_assert(
     && count($autoUploaded['video']['thumbnail_candidates'] ?? array()) >= 1
     && (string)($autoUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') === (string)($libraryCockpit['asset']['asset_uuid'] ?? '')
     && str_contains((string)($autoUploaded['video']['poster_preview_url'] ?? ''), 'training_videos_preview.php')
+    && str_contains((string)($autoUploaded['video']['poster_preview_url'] ?? ''), '&v=')
     && str_starts_with($kernel->trainingVideos->adminPosterBytes($autoUuid)['bytes'], "\xff\xd8")
 );
 $explained = $kernel->trainingVideos->generateAdminExplanation($autoUuid, true);
@@ -1581,6 +1602,15 @@ comm_assert(
     (string)($portraitUploaded['video']['orientation'] ?? '') === 'portrait'
     && (string)($portraitUploaded['video']['poster_template'] ?? '') === 'IPCA_ALPHA_PORTRAIT_V1'
     && (string)($portraitUploaded['video']['poster_source'] ?? '') === 'media_library'
+);
+$bulkThumbRefresh = $kernel->trainingVideos->regenerateGeneratedThumbnails();
+$refreshedPortrait = $kernel->trainingVideos->adminDetail($portraitUuid);
+comm_assert(
+    'generated training-video posters can be redrawn with the current overlay',
+    (int)($bulkThumbRefresh['regenerated'] ?? 0) >= 1
+    && (string)($refreshedPortrait['video']['orientation'] ?? '') === 'portrait'
+    && (string)($refreshedPortrait['video']['poster_template'] ?? '') === 'IPCA_ALPHA_PORTRAIT_V1'
+    && str_contains((string)($refreshedPortrait['video']['poster_preview_url'] ?? ''), '&v=')
 );
 
 $secondLandscape = $kernel->trainingVideos->saveAdmin(array(
@@ -2032,6 +2062,9 @@ if ($iosApp === '') {
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIModels.swift'), 'watch_percent')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/TrainingVideosView.swift'), 'Watched')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Persistence/TrainingVideoDownloadManager.swift'), 'ownerUserUUID')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIModels.swift'), 'orientation')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/TrainingVideosView.swift'), 'aspectRatio')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/TrainingVideosView.swift'), 'scaledToFit')
         && !str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Sync/OutboxWorker.swift'), 'training_videos.php')
     );
     comm_assert(

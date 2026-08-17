@@ -158,7 +158,7 @@ private struct TrainingVideoCard: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: IPCATheme.Spacing.sm) {
             ZStack(alignment: .topTrailing) {
-                TrainingVideoPoster(url: video.posterURL)
+                TrainingVideoPoster(url: video.posterURL, orientation: video.orientation)
                 HStack(alignment: .top) {
                     TrainingVideoWatchBadge(video: video)
                         .padding(10)
@@ -265,7 +265,7 @@ struct TrainingVideoDetailView: View {
                         Task { await play() }
                     } label: {
                         ZStack {
-                            TrainingVideoPoster(url: video.posterURL)
+                            TrainingVideoPoster(url: video.posterURL, orientation: video.orientation)
                             Image(systemName: "play.circle.fill")
                                 .font(.system(size: 64))
                                 .foregroundStyle(.white)
@@ -481,6 +481,11 @@ private struct TrainingVideoWatchBadge: View {
 
 private struct TrainingVideoPoster: View {
     let url: String
+    var orientation: String = "landscape"
+
+    private var isPortrait: Bool {
+        orientation.lowercased() == "portrait"
+    }
 
     var body: some View {
         Group {
@@ -488,7 +493,7 @@ private struct TrainingVideoPoster: View {
                 AsyncImage(url: poster) { phase in
                     switch phase {
                     case .success(let image):
-                        image.resizable().scaledToFill()
+                        image.resizable().scaledToFit()
                     default:
                         placeholder
                     }
@@ -498,8 +503,7 @@ private struct TrainingVideoPoster: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 220)
-        .clipped()
+        .aspectRatio(isPortrait ? (9.0 / 16.0) : (16.0 / 9.0), contentMode: .fit)
         .background(IPCATheme.Colors.navyElevated)
         .clipShape(RoundedRectangle(cornerRadius: IPCATheme.Radius.medium, style: .continuous))
     }

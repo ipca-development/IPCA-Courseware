@@ -243,7 +243,7 @@ final class CommunicationTrainingThumbnailRenderer
         $regular = $this->fontPath(false) ?? $font;
         $this->drawLogo($canvas, (int)round($width / 2), 36, $font, true);
         $maxText = $width - 80;
-        $this->drawCategory($canvas, $meta, $regular, 15, (int)round($width / 2), 88, $maxText, true);
+        $this->drawCategory($canvas, $meta, $regular, 15, (int)round($width / 2), 160, $maxText, true);
         $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 40, 40, 900, 255, 1.0, $maxText, 3, false, 0);
         $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, 40, $height - 34, false);
         return $this->jpeg($canvas);
@@ -262,7 +262,7 @@ final class CommunicationTrainingThumbnailRenderer
         $font = $this->fontPath(true);
         $regular = $this->fontPath(false) ?? $font;
         $this->drawLogo($canvas, 40, 34, $font, false);
-        $this->drawCategory($canvas, $meta, $regular, 18, 160, 42, 700, false);
+        $this->drawCategory($canvas, $meta, $regular, 18, 228, 42, 700, false);
         $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 52, 40, 520, 255, 1.0, 980, 2, false, 0);
         $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 15, $width - 48, $height - 28, false);
         return $this->jpeg($canvas);
@@ -282,7 +282,7 @@ final class CommunicationTrainingThumbnailRenderer
         $regular = $this->fontPath(false) ?? $font;
         $this->drawLogo($canvas, 40, 44, $font, false);
         $maxText = $width - 80;
-        $this->drawCategory($canvas, $meta, $regular, 16, 40, 100, $maxText, false);
+        $this->drawCategory($canvas, $meta, $regular, 16, 40, 140, $maxText, false);
         $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 42, 40, 860, 255, 1.0, $maxText, 3, false, 0);
         $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width - 40, $height - 36, false);
         return $this->jpeg($canvas);
@@ -320,8 +320,8 @@ final class CommunicationTrainingThumbnailRenderer
         $regular = $this->fontPath(false) ?? $font;
         $this->drawLogo($canvas, 40, 48, $font, false);
         $maxText = $width - 80;
-        $this->drawCategory($canvas, $meta, $regular, 16, 40, 120, $maxText, false);
-        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 38, 40, 168, 255, 1.0, $maxText, 3, false, 0);
+        $this->drawCategory($canvas, $meta, $regular, 16, 40, 148, $maxText, false);
+        $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 38, 40, 200, 255, 1.0, $maxText, 3, false, 0);
         $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width / 2, $height - 36, true);
         return $this->jpeg($canvas);
     }
@@ -340,7 +340,7 @@ final class CommunicationTrainingThumbnailRenderer
         $regular = $this->fontPath(false) ?? $font;
         $this->drawText($canvas, $this->displayTitle((string)($meta['title'] ?? '')), $font, 48, 40, 500, 255, 1.0, 980, 2, false, 0);
         $this->drawLogo($canvas, 40, $height - 118, $font, false);
-        $this->drawCategory($canvas, $meta, $regular, 16, 160, $height - 108, 520, false);
+        $this->drawCategory($canvas, $meta, $regular, 16, 228, $height - 108, 520, false);
         $this->drawTrackedLine($canvas, self::BRAND_LINE, $regular, 14, $width - 48, $height - 28, false);
         return $this->jpeg($canvas);
     }
@@ -488,18 +488,58 @@ final class CommunicationTrainingThumbnailRenderer
     }
 
     /**
+     * Official IPCA lockup. Never draw the letters IPCA as type.
+     *
      * @param resource|\GdImage $canvas
      */
     private function drawLogo($canvas, int $x, int $y, ?string $font, bool $center): void
     {
-        $this->drawText($canvas, 'IPCA', $font, $center ? 28 : 32, $x, $y, 255, 1.0, 400, 1, $center, 1);
-        $white = imagecolorallocate($canvas, 255, 255, 255);
-        if ($center) {
-            $width = 72;
-            imageline($canvas, $x - (int)round($width / 2), $y + 18, $x + (int)round($width / 2), $y + 18, $white);
+        unset($font);
+        $path = $this->logoPath();
+        if ($path === null) {
             return;
         }
-        imageline($canvas, $x, $y + 20, $x + 86, $y + 20, $white);
+        $logo = @imagecreatefrompng($path);
+        if ($logo === false) {
+            return;
+        }
+        imagealphablending($logo, true);
+        imagesavealpha($logo, true);
+        $srcW = imagesx($logo);
+        $srcH = imagesy($logo);
+        if ($srcW < 1 || $srcH < 1) {
+            return;
+        }
+        $maxW = $center ? 240 : 168;
+        $scale = $maxW / $srcW;
+        $dstW = max(1, (int)round($srcW * $scale));
+        $dstH = max(1, (int)round($srcH * $scale));
+        $scaled = imagecreatetruecolor($dstW, $dstH);
+        if ($scaled === false) {
+            return;
+        }
+        imagealphablending($scaled, false);
+        imagesavealpha($scaled, true);
+        $clear = imagecolorallocatealpha($scaled, 0, 0, 0, 127);
+        imagefilledrectangle($scaled, 0, 0, $dstW, $dstH, $clear);
+        imagealphablending($scaled, true);
+        imagecopyresampled($scaled, $logo, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
+        $dx = $center ? (int)round($x - ($dstW / 2)) : $x;
+        imagealphablending($canvas, true);
+        imagecopy($canvas, $scaled, $dx, $y, 0, 0, $dstW, $dstH);
+    }
+
+    private function logoPath(): ?string
+    {
+        $candidates = array(
+            dirname(__DIR__, 2) . '/public/assets/logo/ipca_logo_white.png',
+        );
+        foreach ($candidates as $path) {
+            if (is_readable($path)) {
+                return $path;
+            }
+        }
+        return null;
     }
 
     /**

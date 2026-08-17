@@ -888,11 +888,12 @@ struct TrainingVideoDTO: Codable, Hashable, Identifiable {
     var watchPercent: Int
     var watchCompleted: Bool
     var resumePositionMs: Int
+    var orientation: String
 
     var id: String { videoUUID }
 
     enum CodingKeys: String, CodingKey {
-        case title, description, category, liked, downloadable
+        case title, description, category, liked, downloadable, orientation
         case videoUUID = "video_uuid"
         case durationMs = "duration_ms"
         case durationSeconds = "duration_seconds"
@@ -930,6 +931,7 @@ struct TrainingVideoDTO: Codable, Hashable, Identifiable {
         watchPercent = try container.decodeIfPresent(Int.self, forKey: .watchPercent) ?? 0
         watchCompleted = try container.decodeIfPresent(Bool.self, forKey: .watchCompleted) ?? false
         resumePositionMs = try container.decodeIfPresent(Int.self, forKey: .resumePositionMs) ?? 0
+        orientation = try container.decodeIfPresent(String.self, forKey: .orientation) ?? "landscape"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -953,6 +955,7 @@ struct TrainingVideoDTO: Codable, Hashable, Identifiable {
         try container.encode(watchPercent, forKey: .watchPercent)
         try container.encode(watchCompleted, forKey: .watchCompleted)
         try container.encode(resumePositionMs, forKey: .resumePositionMs)
+        try container.encode(orientation, forKey: .orientation)
     }
 }
 

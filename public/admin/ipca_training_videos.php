@@ -19,10 +19,11 @@ cw_header('Training Videos');
 .tv-muted { color: #728198; }
 .tv-ok { color: #0f6d32; font-weight: 700; }
 .tv-err { color: #b42318; font-weight: 700; }
-.tv-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.tv-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; align-items: start; }
 .tv-card { background:#fff; border:1px solid rgba(15,23,42,.08); border-radius:18px; overflow:hidden; box-shadow:0 8px 20px rgba(15,23,42,.04); display:flex; flex-direction:column; }
 .tv-card-thumb { position:relative; background:#071b35; aspect-ratio:16/9; }
-.tv-card-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.tv-card-thumb.portrait { aspect-ratio:9/16; }
+.tv-card-thumb img { width:100%; height:100%; object-fit:contain; display:block; }
 .tv-card-thumb .tv-duration { position:absolute; right:8px; bottom:8px; background:rgba(7,27,53,.8); color:#fff; font-size:11px; font-weight:800; padding:3px 7px; border-radius:999px; }
 .tv-card-body { padding:12px 14px 14px; display:flex; flex-direction:column; gap:8px; flex:1; }
 .tv-card-title { font-size:16px; font-weight:900; color:#102845; line-height:1.25; }
@@ -35,31 +36,25 @@ cw_header('Training Videos');
 .tv-card-meta { font-size:12px; font-weight:700; color:#64748b; display:flex; gap:12px; }
 .tv-card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; }
 .tv-field { margin: 0 0 12px; }
-.tv-field label { display: block; font-size: 12px; font-weight: 700; margin: 0 0 4px; color: #728198; }
-.tv-field input, .tv-field textarea, .tv-field select { width: 100%; }
 .tv-grants { display: grid; gap: 10px; }
 .tv-grant { display: grid; grid-template-columns: 140px 1fr 1fr 1fr auto; gap: 8px; align-items: end; }
-.tv-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-.tv-banner { padding: 10px 12px; border-radius: 8px; margin: 0 0 14px; font-weight: 700; }
+.tv-banner { padding: 10px 12px; border-radius: 12px; margin: 0 0 14px; font-weight: 800; }
 .tv-banner-live { background: #d8f3dc; color: #0f6d32; }
 .tv-banner-draft { background: #eef2f6; color: #4b5d73; }
 .tv-banner-warn { background: #fff3cd; color: #8a6d00; }
 .tv-progress { height: 8px; background: #e6edf5; border-radius: 999px; overflow: hidden; margin: 8px 0 0; }
 .tv-progress[hidden] { display: none; }
 .tv-progress-bar { height: 100%; width: 0; background: #1f6feb; transition: width .12s linear; }
-.tv-thumb { width: 100%; max-width: 420px; height: auto; border-radius: 10px; background: #071b35; display: block; object-fit: contain; }
-.tv-thumb-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.tv-thumb-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .tv-player { width:100%; max-height:58vh; background:#071b35; border-radius:14px; }
 .tv-drop { border:2px dashed rgba(15,23,42,.16); border-radius:16px; padding:28px 18px; text-align:center; background:#fbfdff; }
 .tv-drop.drag { border-color:#12355f; background:#eff6ff; }
 .tv-bulk-list { display:flex; flex-direction:column; gap:8px; margin-top:14px; }
 .tv-bulk-row { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:10px 12px; border-radius:12px; border:1px solid rgba(15,23,42,.08); background:#fff; }
-.tv-picker { position: fixed; inset: 0; background: rgba(7,27,53,.45); display: none; align-items: center; justify-content: center; z-index: 40; padding: 24px; }
-.tv-picker.open { display: flex; }
-.tv-picker-card { background: #fff; border-radius: 12px; max-width: 860px; width: 100%; max-height: 80vh; overflow: auto; padding: 16px; }
 .tv-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-.tv-picker-grid img { width: 100%; height: 110px; object-fit: cover; border-radius: 8px; cursor: pointer; }
-#tv-edit-modal .tcc-modal-card, #tv-bulk-modal .tcc-modal-card { width:min(920px,96vw); }
+.tv-picker-grid img { width: 100%; aspect-ratio: 16/9; object-fit: contain; background:#071b35; border-radius: 12px; cursor: pointer; }
+.tv-picker-grid img.portrait { aspect-ratio: 9/16; }
+#tv-edit-modal .tcc-modal-card, #tv-bulk-modal .tcc-modal-card, #tv-picker-modal .tcc-modal-card { width:min(1040px,96vw); }
 @media (max-width: 900px) {
   .tv-grant { grid-template-columns: 1fr; }
 }
@@ -107,7 +102,7 @@ cw_header('Training Videos');
       <button type="button" class="tcc-modal-close" data-close="tv-play-modal" aria-label="Close">&times;</button>
     </div>
     <div class="tcc-modal-body">
-      <video id="tv-player" class="tv-player" controls playsinline></video>
+      <video id="tv-player" class="tv-player" controls playsinline poster=""></video>
       <p class="tcc-modal-readable" id="tv-play-copy" style="margin-top:12px;"></p>
       <div class="tv-card-meta" id="tv-play-stats" style="margin-top:10px;"></div>
     </div>
@@ -123,63 +118,72 @@ cw_header('Training Videos');
       </div>
       <button type="button" class="tcc-modal-close" data-close="tv-edit-modal" aria-label="Close">&times;</button>
     </div>
-    <div class="tcc-modal-body">
-      <form id="tv-form">
+    <form id="tv-form">
+      <div class="tcc-modal-body">
         <input type="hidden" id="video-uuid">
         <div id="tv-visibility" class="tv-banner tv-banner-draft">Draft — upload a video file, then publish.</div>
-        <div class="tv-field"><label>Title</label><input id="title" required maxlength="255"></div>
-        <div class="tv-field">
-          <label>What you'll learn</label>
-          <textarea id="description" rows="4" placeholder="Written automatically from the video after upload."></textarea>
-          <p class="tv-muted" id="desc-source">A short, practical explanation is generated from the video. You can edit it.</p>
-          <button type="button" class="tcc-btn" id="tv-rewrite" style="margin-top:8px;">Rewrite from video</button>
-        </div>
-        <div class="tv-field">
-          <label>Category</label>
-          <select id="category_id"></select>
-        </div>
-        <div class="tv-field"><label>Aircraft / program</label><input id="aircraft" maxlength="128" placeholder="Cessna 172, G1000, ..."></div>
-        <div class="tv-field">
-          <label>Status</label>
-          <select id="status">
-            <option value="draft">Draft</option>
-            <option value="published">Published</option>
-            <option value="archived">Archived</option>
-          </select>
-        </div>
-        <div class="tv-field">
-          <label>THUMBNAIL</label>
-          <img id="thumb-preview" class="tv-thumb" alt="" hidden>
-          <p class="tv-muted" id="poster-file-status">No thumbnail yet. Upload a video and one will be generated automatically.</p>
-          <p class="tv-muted" id="thumb-source"></p>
-          <div class="tv-thumb-actions">
-            <button type="button" class="tcc-btn" id="thumb-regenerate">Regenerate</button>
-            <button type="button" class="tcc-btn" id="thumb-choose">Choose Another Image</button>
-            <label class="tcc-btn">Upload Custom
-              <input id="poster-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
-            </label>
+        <div class="tcc-modal-grid">
+          <div class="tcc-modal-section">
+            <div class="tcc-modal-section-title">THUMBNAIL</div>
+            <div id="thumb-frame" class="tv-thumb-frame landscape">
+              <img id="thumb-preview" alt="" hidden>
+            </div>
+            <p class="tv-muted" id="poster-file-status">No thumbnail yet. Upload a video and one will be generated automatically.</p>
+            <p class="tv-muted" id="thumb-source"></p>
+            <div class="tv-thumb-actions">
+              <button type="button" class="tcc-btn" id="thumb-regenerate">Regenerate</button>
+              <button type="button" class="tcc-btn" id="thumb-choose">Choose Another Image</button>
+              <label class="tcc-btn">Upload Custom
+                <input id="poster-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+              </label>
+            </div>
+            <div class="tv-progress" id="poster-progress" hidden><div class="tv-progress-bar" id="poster-progress-bar"></div></div>
           </div>
-          <div class="tv-progress" id="poster-progress" hidden><div class="tv-progress-bar" id="poster-progress-bar"></div></div>
+          <div class="tcc-modal-section">
+            <div class="tcc-modal-section-title">Copy and access</div>
+            <div class="tv-field"><label>Title</label><input id="title" required maxlength="255"></div>
+            <div class="tv-field">
+              <label>What you'll learn</label>
+              <textarea id="description" rows="4" placeholder="Written automatically from the video after upload."></textarea>
+              <p class="tv-muted" id="desc-source">A short, practical explanation is generated from the video. You can edit it.</p>
+              <button type="button" class="tcc-btn" id="tv-rewrite" style="margin-top:8px;">Rewrite from video</button>
+            </div>
+            <div class="tv-field">
+              <label>Category</label>
+              <select id="category_id"></select>
+            </div>
+            <div class="tv-field"><label>Aircraft / program</label><input id="aircraft" maxlength="128" placeholder="Cessna 172, G1000, ..."></div>
+            <div class="tv-field">
+              <label>Status</label>
+              <select id="status">
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+            <div class="tv-field">
+              <label>Video file (MP4)</label>
+              <input id="video-file" type="file" accept="video/mp4,video/quicktime">
+              <div class="tv-progress" id="video-progress" hidden><div class="tv-progress-bar" id="video-progress-bar"></div></div>
+              <p class="tv-muted" id="video-file-status">No video uploaded yet.</p>
+            </div>
+          </div>
+          <div class="tcc-modal-section full">
+            <div class="tcc-modal-section-title">Who can watch</div>
+            <p class="tv-muted">A person needs at least one currently active grant. Leave until blank to keep access open-ended. Times are UTC. Time-limited category access is set in Enrollment.</p>
+            <div id="tv-grants" class="tv-grants"></div>
+            <button type="button" class="tcc-btn" id="tv-add-grant">Add access</button>
+          </div>
         </div>
-        <div class="tv-field">
-          <label>Video file (MP4)</label>
-          <input id="video-file" type="file" accept="video/mp4,video/quicktime">
-          <div class="tv-progress" id="video-progress" hidden><div class="tv-progress-bar" id="video-progress-bar"></div></div>
-          <p class="tv-muted" id="video-file-status">No video uploaded yet.</p>
-        </div>
-        <h3>Who can watch</h3>
-        <p class="tv-muted">A person needs at least one currently active grant. Leave until blank to keep access open-ended. Times are UTC. Time-limited category access is set in Enrollment.</p>
-        <div id="tv-grants" class="tv-grants"></div>
-        <button type="button" class="tcc-btn" id="tv-add-grant">Add access</button>
-        <div class="tv-actions">
-          <button type="submit" class="tcc-btn primary">Save</button>
-          <button type="button" class="tcc-btn primary" id="tv-publish">Publish to app</button>
-          <button type="button" class="tcc-btn" id="tv-archive">Archive</button>
-          <button type="button" class="tcc-btn warn" id="tv-delete">Delete</button>
-        </div>
-        <p id="tv-message" class="tv-muted"></p>
-      </form>
-    </div>
+      </div>
+      <div class="tcc-modal-foot">
+        <button type="submit" class="tcc-btn primary">Save</button>
+        <button type="button" class="tcc-btn primary" id="tv-publish">Publish to app</button>
+        <button type="button" class="tcc-btn" id="tv-archive">Archive</button>
+        <button type="button" class="tcc-btn warn" id="tv-delete">Delete</button>
+        <p id="tv-message" class="tv-message tv-muted"></p>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -212,12 +216,19 @@ cw_header('Training Videos');
   </div>
 </div>
 
-<div class="tv-picker" id="tv-picker">
-  <div class="tv-picker-card">
-    <h3 style="margin-top:0;">Choose Another Image</h3>
-    <p class="tv-muted">Orientation-matched photographs from the IPCA Media Library.</p>
-    <div class="tv-picker-grid" id="tv-picker-grid"></div>
-    <button type="button" class="tcc-btn" id="tv-picker-close" style="margin-top:12px;">Close</button>
+<div class="tcc-modal-overlay" id="tv-picker-modal">
+  <div class="tcc-modal-card">
+    <div class="tcc-modal-head">
+      <div>
+        <div class="tcc-modal-kicker">IPCA Media Library</div>
+        <div class="tcc-modal-title">Choose Another Image</div>
+      </div>
+      <button type="button" class="tcc-modal-close" data-close="tv-picker-modal" aria-label="Close">&times;</button>
+    </div>
+    <div class="tcc-modal-body">
+      <p class="tv-muted">Orientation-matched photographs from the IPCA Media Library.</p>
+      <div class="tv-picker-grid" id="tv-picker-grid"></div>
+    </div>
   </div>
 </div>
 
@@ -319,10 +330,21 @@ cw_header('Training Videos');
 
   const setThumb = (video) => {
     const img = document.getElementById('thumb-preview');
+    const frame = document.getElementById('thumb-frame');
     const source = document.getElementById('thumb-source');
-    const url = (video && (video.poster_preview_url || video.poster_url)) || '';
+    const orientation = (video && video.orientation) === 'portrait' ? 'portrait' : 'landscape';
+    if (frame) {
+      frame.classList.toggle('portrait', orientation === 'portrait');
+      frame.classList.toggle('landscape', orientation !== 'portrait');
+    }
+    let url = (video && (video.poster_preview_url || video.poster_url)) || '';
+    if (url.indexOf('/admin/api/training_videos_preview.php') !== -1) {
+      url += (url.indexOf('?') === -1 ? '?' : '&') + 'r=' + Date.now();
+    }
     if (url) {
       img.hidden = false;
+      img.removeAttribute('src');
+      img.src = '';
       img.src = url;
     } else {
       img.hidden = true;
@@ -498,7 +520,7 @@ cw_header('Training Videos');
     document.getElementById('tv-empty').hidden = list.length > 0;
     document.getElementById('tv-catalog').innerHTML = list.map((video) => `
       <article class="tv-card" data-uuid="${video.video_uuid}">
-        <div class="tv-card-thumb">
+        <div class="tv-card-thumb ${video.orientation === 'portrait' ? 'portrait' : 'landscape'}">
           ${video.poster_preview_url ? `<img src="${escapeHtml(video.poster_preview_url)}" alt="">` : ''}
           <span class="tv-duration">${formatDuration(video.duration_ms)}</span>
         </div>
@@ -595,6 +617,9 @@ cw_header('Training Videos');
     document.getElementById('tv-play-copy').textContent = video.description || '';
     document.getElementById('tv-play-stats').textContent = (video.view_count || 0) + ' views · ' + (video.like_count || 0) + ' likes';
     const player = document.getElementById('tv-player');
+    const poster = video.poster_preview_url || video.poster_url || '';
+    if (poster) player.setAttribute('poster', poster);
+    else player.removeAttribute('poster');
     player.src = video.video_play_url || ('/admin/api/training_videos_play.php?video_uuid=' + encodeURIComponent(uuid));
     openModal('tv-play-modal');
     player.play().catch(() => {});
@@ -798,15 +823,40 @@ cw_header('Training Videos');
   });
   document.getElementById('thumb-regenerate').addEventListener('click', async () => {
     const uuid = document.getElementById('video-uuid').value;
+    const regen = document.getElementById('thumb-regenerate');
     if (!uuid) {
       setMessage('Save and upload a video first.', 'err');
       return;
     }
-    const result = await post({ action: 'regenerate_thumbnail', video_uuid: uuid });
-    if (result.ok) {
-      fillForm(result.video, result.grants || collectGrants());
-      setMessage('Thumbnail updated from the next matching photograph.', 'ok');
-    } else setMessage(result.error || 'Could not regenerate.', 'err');
+    const orientation = (current && current.orientation) === 'portrait' ? 'portrait' : 'landscape';
+    regen.disabled = true;
+    setProgress('poster', 0.22, 'Matching a ' + orientation + ' photo…');
+    setMessage('Matching a ' + orientation + ' photo…');
+    const drawingTimer = window.setTimeout(() => {
+      setProgress('poster', 0.62, 'Drawing the IPCA overlay…');
+      setMessage('Drawing the IPCA overlay…');
+    }, 700);
+    try {
+      const result = await post({ action: 'regenerate_thumbnail', video_uuid: uuid });
+      window.clearTimeout(drawingTimer);
+      if (result.ok) {
+        setProgress('poster', 1, 'Ready');
+        fillForm(result.video, result.grants || collectGrants());
+        await loadList();
+        setThumb(result.video);
+        setMessage('Thumbnail updated from the next matching photograph.', 'ok');
+        window.setTimeout(() => setProgress('poster', null), 900);
+      } else {
+        setProgress('poster', null);
+        setMessage(result.error || 'Could not regenerate.', 'err');
+      }
+    } catch (error) {
+      window.clearTimeout(drawingTimer);
+      setProgress('poster', null);
+      setMessage(error.message || 'Could not regenerate.', 'err');
+    } finally {
+      regen.disabled = false;
+    }
   });
   document.getElementById('thumb-choose').addEventListener('click', async () => {
     const uuid = document.getElementById('video-uuid').value;
@@ -816,26 +866,31 @@ cw_header('Training Videos');
     }
     const orientation = (current && current.orientation) || 'landscape';
     const data = await fetch('/admin/api/media_library_api.php?action=list&orientation=' + encodeURIComponent(orientation)).then((r) => r.json());
-    const picker = document.getElementById('tv-picker');
     const grid = document.getElementById('tv-picker-grid');
     const assets = data.assets || [];
     grid.innerHTML = assets.map((asset) => `
-      <img src="${asset.preview_url || ''}" data-uuid="${asset.asset_uuid}" alt="${asset.filename || ''}">
+      <img class="${asset.orientation === 'portrait' ? 'portrait' : 'landscape'}" src="${asset.preview_url || ''}" data-uuid="${asset.asset_uuid}" alt="${asset.filename || ''}">
     `).join('') || '<p class="tv-muted">No matching photographs yet. Upload some in Media Library.</p>';
     grid.querySelectorAll('img[data-uuid]').forEach((img) => {
       img.addEventListener('click', async () => {
+        setProgress('poster', 0.62, 'Drawing the IPCA overlay…');
+        setMessage('Drawing the IPCA overlay…');
         const result = await post({ action: 'choose_thumbnail', video_uuid: uuid, asset_uuid: img.dataset.uuid });
         if (result.ok) {
+          setProgress('poster', 1, 'Ready');
           fillForm(result.video, result.grants || collectGrants());
-          picker.classList.remove('open');
+          await loadList();
+          setThumb(result.video);
+          closeModal('tv-picker-modal');
           setMessage('Thumbnail updated from the selected photograph.', 'ok');
-        } else setMessage(result.error || 'Could not use that photograph.', 'err');
+          window.setTimeout(() => setProgress('poster', null), 900);
+        } else {
+          setProgress('poster', null);
+          setMessage(result.error || 'Could not use that photograph.', 'err');
+        }
       });
     });
-    picker.classList.add('open');
-  });
-  document.getElementById('tv-picker-close').addEventListener('click', () => {
-    document.getElementById('tv-picker').classList.remove('open');
+    openModal('tv-picker-modal');
   });
   document.querySelectorAll('[data-close]').forEach((button) => {
     button.addEventListener('click', () => closeModal(button.dataset.close));

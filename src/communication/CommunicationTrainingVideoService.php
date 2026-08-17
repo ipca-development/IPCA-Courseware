@@ -558,12 +558,42 @@ final class CommunicationTrainingVideoService
      */
     public function regenerateAdminThumbnail(string $videoUuid): array
     {
+        @set_time_limit(180);
         $this->renderGeneratedThumbnail($videoUuid, 'regenerate', '');
         $row = $this->requireAdminVideo($videoUuid);
         return array(
             'video' => $this->adminVideo($row),
             'grants' => $this->grantsFor((int)$row['id']),
         );
+    }
+
+    /**
+     * Re-draw every non-custom poster with the current locked overlay and logo.
+     *
+     * @return array{regenerated:int,skipped:int}
+     */
+    public function regenerateGeneratedThumbnails(): array
+    {
+        @set_time_limit(0);
+        $stmt = $this->pdo->query(
+            "SELECT video_uuid, poster_source FROM ipca_training_videos
+             WHERE deleted_at_utc IS NULL AND storage_key IS NOT NULL AND storage_key != ''"
+        );
+        $regenerated = 0;
+        $skipped = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (strtolower(trim((string)($row['poster_source'] ?? ''))) === 'custom') {
+                $skipped++;
+                continue;
+            }
+            try {
+                $this->renderGeneratedThumbnail((string)$row['video_uuid'], 'refresh', '');
+                $regenerated++;
+            } catch (Throwable) {
+                $skipped++;
+            }
+        }
+        return array('regenerated' => $regenerated, 'skipped' => $skipped);
     }
 
     /**
@@ -798,6 +828,34 @@ final class CommunicationTrainingVideoService
             return '';
         }
         return $until;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function publicOrientation(array $row): string
+    {
+        $orientation = strtolower(trim((string)($row['orientation'] ?? '')));
+        if ($orientation === 'portrait' || $orientation === 'landscape') {
+            return $orientation;
+        }
+        return CommunicationTrainingThumbnailRenderer::videoOrientation(
+            (int)($row['width'] ?? 0),
+            (int)($row['height'] ?? 0)
+        ) ?: 'landscape';
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     */
+    private function posterRevision(array $row): string
+    {
+        return substr(sha1(implode('|', array(
+            (string)($row['updated_at_utc'] ?? ''),
+            (string)($row['poster_template'] ?? ''),
+            (string)($row['poster_library_asset_id'] ?? ''),
+            (string)($row['poster_candidate_index'] ?? '0'),
+        ))), 0, 12);
     }
 
     /**
@@ -1129,6 +1187,7 @@ final class CommunicationTrainingVideoService
             'downloadable' => trim((string)($row['storage_key'] ?? '')) !== '',
             'available_until' => $this->publicUntil($availableUntil),
             'created_at_utc' => (string)$row['created_at_utc'],
+            'orientation' => $this->publicOrientation($row),
             'watch_percent' => (int)$watch['progress_percent'],
             'watch_completed' => !empty($watch['completed']),
             'resume_position_ms' => !empty($watch['completed']) ? 0 : (int)$watch['position_ms'],
@@ -1169,7 +1228,7 @@ final class CommunicationTrainingVideoService
             'byte_size' => (int)$row['byte_size'],
             'width' => (int)($row['width'] ?? 0),
             'height' => (int)($row['height'] ?? 0),
-            'orientation' => (string)($row['orientation'] ?? ''),
+            'orientation' => $this->publicOrientation($row),
             'mime_type' => (string)$row['mime_type'],
             'has_video' => $videoKey !== '',
             'has_poster' => $posterKey !== '',
@@ -1177,6 +1236,7 @@ final class CommunicationTrainingVideoService
             'poster_url' => $posterKey !== '' ? $this->store->presignGet($posterKey, self::GET_EXPIRES) : '',
             'poster_preview_url' => $posterKey !== ''
                 ? '/admin/api/training_videos_preview.php?video_uuid=' . rawurlencode((string)$row['video_uuid'])
+                    . '&v=' . rawurlencode($this->posterRevision($row))
                 : '',
             'video_play_url' => $videoKey !== ''
                 ? '/admin/api/training_videos_play.php?video_uuid=' . rawurlencode((string)$row['video_uuid'])
