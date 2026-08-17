@@ -5111,10 +5111,13 @@ ol.cpb-list > li[data-indent-level="8"] {
 
 .cpb-review-thread-panel__card {
   position: absolute;
-  top: 6vh;
+  top: max(32px, 5vh);
   right: 3vw;
-  width: min(460px, 92vw);
-  max-height: 88vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(644px, calc(100vw - 64px));
+  height: min(720px, calc(100vh - 96px));
+  max-height: calc(100vh - 96px);
   overflow: hidden;
   border-radius: 16px;
   background: #fff;
@@ -5149,7 +5152,8 @@ ol.cpb-list > li[data-indent-level="8"] {
 }
 
 .cpb-review-thread-panel__messages {
-  max-height: calc(88vh - 82px);
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   padding: 16px;
   background: #f8fafc;

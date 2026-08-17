@@ -3060,11 +3060,10 @@
     if (!thread) return;
     var messages = panel.querySelector('.cpb-review-thread-panel__messages');
     if (!messages) return;
-    var keepAtBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 48;
     messages.innerHTML = reviewThreadMessagesHtml(
       Array.isArray(thread.comments) ? thread.comments : []
     );
-    if (keepAtBottom) messages.scrollTop = messages.scrollHeight;
+    messages.scrollTop = messages.scrollHeight;
   }
 
   function scheduleReviewThreadSync() {
@@ -3161,6 +3160,10 @@
       + 'Regulation references will be enabled in the next phase.'
       + '</small></form></section>';
     panel.hidden = false;
+    window.requestAnimationFrame(function () {
+      var messages = panel.querySelector('.cpb-review-thread-panel__messages');
+      if (messages) messages.scrollTop = messages.scrollHeight;
+    });
     panel.querySelectorAll('[data-review-close]').forEach(function (button) {
       button.addEventListener('click', function () {
         panel.hidden = true;

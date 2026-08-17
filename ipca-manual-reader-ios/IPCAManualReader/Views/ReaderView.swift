@@ -1252,49 +1252,60 @@ struct ReviewerConversationSheet: View {
                     ProgressView("Loading reviewer conversation…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(thread?.comments ?? []) { comment in
-                                reviewerComment(comment)
-                            }
-                            ForEach(pendingNotes) { note in
-                                HStack {
-                                    Spacer(minLength: 48)
-                                    VStack(alignment: .trailing, spacing: 3) {
-                                        Text("Pending sync")
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 12) {
+                                ForEach(thread?.comments ?? []) { comment in
+                                    reviewerComment(comment)
+                                }
+                                ForEach(pendingNotes) { note in
+                                    HStack {
+                                        Spacer(minLength: 48)
+                                        VStack(alignment: .trailing, spacing: 3) {
+                                            Text("Pending sync")
+                                                .font(.caption2)
+                                                .foregroundStyle(.orange)
+                                            Text(
+                                                note.createdAt.formatted(
+                                                    date: .abbreviated,
+                                                    time: .shortened
+                                                )
+                                            )
                                             .font(.caption2)
-                                            .foregroundStyle(.orange)
-                                        Text(
-                                            note.createdAt.formatted(
-                                                date: .abbreviated,
-                                                time: .shortened
-                                            )
-                                        )
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        Text(note.body)
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 13)
-                                            .padding(.vertical, 9)
-                                            .background(
-                                                IPCAReaderTheme.navy.opacity(0.72),
-                                                in: RoundedRectangle(cornerRadius: 16)
-                                            )
+                                            .foregroundStyle(.secondary)
+                                            Text(note.body)
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 13)
+                                                .padding(.vertical, 9)
+                                                .background(
+                                                    IPCAReaderTheme.navy.opacity(0.72),
+                                                    in: RoundedRectangle(cornerRadius: 16)
+                                                )
+                                        }
                                     }
                                 }
-                            }
-                            if thread?.comments.isEmpty != false && pendingNotes.isEmpty {
-                                ContentUnavailableView(
-                                    "Start the Review",
-                                    systemImage: "bubble.left.and.bubble.right",
-                                    description: Text(
-                                        "Your reviewer note will be visible to approved reviewers and in the online editor."
+                                if thread?.comments.isEmpty != false && pendingNotes.isEmpty {
+                                    ContentUnavailableView(
+                                        "Start the Review",
+                                        systemImage: "bubble.left.and.bubble.right",
+                                        description: Text(
+                                            "Your reviewer note will be visible to approved reviewers and in the online editor."
+                                        )
                                     )
-                                )
-                                .padding(.top, 40)
+                                    .padding(.top, 40)
+                                }
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("review-conversation-bottom")
                             }
+                            .padding(16)
                         }
-                        .padding(16)
+                        .onAppear {
+                            scrollReviewerConversationToBottom(proxy, animated: false)
+                        }
+                        .onChange(of: latestReviewerMessageIdentity) { _, _ in
+                            scrollReviewerConversationToBottom(proxy, animated: true)
+                        }
                     }
                 }
 
@@ -1352,6 +1363,27 @@ struct ReviewerConversationSheet: View {
             }
         }
         .preferredColorScheme(.light)
+    }
+
+    private var latestReviewerMessageIdentity: String {
+        let comment = thread?.comments.last?.commentUUID ?? ""
+        let pending = pendingNotes.last?.id.uuidString ?? ""
+        return "\(comment)|\(pending)"
+    }
+
+    private func scrollReviewerConversationToBottom(
+        _ proxy: ScrollViewProxy,
+        animated: Bool
+    ) {
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("review-conversation-bottom", anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo("review-conversation-bottom", anchor: .bottom)
+            }
+        }
     }
 
     private func reviewerComment(_ comment: ReviewNoteComment) -> some View {

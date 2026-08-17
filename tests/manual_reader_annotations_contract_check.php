@@ -157,6 +157,9 @@ foreach (array(
     'loadReviewThreads(showLoading: false, reportErrors: false)',
     'Task.sleep(for: .seconds(5))',
     'ReviewNoteTimestampFormatter.display(comment.createdAtUTC)',
+    'ScrollViewReader { proxy in',
+    'proxy.scrollTo("review-conversation-bottom", anchor: .bottom)',
+    '.onChange(of: latestReviewerMessageIdentity)',
 ) as $liveReviewMarker) {
     if (!str_contains($readerViewSource, $liveReviewMarker)) {
         $failures[] = "iOS live reviewer synchronization missing: {$liveReviewMarker}";
@@ -199,6 +202,7 @@ annotation_require(
         'refreshOpenReviewThread',
         'reviewCommentTimestamp',
         'data-thread-uuid',
+        'messages.scrollTop = messages.scrollHeight',
     ),
     $failures
 );
@@ -208,6 +212,9 @@ annotation_require(
         '::highlight(cpb-review-remarks)',
         '.cpb-review-thread-panel__regulation',
         '.cpb-review-thread-message time',
+        'width: min(644px, calc(100vw - 64px))',
+        'height: min(720px, calc(100vh - 96px))',
+        'grid-template-rows: auto minmax(0, 1fr) auto',
     ),
     $failures
 );
