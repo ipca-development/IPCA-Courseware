@@ -1509,6 +1509,15 @@ private struct ReviewerNotesLibraryView: View {
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                             .lineLimit(2)
+                                            if let lastComment = item.thread.comments.last {
+                                                Text(
+                                                    ReviewNoteTimestampFormatter.display(
+                                                        lastComment.createdAtUTC
+                                                    )
+                                                )
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                            }
                                         }
                                         Spacer()
                                         VStack(spacing: 5) {
@@ -1539,7 +1548,12 @@ private struct ReviewerNotesLibraryView: View {
         .background(IPCAReaderTheme.shelfBackground)
         .navigationTitle("Reviewer Notes")
         .task(id: books.map { String($0.id) }.joined(separator: ",")) {
-            await load()
+            await load(showLoading: true)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                if Task.isCancelled { break }
+                await load(showLoading: false)
+            }
         }
         .sheet(item: $selectedItem) { item in
             ReviewerConversationSheet(
@@ -1563,14 +1577,16 @@ private struct ReviewerNotesLibraryView: View {
         }
     }
 
-    private func load() async {
+    private func load(showLoading: Bool) async {
         guard ManualReaderSessionStore.shared.canAddReviewerNotes,
               let client = ManualReaderSessionStore.shared.client else {
             items = []
             isLoading = false
             return
         }
-        isLoading = true
+        if showLoading {
+            isLoading = true
+        }
         errorMessage = nil
         var loaded: [ReviewerThreadLibraryItem] = []
         var failures: [String] = []
@@ -1588,8 +1604,14 @@ private struct ReviewerNotesLibraryView: View {
             }
         }
         items = loaded.sorted { $0.thread.updatedAtUTC > $1.thread.updatedAtUTC }
+        if let selectedItem,
+           let refreshed = items.first(where: { $0.id == selectedItem.id }) {
+            self.selectedItem = refreshed
+        }
         errorMessage = failures.isEmpty ? nil : failures.joined(separator: "\n")
-        isLoading = false
+        if showLoading {
+            isLoading = false
+        }
     }
 
     private func sendMessage(to item: ReviewerThreadLibraryItem) {

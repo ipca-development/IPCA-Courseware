@@ -198,6 +198,12 @@ struct ReaderView: View {
             } else if let initialBookmark {
                 await viewModel.goToBookmark(initialBookmark)
             }
+            await viewModel.loadReviewThreads(showLoading: false, reportErrors: false)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                if Task.isCancelled { break }
+                await viewModel.loadReviewThreads(showLoading: false, reportErrors: false)
+            }
         }
         .onChange(of: viewModel.currentIndex) { _, newIndex in
             focusedPageIndex = nil
@@ -1258,6 +1264,14 @@ struct ReviewerConversationSheet: View {
                                         Text("Pending sync")
                                             .font(.caption2)
                                             .foregroundStyle(.orange)
+                                        Text(
+                                            note.createdAt.formatted(
+                                                date: .abbreviated,
+                                                time: .shortened
+                                            )
+                                        )
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                         Text(note.body)
                                             .foregroundStyle(.white)
                                             .padding(.horizontal, 13)
@@ -1349,6 +1363,9 @@ struct ReviewerConversationSheet: View {
                 Text(comment.author.name)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
+                Text(ReviewNoteTimestampFormatter.display(comment.createdAtUTC))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Text(comment.body)
                     .foregroundStyle(isCurrentUser ? Color.white : Color.black)
                     .padding(.horizontal, 13)
@@ -1388,6 +1405,22 @@ struct ReviewerConversationSheet: View {
             .foregroundStyle(.white)
             .frame(width: 34, height: 34)
             .background(IPCAReaderTheme.navy, in: Circle())
+    }
+}
+
+enum ReviewNoteTimestampFormatter {
+    static func display(_ rawValue: String) -> String {
+        let raw = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let iso = ISO8601DateFormatter()
+        let database = DateFormatter()
+        database.locale = Locale(identifier: "en_US_POSIX")
+        database.calendar = Calendar(identifier: .gregorian)
+        database.timeZone = TimeZone(secondsFromGMT: 0)
+        database.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        guard let date = iso.date(from: raw) ?? database.date(from: raw) else {
+            return raw
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

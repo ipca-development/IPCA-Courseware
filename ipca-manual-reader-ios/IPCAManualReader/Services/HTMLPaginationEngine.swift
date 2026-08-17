@@ -440,6 +440,16 @@ final class HTMLPaginationEngine: NSObject, WKNavigationDelegate, WKScriptMessag
             margin: 0 !important;
             box-sizing: border-box !important;
           }
+          .reader-page-header-region > .cpb-page-header > .cpb-page-header-table,
+          .reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table,
+          .reader-page-header-region > .cpb-page-header > .cpb-page-header-table > tbody,
+          .reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table > tbody,
+          .reader-page-header-region > .cpb-page-header > .cpb-page-header-table > tbody > tr,
+          .reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table > tbody > tr,
+          .reader-page-header-region > .cpb-page-header > .cpb-page-header-table > tbody > tr > td,
+          .reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table > tbody > tr > td {
+            height: 100% !important;
+          }
           </style>
         </head>
         <body>

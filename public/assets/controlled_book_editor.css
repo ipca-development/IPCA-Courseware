@@ -5170,6 +5170,13 @@ ol.cpb-list > li[data-indent-level="8"] {
   color: #111827;
 }
 
+.cpb-review-thread-message time {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font: 500 10px/1.25 system-ui, sans-serif;
+}
+
 .cpb-review-thread-avatar,
 .cpb-review-thread-avatar img,
 .cpb-review-thread-avatar span {

@@ -550,27 +550,48 @@ final class ReaderViewModel: ObservableObject {
         scheduleAnnotationSync()
     }
 
-    func loadReviewThreads() async {
+    func loadReviewThreads(
+        showLoading: Bool = true,
+        reportErrors: Bool = true
+    ) async {
         guard ManualReaderSessionStore.shared.canAddReviewerNotes,
               let client = ManualReaderSessionStore.shared.client else { return }
-        isLoadingReviewThreads = true
-        defer { isLoadingReviewThreads = false }
+        if showLoading {
+            isLoadingReviewThreads = true
+        }
+        defer {
+            if showLoading {
+                isLoadingReviewThreads = false
+            }
+        }
         do {
             let response = try await client.fetchReviewThreads(
                 bookKey: book.bookKey,
                 versionId: book.versionId
             )
-            reviewThreads = response.threads ?? []
+            let incomingThreads = response.threads ?? []
+            let existingProjection = Set(reviewThreads.map {
+                "\($0.threadUUID)|\($0.pageNumber)|\($0.sourceFragmentID ?? "")|"
+                    + "\($0.stableAnchor ?? "")|\($0.startOffset ?? -1)|\($0.endOffset ?? -1)"
+            })
+            let incomingProjection = Set(incomingThreads.map {
+                "\($0.threadUUID)|\($0.pageNumber)|\($0.sourceFragmentID ?? "")|"
+                    + "\($0.stableAnchor ?? "")|\($0.startOffset ?? -1)|\($0.endOffset ?? -1)"
+            })
+            let projectionChanged = existingProjection != incomingProjection
+            reviewThreads = incomingThreads
             reviewErrorMessage = nil
             await flushPendingReviewNotes()
-            if !pageHTMLByIndex.isEmpty {
+            if projectionChanged && !pageHTMLByIndex.isEmpty {
                 pageHTMLByIndex.removeAll()
                 htmlGeneration += 1
                 preparePageHTML(around: currentIndex)
                 currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
             }
         } catch {
-            reviewErrorMessage = error.localizedDescription
+            if reportErrors {
+                reviewErrorMessage = error.localizedDescription
+            }
         }
     }
 

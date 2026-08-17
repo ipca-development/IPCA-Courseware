@@ -83,6 +83,9 @@ annotation_require(
     array(
         'func goToHighlight',
         'refreshAnnotationHTML(at: currentIndex)',
+        'showLoading: Bool = true',
+        'reportErrors: Bool = true',
+        'let projectionChanged = existingProjection != incomingProjection',
     ),
     $failures
 );
@@ -118,6 +121,8 @@ annotation_require(
         'opensPersonalNote: true',
         'mr-review-highlight',
         'mr-review-note-marker',
+        'width: 21px',
+        'const reviewMarkerSize = 21',
         'reviewThreads.forEach',
         'wrapTextPiece',
         'mark.dataset.annotationFragment',
@@ -148,6 +153,24 @@ $reviewerSheetStart = strpos($readerViewSource, 'struct ReviewerConversationShee
 $reviewerSheetSource = $reviewerSheetStart !== false
     ? substr($readerViewSource, $reviewerSheetStart)
     : '';
+foreach (array(
+    'loadReviewThreads(showLoading: false, reportErrors: false)',
+    'Task.sleep(for: .seconds(5))',
+    'ReviewNoteTimestampFormatter.display(comment.createdAtUTC)',
+) as $liveReviewMarker) {
+    if (!str_contains($readerViewSource, $liveReviewMarker)) {
+        $failures[] = "iOS live reviewer synchronization missing: {$liveReviewMarker}";
+    }
+}
+foreach (array(
+    'await load(showLoading: false)',
+    'ReviewNoteTimestampFormatter.display(',
+    'self.selectedItem = refreshed',
+) as $librarySyncMarker) {
+    if (!str_contains($librarySource, $librarySyncMarker)) {
+        $failures[] = "Reviewer Notes library synchronization missing: {$librarySyncMarker}";
+    }
+}
 foreach (array('Button("Edit")', 'Button("Delete")') as $mutableCommentControl) {
     if (str_contains($reviewerSheetSource, $mutableCommentControl)) {
         $failures[] = "Reviewer comments must remain append-only: {$mutableCommentControl}";
@@ -172,6 +195,10 @@ annotation_require(
         'cpb-review-thread-pin',
         "CSS.highlights.set('cpb-review-remarks', new Highlight(...reviewRanges))",
         "pin.textContent = '•••'",
+        'scheduleReviewThreadSync',
+        'refreshOpenReviewThread',
+        'reviewCommentTimestamp',
+        'data-thread-uuid',
     ),
     $failures
 );
@@ -180,6 +207,7 @@ annotation_require(
     array(
         '::highlight(cpb-review-remarks)',
         '.cpb-review-thread-panel__regulation',
+        '.cpb-review-thread-message time',
     ),
     $failures
 );

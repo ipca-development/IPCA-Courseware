@@ -119,6 +119,22 @@ require_markers(
     $failures
 );
 
+foreach (array(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ManualReaderAPIClient.swift',
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/HTMLPaginationEngine.swift',
+) as $readerHeaderRenderer) {
+    require_markers(
+        $readerHeaderRenderer,
+        array(
+            '.reader-page-header-region > .cpb-page-header > .cpb-page-header-table',
+            '.reader-page-header-region > .cpb-page-header > .cpb-page-header-table > tbody > tr > td',
+            '.reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table > tbody > tr > td',
+            'height: 100% !important;',
+        ),
+        $failures
+    );
+}
+
 require_markers(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/BookPageCurlView.swift',
     array(

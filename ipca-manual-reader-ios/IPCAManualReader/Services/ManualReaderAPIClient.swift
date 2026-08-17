@@ -628,6 +628,16 @@ extension ManualReaderAPIClient {
               margin: 0 !important;
               box-sizing: border-box !important;
             }
+            .reader-page-header-region > .cpb-page-header > .cpb-page-header-table,
+            .reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table,
+            .reader-page-header-region > .cpb-page-header > .cpb-page-header-table > tbody,
+            .reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table > tbody,
+            .reader-page-header-region > .cpb-page-header > .cpb-page-header-table > tbody > tr,
+            .reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table > tbody > tr,
+            .reader-page-header-region > .cpb-page-header > .cpb-page-header-table > tbody > tr > td,
+            .reader-page-footer-region > .cpb-page-footer > .cpb-page-footer-table > tbody > tr > td {
+              height: 100% !important;
+            }
             .mr-app .cpb-block-chrome, .mr-app .cpb-dropzone, .mr-app .cpb-change-marker, .mr-app .cpb-page-layout-toggle { display: none !important; }
             .mr-user-highlight, .mr-search-hit {
               color: #000 !important;
@@ -650,9 +660,9 @@ extension ManualReaderAPIClient {
             .mr-review-note-marker {
               position: absolute;
               z-index: 21;
-              width: 14px;
-              height: 14px;
-              min-width: 14px;
+              width: 21px;
+              height: 21px;
+              min-width: 21px;
               padding: 0;
               border: 2px solid #fff;
               border-radius: 50%;
@@ -664,8 +674,8 @@ extension ManualReaderAPIClient {
               position: absolute;
               inset: -2px 0 0;
               color: #fff;
-              font-size: 6px;
-              line-height: 12px;
+              font-size: 9px;
+              line-height: 19px;
               letter-spacing: -1px;
               text-align: center;
             }
@@ -898,6 +908,7 @@ enum ReaderHTMLAnnotationService {
             root.appendChild(marker);
           });
           const reviewsByID = new Map(reviewThreads.map(item => [item.id, item]));
+          const reviewMarkerSize = 21;
           root.querySelectorAll('.mr-review-highlight.is-last[data-highlight-id]').forEach(mark => {
             const item = reviewsByID.get(mark.dataset.highlightId);
             if (!item) return;
@@ -908,10 +919,10 @@ enum ReaderHTMLAnnotationService {
             const rootRect = root.getBoundingClientRect();
             const markRect = mark.getBoundingClientRect();
             marker.style.left = Math.max(
-              0, Math.min(root.offsetWidth - 14, markRect.right - rootRect.left + 2)
+              0, Math.min(root.offsetWidth - reviewMarkerSize, markRect.right - rootRect.left + 2)
             ) + 'px';
             marker.style.top = Math.max(
-              0, Math.min(root.offsetHeight - 14, markRect.top - rootRect.top)
+              0, Math.min(root.offsetHeight - reviewMarkerSize, markRect.top - rootRect.top)
             ) + 'px';
             marker.addEventListener('touchend', event => event.stopPropagation());
             marker.addEventListener('click', function(event) {

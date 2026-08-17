@@ -32,6 +32,15 @@ function extractFunction(source, name, nextName) {
     await page.setContent(
       '<div id="target"><p>His/Her <strong>responsibilities</strong> are:</p></div>'
     );
+    await page.addScriptTag({
+      content: `
+        function escapeHtml(value) {
+          return String(value == null ? "" : value)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+      `,
+    });
     await page.addScriptTag({ content: rangeFunction });
     const result = await page.evaluate(() => {
       const target = document.getElementById("target");
@@ -43,10 +52,27 @@ function extractFunction(source, name, nextName) {
       });
       if (!range) throw new Error("Reviewer range was not resolved.");
       CSS.highlights.set("cpb-review-remarks", new Highlight(range));
+      const panel = document.createElement("div");
+      panel.id = "cpbReviewThreadPanel";
+      panel.setAttribute("data-thread-uuid", "thread-1");
+      panel.innerHTML = '<div class="cpb-review-thread-panel__messages"></div>'
+        + '<textarea>Unsent draft</textarea>';
+      document.body.appendChild(panel);
+      refreshOpenReviewThread([{
+        thread_uuid: "thread-1",
+        comments: [{
+          body: "Live reply",
+          created_at_utc: "2026-08-17 16:00:00",
+          author: { name: "Reviewer", initials: "RV" },
+        }],
+      }]);
       return {
         text: range.toString(),
         htmlUnchanged: target.innerHTML === originalHTML,
         highlightCount: CSS.highlights.get("cpb-review-remarks").size,
+        liveReply: panel.querySelector(".cpb-review-thread-message p")?.textContent,
+        timestamp: panel.querySelector(".cpb-review-thread-message time")?.textContent,
+        draft: panel.querySelector("textarea")?.value,
       };
     });
 
@@ -58,6 +84,12 @@ function extractFunction(source, name, nextName) {
     }
     if (result.highlightCount !== 1) {
       throw new Error("Reviewer CSS highlight was not registered.");
+    }
+    if (result.liveReply !== "Live reply" || !result.timestamp?.includes("2026")) {
+      throw new Error("Live reviewer reply or timestamp was not rendered.");
+    }
+    if (result.draft !== "Unsent draft") {
+      throw new Error("Live reviewer refresh replaced the unsent draft.");
     }
     process.stdout.write("Controlled book editor reviewer highlight check: PASS\n");
   } finally {

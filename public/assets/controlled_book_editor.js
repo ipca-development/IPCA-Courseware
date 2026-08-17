@@ -3020,18 +3020,73 @@
     return range.collapsed ? null : range;
   }
 
-  function loadReviewThreadMarkers() {
-    canvasEl.querySelectorAll('.cpb-review-thread-pin').forEach(function (pin) {
-      pin.remove();
+  function reviewCommentTimestamp(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    var normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+      ? raw.replace(' ', 'T') + 'Z'
+      : raw;
+    var date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return raw;
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(date);
+  }
+
+  function reviewThreadMessagesHtml(comments) {
+    return comments.map(function (comment) {
+      var author = comment.author || {};
+      var photo = String(author.photo_url || '');
+      var avatar = photo
+        ? '<img src="' + escapeHtml(photo) + '" alt="">'
+        : '<span>' + escapeHtml(String(author.initials || '?')) + '</span>';
+      var timestamp = reviewCommentTimestamp(comment.created_at_utc);
+      return '<article class="cpb-review-thread-message"><div class="cpb-review-thread-avatar">'
+        + avatar + '</div><div><strong>' + escapeHtml(String(author.name || 'Reviewer'))
+        + '</strong><time datetime="' + escapeHtml(String(comment.created_at_utc || '')) + '">'
+        + escapeHtml(timestamp) + '</time><p>'
+        + escapeHtml(String(comment.body || '')) + '</p></div></article>';
+    }).join('');
+  }
+
+  function refreshOpenReviewThread(threads) {
+    var panel = document.getElementById('cpbReviewThreadPanel');
+    if (!panel || panel.hidden) return;
+    var threadUUID = String(panel.getAttribute('data-thread-uuid') || '');
+    var thread = threads.find(function (candidate) {
+      return String(candidate.thread_uuid || '') === threadUUID;
     });
-    if (window.CSS && CSS.highlights) {
-      CSS.highlights.delete('cpb-review-remarks');
-    }
+    if (!thread) return;
+    var messages = panel.querySelector('.cpb-review-thread-panel__messages');
+    if (!messages) return;
+    var keepAtBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 48;
+    messages.innerHTML = reviewThreadMessagesHtml(
+      Array.isArray(thread.comments) ? thread.comments : []
+    );
+    if (keepAtBottom) messages.scrollTop = messages.scrollHeight;
+  }
+
+  function scheduleReviewThreadSync() {
+    clearTimeout(state.reviewThreadSyncTimer);
+    if (document.hidden || !state.versionId) return;
+    state.reviewThreadSyncTimer = setTimeout(function () {
+      loadReviewThreadMarkers();
+    }, 5000);
+  }
+
+  function loadReviewThreadMarkers() {
     if (!state.versionId) return;
-    apiGet(
+    return apiGet(
       apiBase + '?action=review_threads&version_id=' + encodeURIComponent(String(state.versionId))
     ).then(function (res) {
       if (!res || !res.ok || !Array.isArray(res.threads)) return;
+      canvasEl.querySelectorAll('.cpb-review-thread-pin').forEach(function (pin) {
+        pin.remove();
+      });
+      if (window.CSS && CSS.highlights) {
+        CSS.highlights.delete('cpb-review-remarks');
+      }
       var reviewRanges = [];
       res.threads.forEach(function (thread) {
         var anchor = String(thread.stable_anchor || '');
@@ -3072,8 +3127,11 @@
       if (reviewRanges.length && window.CSS && CSS.highlights && window.Highlight) {
         CSS.highlights.set('cpb-review-remarks', new Highlight(...reviewRanges));
       }
+      refreshOpenReviewThread(res.threads);
     }).catch(function () {
       // Reviewer notes are additive and must never interrupt authoring.
+    }).finally(function () {
+      scheduleReviewThreadSync();
     });
   }
 
@@ -3086,6 +3144,7 @@
       document.body.appendChild(panel);
     }
     var comments = Array.isArray(thread.comments) ? thread.comments : [];
+    panel.setAttribute('data-thread-uuid', String(thread.thread_uuid || ''));
     panel.innerHTML =
       '<div class="cpb-review-thread-panel__backdrop" data-review-close></div>'
       + '<section class="cpb-review-thread-panel__card" role="dialog" aria-modal="true">'
@@ -3093,16 +3152,7 @@
       + escapeHtml(String(thread.selected_text || ''))
       + '</small></div><button type="button" data-review-close aria-label="Close">×</button></header>'
       + '<div class="cpb-review-thread-panel__messages">'
-      + comments.map(function (comment) {
-        var author = comment.author || {};
-        var photo = String(author.photo_url || '');
-        var avatar = photo
-          ? '<img src="' + escapeHtml(photo) + '" alt="">'
-          : '<span>' + escapeHtml(String(author.initials || '?')) + '</span>';
-        return '<article class="cpb-review-thread-message"><div class="cpb-review-thread-avatar">'
-          + avatar + '</div><div><strong>' + escapeHtml(String(author.name || 'Reviewer'))
-          + '</strong><p>' + escapeHtml(String(comment.body || '')) + '</p></div></article>';
-      }).join('')
+      + reviewThreadMessagesHtml(comments)
       + '</div><form class="cpb-review-thread-panel__composer">'
       + '<textarea name="body" rows="2" placeholder="Reply to reviewer thread" required></textarea>'
       + '<button type="submit" aria-label="Send reviewer reply">'
@@ -11212,6 +11262,13 @@
 
   wireTreeToggleAll();
   initCrossRefAnnexSelects();
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      clearTimeout(state.reviewThreadSyncTimer);
+    } else {
+      loadReviewThreadMarkers();
+    }
+  });
 
   if (state.liveProjection.enabled) {
     installLiveProjectionSurface();
