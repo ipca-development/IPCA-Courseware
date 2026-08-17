@@ -111,6 +111,61 @@ final class CommunicationTrainingThumbnailRenderer
     }
 
     /**
+     * HandBrake portrait exports are often 1920×1080 with SAR 81:256 / DAR 9:16.
+     *
+     * @return array{width:int,height:int}
+     */
+    public static function displaySizeFromProbe(
+        int $codedWidth,
+        int $codedHeight,
+        int $rotationDegrees = 0,
+        string $sampleAspectRatio = '1:1',
+        string $displayAspectRatio = ''
+    ): array {
+        $size = self::displayDimensions($codedWidth, $codedHeight, $rotationDegrees);
+        $quarter = ((int)round($rotationDegrees / 90) % 4 + 4) % 4;
+        if ($quarter === 1 || $quarter === 3) {
+            return $size;
+        }
+        $dar = self::parseRatio($displayAspectRatio);
+        if ($dar !== null) {
+            $dispW = (int)round($size['height'] * $dar[0] / $dar[1]);
+            if ($dispW < 1) {
+                $dispW = $size['width'];
+            }
+            return array('width' => $dispW, 'height' => $size['height']);
+        }
+        $sar = self::parseRatio($sampleAspectRatio);
+        if ($sar !== null && $sar[0] !== $sar[1]) {
+            return array(
+                'width' => max(1, (int)round($size['width'] * $sar[0] / $sar[1])),
+                'height' => $size['height'],
+            );
+        }
+        return $size;
+    }
+
+    /**
+     * @return array{0:float,1:float}|null
+     */
+    private static function parseRatio(string $ratio): ?array
+    {
+        $ratio = trim($ratio);
+        if ($ratio === '' || strtoupper($ratio) === 'N/A') {
+            return null;
+        }
+        if (!preg_match('/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/', $ratio, $match)) {
+            return null;
+        }
+        $a = (float)$match[1];
+        $b = (float)$match[2];
+        if ($a <= 0 || $b <= 0) {
+            return null;
+        }
+        return array($a, $b);
+    }
+
+    /**
      * @param array<string,mixed> $meta
      */
     private function renderLandscape(array $meta, ?string $backgroundBytes): string

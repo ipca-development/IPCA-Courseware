@@ -441,10 +441,12 @@ final class CommunicationTrainingVideoAnalyzer
         if ($codedW < 1 && $codedH < 1) {
             return null;
         }
-        return CommunicationTrainingThumbnailRenderer::displayDimensions(
+        return CommunicationTrainingThumbnailRenderer::displaySizeFromProbe(
             $codedW,
             $codedH,
-            $this->streamRotation($stream)
+            $this->streamRotation($stream),
+            (string)($stream['sample_aspect_ratio'] ?? '1:1'),
+            (string)($stream['display_aspect_ratio'] ?? '')
         );
     }
 

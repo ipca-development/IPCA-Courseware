@@ -1164,6 +1164,8 @@ comm_assert(
     && str_contains($analyzerSource, 'streamRotation')
     && str_contains($trainingVideoServiceSource, 'resolveVideoGeometry')
     && CommunicationTrainingThumbnailRenderer::displayDimensions(1920, 1080, 90) === array('width' => 1080, 'height' => 1920)
+    && CommunicationTrainingThumbnailRenderer::displaySizeFromProbe(1920, 1080, 0, '81:256', '9:16')['height']
+        > CommunicationTrainingThumbnailRenderer::displaySizeFromProbe(1920, 1080, 0, '81:256', '9:16')['width']
     && CommunicationTrainingThumbnailRenderer::videoOrientation(1080, 1920) === 'portrait'
 );
 $phase9Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_16_communication_phase9_training_video_catalog.sql');
