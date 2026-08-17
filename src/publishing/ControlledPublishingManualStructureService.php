@@ -648,7 +648,7 @@ final class ControlledPublishingManualStructureService
         return 0;
     }
 
-    private function resolvePartParentSectionId(int $versionId, string $partKey): int
+    public function resolvePartParentSectionId(int $versionId, string $partKey): int
     {
         if ($partKey === 'part_1') {
             $mainContentId = $this->sectionIdByKey($versionId, 'main_content');

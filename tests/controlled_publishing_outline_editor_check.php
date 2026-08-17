@@ -117,6 +117,12 @@ if (!is_string($outline) || !str_contains($outline, 'function promoteHeading('))
 if (!is_string($outline) || !str_contains($outline, '_chapter_tmp_')) {
     $failures[] = 'Chapter reorder must use temporary section keys to avoid unique-key collisions.';
 }
+if (!is_string($outline) || !str_contains($outline, 'chapter_parent_id')) {
+    $failures[] = 'Outline modal must load MAIN chapters from the same PART parent as the sidebar.';
+}
+if (!is_string($outline) || !str_contains($outline, 'computeSectionNumberDisplay(')) {
+    $failures[] = 'Outline modal headings must use the same section numbers as the sidebar.';
+}
 
 foreach (array(
     'ControlledPublishingOutlineService::partNavTitle(',

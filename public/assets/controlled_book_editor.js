@@ -3416,7 +3416,7 @@
         var title = window.prompt('MAIN chapter title');
         if (!title || !title.trim()) return;
         outlinePost('add_outline_chapter', {
-          part_section_id: part.section_id,
+          part_section_id: part.chapter_parent_id || part.section_id,
           title: title.trim(),
         }).then(function (res) {
           if (res.section_id) loadSection(res.section_id);

@@ -129,6 +129,10 @@ final class ControlledPublishingOutlineService
             $childrenByParent[$parentId][] = $row;
         }
 
+        $version = $this->requireVersion($versionId);
+        $manualCode = strtoupper(trim((string)(($version['manual_code'] ?? '') !== '' ? $version['manual_code'] : ($version['book_key'] ?? ''))));
+        $sectionNumberDisplay = $this->manualStructure->computeSectionNumberDisplay($versionId, $manualCode);
+
         $parts = array();
         foreach (self::PART_KEYS as $partKey) {
             $row = $byKey[$partKey] ?? null;
@@ -138,27 +142,42 @@ final class ControlledPublishingOutlineService
             if (!is_array($row)) {
                 continue;
             }
-            $partId = (int)($row['id'] ?? 0);
             $partNumber = self::partNumberFromRow($row);
+            $chapterParentId = $this->manualStructure->resolvePartParentSectionId($versionId, $partKey);
+            if ($chapterParentId <= 0) {
+                $chapterParentId = (int)($row['id'] ?? 0);
+            }
+            $partNav = self::partNavTitle($row, 'PART ' . $partNumber);
             $chapters = array();
-            foreach ($childrenByParent[$partId] ?? array() as $child) {
-                $chapterNumber = $this->chapterNumberFromRow($child);
-                if ($chapterNumber <= 0 || self::isProtectedSectionKey((string)($child['section_key'] ?? ''))) {
+            foreach ($childrenByParent[$chapterParentId] ?? array() as $child) {
+                if (!$this->manualStructure->isValidChapterNavEntry($child)) {
                     continue;
                 }
-                $title = trim((string)($child['title'] ?? ''));
-                $nav = trim((string)(self::decodeMeta($child)['nav_label'] ?? ''));
+                if (self::isProtectedSectionKey((string)($child['section_key'] ?? ''))) {
+                    continue;
+                }
+                $chapterNumber = $this->chapterNumberFromRow($child);
+                $sectionId = (int)($child['id'] ?? 0);
+                $meta = self::decodeMeta($child);
+                $lockedLabel = ControlledPublishingManualStructureService::navLabelForSection($child, true);
+                $importedLabel = !empty($meta['outline_locked'])
+                    ? ''
+                    : $this->manualStructure->chapterTitleFromImportedBlocks($sectionId, $chapterNumber);
+                $label = $importedLabel !== ''
+                    ? ControlledPublishingManualStructureService::uppercaseNavLabel($importedLabel)
+                    : $lockedLabel;
+                $title = self::stripChapterNumberPrefix($label);
                 $chapters[] = array(
-                    'section_id' => (int)($child['id'] ?? 0),
+                    'section_id' => $sectionId,
                     'chapter_number' => $chapterNumber,
                     'title' => $title,
-                    'nav_label' => $nav !== '' ? $nav : self::formatChapterNavTitle($chapterNumber, $title),
+                    'nav_label' => $label,
                     'block_count' => (int)($child['block_count'] ?? 0),
                     'sort_order' => (int)($child['sort_order'] ?? 0),
                     'headings' => self::headingTreeFromNavItems(
                         $this->manualStructure->listNavSubsectionsFromChapterBlocks(
-                            (int)($child['id'] ?? 0),
-                            array(),
+                            $sectionId,
+                            $sectionNumberDisplay,
                             $partNumber
                         )
                     ),
@@ -168,11 +187,12 @@ final class ControlledPublishingOutlineService
                 return ($a['chapter_number'] <=> $b['chapter_number']) ?: ($a['sort_order'] <=> $b['sort_order']);
             });
             $parts[] = array(
-                'section_id' => $partId,
+                'section_id' => (int)($row['id'] ?? 0),
+                'chapter_parent_id' => $chapterParentId,
                 'section_key' => (string)($row['section_key'] ?? $partKey),
                 'part_number' => $partNumber,
-                'title' => self::stripPartNumberPrefix((string)($row['title'] ?? '')),
-                'nav_label' => self::partNavTitle($row, 'PART ' . $partNumber),
+                'title' => self::stripPartNumberPrefix($partNav),
+                'nav_label' => $partNav,
                 'chapters' => $chapters,
             );
         }
