@@ -414,7 +414,7 @@ final class ManualDownloadManager: ObservableObject {
             var coverData: Data?
             if let baseURL = ManualReaderSessionStore.shared.baseURL,
                let coverURL = ManualReaderAPIClient.absoluteURL(
-                   from: book.coverImageUrl ?? book.coverUrl,
+                   from: book.coverPageThumbnailUrl ?? book.coverImageUrl ?? book.coverUrl,
                    baseURL: baseURL
                ),
                let result = try? await client.session.data(from: coverURL),

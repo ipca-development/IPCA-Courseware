@@ -134,6 +134,8 @@ final class ControlledPublishingReaderService
             'is_preview' => $isPreview,
             'cover_url' => $cover['cover_url'],
             'cover_image_url' => $cover['cover_image_url'],
+            'cover_page_thumbnail_url' => '/student/api/manual_reader_cover_thumbnail.php?book='
+                . rawurlencode($bookKey) . '&version_id=' . (int)$version['id'],
             'logo_url' => $cover['logo_url'],
             'cover_fallback' => $cover['fallback'],
             'has_progress' => is_array($progress),
@@ -340,6 +342,7 @@ final class ControlledPublishingReaderService
         $sectionId = (int)$section['id'];
         $nav = $this->prevNextSectionIds($versionId, $sectionId);
         $isCover = $this->isCoverSection($section);
+        $isAnnexCover = $this->isAnnexCoverSection($section);
         $pageHeaderConfig = $this->pageHeaderConfig($version, $section, $versionId);
         $partTitle = '';
         if (is_array($pageHeaderConfig['token_overrides'] ?? null)) {
@@ -361,7 +364,7 @@ final class ControlledPublishingReaderService
             'section_key' => (string)($section['section_key'] ?? ''),
             'section_type' => (string)($section['section_type'] ?? ''),
             'is_cover' => $isCover,
-            'hide_header_footer' => $isCover || !empty($layout['hide_header_footer']),
+            'hide_header_footer' => $isCover || $isAnnexCover || !empty($layout['hide_header_footer']),
             'token_context' => $this->tokens()->contextForApi($tokenContext),
             'prev_section_id' => $nav['prev'],
             'next_section_id' => $nav['next'],
@@ -652,6 +655,21 @@ final class ControlledPublishingReaderService
 
             return $this->renderer()->renderCoverPageShell($version, $section, $mode, $pageHeaderConfig, $coverPage);
         }
+        if ($this->isAnnexCoverSection($section)) {
+            $coverPage = $this->coverPageSvc()->resolveFromVersion($version);
+            $baseTitle = trim((string)($coverPage['manual_title'] ?? $version['book_title'] ?? 'Manual'));
+            $coverPage['manual_title'] = preg_match('/\bAnnexes\s*$/i', $baseTitle)
+                ? $baseTitle
+                : ($baseTitle . ' Annexes');
+
+            return $this->renderer()->renderCoverPageShell(
+                $version,
+                $section,
+                $mode,
+                $pageHeaderConfig,
+                $coverPage
+            );
+        }
         if ($this->isLepSection($section)) {
             $lepPage = $this->lepPageSvc()->resolveFromVersion($version);
             $approval = $this->approvalSvc()->resolveApproval((int)$version['id']);
@@ -663,6 +681,15 @@ final class ControlledPublishingReaderService
             $rows = is_array($register['rows'] ?? null) ? $register['rows'] : array();
 
             return $this->renderer()->renderAnnexRegisterShell($version, $section, $rows, $mode, $pageHeaderConfig);
+        }
+        if ($this->isAnnexCrossRefSection($section)) {
+            return $this->renderer()->renderAnnexCrossRefShell(
+                $version,
+                $section,
+                $blocksHtml,
+                $mode,
+                $pageHeaderConfig
+            );
         }
         if ($this->isAnnexHighlightsSection($section)) {
             $manual = array();
@@ -902,6 +929,14 @@ final class ControlledPublishingReaderService
     /**
      * @param array<string,mixed> $section
      */
+    private function isAnnexCoverSection(array $section): bool
+    {
+        return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::PARENT_SECTION_KEY;
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
     private function isLepSection(array $section): bool
     {
         return (string)($section['section_key'] ?? '') === 'lep';
@@ -913,6 +948,14 @@ final class ControlledPublishingReaderService
     private function isAnnexRegisterSection(array $section): bool
     {
         return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::REGISTER_SECTION_KEY;
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    private function isAnnexCrossRefSection(array $section): bool
+    {
+        return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::CROSS_REF_SECTION_KEY;
     }
 
     /**

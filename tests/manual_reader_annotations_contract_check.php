@@ -57,6 +57,27 @@ annotation_require(
         '"Remove Highlight"',
         '"Add Personal Note"',
         '"Add Reviewer Note"',
+        '"Confirm you want to delete your personal note?"',
+        'shareAnnexPDF',
+    ),
+    $failures
+);
+annotation_require(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/LibraryView.swift',
+    array(
+        '"Highlighted text"',
+        '"Personal note"',
+        '"Open in Book"',
+        '"Confirm you want to delete your personal note?"',
+        'initialHighlight: openingHighlight',
+    ),
+    $failures
+);
+annotation_require(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/ViewModels/ReaderViewModels.swift',
+    array(
+        'func goToHighlight',
+        'refreshAnnotationHTML(at: currentIndex)',
     ),
     $failures
 );
@@ -66,6 +87,7 @@ annotation_require(
         'private final class ReaderWebView',
         'canPerformAction',
         'existingHighlightID',
+        'opensPersonalNote',
     ),
     $failures
 );
@@ -76,6 +98,25 @@ annotation_require(
         'annotationMutationRevision',
         'pendingReviewNotes',
         'queueReviewNote',
+    ),
+    $failures
+);
+annotation_require(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ManualReaderAPIClient.swift',
+    array(
+        'URLComponents(string: path)',
+        'relative.queryItems',
+        'mr-personal-note-marker',
+        'opensPersonalNote: true',
+    ),
+    $failures
+);
+annotation_require(
+    $root . '/public/student/api/manual_reader_annex_pdf.php',
+    array(
+        'application/pdf',
+        'section_page_index',
+        'render_annex_pdf.cjs',
     ),
     $failures
 );

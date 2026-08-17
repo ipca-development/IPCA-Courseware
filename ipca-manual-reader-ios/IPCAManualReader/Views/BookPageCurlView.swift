@@ -14,6 +14,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
     let onPageReady: (Int) -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
+    let onShareAnnex: (Int) -> Void
     let onExternalLink: (URL) -> Void
     let onTextSelection: (Int, ReaderTextSelection) -> Void
 
@@ -105,6 +106,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     onReady: { [weak self] in self?.parent.onPageReady(position) },
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
+                    onShareAnnex: parent.onShareAnnex,
                     onExternalLink: parent.onExternalLink,
                     onTextSelection: { [weak self] selection in
                         self?.parent.onTextSelection(position, selection)
@@ -183,6 +185,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     onReady: { [weak self] in self?.parent.onPageReady(position) },
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
+                    onShareAnnex: parent.onShareAnnex,
                     onExternalLink: parent.onExternalLink,
                     onTextSelection: { [weak self] selection in
                         self?.parent.onTextSelection(position, selection)
@@ -294,6 +297,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         onReady: @escaping () -> Void = {},
         onNavigateToAnchor: @escaping (String) -> Void = { _ in },
         onNavigateToSection: @escaping (Int) -> Void = { _ in },
+        onShareAnnex: @escaping (Int) -> Void = { _ in },
         onExternalLink: @escaping (URL) -> Void = { _ in },
         onTextSelection: @escaping (ReaderTextSelection) -> Void = { _ in },
         onZoomChanged: @escaping (Bool) -> Void = { _ in }
@@ -313,6 +317,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 onReady: onReady,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
+                onShareAnnex: onShareAnnex,
                 onExternalLink: onExternalLink,
                 onTextSelection: onTextSelection,
                 onZoomChanged: onZoomChanged
@@ -335,6 +340,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         onReady: @escaping () -> Void,
         onNavigateToAnchor: @escaping (String) -> Void,
         onNavigateToSection: @escaping (Int) -> Void,
+        onShareAnnex: @escaping (Int) -> Void,
         onExternalLink: @escaping (URL) -> Void,
         onTextSelection: @escaping (ReaderTextSelection) -> Void,
         onZoomChanged: @escaping (Bool) -> Void
@@ -353,6 +359,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 onReady: onReady,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
+                onShareAnnex: onShareAnnex,
                 onExternalLink: onExternalLink,
                 onTextSelection: onTextSelection,
                 onZoomChanged: onZoomChanged
@@ -375,6 +382,7 @@ private struct PhysicalManualPage: View {
     let onReady: () -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
+    let onShareAnnex: (Int) -> Void
     let onExternalLink: (URL) -> Void
     let onTextSelection: (ReaderTextSelection) -> Void
     let onZoomChanged: (Bool) -> Void
@@ -391,6 +399,7 @@ private struct PhysicalManualPage: View {
                 onReady: onReady,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
+                onShareAnnex: onShareAnnex,
                 onExternalLink: onExternalLink,
                 onZoomChanged: onZoomChanged,
                 onTextSelection: onTextSelection
@@ -410,7 +419,9 @@ private struct PhysicalManualPage: View {
                     .allowsHitTesting(false)
                 }
             }
-            .overlay(alignment: .topLeading) {
+            .overlay(
+                alignment: isLandscape && !isLeftPage ? .topTrailing : .topLeading
+            ) {
                 if let ordinal = session.bookmarkOrdinal(
                     for: bookKey,
                     pageNumber: pageNumber
@@ -426,8 +437,8 @@ private struct PhysicalManualPage: View {
                             .padding(.top, 7)
                     }
                         .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
-                        .padding(.top, 4)
-                        .padding(.leading, 8)
+                        .padding(.top, 2)
+                        .padding(isLandscape && !isLeftPage ? .trailing : .leading, 4)
                         .allowsHitTesting(false)
                         .accessibilityLabel("Bookmark \(ordinal)")
                 }

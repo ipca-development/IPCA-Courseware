@@ -454,7 +454,17 @@ struct ManualReaderAPIClient {
     }
 
     private func postJSON<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
-        let url = baseURL.appending(path: path)
+        guard let relative = URLComponents(string: path) else {
+            throw ManualReaderAPIError.invalidServerURL
+        }
+        var components = URLComponents(
+            url: baseURL.appending(path: relative.path),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = relative.queryItems
+        guard let url = components?.url else {
+            throw ManualReaderAPIError.invalidServerURL
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -468,7 +478,8 @@ struct ManualReaderAPIClient {
 
     private func validate(response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
-        if http.url?.path.hasSuffix("/login.php") == true {
+        if http.url?.path.hasSuffix("/login.php") == true
+            || http.url?.path.hasSuffix("/admin/dashboard.php") == true {
             throw ManualReaderAPIError.unauthorized
         }
         if http.statusCode == 401 {
@@ -628,6 +639,30 @@ extension ManualReaderAPIClient {
               border-left: 4px solid #f4c430 !important;
               padding-left: 2px;
             }
+            .mr-personal-note-marker {
+              position: absolute;
+              z-index: 20;
+              width: 13px;
+              height: 13px;
+              min-width: 13px;
+              padding: 0;
+              border: 1px solid #bb8d00;
+              border-radius: 3px;
+              background: #ffd633;
+              box-shadow: 0 1px 2px rgba(0,0,0,.22);
+              -webkit-user-select: none;
+              user-select: none;
+            }
+            .mr-personal-note-marker::before {
+              content: '';
+              position: absolute;
+              left: 3px;
+              top: 3px;
+              width: 6px;
+              height: 1px;
+              background: #725700;
+              box-shadow: 0 2px 0 #725700, 0 4px 0 #725700;
+            }
           </style>
         </head>
         <body class="mr-body" data-mr-theme="\(theme)" data-reader-validated="\(isValidatedPersonalPage ? "1" : "0")">
@@ -750,6 +785,39 @@ enum ReaderHTMLAnnotationService {
             }
           }
           highlights.forEach(highlightExact);
+          const byID = new Map(highlights.map(item => [item.id, item]));
+          root.querySelectorAll('.mr-user-highlight.is-noted[data-highlight-id]').forEach(mark => {
+            const item = byID.get(mark.dataset.highlightId);
+            if (!item) return;
+            const marker = document.createElement('button');
+            marker.type = 'button';
+            marker.className = 'mr-personal-note-marker';
+            marker.setAttribute('aria-label', 'Open personal note');
+            const rootRect = root.getBoundingClientRect();
+            const markRect = mark.getBoundingClientRect();
+            marker.style.left = Math.max(
+              0, Math.min(root.offsetWidth - 13, markRect.right - rootRect.left + 2)
+            ) + 'px';
+            marker.style.top = Math.max(
+              0, Math.min(root.offsetHeight - 13, markRect.top - rootRect.top)
+            ) + 'px';
+            marker.addEventListener('click', function(event) {
+              event.preventDefault();
+              event.stopPropagation();
+              window.webkit.messageHandlers.readerSelection.postMessage({
+                selectedText: item.text,
+                sourceFragmentID: item.fragment || '',
+                stableAnchor: item.anchor || '',
+                startOffset: item.start || 0,
+                endOffset: (item.start || 0) + item.text.length,
+                prefix: '',
+                suffix: '',
+                existingHighlightID: item.id,
+                opensPersonalNote: true
+              });
+            });
+            root.appendChild(marker);
+          });
           if (searchTerm && searchTerm.trim()) {
             const needle = searchTerm.toLocaleLowerCase();
             let count = 0;

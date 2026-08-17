@@ -17,6 +17,7 @@ struct ManualPageWebView: UIViewRepresentable {
     var onReady: () -> Void
     var onNavigateToAnchor: (String) -> Void
     var onNavigateToSection: (Int) -> Void
+    var onShareAnnex: (Int) -> Void
     var onExternalLink: (URL) -> Void
     var onZoomChanged: (Bool) -> Void
     var onTextSelection: (ReaderTextSelection) -> Void
@@ -26,6 +27,7 @@ struct ManualPageWebView: UIViewRepresentable {
             onReady: onReady,
             onNavigateToAnchor: onNavigateToAnchor,
             onNavigateToSection: onNavigateToSection,
+            onShareAnnex: onShareAnnex,
             onExternalLink: onExternalLink,
             onZoomChanged: onZoomChanged,
             onTextSelection: onTextSelection
@@ -36,6 +38,7 @@ struct ManualPageWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.userContentController.add(context.coordinator, name: "readerSelection")
+        config.userContentController.add(context.coordinator, name: "readerAnnexAction")
         config.userContentController.addUserScript(
             WKUserScript(
                 source: Self.selectionBridgeScript,
@@ -50,6 +53,7 @@ struct ManualPageWebView: UIViewRepresentable {
         context.coordinator.onReady = onReady
         context.coordinator.onNavigateToAnchor = onNavigateToAnchor
         context.coordinator.onNavigateToSection = onNavigateToSection
+        context.coordinator.onShareAnnex = onShareAnnex
         context.coordinator.onExternalLink = onExternalLink
         context.coordinator.onZoomChanged = onZoomChanged
         context.coordinator.onTextSelection = onTextSelection
@@ -70,6 +74,7 @@ struct ManualPageWebView: UIViewRepresentable {
         context.coordinator.onReady = onReady
         context.coordinator.onNavigateToAnchor = onNavigateToAnchor
         context.coordinator.onNavigateToSection = onNavigateToSection
+        context.coordinator.onShareAnnex = onShareAnnex
         context.coordinator.onExternalLink = onExternalLink
         context.coordinator.onZoomChanged = onZoomChanged
         let scaleExpression: String = switch zoomMode {
@@ -114,6 +119,7 @@ struct ManualPageWebView: UIViewRepresentable {
         var onReady: () -> Void
         var onNavigateToAnchor: (String) -> Void
         var onNavigateToSection: (Int) -> Void
+        var onShareAnnex: (Int) -> Void
         var onExternalLink: (URL) -> Void
         var onZoomChanged: (Bool) -> Void
         var onTextSelection: (ReaderTextSelection) -> Void
@@ -123,6 +129,7 @@ struct ManualPageWebView: UIViewRepresentable {
             onReady: @escaping () -> Void,
             onNavigateToAnchor: @escaping (String) -> Void,
             onNavigateToSection: @escaping (Int) -> Void,
+            onShareAnnex: @escaping (Int) -> Void,
             onExternalLink: @escaping (URL) -> Void,
             onZoomChanged: @escaping (Bool) -> Void,
             onTextSelection: @escaping (ReaderTextSelection) -> Void
@@ -130,6 +137,7 @@ struct ManualPageWebView: UIViewRepresentable {
             self.onReady = onReady
             self.onNavigateToAnchor = onNavigateToAnchor
             self.onNavigateToSection = onNavigateToSection
+            self.onShareAnnex = onShareAnnex
             self.onExternalLink = onExternalLink
             self.onZoomChanged = onZoomChanged
             self.onTextSelection = onTextSelection
@@ -157,6 +165,17 @@ struct ManualPageWebView: UIViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            if message.name == "readerAnnexAction",
+               let body = message.body as? [String: Any],
+               let sectionID = body["sectionID"] as? Int,
+               sectionID > 0 {
+                if body["action"] as? String == "share" {
+                    onShareAnnex(sectionID)
+                } else {
+                    onNavigateToSection(sectionID)
+                }
+                return
+            }
             guard message.name == "readerSelection",
                   let body = message.body as? [String: Any],
                   let text = body["selectedText"] as? String,
@@ -171,7 +190,8 @@ struct ManualPageWebView: UIViewRepresentable {
                     prefix: body["prefix"] as? String,
                     suffix: body["suffix"] as? String,
                     existingHighlightID: (body["existingHighlightID"] as? String)
-                        .flatMap(UUID.init(uuidString:))
+                        .flatMap(UUID.init(uuidString:)),
+                    opensPersonalNote: body["opensPersonalNote"] as? Bool
                 )
             )
         }
@@ -205,6 +225,36 @@ struct ManualPageWebView: UIViewRepresentable {
     (function() {
       if (window.__ipcaReaderSelectionBridge) return;
       window.__ipcaReaderSelectionBridge = true;
+      document.querySelectorAll('.cpb-annex-register-row[data-annex-link]').forEach(function(row) {
+        const sectionID = Number(row.getAttribute('data-annex-link') || 0);
+        if (!sectionID) return;
+        row.setAttribute('role', 'button');
+        row.tabIndex = 0;
+        const titleCell = row.querySelector('.cpb-annex-register-col-title');
+        if (titleCell && !titleCell.querySelector('.mr-annex-share')) {
+          const share = document.createElement('button');
+          share.type = 'button';
+          share.className = 'mr-annex-share';
+          share.textContent = '↗';
+          share.setAttribute('aria-label', 'Share Annex PDF');
+          share.style.cssText = 'float:right;width:18px;height:18px;padding:0;border:1px solid #0b3f73;'
+            + 'border-radius:5px;background:#fff;color:#0b3f73;font-weight:800;line-height:15px;';
+          share.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            window.webkit.messageHandlers.readerAnnexAction.postMessage({
+              action: 'share', sectionID: sectionID
+            });
+          });
+          titleCell.appendChild(share);
+        }
+        row.addEventListener('click', function(event) {
+          if (event.target.closest('.mr-annex-share')) return;
+          window.webkit.messageHandlers.readerAnnexAction.postMessage({
+            action: 'open', sectionID: sectionID
+          });
+        });
+      });
       document.addEventListener('touchend', function() {
         setTimeout(function() {
           const selection = window.getSelection();
@@ -234,7 +284,8 @@ struct ManualPageWebView: UIViewRepresentable {
             endOffset: startOffset + text.length,
             prefix: scopeText.substring(Math.max(0, startOffset - 24), startOffset),
             suffix: scopeText.substring(startOffset + text.length, startOffset + text.length + 24),
-            existingHighlightID: existingMark?.dataset.highlightId || ''
+            existingHighlightID: existingMark?.dataset.highlightId || '',
+            opensPersonalNote: false
           });
         }, 20);
       }, { passive: true });

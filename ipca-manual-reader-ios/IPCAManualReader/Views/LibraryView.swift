@@ -13,6 +13,7 @@ struct LibraryView: View {
     @State private var utilityDestination: LibraryDestination?
     @State private var openingBook: LibraryBook?
     @State private var openingBookmark: LocalBookmark?
+    @State private var openingHighlight: TextHighlightAnchor?
 
     var body: some View {
         GeometryReader { proxy in
@@ -50,9 +51,14 @@ struct LibraryView: View {
         }
         .task { await viewModel.load() }
         .fullScreenCover(item: $selectedBook) { book in
-            ReaderView(book: book, initialBookmark: openingBookmark) {
+            ReaderView(
+                book: book,
+                initialBookmark: openingBookmark,
+                initialHighlight: openingHighlight
+            ) {
                 selectedBook = nil
                 openingBookmark = nil
+                openingHighlight = nil
             }
             .onAppear { openingBook = nil }
         }
@@ -140,24 +146,7 @@ struct LibraryView: View {
         switch destination {
         case .personalNotes:
             PersonalNotesLibraryView(books: viewModel.books) { book, highlight in
-                presentReader(
-                    book,
-                    bookmark: LocalBookmark(
-                        id: UUID(),
-                        bookKey: highlight.bookKey,
-                        versionID: highlight.versionID,
-                        pageNumber: highlight.pageNumber,
-                        label: "Personal Note",
-                        createdAt: highlight.createdAt,
-                        stableAnchor: highlight.stableAnchor,
-                        blockAnchor: highlight.sourceFragmentID,
-                        officialLocation: nil,
-                        semanticLocation: nil,
-                        personalReaderPageNumber: highlight.pageNumber,
-                        clientUpdatedAt: highlight.clientUpdatedAt,
-                        deletedAt: nil
-                    )
-                )
+                presentReader(book, highlight: highlight)
             }
         case .help:
             LibraryPlaceholderView(
@@ -193,12 +182,17 @@ struct LibraryView: View {
         }
     }
 
-    private func presentReader(_ book: LibraryBook, bookmark: LocalBookmark? = nil) {
+    private func presentReader(
+        _ book: LibraryBook,
+        bookmark: LocalBookmark? = nil,
+        highlight: TextHighlightAnchor? = nil
+    ) {
 #if DEBUG
         print("READER_PRESENT_REQUEST book=\(book.id)")
 #endif
         guard openingBook == nil, selectedBook == nil else { return }
         openingBookmark = bookmark
+        openingHighlight = highlight
         openingBook = book
         Task { @MainActor in
             // Give SwiftUI one frame to paint immediate tap feedback before
@@ -776,7 +770,7 @@ private struct ManualCoverCard: View {
         if let absolute = book.coverAbsoluteURL { return absolute }
         guard let baseURL else { return nil }
         return ManualReaderAPIClient.absoluteURL(
-            from: book.coverImageUrl ?? book.coverUrl,
+            from: book.coverPageThumbnailUrl ?? book.coverImageUrl ?? book.coverUrl,
             baseURL: baseURL
         )
     }
@@ -834,14 +828,14 @@ private struct ManualCoverCard: View {
                let image = UIImage(data: data) {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
                     .frame(width: width, height: width / 0.68)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else if let url = resolvedCoverURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
-                        image.resizable().scaledToFill()
+                        image.resizable().scaledToFit()
                     default:
                         coverPlaceholder
                     }
@@ -864,7 +858,11 @@ private struct ManualCoverCard: View {
         }
         .frame(width: width, height: width / 0.68)
         .clipped()
-        .shadow(color: .black.opacity(0.14), radius: 7, y: 4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.black.opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 10, x: 3, y: 7)
     }
 
     private var coverPlaceholder: some View {
@@ -1018,6 +1016,10 @@ private struct BookmarksByManualSection: View {
 
 private struct PersonalNotesLibraryView: View {
     @ObservedObject private var session = ManualReaderSessionStore.shared
+    @State private var expandedNoteIDs: Set<UUID> = []
+    @State private var editingNote: TextHighlightAnchor?
+    @State private var noteDraft = ""
+    @State private var pendingDeletion: TextHighlightAnchor?
     let books: [LibraryBook]
     let onSelect: (LibraryBook, TextHighlightAnchor) -> Void
 
@@ -1059,28 +1061,92 @@ private struct PersonalNotesLibraryView: View {
                                 .font(.headline)
                                 .foregroundStyle(IPCAReaderTheme.navy)
                             ForEach(notes) { note in
-                                Button { onSelect(book, note) } label: {
-                                    HStack(alignment: .top, spacing: 10) {
-                                        Rectangle()
-                                            .fill(Color.yellow)
-                                            .frame(width: 4)
-                                        VStack(alignment: .leading, spacing: 4) {
+                                VStack(spacing: 0) {
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.18)) {
+                                            if expandedNoteIDs.contains(note.id) {
+                                                expandedNoteIDs.remove(note.id)
+                                            } else {
+                                                expandedNoteIDs.insert(note.id)
+                                            }
+                                        }
+                                    } label: {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Rectangle()
+                                                .fill(Color.yellow)
+                                                .frame(width: 4)
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(note.personalNote ?? "")
+                                                    .foregroundStyle(Color.black)
+                                                    .multilineTextAlignment(.leading)
+                                                Text("Page \(note.pageNumber) · \(note.selectedText)")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(2)
+                                            }
+                                            Spacer()
+                                            Image(
+                                                systemName: expandedNoteIDs.contains(note.id)
+                                                    ? "chevron.down"
+                                                    : "chevron.right"
+                                            )
+                                            .foregroundStyle(.secondary)
+                                        }
+                                        .padding(14)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    if expandedNoteIDs.contains(note.id) {
+                                        Divider()
+                                            .padding(.horizontal, 14)
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            Text("Highlighted text")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                            Text(note.selectedText)
+                                                .foregroundStyle(Color.black)
+                                                .padding(10)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .background(
+                                                    Color.yellow.opacity(0.2),
+                                                    in: RoundedRectangle(cornerRadius: 8)
+                                                )
+                                            Text("Personal note")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
                                             Text(note.personalNote ?? "")
                                                 .foregroundStyle(Color.black)
-                                                .multilineTextAlignment(.leading)
-                                            Text("Page \(note.pageNumber) · \(note.selectedText)")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(2)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
+                                            Text(
+                                                note.createdAt.formatted(
+                                                    date: .abbreviated,
+                                                    time: .shortened
+                                                )
+                                            )
+                                            .font(.caption2)
                                             .foregroundStyle(.secondary)
+                                            HStack {
+                                                Button("Edit") {
+                                                    noteDraft = note.personalNote ?? ""
+                                                    editingNote = note
+                                                }
+                                                Button("Delete", role: .destructive) {
+                                                    pendingDeletion = note
+                                                }
+                                                Spacer()
+                                            }
+                                            Button {
+                                                onSelect(book, note)
+                                            } label: {
+                                                Label("Open in Book", systemImage: "book")
+                                                    .frame(maxWidth: .infinity)
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(IPCAReaderTheme.navy)
+                                        }
+                                        .padding(14)
                                     }
-                                    .padding(14)
-                                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
                                 }
-                                .buttonStyle(.plain)
+                                .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
                             }
                         }
                     }
@@ -1090,6 +1156,72 @@ private struct PersonalNotesLibraryView: View {
         }
         .background(IPCAReaderTheme.shelfBackground)
         .navigationTitle("Personal Notes")
+        .sheet(item: $editingNote) { note in
+            NavigationStack {
+                TextEditor(text: $noteDraft)
+                    .foregroundStyle(Color.black)
+                    .scrollContentBackground(.hidden)
+                    .padding(14)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .navigationTitle("Edit Personal Note")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { editingNote = nil }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                session.updateHighlight(
+                                    id: note.id,
+                                    personalNote: .some(
+                                        noteDraft.trimmingCharacters(
+                                            in: .whitespacesAndNewlines
+                                        )
+                                    )
+                                )
+                                editingNote = nil
+                                if let versionID = note.versionID {
+                                    Task {
+                                        await session.syncAnnotations(
+                                            bookKey: note.bookKey,
+                                            versionID: versionID
+                                        )
+                                    }
+                                }
+                            }
+                            .disabled(
+                                noteDraft.trimmingCharacters(
+                                    in: .whitespacesAndNewlines
+                                ).isEmpty
+                            )
+                        }
+                    }
+            }
+            .preferredColorScheme(.light)
+        }
+        .alert(
+            "Confirm you want to delete your personal note?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            )
+        ) {
+            Button("NO", role: .cancel) { pendingDeletion = nil }
+            Button("YES", role: .destructive) {
+                guard let note = pendingDeletion else { return }
+                session.updateHighlight(id: note.id, personalNote: .some(nil))
+                expandedNoteIDs.remove(note.id)
+                pendingDeletion = nil
+                if let versionID = note.versionID {
+                    Task {
+                        await session.syncAnnotations(
+                            bookKey: note.bookKey,
+                            versionID: versionID
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

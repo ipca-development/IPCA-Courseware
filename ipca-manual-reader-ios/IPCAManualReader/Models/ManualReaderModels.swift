@@ -51,6 +51,7 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     var isPreview: Bool?
     var coverUrl: String?
     var coverImageUrl: String?
+    var coverPageThumbnailUrl: String?
     var logoUrl: String?
     var hasProgress: Bool
     var hasPageMap: Bool
@@ -73,6 +74,7 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         case isPreview = "is_preview"
         case coverUrl = "cover_url"
         case coverImageUrl = "cover_image_url"
+        case coverPageThumbnailUrl = "cover_page_thumbnail_url"
         case logoUrl = "logo_url"
         case hasProgress = "has_progress"
         case hasPageMap = "has_page_map"
@@ -98,7 +100,7 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     }
 
     var coverAbsoluteURL: URL? {
-        guard let path = coverImageUrl ?? coverUrl,
+        guard let path = coverPageThumbnailUrl ?? coverImageUrl ?? coverUrl,
               !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         if path.hasPrefix("http://") || path.hasPrefix("https://") {
             return URL(string: path)
@@ -706,6 +708,7 @@ struct ReaderTextSelection: Codable, Hashable {
     var prefix: String?
     var suffix: String?
     var existingHighlightID: UUID?
+    var opensPersonalNote: Bool?
 }
 
 struct TextHighlightAnchor: Codable, Identifiable, Hashable {

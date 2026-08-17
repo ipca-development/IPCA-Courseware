@@ -277,17 +277,34 @@ final class ReaderViewModel: ObservableObject {
     }
 
     func goToBookmark(_ bookmark: LocalBookmark) async {
+        let targetPageNumber: Int
         if let blockAnchor = bookmark.blockAnchor, !blockAnchor.isEmpty,
            let pageNumber = stableAnchorPageIndex[blockAnchor] {
-            await goToPageNumber(pageNumber)
-            return
+            targetPageNumber = pageNumber
+        } else if let stableAnchor = bookmark.stableAnchor, !stableAnchor.isEmpty,
+                  let pageNumber = stableAnchorPageIndex[stableAnchor] {
+            targetPageNumber = pageNumber
+        } else {
+            targetPageNumber = bookmark.pageNumber
         }
-        if let stableAnchor = bookmark.stableAnchor, !stableAnchor.isEmpty,
-           let pageNumber = stableAnchorPageIndex[stableAnchor] {
-            await goToPageNumber(pageNumber)
-            return
+        await goToPageNumber(targetPageNumber)
+        refreshAnnotationHTML(at: currentIndex)
+    }
+
+    func goToHighlight(_ highlight: TextHighlightAnchor) async {
+        let targetPageNumber: Int
+        if let fragmentID = highlight.sourceFragmentID, !fragmentID.isEmpty,
+           let pageNumber = stableAnchorPageIndex[fragmentID] {
+            targetPageNumber = pageNumber
+        } else if let stableAnchor = highlight.stableAnchor, !stableAnchor.isEmpty,
+                  let pageNumber = stableAnchorPageIndex[stableAnchor] {
+            targetPageNumber = pageNumber
+        } else {
+            targetPageNumber = highlight.pageNumber
         }
-        await goToPageNumber(bookmark.pageNumber)
+        await goToPageNumber(targetPageNumber)
+        pageHTMLByIndex[currentIndex] = nil
+        refreshAnnotationHTML(at: currentIndex)
     }
 
     func goToSection(_ sectionId: Int) async {

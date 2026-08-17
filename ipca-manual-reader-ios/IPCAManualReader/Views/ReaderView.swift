@@ -24,16 +24,21 @@ struct ReaderView: View {
     @State private var personalNoteDraft = ""
     @State private var showReviewerThread = false
     @State private var reviewerNoteDraft = ""
+    @State private var isPreparingAnnexPDF = false
+    @State private var annexShareError: String?
     private let onExit: (() -> Void)?
     private let initialBookmark: LocalBookmark?
+    private let initialHighlight: TextHighlightAnchor?
 
     init(
         book: LibraryBook,
         initialBookmark: LocalBookmark? = nil,
+        initialHighlight: TextHighlightAnchor? = nil,
         onExit: (() -> Void)? = nil
     ) {
         _viewModel = StateObject(wrappedValue: ReaderViewModel(book: book))
         self.initialBookmark = initialBookmark
+        self.initialHighlight = initialHighlight
         self.onExit = onExit
     }
 
@@ -84,6 +89,13 @@ struct ReaderView: View {
                     }
                     .padding(24)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                }
+
+                if isPreparingAnnexPDF {
+                    ProgressView("Preparing Annex PDF…")
+                        .padding(22)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                        .zIndex(250)
                 }
 
                 if showChrome && !isOpening {
@@ -169,7 +181,9 @@ struct ReaderView: View {
         .persistentSystemOverlays(.hidden)
         .task {
             await viewModel.load()
-            if let initialBookmark {
+            if let initialHighlight {
+                await viewModel.goToHighlight(initialHighlight)
+            } else if let initialBookmark {
                 await viewModel.goToBookmark(initialBookmark)
             }
         }
@@ -199,9 +213,19 @@ struct ReaderView: View {
                     + (pendingExternalURL?.absoluteString ?? "")
             )
         }
+        .alert(
+            "Unable to Share Annex",
+            isPresented: Binding(
+                get: { annexShareError != nil },
+                set: { if !$0 { annexShareError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { annexShareError = nil }
+        } message: {
+            Text(annexShareError ?? "")
+        }
         .sheet(isPresented: $showPersonalNoteEditor) {
             PersonalNoteEditorSheet(
-                selectedText: pendingTextSelection?.selectedText ?? "",
                 note: $personalNoteDraft,
                 hasHighlight: selectedHighlight != nil,
                 hasPersonalNote: !(selectedHighlight?.personalNote ?? "").isEmpty,
@@ -309,12 +333,28 @@ struct ReaderView: View {
                     onNavigateToSection: { sectionID in
                         Task { await viewModel.goToSection(sectionID) }
                     },
-                    onExternalLink: { pendingExternalURL = $0 },
+                    onShareAnnex: { sectionID in
+                        shareAnnexPDF(sectionID: sectionID)
+                    },
+                    onExternalLink: { url in
+                        if url.path.hasSuffix("/student/api/manual_reader_annex_pdf.php") {
+                            shareAnnexPDF(from: url)
+                        } else {
+                            pendingExternalURL = url
+                        }
+                    },
                     onTextSelection: { pageIndex, selection in
                         focusedPageIndex = pageIndex
                         selectionPageIndex = pageIndex
                         pendingTextSelection = selection
                         showHighlightColors = false
+                        if selection.opensPersonalNote == true,
+                           let highlightID = selection.existingHighlightID,
+                           let highlight = session.highlight(id: highlightID),
+                           !(highlight.personalNote ?? "").isEmpty {
+                            personalNoteDraft = highlight.personalNote ?? ""
+                            showPersonalNoteEditor = true
+                        }
                     }
                 )
                 .id(landscape)
@@ -426,6 +466,87 @@ struct ReaderView: View {
                 at: selectionTargetIndex
             )
         }
+    }
+
+    private func shareAnnexPDF(from url: URL) {
+        guard !isPreparingAnnexPDF, let client = session.client else { return }
+        isPreparingAnnexPDF = true
+        Task {
+            do {
+                let (data, response) = try await client.session.data(from: url)
+                guard let http = response as? HTTPURLResponse,
+                      (200...299).contains(http.statusCode),
+                      http.mimeType == "application/pdf",
+                      !data.isEmpty else {
+                    let message = String(data: data, encoding: .utf8)
+                        ?? "The server did not return an Annex PDF."
+                    throw ManualReaderAPIError.badResponse(message)
+                }
+                let disposition = http.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+                let filenamePart = disposition.components(separatedBy: "filename=").last
+                let suggestedName = filenamePart?.trimmingCharacters(
+                    in: CharacterSet(charactersIn: "\"' ")
+                )
+                let fileURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(suggestedName ?? "Annex.pdf")
+                try data.write(to: fileURL, options: .atomic)
+                await MainActor.run {
+                    isPreparingAnnexPDF = false
+                    presentShareSheet(for: fileURL)
+                }
+            } catch {
+                await MainActor.run {
+                    isPreparingAnnexPDF = false
+                    annexShareError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func shareAnnexPDF(sectionID: Int) {
+        guard let baseURL = session.baseURL else { return }
+        var components = URLComponents(
+            url: baseURL.appending(path: "student/api/manual_reader_annex_pdf.php"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "book", value: viewModel.book.bookKey),
+            URLQueryItem(name: "version_id", value: String(viewModel.book.versionId)),
+            URLQueryItem(name: "section_id", value: String(sectionID)),
+        ]
+        guard let url = components?.url else {
+            annexShareError = "The Annex PDF URL could not be created."
+            return
+        }
+        shareAnnexPDF(from: url)
+    }
+
+    private func presentShareSheet(for fileURL: URL) {
+        let controller = UIActivityViewController(
+            activityItems: [fileURL],
+            applicationActivities: nil
+        )
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
+              let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController else {
+            annexShareError = "The share sheet could not be opened."
+            return
+        }
+        var presenter = root
+        while let presented = presenter.presentedViewController {
+            presenter = presented
+        }
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = presenter.view
+            popover.sourceRect = CGRect(
+                x: presenter.view.bounds.midX,
+                y: presenter.view.bounds.midY,
+                width: 1,
+                height: 1
+            )
+        }
+        presenter.present(controller, animated: true)
     }
 
     private func dismissSelectionMenu() {
@@ -867,7 +988,10 @@ struct SearchSheetView: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 44)
-                .background(Color(uiColor: .secondarySystemBackground))
+                .background(
+                    Color(uiColor: .secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+                )
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color.white)
@@ -1012,7 +1136,7 @@ private struct HighlightColorMenu: View {
 
 private struct PersonalNoteEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let selectedText: String
+    @State private var confirmDeletion = false
     @Binding var note: String
     let hasHighlight: Bool
     let hasPersonalNote: Bool
@@ -1023,13 +1147,6 @@ private struct PersonalNoteEditorSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
-                Text(selectedText)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(4)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.yellow.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
                 TextEditor(text: $note)
                     .foregroundStyle(Color.black)
                     .scrollContentBackground(.hidden)
@@ -1041,7 +1158,9 @@ private struct PersonalNoteEditorSheet: View {
                 if hasHighlight {
                     HStack {
                         if hasPersonalNote {
-                            Button("Remove Note", role: .destructive, action: onRemoveNote)
+                            Button("Delete Note", role: .destructive) {
+                                confirmDeletion = true
+                            }
                         }
                         Spacer()
                         Button("Remove Highlight", role: .destructive, action: onRemoveHighlight)
@@ -1062,6 +1181,10 @@ private struct PersonalNoteEditorSheet: View {
             }
         }
         .preferredColorScheme(.light)
+        .alert("Confirm you want to delete your personal note?", isPresented: $confirmDeletion) {
+            Button("NO", role: .cancel) {}
+            Button("YES", role: .destructive, action: onRemoveNote)
+        }
     }
 }
 
