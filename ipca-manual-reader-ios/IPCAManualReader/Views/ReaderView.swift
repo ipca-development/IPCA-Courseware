@@ -15,6 +15,7 @@ struct ReaderView: View {
     @State private var controlsHideTask: Task<Void, Never>?
     @State private var isExiting = false
     @State private var renderedPages: Set<Int> = []
+    @State private var pageRenderFailures: Set<Int> = []
     @State private var pendingExternalURL: URL?
     @State private var pendingTextSelection: ReaderTextSelection?
     @State private var focusedPageIndex: Int?
@@ -58,6 +59,7 @@ struct ReaderView: View {
                 isLandscape: safeSize.width > safeSize.height
             )
             let readyPages = requiredPages.intersection(renderedPages)
+            let failedPages = requiredPages.intersection(pageRenderFailures)
             let pagesAreReady = !requiredPages.isEmpty && readyPages.count == requiredPages.count
             let isOpening = viewModel.isLoading || (!viewModel.pages.isEmpty && !pagesAreReady)
             ZStack {
@@ -72,23 +74,44 @@ struct ReaderView: View {
                 } else if !viewModel.pages.isEmpty {
                     physicalBookReader(size: safeSize)
                         .frame(width: safeSize.width, height: safeSize.height)
+                        .opacity(isOpening ? 0 : 1)
+                        .allowsHitTesting(!isOpening)
+                        .accessibilityHidden(isOpening)
                 }
 
                 if isOpening {
+                    Color.white
+                        .ignoresSafeArea()
                     VStack(spacing: 14) {
-                        ProgressView(
-                            value: openingProgress(
-                                readyCount: readyPages.count,
-                                requiredCount: requiredPages.count
+                        if failedPages.isEmpty {
+                            ProgressView(
+                                value: openingProgress(
+                                    readyCount: readyPages.count,
+                                    requiredCount: requiredPages.count
+                                )
                             )
-                        )
-                        .progressViewStyle(.linear)
-                        .frame(maxWidth: 280)
-                        Text(openingMessage(pagesAreReady: pagesAreReady))
-                            .font(.subheadline.weight(.medium))
+                            .progressViewStyle(.linear)
+                            .frame(maxWidth: 280)
+                            Text(openingMessage(pagesAreReady: pagesAreReady))
+                                .font(.subheadline.weight(.medium))
+                        } else {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.title2)
+                                .foregroundStyle(.orange)
+                            Text("The visible pages did not reach stable layout.")
+                                .font(.subheadline.weight(.medium))
+                            Button("Retry Rendering") {
+                                pageRenderFailures.subtract(requiredPages)
+                                renderedPages.subtract(requiredPages)
+                                Task { await viewModel.reloadCurrentPageStyles() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(IPCAReaderTheme.navy)
+                        }
                     }
                     .padding(24)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                    .zIndex(10)
                 }
 
                 if isPreparingAnnexPDF {
@@ -196,6 +219,7 @@ struct ReaderView: View {
         }
         .onChange(of: viewModel.htmlGeneration) { _, _ in
             renderedPages.removeAll()
+            pageRenderFailures.removeAll()
         }
         .onDisappear {
             controlsHideTask?.cancel()
@@ -257,7 +281,8 @@ struct ReaderView: View {
                                 : -1)
                 },
                 draft: $reviewerNoteDraft,
-                onSend: sendReviewerNote
+                onSend: sendReviewerNote,
+                onOpenInBook: { showReviewerThread = false }
             )
         }
     }
@@ -332,7 +357,14 @@ struct ReaderView: View {
                         }
                         scheduleControlsAutoHide()
                     },
-                    onPageReady: { renderedPages.insert($0) },
+                    onPageReady: {
+                        pageRenderFailures.remove($0)
+                        renderedPages.insert($0)
+                    },
+                    onPageRenderFailure: {
+                        renderedPages.remove($0)
+                        pageRenderFailures.insert($0)
+                    },
                     onToggleBookmark: { pageIndex in
                         let pageNumber = viewModel.pages.indices.contains(pageIndex)
                             ? viewModel.pages[pageIndex].pageNumber
@@ -1206,7 +1238,7 @@ private struct PersonalNoteEditorSheet: View {
     }
 }
 
-private struct ReviewerConversationSheet: View {
+struct ReviewerConversationSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var session = ManualReaderSessionStore.shared
     let selectedText: String
@@ -1216,6 +1248,7 @@ private struct ReviewerConversationSheet: View {
     let pendingNotes: [PendingReviewNote]
     @Binding var draft: String
     let onSend: () -> Void
+    let onOpenInBook: (() -> Void)?
 
     var body: some View {
         NavigationStack {
@@ -1304,6 +1337,16 @@ private struct ReviewerConversationSheet: View {
             .navigationTitle("Reviewer Notes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if let onOpenInBook {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            dismiss()
+                            onOpenInBook()
+                        } label: {
+                            Label("Open in Book", systemImage: "book")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }

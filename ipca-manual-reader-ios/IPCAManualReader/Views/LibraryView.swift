@@ -782,12 +782,18 @@ private struct ManualCoverCard: View {
     let onSelect: () -> Void
 
     private var resolvedCoverURL: URL? {
-        if let absolute = book.coverAbsoluteURL { return absolute }
-        guard let baseURL else { return nil }
+        guard let coverPath = book.coverPageThumbnailUrl,
+              let baseURL else { return nil }
         return ManualReaderAPIClient.absoluteURL(
-            from: book.coverPageThumbnailUrl ?? book.coverImageUrl ?? book.coverUrl,
+            from: coverPath,
             baseURL: baseURL
         )
+    }
+
+    private var cachedAuthoritativeCoverData: Data? {
+        guard let package = downloads.packages[book.id],
+              package.coverImageKind == "authoritative_page_thumbnail_v1" else { return nil }
+        return package.coverImageData
     }
 
     private var progress: Double? {
@@ -813,10 +819,6 @@ private struct ManualCoverCard: View {
                     Text(progress.map { "\(Int($0 * 100))%" } ?? "Continue")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
-                } else if book.isDraftPreview {
-                    Text("DRAFT")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.orange)
                 }
                 Spacer(minLength: 4)
 
@@ -842,18 +844,17 @@ private struct ManualCoverCard: View {
     private var cover: some View {
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(IPCAReaderTheme.navy)
+                .fill(Color(uiColor: .secondarySystemBackground))
                 .aspectRatio(0.68, contentMode: .fit)
 
             if let url = resolvedCoverURL {
                 AuthenticatedCoverImage(
                     url: url,
-                    fallbackData: downloads.packages[book.id]?.coverImageData,
-                    placeholder: AnyView(coverPlaceholder)
+                    cachedAuthoritativeData: cachedAuthoritativeCoverData
                 )
                 .frame(width: width, height: width / 0.68)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else if let data = downloads.packages[book.id]?.coverImageData,
+            } else if let data = cachedAuthoritativeCoverData,
                       let image = UIImage(data: data) {
                 Image(uiImage: image)
                     .resizable()
@@ -861,17 +862,7 @@ private struct ManualCoverCard: View {
                     .frame(width: width, height: width / 0.68)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else {
-                coverPlaceholder
-            }
-
-            if book.isDraftPreview {
-                Text("DRAFT")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 5)
-                    .background(.orange, in: Capsule())
-                    .padding(7)
+                CoverThumbnailUnavailableView()
             }
         }
         .frame(width: width, height: width / 0.68)
@@ -881,25 +872,6 @@ private struct ManualCoverCard: View {
                 .stroke(Color.black.opacity(0.12), lineWidth: 0.75)
         )
         .shadow(color: .black.opacity(0.28), radius: 10, x: 3, y: 7)
-    }
-
-    private var coverPlaceholder: some View {
-        ZStack(alignment: .bottomLeading) {
-            LinearGradient(
-                colors: [IPCAReaderTheme.navyLight, IPCAReaderTheme.navy],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            VStack(alignment: .leading, spacing: 5) {
-                Text(book.manualCode.isEmpty ? book.bookKey : book.manualCode)
-                    .font(.headline.weight(.bold))
-                Text(book.displayTitle)
-                    .font(.caption)
-                    .lineLimit(3)
-            }
-            .foregroundStyle(.white)
-            .padding(13)
-        }
     }
 
     @ViewBuilder
@@ -912,30 +884,33 @@ private struct ManualCoverCard: View {
         case .notDownloaded:
             Button(action: download) {
                 Image(systemName: "icloud.and.arrow.down")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 20, weight: .light))
+                    .foregroundStyle(Color.gray.opacity(0.48))
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Download manual")
         case .updateAvailable:
             Button(action: downloadUpdate) {
-                Image(systemName: "icloud.and.arrow.down.fill")
-                    .font(.title3)
+                Image(systemName: "icloud.and.arrow.down")
+                    .font(.system(size: 20, weight: .light))
                     .foregroundStyle(.orange)
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Download update")
         case .availableOffline:
-            Image(systemName: "icloud.fill")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            Image(systemName: "icloud")
+                .font(.system(size: 20, weight: .light))
+                .foregroundStyle(Color.gray.opacity(0.48))
                 .frame(width: 28, height: 28)
                 .accessibilityLabel("Available offline")
         case .failed:
             Button(action: download) {
                 Image(systemName: "exclamationmark.icloud")
-                    .font(.title3)
-                    .foregroundStyle(.orange)
+                    .font(.system(size: 20, weight: .light))
+                    .foregroundStyle(Color.gray.opacity(0.48))
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Retry download")
@@ -985,9 +960,10 @@ private struct ManualCoverCard: View {
 
 private struct AuthenticatedCoverImage: View {
     let url: URL
-    let fallbackData: Data?
-    let placeholder: AnyView
+    let cachedAuthoritativeData: Data?
     @State private var image: UIImage?
+    @State private var failed = false
+    @State private var retryRevision = 0
 
     var body: some View {
         Group {
@@ -995,22 +971,58 @@ private struct AuthenticatedCoverImage: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-            } else if let fallbackData, let fallback = UIImage(data: fallbackData) {
+            } else if let cachedAuthoritativeData,
+                      let fallback = UIImage(data: cachedAuthoritativeData) {
                 Image(uiImage: fallback)
                     .resizable()
                     .scaledToFit()
+            } else if failed {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.secondary)
+                    Button("Retry") {
+                        failed = false
+                        retryRevision += 1
+                    }
+                    .font(.caption.weight(.semibold))
+                }
             } else {
-                placeholder
+                ProgressView()
             }
         }
-        .task(id: url) {
-            guard let client = ManualReaderSessionStore.shared.client else { return }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .task(id: "\(url.absoluteString)-\(retryRevision)") {
+            guard let client = ManualReaderSessionStore.shared.client else {
+                failed = true
+                return
+            }
             guard let response = try? await client.session.data(from: url),
                   let http = response.1 as? HTTPURLResponse,
                   (200...299).contains(http.statusCode),
-                  let loaded = UIImage(data: response.0) else { return }
+                  http.mimeType == "image/png",
+                  let loaded = UIImage(data: response.0) else {
+                failed = true
+                return
+            }
             image = loaded
+            failed = false
         }
+    }
+}
+
+private struct CoverThumbnailUnavailableView: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "doc.richtext")
+                .font(.title2)
+                .foregroundStyle(Color.gray.opacity(0.55))
+            Text("Cover unavailable")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .secondarySystemBackground))
     }
 }
 
@@ -1385,63 +1397,129 @@ private struct ReviewerThreadLibraryItem: Identifiable {
 }
 
 private struct ReviewerNotesLibraryView: View {
+    @ObservedObject private var session = ManualReaderSessionStore.shared
     let books: [LibraryBook]
     let onOpen: (LibraryBook, ReviewNoteThread) -> Void
     @State private var items: [ReviewerThreadLibraryItem] = []
+    @State private var selectedItem: ReviewerThreadLibraryItem?
+    @State private var messageDraft = ""
     @State private var isLoading = true
     @State private var errorMessage: String?
 
+    private var groupedItems: [(LibraryBook, [ReviewerThreadLibraryItem])] {
+        books.compactMap { book in
+            let matching = items.filter { $0.book.id == book.id }
+            return matching.isEmpty ? nil : (book, matching)
+        }
+    }
+
     var body: some View {
-        Group {
-            if isLoading {
-                ProgressView("Loading reviewer notes…")
-            } else if let errorMessage {
-                ContentUnavailableView(
-                    "Unable to Load Reviewer Notes",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(errorMessage)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                LibraryHeader(
+                    title: "Reviewer Notes",
+                    subtitle: "Shared reviewer conversations, grouped by manual.",
+                    user: session.user,
+                    isPhone: UIDevice.current.userInterfaceIdiom != .pad
                 )
-            } else if items.isEmpty {
-                ContentUnavailableView(
-                    "No Reviewer Notes",
-                    systemImage: "text.bubble",
-                    description: Text("Shared reviewer conversations will appear here.")
-                )
-            } else {
-                List(items) { item in
-                    Button {
-                        onOpen(item.book, item.thread)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(item.book.displayTitle)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(IPCAReaderTheme.navy)
-                                Spacer()
-                                Text("Page \(item.thread.pageNumber)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text(item.thread.selectedText)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(2)
-                            if let latest = item.thread.comments.last {
-                                Text("\(latest.author.name): \(latest.body)")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(3)
+                if isLoading {
+                    ProgressView("Loading reviewer notes…")
+                        .frame(maxWidth: .infinity, minHeight: 280)
+                } else if let errorMessage, items.isEmpty {
+                    ContentUnavailableView(
+                        "Unable to Load Reviewer Notes",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(errorMessage)
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 280)
+                } else if groupedItems.isEmpty {
+                    ContentUnavailableView(
+                        "No Reviewer Notes",
+                        systemImage: "text.bubble",
+                        description: Text("Shared reviewer conversations will appear here.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 280)
+                } else {
+                    ForEach(groupedItems, id: \.0.id) { book, threads in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(book.displayTitle)
+                                .font(.headline)
+                                .foregroundStyle(IPCAReaderTheme.navy)
+                            ForEach(threads) { item in
+                                Button {
+                                    messageDraft = ""
+                                    selectedItem = item
+                                } label: {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Rectangle()
+                                            .fill(Color.blue)
+                                            .frame(width: 4)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(
+                                                item.thread.comments.last?.body
+                                                    ?? item.thread.selectedText
+                                            )
+                                            .foregroundStyle(Color.black)
+                                            .multilineTextAlignment(.leading)
+                                            .lineLimit(3)
+                                            Text(
+                                                "Page \(item.thread.pageNumber) · "
+                                                    + item.thread.selectedText
+                                            )
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                        }
+                                        Spacer()
+                                        VStack(spacing: 5) {
+                                            Image(systemName: "bubble.left.and.bubble.right")
+                                                .foregroundStyle(IPCAReaderTheme.navy)
+                                            Text("\(item.thread.comments.count)")
+                                                .font(.caption2.monospacedDigit())
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Image(systemName: "chevron.right")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(14)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        Color.white,
+                                        in: RoundedRectangle(cornerRadius: 12)
+                                    )
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
-                        .padding(.vertical, 5)
                     }
-                    .buttonStyle(.plain)
                 }
             }
+            .padding(24)
         }
+        .background(IPCAReaderTheme.shelfBackground)
         .navigationTitle("Reviewer Notes")
         .task(id: books.map { String($0.id) }.joined(separator: ",")) {
             await load()
+        }
+        .sheet(item: $selectedItem) { item in
+            ReviewerConversationSheet(
+                selectedText: item.thread.selectedText,
+                thread: selectedItem?.thread ?? item.thread,
+                isLoading: false,
+                errorMessage: errorMessage,
+                pendingNotes: session.pendingReviewNotes.filter {
+                    $0.threadUUID == item.thread.threadUUID
+                },
+                draft: $messageDraft,
+                onSend: { sendMessage(to: item) },
+                onOpenInBook: {
+                    let target = selectedItem ?? item
+                    selectedItem = nil
+                    DispatchQueue.main.async {
+                        onOpen(target.book, target.thread)
+                    }
+                }
+            )
         }
     }
 
@@ -1455,8 +1533,9 @@ private struct ReviewerNotesLibraryView: View {
         isLoading = true
         errorMessage = nil
         var loaded: [ReviewerThreadLibraryItem] = []
-        do {
-            for book in books where book.isDraftPreview {
+        var failures: [String] = []
+        for book in books where book.isDraftPreview {
+            do {
                 let response = try await client.fetchReviewThreads(
                     bookKey: book.bookKey,
                     versionId: book.versionId
@@ -1464,12 +1543,38 @@ private struct ReviewerNotesLibraryView: View {
                 loaded.append(contentsOf: (response.threads ?? []).map {
                     ReviewerThreadLibraryItem(book: book, thread: $0)
                 })
+            } catch {
+                failures.append("\(book.displayTitle): \(error.localizedDescription)")
             }
-            items = loaded.sorted { $0.thread.updatedAtUTC > $1.thread.updatedAtUTC }
-        } catch {
-            errorMessage = error.localizedDescription
         }
+        items = loaded.sorted { $0.thread.updatedAtUTC > $1.thread.updatedAtUTC }
+        errorMessage = failures.isEmpty ? nil : failures.joined(separator: "\n")
         isLoading = false
+    }
+
+    private func sendMessage(to item: ReviewerThreadLibraryItem) {
+        let text = messageDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let client = session.client else { return }
+        messageDraft = ""
+        Task {
+            do {
+                let updated = try await client.addReviewComment(
+                    bookKey: item.book.bookKey,
+                    versionId: item.book.versionId,
+                    threadUUID: item.thread.threadUUID,
+                    body: text
+                )
+                let replacement = ReviewerThreadLibraryItem(book: item.book, thread: updated)
+                if let index = items.firstIndex(where: { $0.id == item.id }) {
+                    items[index] = replacement
+                }
+                selectedItem = replacement
+                errorMessage = nil
+            } catch {
+                messageDraft = text
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 }
 

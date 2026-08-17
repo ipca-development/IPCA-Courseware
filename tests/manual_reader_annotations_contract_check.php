@@ -72,6 +72,9 @@ annotation_require(
         'initialHighlight: openingHighlight',
         'ReviewerNotesLibraryView',
         'canReviewManuals: session.canAddReviewerNotes',
+        'selectedItem = item',
+        'ReviewerConversationSheet(',
+        'onOpenInBook:',
     ),
     $failures
 );
@@ -116,9 +119,41 @@ annotation_require(
         'mr-review-highlight',
         'mr-review-note-marker',
         'reviewThreads.forEach',
+        'wrapTextPiece',
+        'mark.dataset.annotationFragment',
     ),
     $failures
 );
+annotation_require(
+    $root . '/tests/manual_reader_annotation_dom_check.js',
+    array(
+        'Cross-node selection must create multiple fragments',
+        'assert(!annotationHelpers.includes("surroundContents"))',
+        'assert(!annotationHelpers.includes("extractContents"))',
+        'Manual reader annotation DOM check: PASS',
+    ),
+    $failures
+);
+
+$librarySource = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/LibraryView.swift'
+);
+if (str_contains($librarySource, 'onOpen(item.book, item.thread)')) {
+    $failures[] = 'Reviewer Notes rows must open chat first, not open the book directly.';
+}
+$readerViewSource = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ReaderView.swift'
+);
+$reviewerSheetStart = strpos($readerViewSource, 'struct ReviewerConversationSheet');
+$reviewerSheetSource = $reviewerSheetStart !== false
+    ? substr($readerViewSource, $reviewerSheetStart)
+    : '';
+foreach (array('Button("Edit")', 'Button("Delete")') as $mutableCommentControl) {
+    if (str_contains($reviewerSheetSource, $mutableCommentControl)) {
+        $failures[] = "Reviewer comments must remain append-only: {$mutableCommentControl}";
+    }
+}
+
 annotation_require(
     $root . '/public/student/api/manual_reader_annex_pdf.php',
     array(

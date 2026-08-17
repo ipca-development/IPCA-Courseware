@@ -710,6 +710,7 @@ struct ReaderTextSelection: Codable, Hashable {
     var existingHighlightID: UUID?
     var opensPersonalNote: Bool?
     var opensReviewerNote: Bool?
+    var reviewThreadID: String?
 }
 
 struct TextHighlightAnchor: Codable, Identifiable, Hashable {

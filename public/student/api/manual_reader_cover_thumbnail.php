@@ -86,9 +86,15 @@ try {
         }
     }
 
+    $etag = '"' . substr($mapHash, 0, 32) . '"';
+    header('ETag: ' . $etag);
+    header('Cache-Control: private, max-age=0, must-revalidate');
+    if (trim((string)($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) === $etag) {
+        http_response_code(304);
+        exit;
+    }
     header('Content-Type: image/png');
     header('Content-Length: ' . (string)filesize($outputPath));
-    header('Cache-Control: private, max-age=86400');
     readfile($outputPath);
 } catch (Throwable $e) {
     reader_cover_fail(400, 'Cover thumbnail failed: ' . $e->getMessage());

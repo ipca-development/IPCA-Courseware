@@ -637,12 +637,14 @@ extension ManualReaderAPIClient {
               -webkit-box-decoration-break: clone;
             }
             .mr-search-hit { background: #fff34d !important; }
-            .mr-user-highlight.is-noted {
+            .mr-user-highlight.is-noted.is-first {
               border-left: 4px solid #f4c430 !important;
               padding-left: 2px;
             }
             .mr-review-highlight {
               background: #65dfff !important;
+            }
+            .mr-review-highlight.is-first {
               border-left: 4px solid #1769aa !important;
               padding-left: 2px;
             }
@@ -657,6 +659,16 @@ extension ManualReaderAPIClient {
               border-radius: 50%;
               background: #1769aa;
               box-shadow: 0 1px 3px rgba(0,0,0,.28);
+            }
+            .mr-review-note-marker::before {
+              content: '•••';
+              position: absolute;
+              inset: -2px 0 0;
+              color: #fff;
+              font-size: 6px;
+              line-height: 12px;
+              letter-spacing: -1px;
+              text-align: center;
             }
             .mr-personal-note-marker {
               position: absolute;
@@ -754,47 +766,55 @@ enum ReaderHTMLAnnotationService {
             while (walker.nextNode()) nodes.push(walker.currentNode);
             return nodes;
           }
-          function wrap(node, start, length, className, color, item) {
-            if (!node || length <= 0) return;
-            const range = document.createRange();
-            range.setStart(node, start);
-            range.setEnd(node, start + length);
-            wrapRange(range, className, color, item);
-          }
-          function wrapRange(range, className, color, item) {
+          function wrapTextPiece(node, start, end, className, color, item, index, count) {
+            if (!node || end <= start) return null;
+            if (end < node.nodeValue.length) node.splitText(end);
+            const selected = start > 0 ? node.splitText(start) : node;
             const mark = document.createElement('mark');
             mark.className = className;
+            if (index === 0) mark.classList.add('is-first');
+            if (index === count - 1) mark.classList.add('is-last');
             if (color) mark.style.backgroundColor = color;
             if (item && item.id) mark.dataset.highlightId = item.id;
             if (item && item.noted) mark.classList.add('is-noted');
-            try {
-              range.surroundContents(mark);
-            } catch (_) {
-              const contents = range.extractContents();
-              mark.appendChild(contents);
-              range.insertNode(mark);
-            }
-          }
-          function boundaryAt(nodes, offset) {
-            let consumed = 0;
-            for (const node of nodes) {
-              const next = consumed + node.nodeValue.length;
-              if (offset <= next) {
-                return { node: node, offset: Math.max(0, offset - consumed) };
-              }
-              consumed = next;
-            }
-            const last = nodes[nodes.length - 1];
-            return last ? { node: last, offset: last.nodeValue.length } : null;
+            mark.dataset.annotationFragment = String(index);
+            selected.parentNode.insertBefore(mark, selected);
+            mark.appendChild(selected);
+            return mark;
           }
           function wrapGlobal(nodes, start, length, className, color, item) {
-            const from = boundaryAt(nodes, start);
-            const to = boundaryAt(nodes, start + length);
-            if (!from || !to) return false;
-            const range = document.createRange();
-            range.setStart(from.node, from.offset);
-            range.setEnd(to.node, to.offset);
-            wrapRange(range, className, color, item);
+            const end = start + length;
+            const pieces = [];
+            let consumed = 0;
+            for (const node of nodes) {
+              const nodeStart = consumed;
+              const nodeEnd = consumed + node.nodeValue.length;
+              const pieceStart = Math.max(start, nodeStart);
+              const pieceEnd = Math.min(end, nodeEnd);
+              if (pieceStart < pieceEnd) {
+                pieces.push({
+                  node: node,
+                  start: pieceStart - nodeStart,
+                  end: pieceEnd - nodeStart
+                });
+              }
+              consumed = nodeEnd;
+              if (consumed >= end) break;
+            }
+            if (!pieces.length) return false;
+            for (let index = pieces.length - 1; index >= 0; index -= 1) {
+              const piece = pieces[index];
+              wrapTextPiece(
+                piece.node,
+                piece.start,
+                piece.end,
+                className,
+                color,
+                item,
+                index,
+                pieces.length
+              );
+            }
             return true;
           }
           function highlightExact(item, className) {
@@ -843,7 +863,9 @@ enum ReaderHTMLAnnotationService {
           highlights.forEach(item => highlightExact(item, 'mr-user-highlight'));
           reviewThreads.forEach(item => highlightExact(item, 'mr-review-highlight'));
           const byID = new Map(highlights.map(item => [item.id, item]));
-          root.querySelectorAll('.mr-user-highlight.is-noted[data-highlight-id]').forEach(mark => {
+          root.querySelectorAll(
+            '.mr-user-highlight.is-noted.is-last[data-highlight-id]'
+          ).forEach(mark => {
             const item = byID.get(mark.dataset.highlightId);
             if (!item) return;
             const marker = document.createElement('button');
@@ -877,7 +899,7 @@ enum ReaderHTMLAnnotationService {
             root.appendChild(marker);
           });
           const reviewsByID = new Map(reviewThreads.map(item => [item.id, item]));
-          root.querySelectorAll('.mr-review-highlight[data-highlight-id]').forEach(mark => {
+          root.querySelectorAll('.mr-review-highlight.is-last[data-highlight-id]').forEach(mark => {
             const item = reviewsByID.get(mark.dataset.highlightId);
             if (!item) return;
             const marker = document.createElement('button');
@@ -905,7 +927,8 @@ enum ReaderHTMLAnnotationService {
                 prefix: item.prefix || '',
                 suffix: item.suffix || '',
                 existingHighlightID: '',
-                opensReviewerNote: true
+                opensReviewerNote: true,
+                reviewThreadID: item.id
               });
             });
             root.appendChild(marker);
@@ -919,7 +942,16 @@ enum ReaderHTMLAnnotationService {
               while (count < 200) {
                 const found = node.nodeValue.toLocaleLowerCase().indexOf(needle, offset);
                 if (found < 0) break;
-                wrap(node, found, searchTerm.length, 'mr-search-hit', null, null);
+                wrapTextPiece(
+                  node,
+                  found,
+                  found + searchTerm.length,
+                  'mr-search-hit',
+                  null,
+                  null,
+                  0,
+                  1
+                );
                 count += 1;
                 break;
               }

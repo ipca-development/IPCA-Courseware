@@ -111,7 +111,9 @@ require_markers(
         'maximumZoomScale = 4',
         'WKScriptMessageHandler',
         'readerSelection',
-        'requestAnimationFrame(() => requestAnimationFrame(resolve))',
+        'readerPageReady',
+        'document.fonts?.ready',
+        'verifyStableGeometry',
     ),
     $failures
 );
@@ -125,6 +127,8 @@ require_markers(
         'PersonalNoteEditorSheet',
         'bookmarksPopover',
         '.preferredColorScheme(.light)',
+        '.opacity(isOpening ? 0 : 1)',
+        '.allowsHitTesting(!isOpening)',
     ),
     $failures
 );
@@ -169,7 +173,31 @@ require_markers(
         'onSelectBookmark(book, bookmark)',
         'AuthenticatedCoverImage',
         'Image(systemName: "icloud.and.arrow.down")',
+        'Image(systemName: "icloud")',
+        'coverImageKind == "authoritative_page_thumbnail_v1"',
         'Button("Delete Local Download"',
+    ),
+    $failures
+);
+$libraryViewSource = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/LibraryView.swift'
+);
+$coverCardStart = strpos($libraryViewSource, 'private struct ManualCoverCard');
+$coverCardEnd = strpos($libraryViewSource, 'private struct AuthenticatedCoverImage');
+$coverCardSource = $coverCardStart !== false && $coverCardEnd !== false
+    ? substr($libraryViewSource, $coverCardStart, $coverCardEnd - $coverCardStart)
+    : '';
+foreach (array('book.coverImageUrl', 'book.coverUrl', 'Text("DRAFT")', 'coverPlaceholder') as $legacyCoverMarker) {
+    if (str_contains($coverCardSource, $legacyCoverMarker)) {
+        $failures[] = "Manual cover card still exposes non-authoritative fallback: {$legacyCoverMarker}";
+    }
+}
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/PageCache.swift',
+    array(
+        'let coverImageKind: String?',
+        'from: coverPath',
+        '"authoritative_page_thumbnail_v1"',
     ),
     $failures
 );

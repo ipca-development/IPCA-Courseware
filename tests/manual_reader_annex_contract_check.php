@@ -28,6 +28,8 @@ $requirements = array(
         'page_map_hash',
         'image/png',
         'render_annex_pdf.cjs',
+        'ETag:',
+        'must-revalidate',
     ),
     'scripts/render_annex_pdf.cjs' => array(
         'printBackground: true',

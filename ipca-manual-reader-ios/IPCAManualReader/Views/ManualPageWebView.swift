@@ -15,6 +15,7 @@ struct ManualPageWebView: UIViewRepresentable {
     var pageSize: CGSize
     var pageBackground: Color
     var onReady: () -> Void
+    var onRenderFailure: () -> Void
     var onNavigateToAnchor: (String) -> Void
     var onNavigateToSection: (Int) -> Void
     var onShareAnnex: (Int) -> Void
@@ -25,6 +26,7 @@ struct ManualPageWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onReady: onReady,
+            onRenderFailure: onRenderFailure,
             onNavigateToAnchor: onNavigateToAnchor,
             onNavigateToSection: onNavigateToSection,
             onShareAnnex: onShareAnnex,
@@ -39,6 +41,7 @@ struct ManualPageWebView: UIViewRepresentable {
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         config.userContentController.add(context.coordinator, name: "readerSelection")
         config.userContentController.add(context.coordinator, name: "readerAnnexAction")
+        config.userContentController.add(context.coordinator, name: "readerPageReady")
         config.userContentController.addUserScript(
             WKUserScript(
                 source: Self.selectionBridgeScript,
@@ -51,6 +54,7 @@ struct ManualPageWebView: UIViewRepresentable {
         webView.backgroundColor = UIColor(pageBackground)
         webView.scrollView.backgroundColor = UIColor(pageBackground)
         context.coordinator.onReady = onReady
+        context.coordinator.onRenderFailure = onRenderFailure
         context.coordinator.onNavigateToAnchor = onNavigateToAnchor
         context.coordinator.onNavigateToSection = onNavigateToSection
         context.coordinator.onShareAnnex = onShareAnnex
@@ -72,6 +76,7 @@ struct ManualPageWebView: UIViewRepresentable {
         webView.backgroundColor = UIColor(pageBackground)
         webView.scrollView.backgroundColor = UIColor(pageBackground)
         context.coordinator.onReady = onReady
+        context.coordinator.onRenderFailure = onRenderFailure
         context.coordinator.onNavigateToAnchor = onNavigateToAnchor
         context.coordinator.onNavigateToSection = onNavigateToSection
         context.coordinator.onShareAnnex = onShareAnnex
@@ -89,22 +94,66 @@ struct ManualPageWebView: UIViewRepresentable {
         case .percent125:
             "1.25"
         }
+        let htmlChanged = context.coordinator.lastHTML != html
+        if htmlChanged {
+            context.coordinator.htmlRevision += 1
+            context.coordinator.isLoaded = false
+        }
+        let revision = context.coordinator.htmlRevision
         let js = """
         (function() {
-          var frame = document.querySelector('.mr-ios-frame');
+          const revision = \(revision);
+          const frame = document.querySelector('.mr-ios-frame');
           if (!frame) return;
-          frame.style.transform = 'none';
-          var contentWidth = Math.max(frame.offsetWidth, 1);
-          var contentHeight = Math.max(frame.offsetHeight, 1);
-          var isLayoutBound = frame.getAttribute('data-layout-bound') === '1';
-          var scale = isLayoutBound ? 1 : \(scaleExpression);
-          frame.style.transform = 'scale(' + scale + ')';
-          frame.style.marginBottom = ((contentHeight * scale) - contentHeight) + 'px';
+          const imageReady = Array.from(document.images).map(image => {
+            if (image.complete) return Promise.resolve();
+            if (typeof image.decode === 'function') return image.decode().catch(() => {});
+            return new Promise(resolve => {
+              image.addEventListener('load', resolve, { once: true });
+              image.addEventListener('error', resolve, { once: true });
+            });
+          });
+          const fontReady = document.fonts?.ready || Promise.resolve();
+          Promise.all([fontReady, ...imageReady]).then(function() {
+            frame.style.transform = 'none';
+            const contentWidth = Math.max(frame.offsetWidth, 1);
+            const contentHeight = Math.max(frame.offsetHeight, 1);
+            const isLayoutBound = frame.getAttribute('data-layout-bound') === '1';
+            const scale = isLayoutBound ? 1 : \(scaleExpression);
+            frame.style.transform = 'scale(' + scale + ')';
+            frame.style.marginBottom = ((contentHeight * scale) - contentHeight) + 'px';
+            let previous = '';
+            let stableFrames = 0;
+            let attempts = 0;
+            function verifyStableGeometry() {
+              requestAnimationFrame(function() {
+                const rect = frame.getBoundingClientRect();
+                const signature = [
+                  rect.width.toFixed(2),
+                  rect.height.toFixed(2),
+                  frame.scrollWidth,
+                  frame.scrollHeight
+                ].join(':');
+                stableFrames = signature === previous ? stableFrames + 1 : 0;
+                previous = signature;
+                attempts += 1;
+                if (stableFrames >= 2 || attempts >= 12) {
+                  window.webkit.messageHandlers.readerPageReady.postMessage({
+                    revision: revision,
+                    stable: stableFrames >= 2
+                  });
+                  return;
+                }
+                verifyStableGeometry();
+              });
+            }
+            verifyStableGeometry();
+          });
         })();
         """
         context.coordinator.pendingScaleJS = js
 
-        if context.coordinator.lastHTML != html {
+        if htmlChanged {
             context.coordinator.lastHTML = html
             webView.loadHTMLString(html, baseURL: baseURL)
         } else if context.coordinator.isLoaded {
@@ -114,9 +163,11 @@ struct ManualPageWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var lastHTML: String = ""
+        var htmlRevision = 0
         var pendingScaleJS: String = ""
         var isLoaded = false
         var onReady: () -> Void
+        var onRenderFailure: () -> Void
         var onNavigateToAnchor: (String) -> Void
         var onNavigateToSection: (Int) -> Void
         var onShareAnnex: (Int) -> Void
@@ -127,6 +178,7 @@ struct ManualPageWebView: UIViewRepresentable {
 
         init(
             onReady: @escaping () -> Void,
+            onRenderFailure: @escaping () -> Void,
             onNavigateToAnchor: @escaping (String) -> Void,
             onNavigateToSection: @escaping (Int) -> Void,
             onShareAnnex: @escaping (Int) -> Void,
@@ -135,6 +187,7 @@ struct ManualPageWebView: UIViewRepresentable {
             onTextSelection: @escaping (ReaderTextSelection) -> Void
         ) {
             self.onReady = onReady
+            self.onRenderFailure = onRenderFailure
             self.onNavigateToAnchor = onNavigateToAnchor
             self.onNavigateToSection = onNavigateToSection
             self.onShareAnnex = onShareAnnex
@@ -146,14 +199,7 @@ struct ManualPageWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isLoaded = true
             if !pendingScaleJS.isEmpty {
-                webView.evaluateJavaScript(pendingScaleJS) { [weak self] _, _ in
-                    guard let self else { return }
-                    webView.evaluateJavaScript(
-                        "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
-                    ) { _, _ in
-                        DispatchQueue.main.async { self.onReady() }
-                    }
-                }
+                webView.evaluateJavaScript(pendingScaleJS, completionHandler: nil)
             } else {
                 DispatchQueue.main.async { self.onReady() }
             }
@@ -173,6 +219,15 @@ struct ManualPageWebView: UIViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+            if message.name == "readerPageReady",
+               let body = message.body as? [String: Any],
+               body["revision"] as? Int == htmlRevision {
+                let stable = body["stable"] as? Bool == true
+                DispatchQueue.main.async {
+                    stable ? self.onReady() : self.onRenderFailure()
+                }
+                return
+            }
             if message.name == "readerAnnexAction",
                let body = message.body as? [String: Any],
                let sectionID = body["sectionID"] as? Int,
@@ -200,7 +255,8 @@ struct ManualPageWebView: UIViewRepresentable {
                     existingHighlightID: (body["existingHighlightID"] as? String)
                         .flatMap(UUID.init(uuidString:)),
                     opensPersonalNote: body["opensPersonalNote"] as? Bool,
-                    opensReviewerNote: body["opensReviewerNote"] as? Bool
+                    opensReviewerNote: body["opensReviewerNote"] as? Bool,
+                    reviewThreadID: body["reviewThreadID"] as? String
                 )
             )
         }

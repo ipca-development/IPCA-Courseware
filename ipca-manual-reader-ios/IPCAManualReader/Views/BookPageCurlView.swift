@@ -12,6 +12,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
     @Binding var currentIndex: Int
     let onTap: (Int) -> Void
     let onPageReady: (Int) -> Void
+    let onPageRenderFailure: (Int) -> Void
     let onToggleBookmark: (Int) -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
@@ -105,6 +106,9 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     pageSize: parent.pageSize,
                     pageBackground: parent.pageBackground,
                     onReady: { [weak self] in self?.parent.onPageReady(position) },
+                    onRenderFailure: {
+                        [weak self] in self?.parent.onPageRenderFailure(position)
+                    },
                     onToggleBookmark: { [weak self] in self?.parent.onToggleBookmark(position) },
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
@@ -185,6 +189,9 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     pageSize: parent.pageSize,
                     pageBackground: parent.pageBackground,
                     onReady: { [weak self] in self?.parent.onPageReady(position) },
+                    onRenderFailure: {
+                        [weak self] in self?.parent.onPageRenderFailure(position)
+                    },
                     onToggleBookmark: { [weak self] in self?.parent.onToggleBookmark(position) },
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
@@ -298,6 +305,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         ),
         pageBackground: Color = .white,
         onReady: @escaping () -> Void = {},
+        onRenderFailure: @escaping () -> Void = {},
         onToggleBookmark: @escaping () -> Void = {},
         onNavigateToAnchor: @escaping (String) -> Void = { _ in },
         onNavigateToSection: @escaping (Int) -> Void = { _ in },
@@ -319,6 +327,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 pageSize: pageSize,
                 pageBackground: pageBackground,
                 onReady: onReady,
+                onRenderFailure: onRenderFailure,
                 onToggleBookmark: onToggleBookmark,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
@@ -343,6 +352,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         pageSize: CGSize,
         pageBackground: Color,
         onReady: @escaping () -> Void,
+        onRenderFailure: @escaping () -> Void,
         onToggleBookmark: @escaping () -> Void,
         onNavigateToAnchor: @escaping (String) -> Void,
         onNavigateToSection: @escaping (Int) -> Void,
@@ -363,6 +373,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 pageSize: pageSize,
                 pageBackground: pageBackground,
                 onReady: onReady,
+                onRenderFailure: onRenderFailure,
                 onToggleBookmark: onToggleBookmark,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
@@ -387,6 +398,7 @@ private struct PhysicalManualPage: View {
     let pageSize: CGSize
     let pageBackground: Color
     let onReady: () -> Void
+    let onRenderFailure: () -> Void
     let onToggleBookmark: () -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
@@ -405,6 +417,7 @@ private struct PhysicalManualPage: View {
                 pageSize: pageSize,
                 pageBackground: pageBackground,
                 onReady: onReady,
+                onRenderFailure: onRenderFailure,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
                 onShareAnnex: onShareAnnex,

@@ -44,6 +44,7 @@ struct OfflineManualPackage: Codable {
     let tableOfContents: TocResponse
     let pages: [FrozenPageResponse]
     let coverImageData: Data?
+    let coverImageKind: String?
     /// Legacy download field retained only so existing packages decode.
     let editorCSS: String?
     let contentCSS: String?
@@ -412,9 +413,10 @@ final class ManualDownloadManager: ObservableObject {
             )
 
             var coverData: Data?
-            if let baseURL = ManualReaderSessionStore.shared.baseURL,
+            if let coverPath = book.coverPageThumbnailUrl,
+               let baseURL = ManualReaderSessionStore.shared.baseURL,
                let coverURL = ManualReaderAPIClient.absoluteURL(
-                   from: book.coverPageThumbnailUrl ?? book.coverImageUrl ?? book.coverUrl,
+                   from: coverPath,
                    baseURL: baseURL
                ),
                let result = try? await client.session.data(from: coverURL),
@@ -483,6 +485,7 @@ final class ManualDownloadManager: ObservableObject {
                 tableOfContents: tableOfContents,
                 pages: openingBatch.pages,
                 coverImageData: coverData,
+                coverImageKind: coverData == nil ? nil : "authoritative_page_thumbnail_v1",
                 editorCSS: nil,
                 contentCSS: nil,
                 readerCSS: nil,
@@ -597,6 +600,7 @@ final class ManualDownloadManager: ObservableObject {
                 tableOfContents: starterPackage.tableOfContents,
                 pages: orderedPages,
                 coverImageData: starterPackage.coverImageData,
+                coverImageKind: starterPackage.coverImageKind,
                 editorCSS: nil,
                 contentCSS: nil,
                 readerCSS: nil,

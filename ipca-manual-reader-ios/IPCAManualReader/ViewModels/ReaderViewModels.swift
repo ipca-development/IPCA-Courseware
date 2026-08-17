@@ -543,6 +543,7 @@ final class ReaderViewModel: ObservableObject {
         guard let highlight = highlight(matching: selection, at: index) else { return }
         ManualReaderSessionStore.shared.updateHighlight(
             id: highlight.id,
+            color: .fluorescentYellow,
             personalNote: .some(trimmed.isEmpty ? nil : trimmed)
         )
         refreshAnnotationHTML(at: index)
@@ -578,6 +579,9 @@ final class ReaderViewModel: ObservableObject {
         at index: Int
     ) -> ReviewNoteThread? {
         guard pages.indices.contains(index) else { return nil }
+        if let threadID = selection.reviewThreadID, !threadID.isEmpty {
+            return reviewThreads.first { $0.threadUUID == threadID }
+        }
         return reviewThreads.first {
             guard $0.pageNumber == pages[index].pageNumber else { return false }
             if let sourceFragmentID = selection.sourceFragmentID,
