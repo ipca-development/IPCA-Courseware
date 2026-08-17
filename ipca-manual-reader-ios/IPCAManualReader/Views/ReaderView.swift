@@ -124,7 +124,6 @@ struct ReaderView: View {
                 if showChrome && !isOpening {
                     ReaderControlsOverlay(
                         pageDescription: pageDescription,
-                        isBookmarked: viewModel.isPageBookmarked(at: selectedPageIndex),
                         isExiting: isExiting,
                         onClose: exitReader,
                         onSearch: {
@@ -133,16 +132,6 @@ struct ReaderView: View {
                         },
                         onContents: {
                             showTOC = true
-                            scheduleControlsAutoHide()
-                        },
-                        onBookmark: {
-                            let pageNumber = viewModel.pages.indices.contains(selectedPageIndex)
-                                ? viewModel.pages[selectedPageIndex].pageNumber
-                                : 0
-                            viewModel.toggleBookmark(
-                                at: selectedPageIndex,
-                                label: "Page \(pageNumber)"
-                            )
                             scheduleControlsAutoHide()
                         },
                         showSearch: $showSearch,
@@ -755,12 +744,10 @@ private struct ReaderControlsOverlay<
     BookmarksContent: View
 >: View {
     let pageDescription: String
-    let isBookmarked: Bool
     let isExiting: Bool
     let onClose: () -> Void
     let onSearch: () -> Void
     let onContents: () -> Void
-    let onBookmark: () -> Void
     @Binding var showSearch: Bool
     @Binding var showContents: Bool
     @Binding var showBookmarks: Bool
@@ -795,12 +782,6 @@ private struct ReaderControlsOverlay<
                         .popover(isPresented: $showContents, arrowEdge: .top) {
                             contentsContent()
                         }
-
-                    controlButton(
-                        isBookmarked ? "bookmark.fill" : "bookmark",
-                        label: isBookmarked ? "Remove bookmark" : "Bookmark page",
-                        action: onBookmark
-                    )
 
                     controlButton(
                         "book.pages",
@@ -1255,11 +1236,11 @@ struct ReviewerConversationSheet: View {
             VStack(spacing: 0) {
                 Text(selectedText)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white)
                     .lineLimit(4)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(uiColor: .secondarySystemBackground))
+                    .background(IPCAReaderTheme.navy)
 
                 if isLoading {
                     ProgressView("Loading reviewer conversation…")
@@ -1324,18 +1305,22 @@ struct ReviewerConversationSheet: View {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 32))
                                 .foregroundStyle(IPCAReaderTheme.navy)
+                                .background(Circle().fill(Color.white))
                         }
                         .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     Text("Regulation references will be enabled in the next phase.")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white)
                 }
                 .padding(12)
-                .background(.ultraThinMaterial)
+                .background(IPCAReaderTheme.navy)
             }
             .navigationTitle("Reviewer Notes")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(IPCAReaderTheme.navy, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 if let onOpenInBook {
                     ToolbarItem(placement: .navigationBarLeading) {

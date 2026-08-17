@@ -34,6 +34,23 @@ function require_markers(string $path, array $needles, array &$failures): void
     }
 }
 
+$readerCoverService = (string)file_get_contents(
+    $root . '/src/publishing/ControlledPublishingReaderCoverService.php'
+);
+foreach (array(
+    '$this->sections->listFlatSections',
+    '$this->blocks->listSectionBlocks',
+) as $coverDependencyCall) {
+    if (!str_contains($readerCoverService, $coverDependencyCall)) {
+        $failures[] = "Reader cover fallback missing dependency call: {$coverDependencyCall}";
+    }
+}
+foreach (array('$this->sections()', '$this->blocks()') as $invalidCoverCall) {
+    if (str_contains($readerCoverService, $invalidCoverCall)) {
+        $failures[] = "Reader cover fallback calls injected service as a method: {$invalidCoverCall}";
+    }
+}
+
 require_markers(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Models/ReaderPaginationModels.swift',
     array(
@@ -95,8 +112,8 @@ require_markers(
         'if !pageNumber.isMultiple(of: 2)',
         'pageNumber.isMultiple(of: 2) == false',
         'onToggleBookmark',
-        'Image(systemName: "bookmark")',
         'Image(systemName: "bookmark.fill")',
+        'red: 236 / 255',
         'zoomedPositions',
     ),
     $failures

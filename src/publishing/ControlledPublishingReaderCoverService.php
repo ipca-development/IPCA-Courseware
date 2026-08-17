@@ -89,7 +89,7 @@ final class ControlledPublishingReaderCoverService
     {
         $result = array('cover_image_url' => '', 'logo_url' => '');
 
-        foreach ($this->sections()->listFlatSections($versionId) as $row) {
+        foreach ($this->sections->listFlatSections($versionId) as $row) {
             if ((string)($row['section_key'] ?? '') !== 'cover') {
                 continue;
             }
@@ -98,7 +98,7 @@ final class ControlledPublishingReaderCoverService
                 break;
             }
 
-            foreach ($this->blocks()->listSectionBlocks($sectionId) as $block) {
+            foreach ($this->blocks->listSectionBlocks($sectionId) as $block) {
                 if ((string)($block['block_type'] ?? '') !== 'image') {
                     continue;
                 }

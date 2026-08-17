@@ -26,6 +26,7 @@ struct LibraryView: View {
             }
         }
         .background(IPCAReaderTheme.shelfBackground.ignoresSafeArea())
+        .preferredColorScheme(.light)
         .overlay {
             if let openingBook {
                 ZStack {
@@ -844,7 +845,7 @@ private struct ManualCoverCard: View {
     private var cover: some View {
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
+                .fill(Color.white)
                 .aspectRatio(0.68, contentMode: .fit)
 
             if let url = resolvedCoverURL {
@@ -996,7 +997,7 @@ private struct AuthenticatedCoverImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(Color.white)
         .task(id: "\(url.absoluteString)-\(retryRevision)") {
             guard let client = ManualReaderSessionStore.shared.client else {
                 failureMessage = "Reader session is unavailable."
@@ -1061,7 +1062,7 @@ private struct CoverThumbnailUnavailableView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(Color.white)
     }
 }
 

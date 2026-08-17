@@ -450,9 +450,15 @@ private struct PhysicalManualPage: View {
                 Button(action: onToggleBookmark) {
                     ZStack(alignment: .top) {
                         if ordinal == nil {
-                            Image(systemName: "bookmark")
+                            Image(systemName: "bookmark.fill")
                                 .font(.system(size: 34, weight: .bold))
-                                .foregroundStyle(Color.gray.opacity(0.42))
+                                .foregroundStyle(
+                                    Color(
+                                        red: 236 / 255,
+                                        green: 236 / 255,
+                                        blue: 236 / 255
+                                    )
+                                )
                         } else {
                             Image(systemName: "bookmark.fill")
                                 .font(.system(size: 34, weight: .bold))
