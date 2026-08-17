@@ -39,6 +39,8 @@ $requirements = array(
     ),
     'scripts/playwright_chromium_launcher.cjs' => array(
         'fs.accessSync',
+        'XDG_CONFIG_HOME',
+        '--disable-crashpad',
         '/usr/bin/chromium',
         'channel: "chrome"',
         'No usable Chromium executable was found.',

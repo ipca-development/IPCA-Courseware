@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 function discoverChromiumExecutables(root, depth = 0) {
@@ -27,6 +28,24 @@ function discoverChromiumExecutables(root, depth = 0) {
 }
 
 async function launchChromium(chromium) {
+  const runtimeRoot = path.join(
+    os.tmpdir(),
+    `ipca-chromium-${typeof process.getuid === "function" ? process.getuid() : "runtime"}`
+  );
+  fs.mkdirSync(runtimeRoot, { recursive: true, mode: 0o700 });
+  try {
+    fs.accessSync(String(process.env.HOME || ""), fs.constants.W_OK);
+  } catch (_) {
+    process.env.HOME = runtimeRoot;
+  }
+  process.env.XDG_CONFIG_HOME ||= path.join(runtimeRoot, "config");
+  process.env.XDG_CACHE_HOME ||= path.join(runtimeRoot, "cache");
+  fs.mkdirSync(process.env.XDG_CONFIG_HOME, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(process.env.XDG_CACHE_HOME, { recursive: true, mode: 0o700 });
+  const launchOptions = {
+    headless: true,
+    args: ["--disable-crash-reporter", "--disable-crashpad"],
+  };
   const configured = String(process.env.CW_PAGINATION_CHROMIUM_EXECUTABLE || "").trim();
   const configuredRoot = configured.includes("/chromium_")
     ? configured.slice(0, configured.indexOf("/chromium_"))
@@ -54,20 +73,20 @@ async function launchChromium(chromium) {
       continue;
     }
     try {
-      return await chromium.launch({ headless: true, executablePath });
+      return await chromium.launch({ ...launchOptions, executablePath });
     } catch (error) {
       failures.push(`${executablePath}: ${error.message || error}`);
     }
   }
 
   try {
-    return await chromium.launch({ headless: true });
+    return await chromium.launch(launchOptions);
   } catch (error) {
     failures.push(`bundled Chromium: ${error.message || error}`);
   }
 
   try {
-    return await chromium.launch({ headless: true, channel: "chrome" });
+    return await chromium.launch({ ...launchOptions, channel: "chrome" });
   } catch (error) {
     failures.push(`Chrome channel: ${error.message || error}`);
   }
