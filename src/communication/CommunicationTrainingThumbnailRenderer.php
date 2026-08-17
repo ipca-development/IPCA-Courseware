@@ -91,6 +91,26 @@ final class CommunicationTrainingThumbnailRenderer
     }
 
     /**
+     * Apply container rotation so a phone portrait file stored as 1920×1080
+     * with rotate=90 is treated as 1080×1920.
+     *
+     * @return array{width:int,height:int}
+     */
+    public static function displayDimensions(int $width, int $height, int $rotationDegrees): array
+    {
+        $width = max(0, $width);
+        $height = max(0, $height);
+        if ($width < 1 || $height < 1) {
+            return array('width' => $width, 'height' => $height);
+        }
+        $quarter = ((int)round($rotationDegrees / 90) % 4 + 4) % 4;
+        if ($quarter === 1 || $quarter === 3) {
+            return array('width' => $height, 'height' => $width);
+        }
+        return array('width' => $width, 'height' => $height);
+    }
+
+    /**
      * @param array<string,mixed> $meta
      */
     private function renderLandscape(array $meta, ?string $backgroundBytes): string

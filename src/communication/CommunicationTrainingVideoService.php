@@ -495,9 +495,6 @@ final class CommunicationTrainingVideoService
         }
         $now = CommunicationSupport::nowUtc();
         if ($kind === 'video') {
-            $width = max(0, (int)($options['width'] ?? 0));
-            $height = max(0, (int)($options['height'] ?? 0));
-            $orientation = CommunicationTrainingThumbnailRenderer::videoOrientation($width, $height);
             $this->pdo->prepare(
                 'UPDATE ipca_training_videos
                  SET storage_key = ?, mime_type = ?, byte_size = ?, duration_ms = ?, updated_at_utc = ?
@@ -510,10 +507,12 @@ final class CommunicationTrainingVideoService
                 $now,
                 (int)$row['id'],
             ));
+            $row['storage_key'] = $key;
+            $geometry = $this->resolveVideoGeometry($row, $options);
             $this->updateVideoFields((int)$row['id'], array(
-                'width' => $width,
-                'height' => $height,
-                'orientation' => $orientation === '' ? null : $orientation,
+                'width' => $geometry['width'],
+                'height' => $geometry['height'],
+                'orientation' => $geometry['orientation'],
             ));
             if (strtolower(trim((string)($row['poster_source'] ?? ''))) !== 'custom') {
                 $this->ensureGeneratedThumbnail($videoUuid, 'ensure');
@@ -843,6 +842,30 @@ final class CommunicationTrainingVideoService
             (int)($row['width'] ?? 0),
             (int)($row['height'] ?? 0)
         ) ?: 'landscape';
+    }
+
+    /**
+     * Prefer ffprobe of the stored file, including rotation metadata.
+     * Browser videoWidth/videoHeight is only a fallback.
+     *
+     * @param array<string,mixed> $row
+     * @param array<string,mixed> $options
+     * @return array{width:int,height:int,orientation:string}
+     */
+    private function resolveVideoGeometry(array $row, array $options = array()): array
+    {
+        $width = max(0, (int)($options['width'] ?? $row['width'] ?? 0));
+        $height = max(0, (int)($options['height'] ?? $row['height'] ?? 0));
+        $probed = $this->analyzer->probeGeometry((string)($row['storage_key'] ?? ''));
+        if (is_array($probed) && ($probed['width'] > 0 || $probed['height'] > 0)) {
+            $width = $probed['width'];
+            $height = $probed['height'];
+        }
+        return array(
+            'width' => $width,
+            'height' => $height,
+            'orientation' => CommunicationTrainingThumbnailRenderer::videoOrientation($width, $height) ?: 'landscape',
+        );
     }
 
     /**
@@ -1840,16 +1863,22 @@ final class CommunicationTrainingVideoService
             return;
         }
         $row = $this->requireAdminVideo($videoUuid);
-        $orientation = strtolower(trim((string)($row['orientation'] ?? '')));
-        if ($orientation !== 'portrait' && $orientation !== 'landscape') {
-            $orientation = CommunicationTrainingThumbnailRenderer::videoOrientation(
-                (int)($row['width'] ?? 0),
-                (int)($row['height'] ?? 0)
-            );
+        $geometry = $this->resolveVideoGeometry($row);
+        if (
+            (int)($row['width'] ?? 0) !== $geometry['width']
+            || (int)($row['height'] ?? 0) !== $geometry['height']
+            || strtolower(trim((string)($row['orientation'] ?? ''))) !== $geometry['orientation']
+        ) {
+            $this->updateVideoFields((int)$row['id'], array(
+                'width' => $geometry['width'],
+                'height' => $geometry['height'],
+                'orientation' => $geometry['orientation'],
+            ));
+            $row['width'] = $geometry['width'];
+            $row['height'] = $geometry['height'];
+            $row['orientation'] = $geometry['orientation'];
         }
-        if ($orientation === '') {
-            $orientation = 'landscape';
-        }
+        $orientation = $geometry['orientation'];
         $category = $this->categoryPayload($row);
         $template = CommunicationTrainingThumbnailRenderer::templateFor($orientation, (string)$category['slug']);
         $context = array(

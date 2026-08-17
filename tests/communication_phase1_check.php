@@ -1122,6 +1122,7 @@ comm_assert(
     && str_contains($rendererSource, 'IPCA_PRIVATE_PILOT_LANDSCAPE_V1')
     && str_contains($rendererSource, 'IPCA_CFI_LANDSCAPE_V1')
     && str_contains($rendererSource, 'ALPHA TRAINER PRO')
+    && str_contains($rendererSource, 'displayDimensions')
     && str_contains($mediaLibrarySource, 'generateAiBackground')
     && str_contains($mediaLibrarySource, 'return null')
 );
@@ -1154,6 +1155,16 @@ comm_assert(
     && str_contains($trainingVideoServiceSource, 'publicOrientation')
     && str_contains($trainingVideoServiceSource, 'regenerateGeneratedThumbnails')
     && is_file($root . '/scripts/regenerate_training_video_thumbnails.php')
+);
+$analyzerSource = (string)file_get_contents($root . '/src/communication/CommunicationTrainingVideoAnalyzer.php');
+comm_assert(
+    'training video orientation is probed from the stored file including rotation',
+    str_contains($analyzerSource, 'probeGeometry')
+    && str_contains($analyzerSource, 'ffprobe')
+    && str_contains($analyzerSource, 'streamRotation')
+    && str_contains($trainingVideoServiceSource, 'resolveVideoGeometry')
+    && CommunicationTrainingThumbnailRenderer::displayDimensions(1920, 1080, 90) === array('width' => 1080, 'height' => 1920)
+    && CommunicationTrainingThumbnailRenderer::videoOrientation(1080, 1920) === 'portrait'
 );
 $phase9Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_16_communication_phase9_training_video_catalog.sql');
 $adminPlaySource = (string)file_get_contents($root . '/public/admin/api/training_videos_play.php');
@@ -1611,6 +1622,13 @@ comm_assert(
     && (string)($refreshedPortrait['video']['orientation'] ?? '') === 'portrait'
     && (string)($refreshedPortrait['video']['poster_template'] ?? '') === 'IPCA_ALPHA_PORTRAIT_V1'
     && str_contains((string)($refreshedPortrait['video']['poster_preview_url'] ?? ''), '&v=')
+);
+$pdo->prepare('UPDATE ipca_training_videos SET orientation = NULL WHERE video_uuid = ?')->execute(array($portraitUuid));
+$recoveredPortrait = $kernel->trainingVideos->regenerateAdminThumbnail($portraitUuid);
+comm_assert(
+    'regenerate recovers portrait from stored dimensions when orientation was left blank',
+    (string)($recoveredPortrait['video']['orientation'] ?? '') === 'portrait'
+    && (string)($recoveredPortrait['video']['poster_template'] ?? '') === 'IPCA_ALPHA_PORTRAIT_V1'
 );
 
 $secondLandscape = $kernel->trainingVideos->saveAdmin(array(

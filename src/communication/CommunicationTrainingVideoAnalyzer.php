@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/openai.php';
 require_once __DIR__ . '/CommunicationObjectStore.php';
 require_once __DIR__ . '/CommunicationException.php';
+require_once __DIR__ . '/CommunicationTrainingThumbnailRenderer.php';
 
 /**
  * Analyzes a private training video and writes a short student-facing
@@ -400,12 +401,128 @@ final class CommunicationTrainingVideoAnalyzer
         return $status === 0;
     }
 
+    /**
+     * Rotation-aware coded size of the stored video. Null when ffprobe cannot run.
+     *
+     * @return array{width:int,height:int}|null
+     */
+    public function probeGeometry(string $storageKey): ?array
+    {
+        $storageKey = trim($storageKey);
+        if ($storageKey === '') {
+            return null;
+        }
+        $ffprobe = $this->ffprobePath();
+        if ($ffprobe === null) {
+            return null;
+        }
+        $url = $this->store->presignGet($storageKey, 300);
+        if ($url === '' || str_contains($url, 'memory.invalid')) {
+            return null;
+        }
+        $json = $this->runCapture(array(
+            $ffprobe,
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-select_streams', 'v:0',
+            '-print_format', 'json',
+            '-show_streams',
+            $url,
+        ), 25);
+        $payload = json_decode($json, true);
+        $stream = is_array($payload) && isset($payload['streams'][0]) && is_array($payload['streams'][0])
+            ? $payload['streams'][0]
+            : null;
+        if ($stream === null) {
+            return null;
+        }
+        $codedW = (int)($stream['width'] ?? 0);
+        $codedH = (int)($stream['height'] ?? 0);
+        if ($codedW < 1 && $codedH < 1) {
+            return null;
+        }
+        return CommunicationTrainingThumbnailRenderer::displayDimensions(
+            $codedW,
+            $codedH,
+            $this->streamRotation($stream)
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $stream
+     */
+    private function streamRotation(array $stream): int
+    {
+        $raw = $stream['tags']['rotate'] ?? $stream['tags']['ROTATE'] ?? 0;
+        if (isset($stream['side_data_list']) && is_array($stream['side_data_list'])) {
+            foreach ($stream['side_data_list'] as $side) {
+                if (!is_array($side) || !array_key_exists('rotation', $side)) {
+                    continue;
+                }
+                $raw = $side['rotation'];
+                break;
+            }
+        }
+        return (int)round((float)$raw);
+    }
+
+    /**
+     * @param list<string> $args
+     */
+    private function runCapture(array $args, int $timeoutSeconds): string
+    {
+        if (!function_exists('proc_open')) {
+            return '';
+        }
+        $cmd = array();
+        foreach ($args as $arg) {
+            $cmd[] = escapeshellarg($arg);
+        }
+        $descriptor = array(
+            0 => array('pipe', 'r'),
+            1 => array('pipe', 'w'),
+            2 => array('pipe', 'w'),
+        );
+        $proc = proc_open(implode(' ', $cmd), $descriptor, $pipes, null, null);
+        if (!is_resource($proc)) {
+            return '';
+        }
+        fclose($pipes[0]);
+        stream_set_timeout($pipes[1], $timeoutSeconds);
+        stream_set_timeout($pipes[2], $timeoutSeconds);
+        $out = (string)stream_get_contents($pipes[1]);
+        stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($proc);
+        return trim($out);
+    }
+
     private function ffmpegPath(): ?string
     {
         foreach (array('/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg') as $path) {
             if ($path === 'ffmpeg') {
                 if (function_exists('shell_exec')) {
                     $found = trim((string)@shell_exec('command -v ffmpeg 2>/dev/null'));
+                    if ($found !== '' && is_executable($found)) {
+                        return $found;
+                    }
+                }
+                continue;
+            }
+            if (is_executable($path)) {
+                return $path;
+            }
+        }
+        return null;
+    }
+
+    private function ffprobePath(): ?string
+    {
+        foreach (array('/usr/bin/ffprobe', '/usr/local/bin/ffprobe', 'ffprobe') as $path) {
+            if ($path === 'ffprobe') {
+                if (function_exists('shell_exec')) {
+                    $found = trim((string)@shell_exec('command -v ffprobe 2>/dev/null'));
                     if ($found !== '' && is_executable($found)) {
                         return $found;
                     }
