@@ -5,15 +5,19 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if session.isLoggedIn {
+            if !session.hasResolvedInitialSession {
+                ZStack {
+                    Color.white.ignoresSafeArea()
+                    ProgressView("Restoring session…")
+                        .tint(IPCAReaderTheme.navy)
+                }
+            } else if session.isLoggedIn {
                 LibraryView()
             } else {
                 LoginView()
             }
         }
         .task {
-            // Delay so the UIKit login form mounts before any network callback.
-            try? await Task.sleep(for: .milliseconds(300))
             await session.restoreSessionIfNeeded()
         }
     }

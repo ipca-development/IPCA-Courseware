@@ -9,6 +9,7 @@ final class ManualReaderSessionStore: ObservableObject {
     @Published private(set) var baseURL: URL?
     @Published private(set) var user: ReaderUser?
     @Published private(set) var isLoggedIn = false
+    @Published private(set) var hasResolvedInitialSession = false
     @Published private(set) var canAddReviewerNotes = false
     @Published var settings = ReaderSettings()
     @Published var bookmarks: [LocalBookmark] = []
@@ -40,6 +41,13 @@ final class ManualReaderSessionStore: ObservableObject {
            let _ = url.host {
             baseURL = url
         }
+        if baseURL == nil,
+           let credentials = loadCredentials(),
+           let url = URL(string: credentials.serverURL),
+           url.host != nil {
+            baseURL = url
+            UserDefaults.standard.set(url.absoluteString, forKey: baseURLKey)
+        }
         if let data = UserDefaults.standard.data(forKey: settingsKey),
            let decoded = try? JSONDecoder().decode(ReaderSettings.self, from: data) {
             settings = decoded
@@ -65,6 +73,7 @@ final class ManualReaderSessionStore: ObservableObject {
             isLoggedIn = true
             canAddReviewerNotes = decoded.role.lowercased() == "admin"
         }
+        hasResolvedInitialSession = isLoggedIn || baseURL == nil
     }
 
     var client: ManualReaderAPIClient? {
@@ -509,7 +518,11 @@ final class ManualReaderSessionStore: ObservableObject {
 
     /// Background session check — never blocks or rebuilds the login UI.
     func restoreSessionIfNeeded() async {
-        guard baseURL != nil else { return }
+        guard baseURL != nil else {
+            hasResolvedInitialSession = true
+            return
+        }
+        defer { hasResolvedInitialSession = true }
         do {
             try await restoreSession()
         } catch ManualReaderAPIError.unauthorized {

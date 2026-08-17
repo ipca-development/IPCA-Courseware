@@ -1032,6 +1032,8 @@ private struct AuthenticatedCoverImage: View {
                     failureMessage = ""
                     failed = false
                     return
+                } catch is CancellationError {
+                    return
                 } catch {
                     failureMessage = error.localizedDescription
 #if DEBUG

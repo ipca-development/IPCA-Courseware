@@ -196,6 +196,12 @@ final class LoginFormViewController: UIViewController {
         tip.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tip)
 
+        let responsiveContentWidth = contentStack.widthAnchor.constraint(
+            equalTo: scrollView.frameLayoutGuide.widthAnchor,
+            constant: -48
+        )
+        responsiveContentWidth.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -203,11 +209,18 @@ final class LoginFormViewController: UIViewController {
             scrollView.bottomAnchor.constraint(equalTo: tip.topAnchor, constant: -8),
 
             contentStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 24),
-            contentStack.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 24),
-            contentStack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -24),
+            contentStack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.frameLayoutGuide.leadingAnchor,
+                constant: 24
+            ),
+            contentStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: scrollView.frameLayoutGuide.trailingAnchor,
+                constant: -24
+            ),
             contentStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -24),
             contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
             contentStack.centerXAnchor.constraint(equalTo: scrollView.frameLayoutGuide.centerXAnchor),
+            responsiveContentWidth,
 
             signInButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
             tip.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),

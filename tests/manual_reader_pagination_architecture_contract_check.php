@@ -134,6 +134,23 @@ require_markers(
 );
 
 require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ContentView.swift',
+    array(
+        'if !session.hasResolvedInitialSession',
+        'ProgressView("Restoring session…")',
+        'await session.restoreSessionIfNeeded()',
+    ),
+    $failures
+);
+
+$contentViewSource = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ContentView.swift'
+);
+if (str_contains($contentViewSource, 'Task.sleep')) {
+    $failures[] = 'App startup must not mount LoginView behind an artificial session delay.';
+}
+
+require_markers(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ManualReaderSessionStore.swift',
     array(
         'private var apiClient: ManualReaderAPIClient?',
@@ -142,6 +159,8 @@ require_markers(
         'settings.theme = .original',
         'settings.zoom = .fitWidth',
         'func addHighlight(',
+        '@Published private(set) var hasResolvedInitialSession',
+        'defer { hasResolvedInitialSession = true }',
     ),
     $failures
 );
@@ -174,6 +193,16 @@ foreach (array('ReaderSettingsView', '"Reader theme"', '"Reader settings"') as $
     }
 }
 require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/LoginFormViewController.swift',
+    array(
+        'responsiveContentWidth.priority = .defaultHigh',
+        'greaterThanOrEqualTo: scrollView.frameLayoutGuide.leadingAnchor',
+        'lessThanOrEqualTo: scrollView.frameLayoutGuide.trailingAnchor',
+    ),
+    $failures
+);
+
+require_markers(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/LibraryView.swift',
     array(
         'private struct BookmarksByManualSection',
@@ -183,6 +212,7 @@ require_markers(
         'Image(systemName: "icloud")',
         'coverImageKind == "authoritative_page_thumbnail_v1"',
         'Button("Delete Local Download"',
+        'catch is CancellationError',
     ),
     $failures
 );
