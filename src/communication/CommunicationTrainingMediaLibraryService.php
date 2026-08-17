@@ -42,7 +42,31 @@ final class CommunicationTrainingMediaLibraryService
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $assets[] = $this->adminAsset($row);
         }
-        return array('assets' => $assets);
+        return array(
+            'assets' => $assets,
+            'stats' => $this->orientationStats(),
+        );
+    }
+
+    /**
+     * @return array{total:int,landscape:int,portrait:int,square:int}
+     */
+    private function orientationStats(): array
+    {
+        $stats = array('total' => 0, 'landscape' => 0, 'portrait' => 0, 'square' => 0);
+        $stmt = $this->pdo->query(
+            "SELECT orientation, COUNT(*) AS n FROM ipca_training_media_library
+             WHERE deleted_at_utc IS NULL GROUP BY orientation"
+        );
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $key = strtolower(trim((string)($row['orientation'] ?? '')));
+            $n = (int)($row['n'] ?? 0);
+            $stats['total'] += $n;
+            if (isset($stats[$key])) {
+                $stats[$key] += $n;
+            }
+        }
+        return $stats;
     }
 
     /**

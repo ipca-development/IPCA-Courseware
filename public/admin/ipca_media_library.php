@@ -21,6 +21,13 @@ cw_header('Media Library');
 <style>
 .ml-tags { font-size: 12px; color: #4b5d73; margin: 0; max-height: 3.6em; overflow: hidden; }
 .ml-card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; }
+.ml-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; align-items:start; }
+.ml-thumb { background:#071b35; }
+.ml-thumb.landscape { aspect-ratio:16/9; }
+.ml-thumb.portrait { aspect-ratio:9/16; }
+.ml-thumb.square { aspect-ratio:1/1; }
+.ml-thumb img { width:100%; height:100%; object-fit:contain; display:block; background:#071b35; }
+.ia-card .ml-thumb img { height:100%; }
 </style>
 
 <div class="ia-page">
@@ -40,6 +47,8 @@ cw_header('Media Library');
     </div>
     <div class="ia-hero-banner-chips">
       <span class="ia-chip--hero" id="ml-count">0 photographs</span>
+      <span class="ia-chip--hero" id="ml-count-landscape">0 landscape</span>
+      <span class="ia-chip--hero" id="ml-count-portrait">0 portrait</span>
       <span class="ia-chip--hero">JPEG, PNG, or WebP</span>
     </div>
   </section>
@@ -50,8 +59,8 @@ cw_header('Media Library');
     <button type="button" class="ia-chip" data-orientation="portrait">Portrait</button>
   </div>
   <div class="ia-progress" id="ml-progress" hidden><div class="ia-progress-bar" id="ml-progress-bar"></div></div>
-  <p id="ml-message" class="ia-muted">JPEG, PNG, or WebP. AI tags aircraft, cockpit/exterior, maneuvers, avionics, and environment after each upload.</p>
-  <div id="ml-grid" class="ia-card-grid"></div>
+  <p id="ml-message" class="ia-muted">JPEG, PNG, or WebP. Portrait videos only use portrait photographs; landscape videos only use landscape photographs. AI tags aircraft, cockpit/exterior, maneuvers, avionics, and environment after each upload.</p>
+  <div id="ml-grid" class="ml-grid"></div>
 </div>
 
 <script>
@@ -79,21 +88,31 @@ cw_header('Media Library');
     return parts.filter(Boolean).slice(0, 8).join(' · ') || (asset.analysis_text || asset.filename || '');
   };
 
-  const render = (assets) => {
-    document.getElementById('ml-count').textContent = (assets || []).length + ' photograph' + ((assets || []).length === 1 ? '' : 's');
-    grid.innerHTML = (assets || []).map((asset) => `
+  const render = (assets, stats) => {
+    const total = (stats && stats.total != null) ? Number(stats.total) : (assets || []).length;
+    const landscape = (stats && stats.landscape != null) ? Number(stats.landscape) : 0;
+    const portrait = (stats && stats.portrait != null) ? Number(stats.portrait) : 0;
+    document.getElementById('ml-count').textContent = total + ' photograph' + (total === 1 ? '' : 's');
+    document.getElementById('ml-count-landscape').textContent = landscape + ' landscape';
+    document.getElementById('ml-count-portrait').textContent = portrait + ' portrait';
+    grid.innerHTML = (assets || []).map((asset) => {
+      const orient = asset.orientation === 'portrait' || asset.orientation === 'square' ? asset.orientation : 'landscape';
+      const size = (asset.width && asset.height) ? (asset.width + '×' + asset.height) : '';
+      return `
       <div class="ia-card">
-        <img src="${asset.preview_url || ''}" alt="">
+        <div class="ml-thumb ${orient}">
+          <img src="${asset.preview_url || ''}" alt="">
+        </div>
         <div class="ia-card-body">
-          <span class="ia-badge">${asset.orientation || 'photo'}</span>
+          <span class="ia-badge">${orient}${size ? ' · ' + size : ''}</span>
           <div class="ia-card-title">${asset.filename || 'Photograph'}</div>
           <div class="ml-tags">${tags(asset)}</div>
           <div class="ml-card-actions">
             <button type="button" class="tcc-btn ml-delete" data-uuid="${asset.asset_uuid}">Remove</button>
           </div>
         </div>
-      </div>
-    `).join('') || '<p class="ia-muted">No photographs yet. Upload a batch to start the archive.</p>';
+      </div>`;
+    }).join('') || '<p class="ia-muted">No photographs yet. Upload a batch to start the archive.</p>';
     grid.querySelectorAll('.ml-delete').forEach((button) => {
       button.addEventListener('click', async () => {
         const result = await fetch(api, {
@@ -111,8 +130,8 @@ cw_header('Media Library');
   };
 
   const load = async () => {
-    const data = await fetch(api + '?action=list&orientation=' + encodeURIComponent(orientation)).then((r) => r.json());
-    render(data.assets || []);
+    const data = await fetch(api + '?action=list&limit=400&orientation=' + encodeURIComponent(orientation)).then((r) => r.json());
+    render(data.assets || [], data.stats || {});
   };
 
   const uploadOne = (file, index, total) => new Promise((resolve, reject) => {

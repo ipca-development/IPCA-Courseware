@@ -1223,6 +1223,11 @@ comm_assert(
     && str_contains($mediaLibraryPage, 'IPCA App · Media Library')
     && str_contains($mediaLibraryPage, 'xhr.upload.onprogress')
     && str_contains($mediaLibraryPage, 'tcc-btn')
+    && str_contains($mediaLibraryPage, 'ml-thumb')
+    && str_contains($mediaLibraryPage, 'aspect-ratio:9/16')
+    && str_contains($mediaLibraryPage, 'object-fit:contain')
+    && str_contains($mediaLibraryPage, 'ml-count-portrait')
+    && str_contains($mediaLibrarySource, 'orientationStats')
 );
 comm_assert(
     'Enrollment uses the Training Videos hero catalog shell and category access',
@@ -1544,6 +1549,17 @@ comm_assert(
     && !in_array((string)($libraryPortrait['asset']['asset_uuid'] ?? ''), $rankedLandscapeUuids, true)
     && ($rankedPortrait[0]['asset_uuid'] ?? '') === ($libraryPortrait['asset']['asset_uuid'] ?? '')
     && !in_array((string)($libraryCockpit['asset']['asset_uuid'] ?? ''), $rankedPortraitUuids, true)
+);
+$libraryAll = $kernel->mediaLibrary->adminList('', 400);
+$libraryPortraits = $kernel->mediaLibrary->adminList('portrait', 400);
+comm_assert(
+    'Media Library list reports orientation counts without mixing portrait into landscape',
+    (int)($libraryAll['stats']['total'] ?? 0) >= 4
+    && (int)($libraryAll['stats']['portrait'] ?? 0) >= 1
+    && (int)($libraryAll['stats']['landscape'] ?? 0) >= 2
+    && (int)($libraryAll['stats']['portrait'] ?? 0) === (int)($libraryPortraits['stats']['portrait'] ?? 0)
+    && count($libraryPortraits['assets'] ?? array()) >= 1
+    && (string)($libraryPortraits['assets'][0]['orientation'] ?? '') === 'portrait'
 );
 
 $autoThumb = $kernel->trainingVideos->saveAdmin(array(
