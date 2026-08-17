@@ -157,6 +157,7 @@ final class CommunicationTrainingMediaLibraryService
             'SELECT * FROM ipca_training_media_library WHERE deleted_at_utc IS NULL ORDER BY id DESC LIMIT 400'
         );
         $scored = array();
+        $blockedPhashes = $excludePhashes;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $assetOrientation = strtolower(trim((string)$row['orientation']));
             if ($assetOrientation !== $orientation) {
@@ -165,15 +166,33 @@ final class CommunicationTrainingMediaLibraryService
             if (isset($excludeLookup[(int)$row['id']])) {
                 continue;
             }
-            $analysis = json_decode((string)($row['analysis_json'] ?? ''), true);
-            $phash = is_array($analysis) ? (string)($analysis['phash'] ?? '') : '';
-            if ($this->phashTooSimilar($phash, $excludePhashes)) {
+            $phash = $this->ensurePhash($row);
+            if ($this->phashTooSimilar($phash, $blockedPhashes)) {
                 continue;
             }
-            $scored[] = array('row' => $row, 'score' => $this->semanticScore($context, $row));
+            $scored[] = array('row' => $row, 'score' => $this->semanticScore($context, $row), 'phash' => $phash);
         }
-        usort($scored, static fn(array $a, array $b): int => $b['score'] <=> $a['score']);
-        $shortlist = array_slice($scored, 0, 12);
+        usort($scored, static function (array $a, array $b): int {
+            $cmp = $b['score'] <=> $a['score'];
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            return ((int)($a['row']['id'] ?? 0)) <=> ((int)($b['row']['id'] ?? 0));
+        });
+        $shortlist = array();
+        $seenPhashes = $excludePhashes;
+        foreach ($scored as $item) {
+            if ($this->phashTooSimilar((string)$item['phash'], $seenPhashes)) {
+                continue;
+            }
+            $shortlist[] = $item;
+            if ($this->phashUsable((string)$item['phash'])) {
+                $seenPhashes[] = (string)$item['phash'];
+            }
+            if (count($shortlist) >= 12) {
+                break;
+            }
+        }
         $ranked = $this->maybeAiRerank($context, $orientation, $shortlist);
         $out = array();
         foreach (array_slice($ranked, 0, max(1, $limit)) as $item) {
@@ -319,7 +338,7 @@ final class CommunicationTrainingMediaLibraryService
             'height' => $height,
             'orientation' => $orientation,
             'aspect_ratio' => $height > 0 ? round($width / $height, 4) : 0,
-            'phash' => $this->dHash($bytes),
+            'phash' => $this->fingerprintBytes($bytes),
         );
         return array(
             'json' => $json,
@@ -559,6 +578,14 @@ final class CommunicationTrainingMediaLibraryService
     /**
      * @param list<string> $excludePhashes
      */
+    public function phashMatches(string $phash, array $excludePhashes): bool
+    {
+        return $this->phashTooSimilar($phash, $excludePhashes);
+    }
+
+    /**
+     * @param list<string> $excludePhashes
+     */
     private function phashTooSimilar(string $phash, array $excludePhashes): bool
     {
         if (!$this->phashUsable($phash)) {
@@ -569,11 +596,44 @@ final class CommunicationTrainingMediaLibraryService
             if (!$this->phashUsable($other)) {
                 continue;
             }
-            if ($this->hammingHex($phash, $other) <= 10) {
+            if ($this->hammingHex($phash, $other) <= 16) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Compute and persist a perceptual hash when analysis_json omitted it.
+     *
+     * @param array<string,mixed> $row
+     */
+    public function ensurePhash(array &$row): string
+    {
+        $analysis = json_decode((string)($row['analysis_json'] ?? ''), true);
+        if (!is_array($analysis)) {
+            $analysis = array();
+        }
+        $hash = strtolower(trim((string)($analysis['phash'] ?? '')));
+        if ($this->phashUsable($hash)) {
+            return $hash;
+        }
+        $bytes = $this->store->getBytes((string)($row['storage_key'] ?? ''));
+        if (!is_string($bytes) || $bytes === '') {
+            return '';
+        }
+        $hash = strtolower(trim($this->fingerprintBytes($bytes)));
+        if (!$this->phashUsable($hash)) {
+            return '';
+        }
+        $analysis['phash'] = $hash;
+        $encoded = json_encode($analysis, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $row['analysis_json'] = is_string($encoded) ? $encoded : (string)$row['analysis_json'];
+        if (isset($row['id']) && (int)$row['id'] > 0 && is_string($encoded)) {
+            $this->pdo->prepare('UPDATE ipca_training_media_library SET analysis_json = ? WHERE id = ?')
+                ->execute(array($encoded, (int)$row['id']));
+        }
+        return $hash;
     }
 
     private function phashUsable(string $phash): bool
@@ -599,6 +659,15 @@ final class CommunicationTrainingMediaLibraryService
             $distance += substr_count(decbin($xor), '1');
         }
         return $distance;
+    }
+
+    private function fingerprintBytes(string $bytes): string
+    {
+        $hash = strtolower(trim($this->dHash($bytes)));
+        if ($this->phashUsable($hash)) {
+            return $hash;
+        }
+        return substr(hash('sha256', $bytes), 0, 16);
     }
 
     private function dHash(string $bytes): string

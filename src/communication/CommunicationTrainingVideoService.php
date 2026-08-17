@@ -1888,13 +1888,33 @@ final class CommunicationTrainingVideoService
             'aircraft' => (string)($row['aircraft'] ?? ''),
             'program' => (string)($row['program'] ?? ''),
         );
-        $candidates = $this->resolvedCandidates($row, $context, $orientation, $mode === 'ensure');
-        $index = (int)($row['poster_candidate_index'] ?? 0);
-        if ($mode === 'refresh') {
-            $index = 0;
-        } elseif ($mode === 'regenerate' && $candidates !== array()) {
-            $index = ($index + 1) % count($candidates);
-        } elseif ($mode === 'choose' && $chosenAssetUuid !== '') {
+        $candidates = $this->resolvedCandidates(
+            $row,
+            $context,
+            $orientation,
+            $mode === 'ensure' || $mode === 'regenerate'
+        );
+        $exclusions = $this->usedLibraryExclusions((int)$row['id']);
+        if ($mode === 'regenerate') {
+            $currentId = (int)($row['poster_library_asset_id'] ?? 0);
+            if ($currentId > 0) {
+                $exclusions['ids'][] = $currentId;
+                $currentAsset = $this->mediaLibrary->findById($currentId);
+                if (is_array($currentAsset)) {
+                    $currentHash = $this->mediaLibrary->ensurePhash($currentAsset);
+                    if ($currentHash !== '') {
+                        $exclusions['phashes'][] = $currentHash;
+                    }
+                }
+            }
+        }
+        $candidates = $this->filterUnusedCandidates($candidates, $exclusions['ids'], $exclusions['phashes']);
+        if ($candidates === array() && $mode !== 'ensure') {
+            $candidates = $this->resolvedCandidates($row, $context, $orientation, false);
+            $candidates = $this->filterUnusedCandidates($candidates, $exclusions['ids'], $exclusions['phashes']);
+        }
+        $index = 0;
+        if ($mode === 'choose' && $chosenAssetUuid !== '') {
             $chosen = $this->mediaLibrary->findByUuid($chosenAssetUuid);
             if ($chosen === null) {
                 throw new CommunicationException('not_found', 'That photograph was not found.', 404);
@@ -1902,7 +1922,15 @@ final class CommunicationTrainingVideoService
             if (!$this->orientationAllowed($orientation, (string)$chosen['orientation'])) {
                 throw new CommunicationException('validation_error', 'That photograph does not match the video orientation.', 400);
             }
-            array_unshift($candidates, $this->candidateFromRow($chosen, 100.0));
+            $chosenCandidate = $this->filterUnusedCandidates(
+                array($this->candidateFromRow($chosen, 100.0)),
+                $exclusions['ids'],
+                $exclusions['phashes']
+            );
+            if ($chosenCandidate === array()) {
+                throw new CommunicationException('validation_error', 'That photograph is already used on another video.', 400);
+            }
+            array_unshift($candidates, $chosenCandidate[0]);
             $seen = array();
             $unique = array();
             foreach ($candidates as $candidate) {
@@ -2015,6 +2043,50 @@ final class CommunicationTrainingVideoService
     }
 
     /**
+     * @param list<array<string,mixed>> $candidates
+     * @param list<int> $excludeIds
+     * @param list<string> $excludePhashes
+     * @return list<array<string,mixed>>
+     */
+    private function filterUnusedCandidates(array $candidates, array $excludeIds, array $excludePhashes): array
+    {
+        $blocked = array();
+        foreach ($excludeIds as $id) {
+            $blocked[(int)$id] = true;
+        }
+        $out = array();
+        $seen = array();
+        $seenPhashes = $excludePhashes;
+        foreach ($candidates as $candidate) {
+            if (!is_array($candidate)) {
+                continue;
+            }
+            $uuid = (string)($candidate['asset_uuid'] ?? '');
+            if ($uuid === '' || isset($seen[$uuid])) {
+                continue;
+            }
+            $asset = $this->mediaLibrary->findByUuid($uuid);
+            if (!is_array($asset)) {
+                continue;
+            }
+            $id = (int)($asset['id'] ?? 0);
+            if ($id > 0 && isset($blocked[$id])) {
+                continue;
+            }
+            $hash = $this->mediaLibrary->ensurePhash($asset);
+            if ($hash !== '' && $this->mediaLibrary->phashMatches($hash, $seenPhashes)) {
+                continue;
+            }
+            $seen[$uuid] = true;
+            if ($hash !== '') {
+                $seenPhashes[] = $hash;
+            }
+            $out[] = $candidate;
+        }
+        return $out;
+    }
+
+    /**
      * @return array{ids:list<int>,phashes:list<string>}
      */
     private function usedLibraryExclusions(int $exceptVideoId): array
@@ -2043,8 +2115,7 @@ final class CommunicationTrainingVideoService
             if (!is_array($asset)) {
                 continue;
             }
-            $analysis = json_decode((string)($asset['analysis_json'] ?? ''), true);
-            $hash = is_array($analysis) ? trim((string)($analysis['phash'] ?? '')) : '';
+            $hash = $this->mediaLibrary->ensurePhash($asset);
             if ($hash !== '') {
                 $phashes[] = $hash;
             }

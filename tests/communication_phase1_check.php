@@ -1153,6 +1153,9 @@ comm_assert(
     && str_contains($adminThumbPage, 'tcc-modal-foot')
     && str_contains($trainingVideoServiceSource, "'&v='")
     && str_contains($trainingVideoServiceSource, 'publicOrientation')
+    && str_contains($mediaLibrarySource, 'ensurePhash')
+    && str_contains($mediaLibrarySource, 'phashTooSimilar')
+    && str_contains($trainingVideoServiceSource, 'filterUnusedCandidates')
     && str_contains($trainingVideoServiceSource, 'regenerateGeneratedThumbnails')
     && is_file($root . '/scripts/regenerate_training_video_thumbnails.php')
 );
@@ -1516,6 +1519,11 @@ fwrite($rampStream, $landscapeRamp);
 rewind($rampStream);
 $libraryRamp = $kernel->mediaLibrary->putAdminAsset($rampStream, 'image/jpeg', strlen($landscapeRamp), 'ramp_sunset_exterior.jpg', $userB);
 fclose($rampStream);
+$cockpitCopyStream = fopen('php://memory', 'rb+');
+fwrite($cockpitCopyStream, $landscapeCockpit);
+rewind($cockpitCopyStream);
+$libraryCockpitCopy = $kernel->mediaLibrary->putAdminAsset($cockpitCopyStream, 'image/jpeg', strlen($landscapeCockpit), 'cessna_172_cockpit_steep_turns_copy.jpg', $userB);
+fclose($cockpitCopyStream);
 $rankedLandscape = $kernel->mediaLibrary->rankForVideo(array(
     'title' => 'Cessna 172 steep turns',
     'description' => 'Cockpit demonstration of steep turns',
@@ -1532,6 +1540,7 @@ $rankedPortraitUuids = array_map(static fn(array $asset): string => (string)$ass
 comm_assert(
     'Media Library ranking uses orientation as a hard filter',
     ($rankedLandscape[0]['asset_uuid'] ?? '') === ($libraryCockpit['asset']['asset_uuid'] ?? '')
+    && !in_array((string)($libraryCockpitCopy['asset']['asset_uuid'] ?? ''), $rankedLandscapeUuids, true)
     && !in_array((string)($libraryPortrait['asset']['asset_uuid'] ?? ''), $rankedLandscapeUuids, true)
     && ($rankedPortrait[0]['asset_uuid'] ?? '') === ($libraryPortrait['asset']['asset_uuid'] ?? '')
     && !in_array((string)($libraryCockpit['asset']['asset_uuid'] ?? ''), $rankedPortraitUuids, true)
@@ -1660,6 +1669,7 @@ comm_assert(
     && (string)($explained['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') !== ''
     && (string)($secondUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') !== ''
     && (string)($secondUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') !== (string)($explained['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '')
+    && (string)($secondUploaded['video']['thumbnail_candidates'][0]['asset_uuid'] ?? '') !== (string)($libraryCockpitCopy['asset']['asset_uuid'] ?? '')
 );
 
 $baseVideo = array(
