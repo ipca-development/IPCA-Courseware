@@ -189,7 +189,13 @@ struct ReaderView: View {
         }
         .onChange(of: viewModel.currentIndex) { _, newIndex in
             focusedPageIndex = nil
+            dismissSelectionMenu()
+            showPersonalNoteEditor = false
+            showReviewerThread = false
             Task { await viewModel.goToIndex(newIndex) }
+        }
+        .onChange(of: viewModel.htmlGeneration) { _, _ in
+            renderedPages.removeAll()
         }
         .onDisappear {
             controlsHideTask?.cancel()
@@ -327,6 +333,15 @@ struct ReaderView: View {
                         scheduleControlsAutoHide()
                     },
                     onPageReady: { renderedPages.insert($0) },
+                    onToggleBookmark: { pageIndex in
+                        let pageNumber = viewModel.pages.indices.contains(pageIndex)
+                            ? viewModel.pages[pageIndex].pageNumber
+                            : 0
+                        viewModel.toggleBookmark(
+                            at: pageIndex,
+                            label: "Page \(pageNumber)"
+                        )
+                    },
                     onNavigateToAnchor: { anchor in
                         Task { await viewModel.goToStableAnchor(anchor) }
                     },
@@ -354,6 +369,9 @@ struct ReaderView: View {
                            !(highlight.personalNote ?? "").isEmpty {
                             personalNoteDraft = highlight.personalNote ?? ""
                             showPersonalNoteEditor = true
+                        } else if selection.opensReviewerNote == true {
+                            reviewerNoteDraft = ""
+                            showReviewerThread = true
                         }
                     }
                 )

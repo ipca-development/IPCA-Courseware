@@ -70,6 +70,8 @@ annotation_require(
         '"Open in Book"',
         '"Confirm you want to delete your personal note?"',
         'initialHighlight: openingHighlight',
+        'ReviewerNotesLibraryView',
+        'canReviewManuals: session.canAddReviewerNotes',
     ),
     $failures
 );
@@ -88,6 +90,9 @@ annotation_require(
         'canPerformAction',
         'existingHighlightID',
         'opensPersonalNote',
+        'annotationTextNodes',
+        'boundaryOffset',
+        'opensReviewerNote',
     ),
     $failures
 );
@@ -108,6 +113,9 @@ annotation_require(
         'relative.queryItems',
         'mr-personal-note-marker',
         'opensPersonalNote: true',
+        'mr-review-highlight',
+        'mr-review-note-marker',
+        'reviewThreads.forEach',
     ),
     $failures
 );

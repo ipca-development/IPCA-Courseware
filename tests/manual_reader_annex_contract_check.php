@@ -16,6 +16,7 @@ $requirements = array(
     'src/publishing/ControlledPublishingPaginationService.php' => array(
         "\$isAnnexCover = \$key === 'annexes'",
         "\$isAnnexSection = \$parentKey === 'annexes'",
+        "\$flags['is_cover'] || \$flags['is_annex_cover']",
         '$pageBreakBefore = $isCover || $isAnnexCover || $isPart0 || $isAnnexSection',
     ),
     'ipca-manual-reader-ios/IPCAManualReader/Views/ManualPageWebView.swift' => array(

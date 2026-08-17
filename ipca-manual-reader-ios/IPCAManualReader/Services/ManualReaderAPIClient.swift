@@ -570,6 +570,7 @@ extension ManualReaderAPIClient {
         layout: PageLayoutConfiguration? = nil,
         publicationLayout: PublicationLayout,
         highlights: [TextHighlightAnchor] = [],
+        reviewThreads: [ReviewNoteThread] = [],
         searchTerm: String? = nil
     ) -> String {
         let safeBookStyleCSS = bookStyleCSS.replacingOccurrences(of: "</style", with: "<\\/style")
@@ -580,6 +581,7 @@ extension ManualReaderAPIClient {
         let isValidatedPersonalPage = layout != nil
         let annotationScript = ReaderHTMLAnnotationService.script(
             highlights: highlights,
+            reviewThreads: reviewThreads,
             searchTerm: searchTerm
         )
 
@@ -639,6 +641,23 @@ extension ManualReaderAPIClient {
               border-left: 4px solid #f4c430 !important;
               padding-left: 2px;
             }
+            .mr-review-highlight {
+              background: #65dfff !important;
+              border-left: 4px solid #1769aa !important;
+              padding-left: 2px;
+            }
+            .mr-review-note-marker {
+              position: absolute;
+              z-index: 21;
+              width: 14px;
+              height: 14px;
+              min-width: 14px;
+              padding: 0;
+              border: 2px solid #fff;
+              border-radius: 50%;
+              background: #1769aa;
+              box-shadow: 0 1px 3px rgba(0,0,0,.28);
+            }
             .mr-personal-note-marker {
               position: absolute;
               z-index: 20;
@@ -681,7 +700,11 @@ extension ManualReaderAPIClient {
 }
 
 enum ReaderHTMLAnnotationService {
-    static func script(highlights: [TextHighlightAnchor], searchTerm: String?) -> String {
+    static func script(
+        highlights: [TextHighlightAnchor],
+        reviewThreads: [ReviewNoteThread] = [],
+        searchTerm: String?
+    ) -> String {
         let payload: [[String: Any]] = highlights.map {
             [
                 "text": $0.selectedText,
@@ -691,19 +714,35 @@ enum ReaderHTMLAnnotationService {
                 "color": $0.color.cssColor,
                 "id": $0.id.uuidString,
                 "noted": !($0.personalNote ?? "").isEmpty,
+                "prefix": $0.prefix ?? "",
+                "suffix": $0.suffix ?? "",
             ]
         }
         let payloadData = try? JSONSerialization.data(withJSONObject: payload)
         let payloadJSON = payloadData.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let reviewPayload: [[String: Any]] = reviewThreads.map {
+            [
+                "text": $0.selectedText,
+                "fragment": $0.sourceFragmentID ?? "",
+                "anchor": $0.stableAnchor ?? "",
+                "start": $0.startOffset ?? 0,
+                "id": $0.threadUUID,
+                "prefix": "",
+                "suffix": "",
+            ]
+        }
+        let reviewData = try? JSONSerialization.data(withJSONObject: reviewPayload)
+        let reviewJSON = reviewData.flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         let searchData = try? JSONSerialization.data(withJSONObject: [searchTerm ?? ""])
         let searchJSON = searchData.flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
         return """
         <script>
         (function() {
           const highlights = \(payloadJSON.replacingOccurrences(of: "</script", with: "<\\/script"));
+          const reviewThreads = \(reviewJSON.replacingOccurrences(of: "</script", with: "<\\/script"));
           const searchTerm = \(searchJSON)[0];
           const root = document.querySelector('.mr-ios-frame') || document.body;
-          const blocked = new Set(['SCRIPT', 'STYLE', 'MARK']);
+          const blocked = new Set(['SCRIPT', 'STYLE', 'BUTTON']);
           function textNodes(scope) {
             const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
               acceptNode(node) {
@@ -758,7 +797,7 @@ enum ReaderHTMLAnnotationService {
             wrapRange(range, className, color, item);
             return true;
           }
-          function highlightExact(item) {
+          function highlightExact(item, className) {
             let scope = root;
             if (item.fragment) {
               const escaped = CSS.escape(item.fragment);
@@ -775,16 +814,34 @@ enum ReaderHTMLAnnotationService {
             if (item.start >= 0
                 && fullText.substr(item.start, item.text.length) === item.text
                 && wrapGlobal(
-                  nodes, item.start, item.text.length, 'mr-user-highlight', item.color, item
+                  nodes, item.start, item.text.length, className, item.color, item
                 )) {
               return;
             }
-            const found = fullText.indexOf(item.text);
+            let found = -1;
+            let bestScore = -1;
+            let cursor = 0;
+            while (item.text && (cursor = fullText.indexOf(item.text, cursor)) >= 0) {
+              let score = 0;
+              if (item.prefix && fullText.substring(
+                Math.max(0, cursor - item.prefix.length), cursor
+              ) === item.prefix) score += 2;
+              if (item.suffix && fullText.substring(
+                cursor + item.text.length, cursor + item.text.length + item.suffix.length
+              ) === item.suffix) score += 2;
+              score -= Math.min(Math.abs(cursor - item.start), 10000) / 10000;
+              if (score > bestScore) {
+                bestScore = score;
+                found = cursor;
+              }
+              cursor += Math.max(1, item.text.length);
+            }
             if (found >= 0) {
-              wrapGlobal(nodes, found, item.text.length, 'mr-user-highlight', item.color, item);
+              wrapGlobal(nodes, found, item.text.length, className, item.color, item);
             }
           }
-          highlights.forEach(highlightExact);
+          highlights.forEach(item => highlightExact(item, 'mr-user-highlight'));
+          reviewThreads.forEach(item => highlightExact(item, 'mr-review-highlight'));
           const byID = new Map(highlights.map(item => [item.id, item]));
           root.querySelectorAll('.mr-user-highlight.is-noted[data-highlight-id]').forEach(mark => {
             const item = byID.get(mark.dataset.highlightId);
@@ -801,6 +858,7 @@ enum ReaderHTMLAnnotationService {
             marker.style.top = Math.max(
               0, Math.min(root.offsetHeight - 13, markRect.top - rootRect.top)
             ) + 'px';
+            marker.addEventListener('touchend', event => event.stopPropagation());
             marker.addEventListener('click', function(event) {
               event.preventDefault();
               event.stopPropagation();
@@ -814,6 +872,40 @@ enum ReaderHTMLAnnotationService {
                 suffix: '',
                 existingHighlightID: item.id,
                 opensPersonalNote: true
+              });
+            });
+            root.appendChild(marker);
+          });
+          const reviewsByID = new Map(reviewThreads.map(item => [item.id, item]));
+          root.querySelectorAll('.mr-review-highlight[data-highlight-id]').forEach(mark => {
+            const item = reviewsByID.get(mark.dataset.highlightId);
+            if (!item) return;
+            const marker = document.createElement('button');
+            marker.type = 'button';
+            marker.className = 'mr-review-note-marker';
+            marker.setAttribute('aria-label', 'Open reviewer note');
+            const rootRect = root.getBoundingClientRect();
+            const markRect = mark.getBoundingClientRect();
+            marker.style.left = Math.max(
+              0, Math.min(root.offsetWidth - 14, markRect.right - rootRect.left + 2)
+            ) + 'px';
+            marker.style.top = Math.max(
+              0, Math.min(root.offsetHeight - 14, markRect.top - rootRect.top)
+            ) + 'px';
+            marker.addEventListener('touchend', event => event.stopPropagation());
+            marker.addEventListener('click', function(event) {
+              event.preventDefault();
+              event.stopPropagation();
+              window.webkit.messageHandlers.readerSelection.postMessage({
+                selectedText: item.text,
+                sourceFragmentID: item.fragment || '',
+                stableAnchor: item.anchor || '',
+                startOffset: item.start || 0,
+                endOffset: (item.start || 0) + item.text.length,
+                prefix: item.prefix || '',
+                suffix: item.suffix || '',
+                existingHighlightID: '',
+                opensReviewerNote: true
               });
             });
             root.appendChild(marker);

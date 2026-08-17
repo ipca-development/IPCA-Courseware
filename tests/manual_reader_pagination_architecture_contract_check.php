@@ -94,6 +94,8 @@ require_markers(
         'return [safeIndex, right]',
         'if !pageNumber.isMultiple(of: 2)',
         'pageNumber.isMultiple(of: 2) == false',
+        'onToggleBookmark',
+        'Image(systemName: "bookmark")',
         'Image(systemName: "bookmark.fill")',
         'zoomedPositions',
     ),
@@ -109,6 +111,7 @@ require_markers(
         'maximumZoomScale = 4',
         'WKScriptMessageHandler',
         'readerSelection',
+        'requestAnimationFrame(() => requestAnimationFrame(resolve))',
     ),
     $failures
 );
@@ -164,6 +167,9 @@ require_markers(
     array(
         'private struct BookmarksByManualSection',
         'onSelectBookmark(book, bookmark)',
+        'AuthenticatedCoverImage',
+        'Image(systemName: "icloud.and.arrow.down")',
+        'Button("Delete Local Download"',
     ),
     $failures
 );
@@ -272,6 +278,8 @@ require_markers(
         'PersonalPaginationCache.shared',
         'coverage.sourceFragmentID',
         'officialPageNumber',
+        'openingMessage = "Synchronizing notes…"',
+        'htmlGeneration += 1',
     ),
     $failures
 );

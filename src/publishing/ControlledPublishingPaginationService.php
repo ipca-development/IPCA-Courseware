@@ -130,7 +130,7 @@ final class ControlledPublishingPaginationService
                 )),
             );
 
-            if ($flags['is_cover']) {
+            if ($flags['is_cover'] || $flags['is_annex_cover']) {
                 $coverHtml = $this->stripEditorChrome(
                     $this->reader->paginationRenderSectionShellHtml(
                         $version,
@@ -265,6 +265,7 @@ final class ControlledPublishingPaginationService
 
         return array(
             'is_cover' => $isCover,
+            'is_annex_cover' => $isAnnexCover,
             'is_part0' => $isPart0,
             'is_part_start' => $isPartStart,
             'is_chapter_start' => $isChapterStart,

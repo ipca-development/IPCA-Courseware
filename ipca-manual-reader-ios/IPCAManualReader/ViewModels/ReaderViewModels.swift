@@ -58,6 +58,7 @@ final class ReaderViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var currentPageHTML: String = ""
     @Published private(set) var pageHTMLByIndex: [Int: String] = [:]
+    @Published private(set) var htmlGeneration = 0
     @Published private(set) var personalPages: [PersonalReaderPage] = []
     @Published private(set) var activeLayout: PageLayoutConfiguration?
     @Published private(set) var publicationLayout: PublicationLayout?
@@ -204,6 +205,16 @@ final class ReaderViewModel: ObservableObject {
             startIndex = match
         }
         currentIndex = startIndex
+        openingProgress = max(openingProgress, 0.55)
+        openingMessage = "Synchronizing notes…"
+        await ManualReaderSessionStore.shared.syncAnnotations(
+            bookKey: book.bookKey,
+            versionID: book.versionId
+        )
+        if ManualReaderSessionStore.shared.canAddReviewerNotes {
+            openingMessage = "Loading reviewer notes…"
+            await loadReviewThreads()
+        }
         openingMessage = "Preparing visible pages…"
         let openingIndexes = [startIndex, startIndex + 1].filter { pages.indices.contains($0) }
         for (offset, index) in openingIndexes.enumerated() {
@@ -215,14 +226,6 @@ final class ReaderViewModel: ObservableObject {
         currentPageHTML = pageHTMLByIndex[startIndex] ?? ""
         openingProgress = 0.85
         openingMessage = "Rendering visible pages…"
-        Task { [weak self] in
-            guard let self else { return }
-            await ManualReaderSessionStore.shared.syncAnnotations(
-                bookKey: self.book.bookKey,
-                versionID: self.book.versionId
-            )
-            await self.reloadCurrentPageStyles()
-        }
 #if DEBUG
         print(
             "READER_PACKAGE_APPLIED pages=\(pages.count) start=\(startIndex) "
@@ -303,7 +306,6 @@ final class ReaderViewModel: ObservableObject {
             targetPageNumber = highlight.pageNumber
         }
         await goToPageNumber(targetPageNumber)
-        pageHTMLByIndex[currentIndex] = nil
         refreshAnnotationHTML(at: currentIndex)
     }
 
@@ -366,9 +368,6 @@ final class ReaderViewModel: ObservableObject {
 #endif
         guard offlinePackage != nil else { return }
         if ReaderDisplayMode.controlledFrozenPages {
-            pageHTMLByIndex.removeAll()
-            preparePageHTML(around: currentIndex)
-            currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
 #if DEBUG
             print("READER_LAYOUT_USING_FROZEN_PAGES htmlPages=\(pageHTMLByIndex.count)")
 #endif
@@ -377,6 +376,7 @@ final class ReaderViewModel: ObservableObject {
         do {
             try await repaginateFromSource(preservingCurrentPosition: true)
             pageHTMLByIndex.removeAll()
+            htmlGeneration += 1
             preparePageHTML(around: currentIndex)
             currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
         } catch {
@@ -477,6 +477,7 @@ final class ReaderViewModel: ObservableObject {
     func selectSearchResult(_ result: SearchResult, query: String) async {
         activeSearchTerm = query.trimmingCharacters(in: .whitespacesAndNewlines)
         pageHTMLByIndex.removeAll()
+        htmlGeneration += 1
         if let pageNumber = result.pageNumber {
             await goToPageNumber(pageNumber)
         } else {
@@ -561,6 +562,12 @@ final class ReaderViewModel: ObservableObject {
             reviewThreads = response.threads ?? []
             reviewErrorMessage = nil
             await flushPendingReviewNotes()
+            if !pageHTMLByIndex.isEmpty {
+                pageHTMLByIndex.removeAll()
+                htmlGeneration += 1
+                preparePageHTML(around: currentIndex)
+                currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
+            }
         } catch {
             reviewErrorMessage = error.localizedDescription
         }
@@ -628,6 +635,7 @@ final class ReaderViewModel: ObservableObject {
             reviewThreads.removeAll { $0.threadUUID == thread.threadUUID }
             reviewThreads.insert(thread, at: 0)
             reviewErrorMessage = nil
+            refreshAnnotationHTML(at: index)
         } catch {
             reviewErrorMessage = error.localizedDescription
         }
@@ -681,6 +689,7 @@ final class ReaderViewModel: ObservableObject {
 
     private func refreshAnnotationHTML(at index: Int) {
         pageHTMLByIndex[index] = nil
+        htmlGeneration += 1
         preparePageHTML(at: index)
         if index == currentIndex {
             currentPageHTML = pageHTMLByIndex[index] ?? ""
@@ -764,6 +773,7 @@ final class ReaderViewModel: ObservableObject {
                 for: book.bookKey,
                 pageNumber: pageNumber
             ),
+            reviewThreads: reviewThreads.filter { $0.pageNumber == pageNumber },
             searchTerm: activeSearchTerm
         )
     }
@@ -785,6 +795,7 @@ final class ReaderViewModel: ObservableObject {
             )
         }
         pageHTMLByIndex.removeAll()
+        htmlGeneration += 1
         preparePageHTML(around: currentIndex)
         currentPageHTML = pageHTMLByIndex[currentIndex] ?? ""
     }

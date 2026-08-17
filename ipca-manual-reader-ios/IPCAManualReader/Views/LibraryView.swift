@@ -86,6 +86,7 @@ struct LibraryView: View {
                 width: sidebarWidth,
                 selection: $selectedDestination,
                 user: session.user,
+                canReviewManuals: session.canAddReviewerNotes,
                 onSignOut: { Task { await session.logout() } }
             )
             NavigationStack {
@@ -127,6 +128,7 @@ struct LibraryView: View {
             NavigationStack {
                 MoreView(
                     user: session.user,
+                    canReviewManuals: session.canAddReviewerNotes,
                     onOpen: { utilityDestination = $0 },
                     onSignOut: { Task { await session.logout() } }
                 )
@@ -144,6 +146,10 @@ struct LibraryView: View {
         availableWidth: CGFloat
     ) -> some View {
         switch destination {
+        case .reviewerNotes:
+            ReviewerNotesLibraryView(books: viewModel.books) { book, thread in
+                presentReader(book, highlight: thread.navigationAnchor)
+            }
         case .personalNotes:
             PersonalNotesLibraryView(books: viewModel.books) { book, highlight in
                 presentReader(book, highlight: highlight)
@@ -157,6 +163,7 @@ struct LibraryView: View {
         case .more:
             MoreView(
                 user: session.user,
+                canReviewManuals: session.canAddReviewerNotes,
                 onOpen: { utilityDestination = $0 },
                 onSignOut: { Task { await session.logout() } }
             )
@@ -212,6 +219,7 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
     case downloads = "Downloads"
     case bookmarks = "Bookmarks"
     case personalNotes = "Personal Notes"
+    case reviewerNotes = "Reviewer Notes"
     case help = "Help & Support"
     case more = "More"
 
@@ -225,6 +233,7 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
         case .downloads: "arrow.down.to.line"
         case .bookmarks: "bookmark"
         case .personalNotes: "note.text"
+        case .reviewerNotes: "text.bubble"
         case .help: "questionmark.circle"
         case .more: "ellipsis"
         }
@@ -269,11 +278,17 @@ private struct LibrarySidebar: View {
     let width: CGFloat
     @Binding var selection: LibraryDestination
     let user: ReaderUser?
+    let canReviewManuals: Bool
     let onSignOut: () -> Void
 
-    private let primaryItems: [LibraryDestination] = [
-        .home, .library, .categories, .downloads, .bookmarks, .personalNotes, .help,
-    ]
+    private var primaryItems: [LibraryDestination] {
+        var items: [LibraryDestination] = [
+            .home, .library, .categories, .downloads, .bookmarks, .personalNotes,
+        ]
+        if canReviewManuals { items.append(.reviewerNotes) }
+        items.append(.help)
+        return items
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -780,41 +795,47 @@ private struct ManualCoverCard: View {
     }
 
     var body: some View {
-        Button {
+        VStack(alignment: .leading, spacing: 9) {
+            Button {
 #if DEBUG
-            print("READER_CARD_TAP book=\(book.id)")
+                print("READER_CARD_TAP book=\(book.id)")
 #endif
-            onSelect()
-        } label: {
-            VStack(alignment: .leading, spacing: 9) {
+                onSelect()
+            } label: {
                 cover
-
-                Text(book.displayTitle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .frame(height: 32, alignment: .topLeading)
-
-                if showsProgress || book.hasProgress {
-                    HStack(spacing: 7) {
-                        Text(progress.map { "\(Int($0 * 100))%" } ?? "Continue")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        ProgressView(value: progress ?? 0.04)
-                            .tint(IPCAReaderTheme.navy)
-                    }
-                }
-
-                DownloadStatusIndicator(book: book)
+                    .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(book.displayTitle)")
+
+            HStack(spacing: 8) {
+                if showsProgress || book.hasProgress {
+                    Text(progress.map { "\(Int($0 * 100))%" } ?? "Continue")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                } else if book.isDraftPreview {
+                    Text("DRAFT")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.orange)
+                }
+                Spacer(minLength: 4)
+
+                primaryDownloadControl
+
+                Menu {
+                    downloadMenu
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .buttonStyle(.plain)
         .frame(width: width, alignment: .leading)
-        .accessibilityLabel("Open \(book.displayTitle)")
         .contextMenu {
-            downloadActions
-            Button("Open Manual", action: onSelect)
+            downloadMenu
         }
     }
 
@@ -824,24 +845,21 @@ private struct ManualCoverCard: View {
                 .fill(IPCAReaderTheme.navy)
                 .aspectRatio(0.68, contentMode: .fit)
 
-            if let data = downloads.packages[book.id]?.coverImageData,
-               let image = UIImage(data: data) {
+            if let url = resolvedCoverURL {
+                AuthenticatedCoverImage(
+                    url: url,
+                    fallbackData: downloads.packages[book.id]?.coverImageData,
+                    placeholder: AnyView(coverPlaceholder)
+                )
+                .frame(width: width, height: width / 0.68)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else if let data = downloads.packages[book.id]?.coverImageData,
+                      let image = UIImage(data: data) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
                     .frame(width: width, height: width / 0.68)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else if let url = resolvedCoverURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFit()
-                    default:
-                        coverPlaceholder
-                    }
-                }
-                .frame(width: width, height: width / 0.68)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else {
                 coverPlaceholder
             }
@@ -885,74 +903,113 @@ private struct ManualCoverCard: View {
     }
 
     @ViewBuilder
-    private var downloadActions: some View {
+    private var primaryDownloadControl: some View {
+        switch downloads.status(for: book) {
+        case .downloading(let progress):
+            ProgressView(value: progress)
+                .progressViewStyle(.circular)
+                .frame(width: 28, height: 28)
+        case .notDownloaded:
+            Button(action: download) {
+                Image(systemName: "icloud.and.arrow.down")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Download manual")
+        case .updateAvailable:
+            Button(action: downloadUpdate) {
+                Image(systemName: "icloud.and.arrow.down.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Download update")
+        case .availableOffline:
+            Image(systemName: "icloud.fill")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .accessibilityLabel("Available offline")
+        case .failed:
+            Button(action: download) {
+                Image(systemName: "exclamationmark.icloud")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Retry download")
+        }
+    }
+
+    @ViewBuilder
+    private var downloadMenu: some View {
         switch downloads.status(for: book) {
         case .availableOffline:
-            Button("Update Download") {
-                guard let client = ManualReaderSessionStore.shared.client else { return }
-                Task {
-                    _ = try? await downloads.ensureDownloaded(
-                        book: book,
-                        client: client,
-                        forceRefresh: true
-                    )
-                }
-            }
-            Button("Remove Download", role: .destructive) {
+            Text("Version \(book.versionLabel) · Available offline")
+            Button("Re-download", action: downloadUpdate)
+            Button("Delete Local Download", role: .destructive) {
                 Task { await downloads.removeDownload(for: book) }
             }
         case .downloading:
-            EmptyView()
-        case .updateAvailable:
-            Button("Download Update") {
-                guard let client = ManualReaderSessionStore.shared.client else { return }
-                Task {
-                    _ = try? await downloads.ensureDownloaded(
-                        book: book,
-                        client: client,
-                        forceRefresh: true
-                    )
-                }
+            Text("Downloading…")
+        case .updateAvailable(let priorVersion):
+            Text("Update \(book.versionLabel) available · installed \(priorVersion)")
+            Button("Download Update", action: downloadUpdate)
+            Button("Delete Local Download", role: .destructive) {
+                Task { await downloads.removeDownload(for: book) }
             }
         default:
-            Button("Download") {
-                guard let client = ManualReaderSessionStore.shared.client else { return }
-                Task {
-                    _ = try? await downloads.ensureDownloaded(book: book, client: client)
-                }
-            }
+            Text("Not downloaded")
+            Button("Download", action: download)
+        }
+        Button("Open Manual", action: onSelect)
+    }
+
+    private func download() {
+        guard let client = ManualReaderSessionStore.shared.client else { return }
+        Task { _ = try? await downloads.ensureDownloaded(book: book, client: client) }
+    }
+
+    private func downloadUpdate() {
+        guard let client = ManualReaderSessionStore.shared.client else { return }
+        Task {
+            _ = try? await downloads.ensureDownloaded(
+                book: book,
+                client: client,
+                forceRefresh: true
+            )
         }
     }
 }
 
-private struct DownloadStatusIndicator: View {
-    @ObservedObject private var downloads = ManualDownloadManager.shared
-    let book: LibraryBook
+private struct AuthenticatedCoverImage: View {
+    let url: URL
+    let fallbackData: Data?
+    let placeholder: AnyView
+    @State private var image: UIImage?
 
     var body: some View {
-        switch downloads.status(for: book) {
-        case .notDownloaded:
-            Label("Not downloaded", systemImage: "icloud.and.arrow.down")
-                .foregroundStyle(.secondary)
-        case .downloading(let progress):
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.mini)
-                Text("Downloading \(Int(progress * 100))%")
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else if let fallbackData, let fallback = UIImage(data: fallbackData) {
+                Image(uiImage: fallback)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                placeholder
             }
-            .foregroundStyle(IPCAReaderTheme.navy)
-        case .availableOffline:
-            Label("Available offline", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .updateAvailable(let priorVersion):
-            Label(
-                "Update available · \(book.versionLabel) (installed \(priorVersion))",
-                systemImage: "arrow.down.circle.fill"
-            )
-            .foregroundStyle(.orange)
-        case .failed:
-            Label("Download failed", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+        }
+        .task(id: url) {
+            guard let client = ManualReaderSessionStore.shared.client else { return }
+            guard let response = try? await client.session.data(from: url),
+                  let http = response.1 as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode),
+                  let loaded = UIImage(data: response.0) else { return }
+            image = loaded
         }
     }
 }
@@ -1298,8 +1355,127 @@ private struct CategoriesSection: View {
     }
 }
 
+private extension ReviewNoteThread {
+    var navigationAnchor: TextHighlightAnchor {
+        TextHighlightAnchor(
+            id: UUID(uuidString: threadUUID) ?? UUID(),
+            bookKey: bookKey,
+            versionID: versionID,
+            pageNumber: pageNumber,
+            selectedText: selectedText,
+            sourceFragmentID: sourceFragmentID,
+            stableAnchor: stableAnchor,
+            startOffset: startOffset ?? 0,
+            endOffset: endOffset ?? ((startOffset ?? 0) + selectedText.count),
+            prefix: nil,
+            suffix: nil,
+            color: .fluorescentBlue,
+            personalNote: nil,
+            clientUpdatedAt: nil,
+            deletedAt: nil,
+            createdAt: Date()
+        )
+    }
+}
+
+private struct ReviewerThreadLibraryItem: Identifiable {
+    let book: LibraryBook
+    let thread: ReviewNoteThread
+    var id: String { "\(book.id)-\(thread.threadUUID)" }
+}
+
+private struct ReviewerNotesLibraryView: View {
+    let books: [LibraryBook]
+    let onOpen: (LibraryBook, ReviewNoteThread) -> Void
+    @State private var items: [ReviewerThreadLibraryItem] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView("Loading reviewer notes…")
+            } else if let errorMessage {
+                ContentUnavailableView(
+                    "Unable to Load Reviewer Notes",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(errorMessage)
+                )
+            } else if items.isEmpty {
+                ContentUnavailableView(
+                    "No Reviewer Notes",
+                    systemImage: "text.bubble",
+                    description: Text("Shared reviewer conversations will appear here.")
+                )
+            } else {
+                List(items) { item in
+                    Button {
+                        onOpen(item.book, item.thread)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(item.book.displayTitle)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(IPCAReaderTheme.navy)
+                                Spacer()
+                                Text("Page \(item.thread.pageNumber)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(item.thread.selectedText)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                            if let latest = item.thread.comments.last {
+                                Text("\(latest.author.name): \(latest.body)")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
+                        }
+                        .padding(.vertical, 5)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .navigationTitle("Reviewer Notes")
+        .task(id: books.map { String($0.id) }.joined(separator: ",")) {
+            await load()
+        }
+    }
+
+    private func load() async {
+        guard ManualReaderSessionStore.shared.canAddReviewerNotes,
+              let client = ManualReaderSessionStore.shared.client else {
+            items = []
+            isLoading = false
+            return
+        }
+        isLoading = true
+        errorMessage = nil
+        var loaded: [ReviewerThreadLibraryItem] = []
+        do {
+            for book in books where book.isDraftPreview {
+                let response = try await client.fetchReviewThreads(
+                    bookKey: book.bookKey,
+                    versionId: book.versionId
+                )
+                loaded.append(contentsOf: (response.threads ?? []).map {
+                    ReviewerThreadLibraryItem(book: book, thread: $0)
+                })
+            }
+            items = loaded.sorted { $0.thread.updatedAtUTC > $1.thread.updatedAtUTC }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+}
+
 private struct MoreView: View {
     let user: ReaderUser?
+    let canReviewManuals: Bool
     let onOpen: (LibraryDestination) -> Void
     let onSignOut: () -> Void
 
@@ -1320,6 +1496,11 @@ private struct MoreView: View {
                 }
                 Button { onOpen(.personalNotes) } label: {
                     Label("Personal Notes", systemImage: "note.text")
+                }
+                if canReviewManuals {
+                    Button { onOpen(.reviewerNotes) } label: {
+                        Label("Reviewer Notes", systemImage: "text.bubble")
+                    }
                 }
                 Button { onOpen(.help) } label: {
                     Label("Help & Support", systemImage: "questionmark.circle")

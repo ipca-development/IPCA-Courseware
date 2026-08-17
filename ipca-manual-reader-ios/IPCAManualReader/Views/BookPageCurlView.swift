@@ -12,6 +12,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
     @Binding var currentIndex: Int
     let onTap: (Int) -> Void
     let onPageReady: (Int) -> Void
+    let onToggleBookmark: (Int) -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
     let onShareAnnex: (Int) -> Void
@@ -104,6 +105,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     pageSize: parent.pageSize,
                     pageBackground: parent.pageBackground,
                     onReady: { [weak self] in self?.parent.onPageReady(position) },
+                    onToggleBookmark: { [weak self] in self?.parent.onToggleBookmark(position) },
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
                     onShareAnnex: parent.onShareAnnex,
@@ -183,6 +185,7 @@ struct BookPageCurlView: UIViewControllerRepresentable {
                     pageSize: parent.pageSize,
                     pageBackground: parent.pageBackground,
                     onReady: { [weak self] in self?.parent.onPageReady(position) },
+                    onToggleBookmark: { [weak self] in self?.parent.onToggleBookmark(position) },
                     onNavigateToAnchor: parent.onNavigateToAnchor,
                     onNavigateToSection: parent.onNavigateToSection,
                     onShareAnnex: parent.onShareAnnex,
@@ -295,6 +298,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         ),
         pageBackground: Color = .white,
         onReady: @escaping () -> Void = {},
+        onToggleBookmark: @escaping () -> Void = {},
         onNavigateToAnchor: @escaping (String) -> Void = { _ in },
         onNavigateToSection: @escaping (Int) -> Void = { _ in },
         onShareAnnex: @escaping (Int) -> Void = { _ in },
@@ -315,6 +319,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 pageSize: pageSize,
                 pageBackground: pageBackground,
                 onReady: onReady,
+                onToggleBookmark: onToggleBookmark,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
                 onShareAnnex: onShareAnnex,
@@ -338,6 +343,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
         pageSize: CGSize,
         pageBackground: Color,
         onReady: @escaping () -> Void,
+        onToggleBookmark: @escaping () -> Void,
         onNavigateToAnchor: @escaping (String) -> Void,
         onNavigateToSection: @escaping (Int) -> Void,
         onShareAnnex: @escaping (Int) -> Void,
@@ -357,6 +363,7 @@ fileprivate final class PageHostController: UIHostingController<AnyView> {
                 pageSize: pageSize,
                 pageBackground: pageBackground,
                 onReady: onReady,
+                onToggleBookmark: onToggleBookmark,
                 onNavigateToAnchor: onNavigateToAnchor,
                 onNavigateToSection: onNavigateToSection,
                 onShareAnnex: onShareAnnex,
@@ -380,6 +387,7 @@ private struct PhysicalManualPage: View {
     let pageSize: CGSize
     let pageBackground: Color
     let onReady: () -> Void
+    let onToggleBookmark: () -> Void
     let onNavigateToAnchor: (String) -> Void
     let onNavigateToSection: (Int) -> Void
     let onShareAnnex: (Int) -> Void
@@ -420,28 +428,40 @@ private struct PhysicalManualPage: View {
                 }
             }
             .overlay(
-                alignment: isLandscape && !isLeftPage ? .topTrailing : .topLeading
+                alignment: !isLandscape || !isLeftPage ? .topTrailing : .topLeading
             ) {
-                if let ordinal = session.bookmarkOrdinal(
+                let ordinal = session.bookmarkOrdinal(
                     for: bookKey,
                     pageNumber: pageNumber
-                ) {
+                )
+                Button(action: onToggleBookmark) {
                     ZStack(alignment: .top) {
-                        Image(systemName: "bookmark.fill")
-                            .font(.system(size: 36, weight: .bold))
-                            .foregroundStyle(IPCAReaderTheme.navy)
-                        Text("\(ordinal)")
+                        if ordinal == nil {
+                            Image(systemName: "bookmark")
+                                .font(.system(size: 34, weight: .bold))
+                                .foregroundStyle(Color.gray.opacity(0.42))
+                        } else {
+                            Image(systemName: "bookmark.fill")
+                                .font(.system(size: 34, weight: .bold))
+                                .foregroundStyle(IPCAReaderTheme.navy)
+                        }
+                        if let ordinal {
+                            Text("\(ordinal)")
                             .font(.system(size: ordinal > 99 ? 8 : 10, weight: .bold))
                             .foregroundStyle(.white)
                             .monospacedDigit()
                             .padding(.top, 7)
+                        }
                     }
-                        .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
-                        .padding(.top, 2)
-                        .padding(isLandscape && !isLeftPage ? .trailing : .leading, 4)
-                        .allowsHitTesting(false)
-                        .accessibilityLabel("Bookmark \(ordinal)")
                 }
+                .buttonStyle(.plain)
+                .shadow(color: .black.opacity(0.16), radius: 1, y: 1)
+                .padding(.top, 2)
+                .padding(!isLandscape || !isLeftPage ? .trailing : .leading, 4)
+                .accessibilityLabel(
+                    ordinal.map { "Remove bookmark \($0)" } ?? "Bookmark page"
+                )
+                .zIndex(40)
             }
         }
         .background(pageBackground)

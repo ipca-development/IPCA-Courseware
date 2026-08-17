@@ -146,9 +146,17 @@ struct ManualPageWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isLoaded = true
             if !pendingScaleJS.isEmpty {
-                webView.evaluateJavaScript(pendingScaleJS, completionHandler: nil)
+                webView.evaluateJavaScript(pendingScaleJS) { [weak self] _, _ in
+                    guard let self else { return }
+                    webView.evaluateJavaScript(
+                        "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+                    ) { _, _ in
+                        DispatchQueue.main.async { self.onReady() }
+                    }
+                }
+            } else {
+                DispatchQueue.main.async { self.onReady() }
             }
-            DispatchQueue.main.async { self.onReady() }
         }
 
         func observeZoom(in scrollView: UIScrollView) {
@@ -191,7 +199,8 @@ struct ManualPageWebView: UIViewRepresentable {
                     suffix: body["suffix"] as? String,
                     existingHighlightID: (body["existingHighlightID"] as? String)
                         .flatMap(UUID.init(uuidString:)),
-                    opensPersonalNote: body["opensPersonalNote"] as? Bool
+                    opensPersonalNote: body["opensPersonalNote"] as? Bool,
+                    opensReviewerNote: body["opensReviewerNote"] as? Bool
                 )
             )
         }
@@ -255,25 +264,65 @@ struct ManualPageWebView: UIViewRepresentable {
           });
         });
       });
+      function annotationTextNodes(scope) {
+        const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            const parent = node.parentElement;
+            if (!node.nodeValue || !node.nodeValue.length || !parent) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            if (['SCRIPT', 'STYLE', 'BUTTON'].includes(parent.tagName)) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        });
+        const nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        return nodes;
+      }
+      function boundaryOffset(nodes, container, offset) {
+        let total = 0;
+        for (const node of nodes) {
+          if (node === container) return total + Math.min(offset, node.nodeValue.length);
+          if (container.nodeType === Node.ELEMENT_NODE) {
+            const child = container.childNodes[offset] || null;
+            if (child && (child === node || child.contains?.(node))) return total;
+            if (!child && container.contains(node)) {
+              total += node.nodeValue.length;
+              continue;
+            }
+          }
+          total += node.nodeValue.length;
+        }
+        return total;
+      }
       document.addEventListener('touchend', function() {
         setTimeout(function() {
           const selection = window.getSelection();
           if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
           const range = selection.getRangeAt(0);
-          const text = selection.toString();
-          if (!text || !text.trim()) return;
-          let element = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
-            ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
-          const fragment = element && element.closest(
+          const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE
+            ? range.startContainer : range.startContainer.parentElement;
+          const endElement = range.endContainer.nodeType === Node.ELEMENT_NODE
+            ? range.endContainer : range.endContainer.parentElement;
+          const startFragment = startElement && startElement.closest(
             '[data-source-fragment-id], [data-fragment-id], [data-source-fragment], [data-stable-anchor], [id]'
           );
+          const endFragment = endElement && endElement.closest(
+            '[data-source-fragment-id], [data-fragment-id], [data-source-fragment], [data-stable-anchor], [id]'
+          );
+          const sameFragment = startFragment && startFragment === endFragment;
+          const fragment = sameFragment ? startFragment : null;
           const scope = fragment || document.querySelector('.mr-ios-frame') || document.body;
-          const prefixRange = document.createRange();
-          prefixRange.selectNodeContents(scope);
-          try { prefixRange.setEnd(range.startContainer, range.startOffset); } catch (_) {}
-          const startOffset = prefixRange.toString().length;
-          const scopeText = scope.textContent || '';
-          const existingMark = element && element.closest('.mr-user-highlight[data-highlight-id]');
+          const nodes = annotationTextNodes(scope);
+          const scopeText = nodes.map(node => node.nodeValue).join('');
+          const startOffset = boundaryOffset(nodes, range.startContainer, range.startOffset);
+          const endOffset = boundaryOffset(nodes, range.endContainer, range.endOffset);
+          const text = scopeText.substring(startOffset, endOffset);
+          if (!text || !text.trim()) return;
+          const existingMark = startElement
+            && startElement.closest('.mr-user-highlight[data-highlight-id]');
           window.webkit.messageHandlers.readerSelection.postMessage({
             selectedText: text,
             sourceFragmentID: fragment?.getAttribute('data-source-fragment-id')
@@ -281,9 +330,9 @@ struct ManualPageWebView: UIViewRepresentable {
               || fragment?.getAttribute('data-source-fragment') || '',
             stableAnchor: fragment?.getAttribute('data-stable-anchor') || fragment?.id || '',
             startOffset: startOffset,
-            endOffset: startOffset + text.length,
+            endOffset: endOffset,
             prefix: scopeText.substring(Math.max(0, startOffset - 24), startOffset),
-            suffix: scopeText.substring(startOffset + text.length, startOffset + text.length + 24),
+            suffix: scopeText.substring(endOffset, endOffset + 24),
             existingHighlightID: existingMark?.dataset.highlightId || '',
             opensPersonalNote: false
           });
