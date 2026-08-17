@@ -136,6 +136,7 @@
     headerPreviewTokens: {},
     pageHeaderScope: 'main',
     versionInfo: {},
+    publicationFontCSS: '',
     sectionTitle: '',
     calloutPresets: [],
     bookStyles: null,
@@ -3339,6 +3340,8 @@
       state.headerPreviewTokens = res.header_preview_tokens || {};
       state.pageHeaderScope = res.page_header_scope || 'main';
       state.versionInfo = res.version || {};
+      state.publicationFontCSS = res.publication_font_css || '';
+      if (publicationCssEl) publicationCssEl.textContent = state.publicationFontCSS;
       state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
       state.isCoverSection = !!res.is_cover_section;
       state.isTocSection = !!res.is_toc_section;
@@ -4769,6 +4772,23 @@
         var sid = parseInt(row.getAttribute('data-annex-link') || '0', 10);
         if (sid > 0) loadSection(sid);
       });
+    });
+    applyTMGenPublicationFont();
+    setTimeout(applyTMGenPublicationFont, 0);
+  }
+
+  function applyTMGenPublicationFont() {
+    if (!state.publicationFontCSS || !canvasEl) return;
+    canvasEl.querySelectorAll('[style]').forEach(function (el) {
+      var family = String(el.style.fontFamily || '').toLowerCase();
+      if (
+        family.indexOf('system-ui') === -1
+        && family.indexOf('arial') === -1
+        && family.indexOf('segoe ui') === -1
+      ) {
+        return;
+      }
+      el.style.setProperty('font-family', '"IPCA TM GEN Noto Sans", sans-serif', 'important');
     });
   }
 

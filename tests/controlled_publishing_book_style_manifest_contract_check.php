@@ -99,6 +99,30 @@ $assert(
     'Locally calculable asset hash is absent or incorrect.'
 );
 $assert(isset($assetsByDescriptor['font:serif']), 'Required font descriptor is absent from inventory.');
+$assert(!str_contains($first['css']['content'], 'IPCA TM GEN Noto Sans'), 'TM_GEN trial font leaked into the OM package.');
+
+$tmVersion = $version;
+$tmVersion['book_key'] = 'TM_GEN';
+$tmVersion['manual_code'] = 'TM_GEN';
+$tmMetadata = $metadata;
+$tmMetadata['paragraph_styles']['body']['font_family'] = 'sans';
+$tmVersion['metadata_json'] = json_encode($tmMetadata, JSON_THROW_ON_ERROR);
+$tmPackage = $service->buildPublicationPackage($tmVersion, $source);
+$tmAssetsByDescriptor = array();
+foreach ($tmPackage['assets'] as $asset) {
+    $tmAssetsByDescriptor[(string)$asset['descriptor']] = $asset;
+}
+$tmFont = $tmAssetsByDescriptor['embedded-font:tm-gen-noto-sans-latin-wght-normal'] ?? null;
+$assert(str_contains($tmPackage['css']['content'], '@font-face{font-family:"IPCA TM GEN Noto Sans"'), 'TM_GEN package lacks its embedded deterministic font.');
+$assert(str_contains($tmPackage['css']['content'], 'data:font/woff2;base64,'), 'TM_GEN font is not available offline in the package CSS.');
+$assert(str_contains($tmPackage['css']['content'], 'font-family:"IPCA TM GEN Noto Sans",sans-serif'), 'TM_GEN sans typography does not select the deterministic font.');
+$assert(is_array($tmFont) && ($tmFont['kind'] ?? '') === 'embedded_font', 'TM_GEN embedded font is absent from the asset inventory.');
+$assert(is_array($tmFont) && is_string($tmFont['content_hash'] ?? null) && strlen($tmFont['content_hash']) === 64, 'TM_GEN embedded font content hash is absent.');
+$assert($tmPackage['manifest_hash'] !== $first['manifest_hash'], 'TM_GEN font trial did not change the package identity.');
+$convertedHtml = ControlledPublishingPublicationFontService::applyToRenderedHtml(
+    '<p style="font-family:system-ui,-apple-system,Segoe UI,sans-serif">Trial</p>'
+);
+$assert(str_contains($convertedHtml, '"IPCA TM GEN Noto Sans",sans-serif'), 'TM_GEN rendered inline typography is not normalized to the deterministic font.');
 
 $timestampVariant = $version;
 $timestampVariant['released_at'] = '2030-01-01 00:00:00';

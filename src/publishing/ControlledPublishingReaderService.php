@@ -20,6 +20,7 @@ require_once __DIR__ . '/ControlledPublishingAnnexService.php';
 require_once __DIR__ . '/ControlledPublishingReaderTokenResolver.php';
 require_once __DIR__ . '/ControlledPublishingReaderCoverService.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleManifestService.php';
+require_once __DIR__ . '/ControlledPublishingPublicationFontService.php';
 require_once __DIR__ . '/ControlledPublishingManualPageBreakService.php';
 require_once __DIR__ . '/ControlledPublishingAuthoritativePaginationService.php';
 
@@ -608,6 +609,9 @@ final class ControlledPublishingReaderService
             $pageHeaderConfig,
             $sectionBlocks
         );
+        if (ControlledPublishingPublicationFontService::enabledForVersion($version)) {
+            $html = ControlledPublishingPublicationFontService::applyToRenderedHtml($html);
+        }
 
         return $this->tokens()->resolveHtml($html, $tokenContext);
     }
@@ -1759,17 +1763,21 @@ final class ControlledPublishingReaderService
         $mode = ControlledPublishingBookRenderer::MODE_READ;
         $pageLayout = $this->layoutSvc()->resolveLayout($section);
         $blocksHtml = $this->renderer()->renderBlocks($sectionBlocks, $mode);
+        $html = $this->renderPageHtml(
+            $version,
+            $section,
+            $blocksHtml,
+            $mode,
+            $pageLayout,
+            $pageHeaderConfig,
+            $sectionBlocks
+        );
+        if (ControlledPublishingPublicationFontService::enabledForVersion($version)) {
+            $html = ControlledPublishingPublicationFontService::applyToRenderedHtml($html);
+        }
 
         return $this->paginationResolveHtml(
-            $this->renderPageHtml(
-                $version,
-                $section,
-                $blocksHtml,
-                $mode,
-                $pageLayout,
-                $pageHeaderConfig,
-                $sectionBlocks
-            ),
+            $html,
             $tokenContext
         );
     }

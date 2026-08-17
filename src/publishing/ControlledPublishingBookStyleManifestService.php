@@ -5,6 +5,7 @@ require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
 require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
 require_once __DIR__ . '/ControlledPublishingCoverPageService.php';
+require_once __DIR__ . '/ControlledPublishingPublicationFontService.php';
 
 /**
  * Builds the immutable, version-specific publication contract consumed by readers.
@@ -116,7 +117,11 @@ final class ControlledPublishingBookStyleManifestService
         $baseFontSize = max(1, (float)($layout['font_size_pt'] ?? 11));
         $baseFontSizeCSS = rtrim(rtrim(sprintf('%.3F', $baseFontSize), '0'), '.');
         $rules = array();
+        $deterministicFont = ControlledPublishingPublicationFontService::enabledForManifest($manifest);
 
+        if ($deterministicFont) {
+            $rules[] = ControlledPublishingPublicationFontService::css($this->root);
+        }
         $rules[] = ':root{--reader-page-scale:1;--reader-font-scale:1;}';
         $rules[] = '.cpb-sheet-body{font-size:calc(' . $baseFontSizeCSS . 'pt * var(--reader-font-scale,1));}';
         $rules[] = '.reader-page-body:not(.reader-page-cover){font-size:calc(' . $baseFontSizeCSS . 'pt * var(--reader-font-scale,1));}';
@@ -131,7 +136,7 @@ final class ControlledPublishingBookStyleManifestService
             }
             $selector = '[data-paragraph-style="' . preg_replace('/[^a-z0-9_]/', '', (string)$key) . '"]';
             $rules[] = $selector . '{'
-                . 'font-family:' . $this->fontStack((string)($style['font_family'] ?? 'serif')) . ';'
+                . 'font-family:' . $this->fontStack((string)($style['font_family'] ?? 'serif'), $deterministicFont) . ';'
                 . 'font-size:calc(' . (int)($style['font_size'] ?? 11) . 'pt * var(--reader-font-scale,1));'
                 . 'color:' . (string)($style['color'] ?? '#0f172a') . ';'
                 . 'font-weight:' . (!empty($style['font_bold']) ? '700' : '400') . ';'
@@ -163,7 +168,7 @@ final class ControlledPublishingBookStyleManifestService
                 $row = is_array($tableStyle[$rowKey] ?? null) ? $tableStyle[$rowKey] : array();
                 $background = (string)($row['bg'] ?? '');
                 $rules[] = $scope . ' ' . $rowSelector . '>*{'
-                    . 'font-family:' . $this->fontStack((string)($row['font_family'] ?? 'sans')) . ';'
+                    . 'font-family:' . $this->fontStack((string)($row['font_family'] ?? 'sans'), $deterministicFont) . ';'
                     . 'font-size:calc(' . (int)($row['font_size'] ?? 10) . 'pt * var(--reader-font-scale,1));'
                     . 'color:' . (string)($row['color'] ?? '#0f172a') . ';'
                     . 'background:' . ($background !== '' ? $background : 'transparent') . ';'
@@ -184,11 +189,11 @@ final class ControlledPublishingBookStyleManifestService
             $rules[] = '.cpb-callout--' . $type . ' .cpb-callout-icon{background:'
                 . (string)$style['icon_color'] . ';}';
             $rules[] = '.cpb-callout--' . $type . ' .cpb-callout-title{color:' . (string)$style['title_color']
-                . ';font-family:' . $this->fontStack((string)$style['title_font_family'])
+                . ';font-family:' . $this->fontStack((string)$style['title_font_family'], $deterministicFont)
                 . ';font-size:calc(' . (int)$style['title_font_size'] . 'pt * var(--reader-font-scale,1));'
                 . 'font-weight:' . (!empty($style['title_font_bold']) ? '700' : '400') . ';}';
             $rules[] = '.cpb-callout--' . $type . ' .cpb-callout-text{color:' . (string)$style['text_color']
-                . ';font-family:' . $this->fontStack((string)$style['text_font_family'])
+                . ';font-family:' . $this->fontStack((string)$style['text_font_family'], $deterministicFont)
                 . ';font-size:calc(' . (int)$style['text_font_size'] . 'pt * var(--reader-font-scale,1));}';
         }
 
@@ -316,6 +321,19 @@ final class ControlledPublishingBookStyleManifestService
             $asset['descriptor_hash'] = hash('sha256', self::canonicalJson($asset));
             $assets[] = $asset;
         }
+        if (ControlledPublishingPublicationFontService::enabledForVersion($version)) {
+            $asset = array(
+                'descriptor' => 'embedded-font:tm-gen-noto-sans-latin-wght-normal',
+                'kind' => 'embedded_font',
+                'url' => null,
+                'font_family' => ControlledPublishingPublicationFontService::FAMILY,
+                'font_stack' => '"' . ControlledPublishingPublicationFontService::FAMILY . '",sans-serif',
+                'content_hash' => ControlledPublishingPublicationFontService::contentHash($this->root),
+                'hash_algorithm' => 'sha256',
+            );
+            $asset['descriptor_hash'] = hash('sha256', self::canonicalJson($asset));
+            $assets[] = $asset;
+        }
 
         usort($assets, static fn(array $a, array $b): int => strcmp((string)$a['descriptor'], (string)$b['descriptor']));
         return $assets;
@@ -372,9 +390,13 @@ final class ControlledPublishingBookStyleManifestService
         return is_file($candidate) ? hash_file('sha256', $candidate) : null;
     }
 
-    private function fontStack(string $font): string
+    private function fontStack(string $font, bool $deterministic = false): string
     {
-        return (new ControlledPublishingBookStyleService($this->pdo))->fontFamilyStack($font);
+        $fallback = (new ControlledPublishingBookStyleService($this->pdo))->fontFamilyStack($font);
+
+        return $deterministic
+            ? ControlledPublishingPublicationFontService::stackFor($font, $fallback)
+            : $fallback;
     }
 
     public static function canonicalJson(mixed $value): string

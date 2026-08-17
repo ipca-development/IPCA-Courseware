@@ -25,6 +25,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAnnexServic
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualPageBreakService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPublicationFontService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -859,6 +860,7 @@ function cp_editor_handle_load(
         'version' => array(
             'id' => (int)$version['id'],
             'book_key' => (string)$version['book_key'],
+            'manual_code' => (string)($version['manual_code'] ?? ''),
             'book_title' => (string)($version['book_title'] ?? ''),
             'version_label' => (string)$version['version_label'],
             'lifecycle_status' => (string)$version['lifecycle_status'],
@@ -891,6 +893,9 @@ function cp_editor_handle_load(
         'toc_settings_catalog' => $tocSvc->tocSettingsForApi($tocSettings),
         'prior_version_label' => $prior ? (string)($prior['version_label'] ?? '') : null,
         'book_styles' => $bookStyles,
+        'publication_font_css' => ControlledPublishingPublicationFontService::enabledForVersion($version)
+            ? ControlledPublishingPublicationFontService::css(dirname(__DIR__, 3))
+            : '',
         'page_header' => $pageHeaderConfig['page_header'],
         'page_footer' => $pageHeaderConfig['page_footer'],
         'page_header_scope' => cp_editor_page_header_scope_for_section($section),
