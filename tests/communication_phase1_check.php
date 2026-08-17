@@ -33,6 +33,17 @@ function comm_jpeg(int $width, int $height, int $r = 40, int $g = 80, int $b = 1
     return $bytes;
 }
 
+function comm_jpeg_with_exif_orientation(string $jpeg, int $orientation): string
+{
+    if (!str_starts_with($jpeg, "\xff\xd8")) {
+        return $jpeg;
+    }
+    $tiff = "Exif\0\0II*\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0"
+        . pack('v', $orientation)
+        . "\0\0\0\0\0\0";
+    return "\xff\xd8" . "\xff\xe1" . pack('n', strlen($tiff) + 2) . $tiff . substr($jpeg, 2);
+}
+
 function comm_sqlite(): PDO
 {
     $pdo = new PDO('sqlite::memory:');
@@ -1170,6 +1181,14 @@ comm_assert(
     && CommunicationTrainingThumbnailRenderer::displaySizeFromProbe(1920, 1080, 0, '81:256', '9:16')['height']
         > CommunicationTrainingThumbnailRenderer::displaySizeFromProbe(1920, 1080, 0, '81:256', '9:16')['width']
     && CommunicationTrainingThumbnailRenderer::videoOrientation(1080, 1920) === 'portrait'
+    && CommunicationTrainingThumbnailRenderer::jpegExifOrientation(
+        comm_jpeg_with_exif_orientation(comm_jpeg(40, 30, 10, 20, 30), 6)
+    ) === 6
+    && CommunicationTrainingThumbnailRenderer::displaySizeFromImageBytes(
+        comm_jpeg_with_exif_orientation(comm_jpeg(40, 30, 10, 20, 30), 6),
+        40,
+        30
+    ) === array('width' => 30, 'height' => 40)
 );
 $phase9Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_16_communication_phase9_training_video_catalog.sql');
 $adminPlaySource = (string)file_get_contents($root . '/public/admin/api/training_videos_play.php');
@@ -1224,10 +1243,13 @@ comm_assert(
     && str_contains($mediaLibraryPage, 'xhr.upload.onprogress')
     && str_contains($mediaLibraryPage, 'tcc-btn')
     && str_contains($mediaLibraryPage, 'ml-thumb')
-    && str_contains($mediaLibraryPage, 'aspect-ratio:9/16')
-    && str_contains($mediaLibraryPage, 'object-fit:contain')
+    && str_contains($mediaLibraryPage, 'ml-section')
+    && str_contains($mediaLibraryPage, 'object-fit:cover')
     && str_contains($mediaLibraryPage, 'ml-count-portrait')
     && str_contains($mediaLibrarySource, 'orientationStats')
+    && str_contains($mediaLibrarySource, 'reclassifyStoredOrientations')
+    && str_contains($rendererSource, 'jpegExifOrientation')
+    && is_file($root . '/scripts/reclassify_media_library_orientation.php')
 );
 comm_assert(
     'Enrollment uses the Training Videos hero catalog shell and category access',
@@ -1560,6 +1582,41 @@ comm_assert(
     && (int)($libraryAll['stats']['portrait'] ?? 0) === (int)($libraryPortraits['stats']['portrait'] ?? 0)
     && count($libraryPortraits['assets'] ?? array()) >= 1
     && (string)($libraryPortraits['assets'][0]['orientation'] ?? '') === 'portrait'
+);
+$exifPortraitBytes = comm_jpeg_with_exif_orientation(comm_jpeg(40, 30, 90, 40, 20), 6);
+$exifOriented = CommunicationTrainingThumbnailRenderer::imageFromBytes($exifPortraitBytes);
+$exifStream = fopen('php://memory', 'rb+');
+fwrite($exifStream, $exifPortraitBytes);
+rewind($exifStream);
+$libraryExif = $kernel->mediaLibrary->putAdminAsset(
+    $exifStream,
+    'image/jpeg',
+    strlen($exifPortraitBytes),
+    'iphone_portrait_exif6.jpg',
+    $userB
+);
+fclose($exifStream);
+comm_assert(
+    'Media Library stores iPhone EXIF-rotated stills as portrait',
+    CommunicationTrainingThumbnailRenderer::jpegExifOrientation($exifPortraitBytes) === 6
+    && $exifOriented !== false
+    && imagesx($exifOriented) === 30
+    && imagesy($exifOriented) === 40
+    && (string)($libraryExif['asset']['orientation'] ?? '') === 'portrait'
+    && (int)($libraryExif['asset']['width'] ?? 0) === 30
+    && (int)($libraryExif['asset']['height'] ?? 0) === 40
+);
+$pdo->prepare(
+    'UPDATE ipca_training_media_library SET width = 40, height = 30, orientation = ? WHERE asset_uuid = ?'
+)->execute(array('landscape', (string)($libraryExif['asset']['asset_uuid'] ?? '')));
+$reclassified = $kernel->mediaLibrary->reclassifyStoredOrientations();
+$reloadedExif = $kernel->mediaLibrary->findByUuid((string)($libraryExif['asset']['asset_uuid'] ?? ''));
+comm_assert(
+    'reclassify restores EXIF portrait dimensions on stored photographs',
+    (int)($reclassified['updated'] ?? 0) >= 1
+    && (string)($reloadedExif['orientation'] ?? '') === 'portrait'
+    && (int)($reloadedExif['width'] ?? 0) === 30
+    && (int)($reloadedExif['height'] ?? 0) === 40
 );
 
 $autoThumb = $kernel->trainingVideos->saveAdmin(array(

@@ -146,6 +146,144 @@ final class CommunicationTrainingThumbnailRenderer
     }
 
     /**
+     * iPhone stills are often 4032×3024 with EXIF Orientation 6 (display as 3024×4032).
+     *
+     * @return array{width:int,height:int}
+     */
+    public static function displaySizeFromImageBytes(string $bytes, int $codedWidth, int $codedHeight): array
+    {
+        $exif = self::jpegExifOrientation($bytes);
+        $swap = $exif === 5 || $exif === 6 || $exif === 7 || $exif === 8;
+        return self::displayDimensions($codedWidth, $codedHeight, $swap ? 90 : 0);
+    }
+
+    public static function jpegExifOrientation(string $bytes): int
+    {
+        if (strlen($bytes) < 4 || $bytes[0] !== "\xff" || $bytes[1] !== "\xd8") {
+            return 1;
+        }
+        $length = strlen($bytes);
+        $offset = 2;
+        while ($offset + 4 <= $length) {
+            if ($bytes[$offset] !== "\xff") {
+                break;
+            }
+            $marker = ord($bytes[$offset + 1]);
+            if ($marker === 0xDA || $marker === 0xD9) {
+                break;
+            }
+            if ($marker === 0x00 || $marker === 0xFF) {
+                $offset++;
+                continue;
+            }
+            $size = (ord($bytes[$offset + 2]) << 8) | ord($bytes[$offset + 3]);
+            if ($size < 2 || $offset + 2 + $size > $length) {
+                break;
+            }
+            if ($marker === 0xE1) {
+                $orientation = self::tiffOrientation(substr($bytes, $offset + 4, $size - 2));
+                if ($orientation !== null) {
+                    return $orientation;
+                }
+            }
+            $offset += 2 + $size;
+        }
+        return 1;
+    }
+
+    /**
+     * @return resource|\GdImage|false
+     */
+    public static function imageFromBytes(string $bytes)
+    {
+        $image = @imagecreatefromstring($bytes);
+        if ($image === false) {
+            return false;
+        }
+        return self::applyExifOrientation($image, self::jpegExifOrientation($bytes));
+    }
+
+    /**
+     * @param resource|\GdImage $image
+     * @return resource|\GdImage
+     */
+    public static function applyExifOrientation($image, int $exifOrientation)
+    {
+        $rotated = match ($exifOrientation) {
+            2 => self::flipImage($image, IMG_FLIP_HORIZONTAL),
+            3 => imagerotate($image, 180, 0),
+            4 => self::flipImage($image, IMG_FLIP_VERTICAL),
+            5 => imagerotate(self::flipImage($image, IMG_FLIP_VERTICAL), -90, 0),
+            6 => imagerotate($image, -90, 0),
+            7 => imagerotate(self::flipImage($image, IMG_FLIP_VERTICAL), 90, 0),
+            8 => imagerotate($image, 90, 0),
+            default => $image,
+        };
+        return $rotated === false ? $image : $rotated;
+    }
+
+    /**
+     * @param resource|\GdImage $image
+     * @return resource|\GdImage
+     */
+    private static function flipImage($image, int $mode)
+    {
+        imageflip($image, $mode);
+        return $image;
+    }
+
+    private static function tiffOrientation(string $payload): ?int
+    {
+        if (!str_starts_with($payload, "Exif\0\0")) {
+            return null;
+        }
+        $tiff = substr($payload, 6);
+        if (strlen($tiff) < 8) {
+            return null;
+        }
+        $little = str_starts_with($tiff, 'II');
+        if (!$little && !str_starts_with($tiff, 'MM')) {
+            return null;
+        }
+        $u16 = static function (string $data, int $offset) use ($little): int {
+            $raw = substr($data, $offset, 2);
+            if (strlen($raw) < 2) {
+                return 0;
+            }
+            $unpacked = unpack($little ? 'v' : 'n', $raw);
+            return (int)($unpacked[1] ?? 0);
+        };
+        $u32 = static function (string $data, int $offset) use ($little): int {
+            $raw = substr($data, $offset, 4);
+            if (strlen($raw) < 4) {
+                return 0;
+            }
+            $unpacked = unpack($little ? 'V' : 'N', $raw);
+            return (int)($unpacked[1] ?? 0);
+        };
+        if ($u16($tiff, 2) !== 42) {
+            return null;
+        }
+        $ifd = $u32($tiff, 4);
+        if ($ifd < 8 || $ifd + 2 > strlen($tiff)) {
+            return null;
+        }
+        $count = $u16($tiff, $ifd);
+        for ($i = 0; $i < $count; $i++) {
+            $entry = $ifd + 2 + ($i * 12);
+            if ($entry + 12 > strlen($tiff)) {
+                break;
+            }
+            if ($u16($tiff, $entry) !== 0x0112) {
+                continue;
+            }
+            $value = $u16($tiff, $entry + 8);
+            return ($value >= 1 && $value <= 8) ? $value : 1;
+        }
+        return null;
+    }
+
+    /**
      * @return array{0:float,1:float}|null
      */
     private static function parseRatio(string $ratio): ?array
@@ -500,7 +638,7 @@ final class CommunicationTrainingThumbnailRenderer
         if ($backgroundBytes === null || $backgroundBytes === '') {
             return $canvas;
         }
-        $photo = @imagecreatefromstring($backgroundBytes);
+        $photo = CommunicationTrainingThumbnailRenderer::imageFromBytes($backgroundBytes);
         if ($photo === false) {
             return $canvas;
         }

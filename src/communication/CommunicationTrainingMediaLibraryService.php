@@ -70,6 +70,82 @@ final class CommunicationTrainingMediaLibraryService
     }
 
     /**
+     * Rewrite stored width/height/orientation from JPEG EXIF so iPhone portraits
+     * are not kept as coded landscape stills.
+     *
+     * @return array{updated:int,unchanged:int,failed:int}
+     */
+    public function reclassifyStoredOrientations(): array
+    {
+        $this->requireTable();
+        $stmt = $this->pdo->query(
+            'SELECT id, storage_key, width, height, orientation, analysis_json
+             FROM ipca_training_media_library WHERE deleted_at_utc IS NULL'
+        );
+        $updated = 0;
+        $unchanged = 0;
+        $failed = 0;
+        $write = $this->pdo->prepare(
+            'UPDATE ipca_training_media_library
+             SET width = ?, height = ?, orientation = ?, analysis_json = ?
+             WHERE id = ?'
+        );
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            try {
+                $bytes = $this->store->getBytes((string)($row['storage_key'] ?? ''));
+                if (!is_string($bytes) || $bytes === '') {
+                    $failed++;
+                    continue;
+                }
+                $info = @getimagesizefromstring($bytes);
+                if (!is_array($info) || (int)($info[0] ?? 0) < 1 || (int)($info[1] ?? 0) < 1) {
+                    $failed++;
+                    continue;
+                }
+                $display = CommunicationTrainingThumbnailRenderer::displaySizeFromImageBytes(
+                    $bytes,
+                    (int)$info[0],
+                    (int)$info[1]
+                );
+                $orientation = CommunicationTrainingThumbnailRenderer::orientationFromDimensions(
+                    (int)$display['width'],
+                    (int)$display['height']
+                );
+                if ($orientation === '') {
+                    $orientation = 'landscape';
+                }
+                $same = (int)$row['width'] === (int)$display['width']
+                    && (int)$row['height'] === (int)$display['height']
+                    && strtolower(trim((string)$row['orientation'])) === $orientation;
+                if ($same) {
+                    $unchanged++;
+                    continue;
+                }
+                $analysis = json_decode((string)($row['analysis_json'] ?? ''), true);
+                if (!is_array($analysis)) {
+                    $analysis = array();
+                }
+                $hash = $this->fingerprintBytes($bytes);
+                if ($this->phashUsable($hash)) {
+                    $analysis['phash'] = $hash;
+                }
+                $encoded = json_encode($analysis, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                $write->execute(array(
+                    (int)$display['width'],
+                    (int)$display['height'],
+                    $orientation,
+                    is_string($encoded) ? $encoded : (string)$row['analysis_json'],
+                    (int)$row['id'],
+                ));
+                $updated++;
+            } catch (Throwable) {
+                $failed++;
+            }
+        }
+        return array('updated' => $updated, 'unchanged' => $unchanged, 'failed' => $failed);
+    }
+
+    /**
      * @param resource $stream
      * @return array<string,mixed>
      */
@@ -99,6 +175,9 @@ final class CommunicationTrainingMediaLibraryService
         }
         $width = (int)$info[0];
         $height = (int)$info[1];
+        $display = CommunicationTrainingThumbnailRenderer::displaySizeFromImageBytes($bytes, $width, $height);
+        $width = (int)$display['width'];
+        $height = (int)$display['height'];
         $orientation = CommunicationTrainingThumbnailRenderer::orientationFromDimensions($width, $height);
         if ($orientation === '') {
             $orientation = 'landscape';
@@ -699,7 +778,7 @@ final class CommunicationTrainingMediaLibraryService
         if (!extension_loaded('gd')) {
             return '';
         }
-        $image = @imagecreatefromstring($bytes);
+        $image = CommunicationTrainingThumbnailRenderer::imageFromBytes($bytes);
         if ($image === false) {
             return '';
         }
@@ -738,7 +817,7 @@ final class CommunicationTrainingMediaLibraryService
         if (!extension_loaded('gd')) {
             return null;
         }
-        $image = @imagecreatefromstring($bytes);
+        $image = CommunicationTrainingThumbnailRenderer::imageFromBytes($bytes);
         if ($image === false) {
             return null;
         }

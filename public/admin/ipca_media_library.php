@@ -21,12 +21,12 @@ cw_header('Media Library');
 <style>
 .ml-tags { font-size: 12px; color: #4b5d73; margin: 0; max-height: 3.6em; overflow: hidden; }
 .ml-card-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; }
+.ml-sections { display:flex; flex-direction:column; gap:22px; }
+.ml-section-title { margin:0; font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; color:#64748b; }
 .ml-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; align-items:start; }
-.ml-thumb { background:#071b35; }
-.ml-thumb.landscape { aspect-ratio:16/9; }
-.ml-thumb.portrait { aspect-ratio:9/16; }
-.ml-thumb.square { aspect-ratio:1/1; }
-.ml-thumb img { width:100%; height:100%; object-fit:contain; display:block; background:#071b35; }
+.ml-grid.portrait { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+.ml-thumb { background:#071b35; overflow:hidden; }
+.ml-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
 .ia-card .ml-thumb img { height:100%; }
 </style>
 
@@ -60,7 +60,7 @@ cw_header('Media Library');
   </div>
   <div class="ia-progress" id="ml-progress" hidden><div class="ia-progress-bar" id="ml-progress-bar"></div></div>
   <p id="ml-message" class="ia-muted">JPEG, PNG, or WebP. Portrait videos only use portrait photographs; landscape videos only use landscape photographs. AI tags aircraft, cockpit/exterior, maneuvers, avionics, and environment after each upload.</p>
-  <div id="ml-grid" class="ml-grid"></div>
+  <div id="ml-grid" class="ml-sections"></div>
 </div>
 
 <script>
@@ -95,12 +95,17 @@ cw_header('Media Library');
     document.getElementById('ml-count').textContent = total + ' photograph' + (total === 1 ? '' : 's');
     document.getElementById('ml-count-landscape').textContent = landscape + ' landscape';
     document.getElementById('ml-count-portrait').textContent = portrait + ' portrait';
-    grid.innerHTML = (assets || []).map((asset) => {
+    const card = (asset) => {
       const orient = asset.orientation === 'portrait' || asset.orientation === 'square' ? asset.orientation : 'landscape';
-      const size = (asset.width && asset.height) ? (asset.width + '×' + asset.height) : '';
+      const width = Number(asset.width || 0);
+      const height = Number(asset.height || 0);
+      const ratio = (width > 0 && height > 0)
+        ? (width + ' / ' + height)
+        : (orient === 'portrait' ? '3 / 4' : (orient === 'square' ? '1 / 1' : '4 / 3'));
+      const size = (width && height) ? (width + '×' + height) : '';
       return `
       <div class="ia-card">
-        <div class="ml-thumb ${orient}">
+        <div class="ml-thumb ${orient}" style="aspect-ratio:${ratio}">
           <img src="${asset.preview_url || ''}" alt="">
         </div>
         <div class="ia-card-body">
@@ -112,7 +117,14 @@ cw_header('Media Library');
           </div>
         </div>
       </div>`;
-    }).join('') || '<p class="ia-muted">No photographs yet. Upload a batch to start the archive.</p>';
+    };
+    const portraits = (assets || []).filter((asset) => asset.orientation === 'portrait');
+    const landscapes = (assets || []).filter((asset) => asset.orientation !== 'portrait');
+    const section = (title, items, kind) => items.length
+      ? `<section class="ml-section"><h2 class="ml-section-title">${title}</h2><div class="ml-grid ${kind}">${items.map(card).join('')}</div></section>`
+      : '';
+    const html = section('Portrait', portraits, 'portrait') + section('Landscape', landscapes, 'landscape');
+    grid.innerHTML = html || '<p class="ia-muted">No photographs yet. Upload a batch to start the archive.</p>';
     grid.querySelectorAll('.ml-delete').forEach((button) => {
       button.addEventListener('click', async () => {
         const result = await fetch(api, {
