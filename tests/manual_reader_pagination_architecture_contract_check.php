@@ -149,6 +149,7 @@ require_markers(
 require_markers(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ManualReaderAPIClient.swift',
     array(
+        'URL(string: path, relativeTo: baseURL)?.absoluteURL',
         'http.url?.path.hasSuffix("/login.php")',
         'throw ManualReaderAPIError.unauthorized',
         'enum ReaderHTMLAnnotationService',
@@ -157,6 +158,12 @@ require_markers(
     ),
     $failures
 );
+$apiClientSource = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ManualReaderAPIClient.swift'
+);
+if (str_contains($apiClientSource, 'components?.path = path')) {
+    $failures[] = 'Authenticated asset URLs must not encode query strings into URL paths.';
+}
 
 $readerView = (string)file_get_contents(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ReaderView.swift'

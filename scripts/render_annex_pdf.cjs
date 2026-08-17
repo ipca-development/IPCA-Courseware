@@ -3,22 +3,7 @@
 
 const fs = require("fs");
 const { chromium } = require("./garmin/node_modules/playwright");
-
-async function launchChromium() {
-  const executablePath = String(process.env.CW_PAGINATION_CHROMIUM_EXECUTABLE || "").trim();
-  if (executablePath) {
-    return chromium.launch({ headless: true, executablePath });
-  }
-  try {
-    return await chromium.launch({ headless: true });
-  } catch (bundledError) {
-    try {
-      return await chromium.launch({ headless: true, channel: "chrome" });
-    } catch (_) {
-      throw bundledError;
-    }
-  }
-}
+const { launchChromium } = require("./playwright_chromium_launcher.cjs");
 
 async function main() {
   const inputPath = process.argv[2];
@@ -59,7 +44,7 @@ async function main() {
 <body>${pages.map(page => `<div class="annex-pdf-page">${page}</div>`).join("")}</body>
 </html>`;
 
-  const browser = await launchChromium();
+  const browser = await launchChromium(chromium);
   try {
     const page = await browser.newPage({ viewport: { width: Math.ceil(width), height: Math.ceil(height) } });
     await page.setContent(html, { waitUntil: "networkidle", timeout: 30000 });

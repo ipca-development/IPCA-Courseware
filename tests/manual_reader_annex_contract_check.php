@@ -35,6 +35,13 @@ $requirements = array(
         'printBackground: true',
         'preferCSSPageSize: true',
         'page.screenshot',
+        'playwright_chromium_launcher.cjs',
+    ),
+    'scripts/playwright_chromium_launcher.cjs' => array(
+        'fs.accessSync',
+        '/usr/bin/chromium',
+        'channel: "chrome"',
+        'No usable Chromium executable was found.',
     ),
 );
 

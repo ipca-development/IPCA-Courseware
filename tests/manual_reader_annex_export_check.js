@@ -28,7 +28,15 @@ try {
     const result = spawnSync(
       process.execPath,
       [path.join(root, "scripts/render_annex_pdf.cjs"), inputPath, outputPath],
-      { cwd: root, encoding: "utf8", timeout: 60000 }
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 60000,
+        env: {
+          ...process.env,
+          CW_PAGINATION_CHROMIUM_EXECUTABLE: "/definitely/missing/chromium",
+        },
+      }
     );
     assert.strictEqual(result.status, 0, result.stderr || result.stdout);
     assert.ok(fs.statSync(outputPath).size > 100, `${path.basename(outputPath)} is empty`);

@@ -963,6 +963,7 @@ private struct AuthenticatedCoverImage: View {
     let cachedAuthoritativeData: Data?
     @State private var image: UIImage?
     @State private var failed = false
+    @State private var failureMessage = ""
     @State private var retryRevision = 0
 
     var body: some View {
@@ -980,8 +981,12 @@ private struct AuthenticatedCoverImage: View {
                 VStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundStyle(.secondary)
+                    Text("Cover unavailable")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Button("Retry") {
                         failed = false
+                        failureMessage = ""
                         retryRevision += 1
                     }
                     .font(.caption.weight(.semibold))
@@ -994,19 +999,51 @@ private struct AuthenticatedCoverImage: View {
         .background(Color(uiColor: .secondarySystemBackground))
         .task(id: "\(url.absoluteString)-\(retryRevision)") {
             guard let client = ManualReaderSessionStore.shared.client else {
+                failureMessage = "Reader session is unavailable."
                 failed = true
                 return
             }
-            guard let response = try? await client.session.data(from: url),
-                  let http = response.1 as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode),
-                  http.mimeType == "image/png",
-                  let loaded = UIImage(data: response.0) else {
-                failed = true
-                return
+            for attempt in 0..<3 {
+                do {
+                    var request = URLRequest(url: url)
+                    request.timeoutInterval = 65
+                    request.cachePolicy = .reloadRevalidatingCacheData
+                    let (data, response) = try await client.session.data(for: request)
+                    guard let http = response as? HTTPURLResponse else {
+                        throw ManualReaderAPIError.badResponse("No HTTP response.")
+                    }
+                    if http.statusCode == 401, attempt < 2 {
+                        try await Task.sleep(for: .milliseconds(750 * (attempt + 1)))
+                        continue
+                    }
+                    guard (200...299).contains(http.statusCode) else {
+                        let detail = String(data: data, encoding: .utf8)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        throw ManualReaderAPIError.badResponse(
+                            detail?.isEmpty == false ? detail! : "HTTP \(http.statusCode)"
+                        )
+                    }
+                    guard http.mimeType == "image/png", let loaded = UIImage(data: data) else {
+                        throw ManualReaderAPIError.badResponse(
+                            "Expected PNG thumbnail; received \(http.mimeType ?? "unknown content")."
+                        )
+                    }
+                    image = loaded
+                    failureMessage = ""
+                    failed = false
+                    return
+                } catch {
+                    failureMessage = error.localizedDescription
+#if DEBUG
+                    print(
+                        "READER_COVER_FAILED url=\(url.absoluteString) "
+                            + "attempt=\(attempt + 1) error=\(failureMessage)"
+                    )
+#endif
+                    failed = true
+                    return
+                }
             }
-            image = loaded
-            failed = false
         }
     }
 }

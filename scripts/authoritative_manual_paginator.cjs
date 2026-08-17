@@ -12,22 +12,7 @@ const path = require("path");
 })();
 
 const { chromium } = require("./garmin/node_modules/playwright");
-
-async function launchChromium() {
-  const executablePath = String(process.env.CW_PAGINATION_CHROMIUM_EXECUTABLE || "").trim();
-  if (executablePath) {
-    return chromium.launch({ headless: true, executablePath });
-  }
-  try {
-    return await chromium.launch({ headless: true });
-  } catch (bundledError) {
-    try {
-      return await chromium.launch({ headless: true, channel: "chrome" });
-    } catch (_) {
-      throw bundledError;
-    }
-  }
-}
+const { launchChromium } = require("./playwright_chromium_launcher.cjs");
 
 function argument(name) {
   const index = process.argv.indexOf(`--${name}`);
@@ -163,7 +148,7 @@ async function main() {
   const hydratedSource = replacePublicationImages(source, publicationImages);
   const hydratedHeaderTemplates = replacePublicationImages(headerTemplates, publicationImages);
   const hydratedFooterTemplates = replacePublicationImages(footerTemplates, publicationImages);
-  const browser = await launchChromium();
+  const browser = await launchChromium(chromium);
   try {
     const page = await browser.newPage({
       viewport: { width: Math.ceil(pageWidth), height: Math.ceil(pageHeight) }

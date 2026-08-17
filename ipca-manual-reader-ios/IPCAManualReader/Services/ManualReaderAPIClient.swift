@@ -28,8 +28,9 @@ struct ManualReaderAPIClient {
             self.session = session
         } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 20
-            config.timeoutIntervalForResource = 30
+            // First-time authoritative cover rendering may start Chromium on the server.
+            config.timeoutIntervalForRequest = 65
+            config.timeoutIntervalForResource = 75
             config.waitsForConnectivity = false
             self.session = URLSession(configuration: config)
         }
@@ -41,9 +42,7 @@ struct ManualReaderAPIClient {
             return URL(string: path)
         }
         if path.hasPrefix("/") {
-            var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-            components?.path = path
-            return components?.url
+            return URL(string: path, relativeTo: baseURL)?.absoluteURL
         }
         return baseURL.appending(path: path)
     }
