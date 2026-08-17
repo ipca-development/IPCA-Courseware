@@ -120,6 +120,22 @@ final class ControlledPublishingReaderService
             ? $this->getReadingProgress($userId, $bookKey)
             : null;
         $lifecycle = (string)($version['lifecycle_status'] ?? '');
+        $pageMapHash = '';
+        $manifestHash = '';
+        try {
+            require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+            $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+            if ($this->pageMapStore()->pageCount((int)$version['id'], $profile) > 0) {
+                $summary = $this->pageMapStore()->loadPageMapSummary(
+                    (int)$version['id'],
+                    $profile
+                );
+                $pageMapHash = (string)($summary['page_map_hash'] ?? '');
+                $manifestHash = (string)($summary['manifest_hash'] ?? '');
+            }
+        } catch (Throwable $e) {
+            // Library availability must not depend on optional update fingerprints.
+        }
 
         return array(
             'book_id' => (int)($book['id'] ?? 0),
@@ -140,6 +156,8 @@ final class ControlledPublishingReaderService
             'cover_fallback' => $cover['fallback'],
             'has_progress' => is_array($progress),
             'has_page_map' => $isPreview ? true : $this->safeHasApprovedPageMap($version, $bookKey),
+            'page_map_hash' => $pageMapHash !== '' ? $pageMapHash : null,
+            'manifest_hash' => $manifestHash !== '' ? $manifestHash : null,
             'continue_section_id' => is_array($progress) ? (int)($progress['section_id'] ?? 0) : null,
             'continue_stable_anchor' => is_array($progress) ? (string)($progress['stable_anchor'] ?? '') : '',
             'continue_page_number' => is_array($progress) ? (int)($progress['scroll_pct'] ?? 0) : null,

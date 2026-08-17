@@ -103,6 +103,20 @@ struct OfflineManualPackage: Codable {
             && hasCanonicalPublicationPackage
     }
 
+    func matchesPublication(_ book: LibraryBook) -> Bool {
+        if let expected = book.pageMapHash,
+           !expected.isEmpty,
+           pageMap.pageMapHash != expected {
+            return false
+        }
+        if let expected = book.manifestHash,
+           !expected.isEmpty,
+           publicationPackage?.manifestHash != expected {
+            return false
+        }
+        return true
+    }
+
     var bookStyleCSS: String? {
         hasVerifiedPublicationStyle ? publicationPackage?.css.content : nil
     }
@@ -329,8 +343,10 @@ final class ManualDownloadManager: ObservableObject {
         for book in books {
             if let package = await diskStore.load(bookID: book.id, versionID: book.versionId) {
                 packages[book.id] = package
-                if package.isFullyDownloaded {
+                if package.isFullyDownloaded && package.matchesPublication(book) {
                     statuses[book.id] = .availableOffline(package.downloadedAt)
+                } else if package.isFullyDownloaded {
+                    statuses[book.id] = .updateAvailable("earlier draft")
                 } else if let prior = await diskStore.latestOtherVersion(
                     bookKey: book.bookKey,
                     excludingVersionID: book.versionId
@@ -363,7 +379,8 @@ final class ManualDownloadManager: ObservableObject {
     ) async throws -> OfflineManualPackage {
         if !forceRefresh,
            let existing = await package(for: book),
-           existing.isFullyDownloaded {
+           existing.isFullyDownloaded,
+           existing.matchesPublication(book) {
             return existing
         }
         if let active = downloadTasks[book.id] {
@@ -388,7 +405,8 @@ final class ManualDownloadManager: ObservableObject {
     ) async throws -> OfflineManualPackage {
         if !forceRefresh,
            let existing = await package(for: book),
-           existing.isFullyDownloaded {
+           existing.isFullyDownloaded,
+           existing.matchesPublication(book) {
             return existing
         }
 

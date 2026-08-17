@@ -100,7 +100,21 @@ require_markers(
         'case updateAvailable(String)',
         'downloadTasks',
         'var isFullyDownloaded: Bool',
+        'func matchesPublication(_ book: LibraryBook) -> Bool',
+        'pageMap.pageMapHash != expected',
+        'publicationPackage?.manifestHash != expected',
+        'statuses[book.id] = .updateAvailable("earlier draft")',
         'return try await completeDownload(',
+    ),
+    $failures
+);
+
+require_markers(
+    $root . '/src/publishing/ControlledPublishingReaderService.php',
+    array(
+        "'page_map_hash' => \$pageMapHash !== '' ? \$pageMapHash : null",
+        "'manifest_hash' => \$manifestHash !== '' ? \$manifestHash : null",
+        'Library availability must not depend on optional update fingerprints.',
     ),
     $failures
 );

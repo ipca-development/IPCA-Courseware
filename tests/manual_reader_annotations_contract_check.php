@@ -167,8 +167,19 @@ annotation_require(
     $root . '/public/assets/controlled_book_editor.js',
     array(
         'loadReviewThreadMarkers',
+        'reviewThreadTextRange',
         'showReviewThreadPanel',
         'cpb-review-thread-pin',
+        "CSS.highlights.set('cpb-review-remarks', new Highlight(...reviewRanges))",
+        "pin.textContent = '•••'",
+    ),
+    $failures
+);
+annotation_require(
+    $root . '/public/assets/controlled_book_editor.css',
+    array(
+        '::highlight(cpb-review-remarks)',
+        '.cpb-review-thread-panel__regulation',
     ),
     $failures
 );

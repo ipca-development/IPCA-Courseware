@@ -237,8 +237,10 @@
     contentHeight: 744,
     headerTop: 48,
     headerHeight: 84,
+    headerGap: 20,
     footerTop: 920,
     footerHeight: 72,
+    footerGap: 24,
     bottomMargin: 64,
   };
 
@@ -1299,12 +1301,14 @@
         parseInt(state.sectionPageStarts[state.sectionId] || '1', 10) + pageCount - 1
       );
       var preview = document.createElement('div');
-      preview.innerHTML = previewHeaderHtml(
-        state.pageHeader,
-        state.pageFooter,
-        state.liveProjection.enabled ? 'Editing layout' : pageNumber,
-        state.liveProjection.enabled ? 'Approximate' : pageTotal
-      );
+      preview.innerHTML = state.pageLayout && state.pageLayout.hide_header_footer
+        ? ''
+        : previewHeaderHtml(
+          state.pageHeader,
+          state.pageFooter,
+          state.liveProjection.enabled ? 'Editing layout' : pageNumber,
+          state.liveProjection.enabled ? 'Approximate' : pageTotal
+        );
       var header = preview.querySelector('.cpb-page-header');
       var footer = preview.querySelector('.cpb-page-footer');
       if (header) {
@@ -1346,6 +1350,68 @@
     }
   }
 
+  function measurePrintFurnitureGeometry(sheet) {
+    var hideFurniture = !!(state.pageLayout && state.pageLayout.hide_header_footer);
+    var host = document.createElement('div');
+    host.setAttribute('aria-hidden', 'true');
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;width:704px;'
+      + 'height:auto;visibility:hidden;overflow:visible;pointer-events:none;';
+    var sheetStyle = window.getComputedStyle(sheet);
+    [
+      '--cpb-frame-radius',
+      '--cpb-frame-border-color',
+      '--cpb-frame-border-width',
+    ].forEach(function (property) {
+      var value = sheetStyle.getPropertyValue(property);
+      if (value) host.style.setProperty(property, value);
+    });
+    host.innerHTML = hideFurniture
+      ? ''
+      : previewHeaderHtml(state.pageHeader, state.pageFooter, 1, 1);
+    document.body.appendChild(host);
+
+    function measure(selector) {
+      var element = host.querySelector(selector);
+      if (!element) return 0;
+      element.style.setProperty('position', 'static', 'important');
+      element.style.setProperty('inset', 'auto', 'important');
+      element.style.setProperty('width', '100%', 'important');
+      element.style.setProperty('height', 'auto', 'important');
+      element.style.setProperty('margin', '0', 'important');
+      element.style.setProperty('box-sizing', 'border-box', 'important');
+      return Math.max(
+        element.getBoundingClientRect().height,
+        element.scrollHeight
+      );
+    }
+
+    var headerHeight = measure('.cpb-page-header');
+    var footerHeight = measure('.cpb-page-footer');
+    host.remove();
+
+    PRINT_PAGE.headerHeight = headerHeight;
+    PRINT_PAGE.footerHeight = footerHeight;
+    PRINT_PAGE.contentTop = PRINT_PAGE.headerTop
+      + headerHeight
+      + (headerHeight > 0 ? PRINT_PAGE.headerGap : 0);
+    PRINT_PAGE.footerTop = PRINT_PAGE.height - PRINT_PAGE.bottomMargin - footerHeight;
+    PRINT_PAGE.contentHeight = PRINT_PAGE.footerTop
+      - (footerHeight > 0 ? PRINT_PAGE.footerGap : 0)
+      - PRINT_PAGE.contentTop;
+    if (PRINT_PAGE.contentHeight <= 0) {
+      PRINT_PAGE.contentTop = 152;
+      PRINT_PAGE.contentHeight = 744;
+      PRINT_PAGE.headerHeight = 84;
+      PRINT_PAGE.footerTop = 920;
+      PRINT_PAGE.footerHeight = 72;
+    }
+
+    sheet.style.setProperty('--cpb-print-content-top', PRINT_PAGE.contentTop + 'px');
+    sheet.style.setProperty('--cpb-print-header-height', PRINT_PAGE.headerHeight + 'px');
+    sheet.style.setProperty('--cpb-print-footer-top', PRINT_PAGE.footerTop + 'px');
+    sheet.style.setProperty('--cpb-print-footer-height', PRINT_PAGE.footerHeight + 'px');
+  }
+
   function applyUnifiedPrintLayout() {
     var sheet = canvasEl.querySelector('.cpb-sheet');
     var body = sheet ? sheet.querySelector('[data-blocks-root="1"]') : null;
@@ -1353,6 +1419,7 @@
     var caret = capturePrintCaret();
     removeAutomaticPrintBreaks(sheet);
     sheet.classList.add('cpb-print-layout');
+    measurePrintFurnitureGeometry(sheet);
     var blocks = Array.prototype.slice.call(body.querySelectorAll(':scope > .cpb-block'));
     var manualAnchors = {};
     state.manualBreaks.forEach(function (row) {
@@ -2878,15 +2945,94 @@
     return text.slice(0, maxLen - 3) + '...';
   }
 
+  function reviewThreadTextRange(target, thread) {
+    if (!target || typeof document.createTreeWalker !== 'function') return null;
+    var nodes = [];
+    var text = '';
+    var walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        var parent = node.parentElement;
+        if (!parent || parent.closest(
+          '.cpb-block-controls,.cpb-review-thread-pin,button,input,select,textarea'
+        )) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    var node;
+    while ((node = walker.nextNode())) {
+      nodes.push({ node: node, start: text.length, end: text.length + node.nodeValue.length });
+      text += node.nodeValue;
+    }
+    if (!nodes.length || !text) return null;
+
+    var selected = String(thread.selected_text || '').trim();
+    if (!selected) return null;
+    var start = Number(thread.start_offset);
+    var end = Number(thread.end_offset);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start
+      || end > text.length
+      || text.slice(start, end).replace(/\s+/g, ' ').trim()
+        !== selected.replace(/\s+/g, ' ').trim()) {
+      start = text.indexOf(selected);
+      end = start >= 0 ? start + selected.length : -1;
+    }
+    if (start < 0 || end <= start) {
+      var normalized = '';
+      var rawOffsets = [];
+      var previousWasSpace = false;
+      Array.from(text).forEach(function (char, rawOffset) {
+        var isSpace = /\s/.test(char);
+        if (isSpace && previousWasSpace) return;
+        normalized += isSpace ? ' ' : char;
+        rawOffsets.push(rawOffset);
+        previousWasSpace = isSpace;
+      });
+      var normalizedSelected = selected.replace(/\s+/g, ' ').trim();
+      var normalizedStart = normalized.indexOf(normalizedSelected);
+      if (normalizedStart < 0) return null;
+      start = rawOffsets[normalizedStart];
+      var normalizedEnd = normalizedStart + normalizedSelected.length - 1;
+      end = (rawOffsets[normalizedEnd] ?? start) + 1;
+    }
+
+    function pointForOffset(offset, preferEnd) {
+      for (var i = 0; i < nodes.length; i += 1) {
+        var item = nodes[i];
+        if (offset < item.end || (preferEnd && offset === item.end)) {
+          return {
+            node: item.node,
+            offset: Math.max(0, Math.min(item.node.nodeValue.length, offset - item.start)),
+          };
+        }
+      }
+      var last = nodes[nodes.length - 1];
+      return { node: last.node, offset: last.node.nodeValue.length };
+    }
+
+    var startPoint = pointForOffset(start, false);
+    var endPoint = pointForOffset(end, true);
+    var range = document.createRange();
+    range.setStart(startPoint.node, startPoint.offset);
+    range.setEnd(endPoint.node, endPoint.offset);
+    return range.collapsed ? null : range;
+  }
+
   function loadReviewThreadMarkers() {
     canvasEl.querySelectorAll('.cpb-review-thread-pin').forEach(function (pin) {
       pin.remove();
     });
+    if (window.CSS && CSS.highlights) {
+      CSS.highlights.delete('cpb-review-remarks');
+    }
     if (!state.versionId) return;
     apiGet(
       apiBase + '?action=review_threads&version_id=' + encodeURIComponent(String(state.versionId))
     ).then(function (res) {
       if (!res || !res.ok || !Array.isArray(res.threads)) return;
+      var reviewRanges = [];
       res.threads.forEach(function (thread) {
         var anchor = String(thread.stable_anchor || '');
         var fragment = String(thread.source_fragment_id || '');
@@ -2905,12 +3051,17 @@
         }
         if (!target) return;
         var block = target.closest('.cpb-block') || target;
+        var range = reviewThreadTextRange(target, thread);
+        if (range) reviewRanges.push(range);
         var pin = document.createElement('button');
         pin.type = 'button';
         pin.className = 'cpb-review-thread-pin';
-        pin.textContent = String((thread.comments || []).length || 1);
+        pin.textContent = '•••';
         pin.title = 'Open reviewer notes';
-        pin.setAttribute('aria-label', 'Open reviewer notes');
+        pin.setAttribute(
+          'aria-label',
+          'Open reviewer notes (' + String((thread.comments || []).length || 1) + ')'
+        );
         pin.addEventListener('click', function (event) {
           event.preventDefault();
           event.stopPropagation();
@@ -2918,6 +3069,9 @@
         });
         block.appendChild(pin);
       });
+      if (reviewRanges.length && window.CSS && CSS.highlights && window.Highlight) {
+        CSS.highlights.set('cpb-review-remarks', new Highlight(...reviewRanges));
+      }
     }).catch(function () {
       // Reviewer notes are additive and must never interrupt authoring.
     });
@@ -2951,7 +3105,11 @@
       }).join('')
       + '</div><form class="cpb-review-thread-panel__composer">'
       + '<textarea name="body" rows="2" placeholder="Reply to reviewer thread" required></textarea>'
-      + '<button type="submit">Send</button></form></section>';
+      + '<button type="submit" aria-label="Send reviewer reply">'
+      + '<span aria-hidden="true">↑</span></button>'
+      + '<small class="cpb-review-thread-panel__regulation">'
+      + 'Regulation references will be enabled in the next phase.'
+      + '</small></form></section>';
     panel.hidden = false;
     panel.querySelectorAll('[data-review-close]').forEach(function (button) {
       button.addEventListener('click', function () {
@@ -6091,12 +6249,12 @@
     var footerLeft = escapeHtml(resolveHeaderTokensPreview(f.left_text, pageNumber, pageTotal)).replace(/\n/g, '<br>');
     var footerCenter = escapeHtml(resolveHeaderTokensPreview(f.center_text, pageNumber, pageTotal)).replace(/\n/g, '<br>');
     var footerRight = escapeHtml(resolveHeaderTokensPreview(f.right_text, pageNumber, pageTotal)).replace(/\n/g, '<br>');
-    return '<header class="cpb-page-header">'
+    return (h.enabled ? '<header class="cpb-page-header">'
       + '<table class="cpb-page-header-table" role="presentation"><tr>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--left"' + headerRowCellStyleAttr(headerRow) + '>' + logo + '</td>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--center ' + headerFontClass(h.center_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(h, 'center'), headerRow) + '>' + center + '</td>'
       + '<td class="cpb-page-header-cell cpb-page-header-cell--right ' + headerFontClass(h.right_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(h, 'right'), headerRow) + '>' + right + '</td>'
-      + '</tr></table></header>'
+      + '</tr></table></header>' : '')
       + (f.enabled ? '<footer class="cpb-page-footer">'
         + '<table class="cpb-page-header-table cpb-page-footer-table" role="presentation"><tr>'
         + '<td class="cpb-page-header-cell cpb-page-header-cell--left ' + headerFontClass(f.left_font_family) + '"' + headerCellStyleAttr(headerColumnFromBand(f, 'left'), footerRow) + '>' + footerLeft + '</td>'
@@ -9533,7 +9691,7 @@
       + 'Use variables for dynamic content — page numbers are resolved automatically in the e-reader.</p>'
       + '<section class="cpb-header-section">'
       + '<label class="cpb-header-enable"><input type="checkbox" id="cpbHeaderEnabled"' + (header.enabled ? ' checked' : '') + '> Show page header</label>'
-      + '<label class="cpb-header-row-height">Row height <select class="cpb-style-input" id="cpbHeaderRowHeight">'
+      + '<label class="cpb-header-row-height">Minimum row height <select class="cpb-style-input" id="cpbHeaderRowHeight">'
       + headerRowHeightOptions(parseInt(header.row_height, 10) || 32) + '</select></label>'
       + '<div class="cpb-header-grid">'
       + '<div class="cpb-header-col">'
@@ -9563,7 +9721,7 @@
       + '</section>'
       + '<section class="cpb-header-section cpb-header-section--footer">'
       + '<label class="cpb-header-enable"><input type="checkbox" id="cpbFooterEnabled"' + (footer.enabled ? ' checked' : '') + '> Show page footer</label>'
-      + '<label class="cpb-header-row-height">Row height <select class="cpb-style-input" id="cpbFooterRowHeight">'
+      + '<label class="cpb-header-row-height">Minimum row height <select class="cpb-style-input" id="cpbFooterRowHeight">'
       + headerRowHeightOptions(parseInt(footer.row_height, 10) || 26) + '</select></label>'
       + '<div class="cpb-header-grid cpb-header-grid--footer">'
       + '<div class="cpb-header-col"><h4>Footer left</h4>'

@@ -55,6 +55,8 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     var logoUrl: String?
     var hasProgress: Bool
     var hasPageMap: Bool
+    var pageMapHash: String?
+    var manifestHash: String?
     var continueSectionId: Int?
     var continueStableAnchor: String?
     var continuePageNumber: Int?
@@ -78,6 +80,8 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         case logoUrl = "logo_url"
         case hasProgress = "has_progress"
         case hasPageMap = "has_page_map"
+        case pageMapHash = "page_map_hash"
+        case manifestHash = "manifest_hash"
         case continueSectionId = "continue_section_id"
         case continueStableAnchor = "continue_stable_anchor"
         case continuePageNumber = "continue_page_number"
