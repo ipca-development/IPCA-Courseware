@@ -854,6 +854,29 @@
   font-size: 11px !important;
 }
 
+.cmp-page .cpb-struct-card button.cpb-outline-btn--demote,
+.cpb-struct-card button.cpb-outline-btn--demote {
+  width: auto !important;
+  min-width: 112px !important;
+  max-width: none !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  max-height: 28px !important;
+  padding: 0 10px !important;
+  border-radius: 8px !important;
+  background: #e6eef8 !important;
+  color: #12355f !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  white-space: nowrap;
+}
+
+.cmp-page .cpb-struct-card button.cpb-outline-btn--demote:hover,
+.cpb-struct-card button.cpb-outline-btn--demote:hover {
+  background: #d7e5f5 !important;
+}
+
 .cmp-page .cpb-struct-promote,
 .cpb-struct-promote {
   flex: 0 0 auto;

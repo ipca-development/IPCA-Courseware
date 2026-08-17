@@ -3725,7 +3725,7 @@
         actions.appendChild(outlineSmallBtn('↓', '', index === part.chapters.length - 1, function () {
           outlinePost('move_outline_chapter', { section_id: chapter.section_id, direction: 'down' }).catch(showError);
         }));
-        actions.appendChild(outlineSmallBtn('Make subchapter', '', index === 0, function () {
+        actions.appendChild(outlineSmallBtn('Make subchapter', 'cpb-outline-btn--demote', index === 0, function () {
           var target = part.chapters[index - 1];
           if (!target) return;
           if (!window.confirm(

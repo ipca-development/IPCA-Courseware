@@ -193,6 +193,11 @@ if (!is_string($css) || !str_contains($css, 'min-height: 22px !important')) {
 if (!is_string($css) || !str_contains($css, 'width: 18px !important')) {
     $failures[] = 'Outline move/delete buttons must stay compact against global compliance button styles.';
 }
+if (!is_string($css)
+    || !str_contains($css, 'button.cpb-outline-btn--demote')
+    || !str_contains($css, 'min-width: 112px !important')) {
+    $failures[] = 'The labeled MAIN chapter demotion action must remain readable.';
+}
 if (!is_string($structure) || !str_contains($structure, "\$meta['outline_locked']")) {
     $failures[] = 'Import overlay must not overwrite author-locked MAIN titles.';
 }
