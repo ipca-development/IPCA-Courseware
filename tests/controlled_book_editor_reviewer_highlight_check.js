@@ -32,11 +32,14 @@ function extractFunction(source, name, nextName) {
     await page.setContent(
       '<div id="target" class="cpb-block" data-block-id="7" '
         + 'data-stable-anchor="block-7"><p>His/Her <strong>responsibilities</strong> are:</p></div>'
+        + '<div id="list-target" class="cpb-block" data-block-id="8" '
+        + 'data-stable-anchor="TM_GEN-BLOCK-008"><ul><li>Determine the intentions</li></ul></div>'
     );
     await page.addScriptTag({
       content: `
         var state = { sectionId: 3, sectionPageStarts: { 3: 12 } };
         var PRINT_PAGE = { height: 1056, gap: 28 };
+        var canvasEl = document.body;
         function printY() { return 0; }
         function escapeHtml(value) {
           return String(value == null ? "" : value)
@@ -79,6 +82,10 @@ function extractFunction(source, name, nextName) {
         timestamp: panel.querySelector(".cpb-review-thread-message time")?.textContent,
         draft: panel.querySelector("textarea")?.value,
         anchor,
+        compositeTarget: reviewThreadTarget({
+          source_fragment_id: "TM_GEN-SECTION/TM_GEN-BLOCK-008/li-0",
+          selected_text: "Determine the intentions",
+        })?.id,
       };
     });
 
@@ -104,6 +111,9 @@ function extractFunction(source, name, nextName) {
       || result.anchor?.end_offset <= result.anchor?.start_offset
     ) {
       throw new Error("Editor reviewer selection did not produce a stable source anchor.");
+    }
+    if (result.compositeTarget !== "list-target") {
+      throw new Error("Authoritative list fragment did not resolve to its editable source block.");
     }
     process.stdout.write("Controlled book editor reviewer highlight check: PASS\n");
   } finally {

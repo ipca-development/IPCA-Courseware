@@ -161,6 +161,8 @@ require_markers(
         'readerPageReady',
         'document.fonts?.ready',
         'verifyStableGeometry',
+        'refreshZoomGestureState',
+        'panGestureRecognizer.isEnabled = zoomed',
     ),
     $failures
 );

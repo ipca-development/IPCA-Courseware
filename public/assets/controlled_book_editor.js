@@ -3301,10 +3301,50 @@
     }, 5000);
   }
 
+  function reviewThreadTarget(thread) {
+    var anchor = String(thread.stable_anchor || '');
+    var fragment = String(thread.source_fragment_id || '');
+    var target = null;
+    if (anchor) {
+      target = canvasEl.querySelector(
+        '[data-stable-anchor="' + CSS.escape(anchor) + '"],#' + CSS.escape(anchor)
+      );
+    }
+    if (!target && fragment) {
+      target = canvasEl.querySelector(
+        '[data-source-fragment-id="' + CSS.escape(fragment) + '"],'
+          + '[data-fragment-id="' + CSS.escape(fragment) + '"],'
+          + '[data-stable-anchor="' + CSS.escape(fragment) + '"]'
+      );
+    }
+    if (!target && fragment.indexOf('/') !== -1) {
+      var fragmentParts = fragment.split('/').filter(Boolean).reverse();
+      fragmentParts.some(function (part) {
+        target = canvasEl.querySelector(
+          '[data-stable-anchor="' + CSS.escape(part) + '"],#' + CSS.escape(part)
+        );
+        return !!target;
+      });
+    }
+    if (!target) {
+      var selected = String(thread.selected_text || '').replace(/\s+/g, ' ').trim();
+      if (selected) {
+        var candidates = canvasEl.querySelectorAll(
+          '.cpb-block,[data-blocks-root="1"]'
+        );
+        target = Array.prototype.find.call(candidates, function (candidate) {
+          return String(candidate.textContent || '').replace(/\s+/g, ' ').indexOf(selected) !== -1;
+        }) || null;
+      }
+    }
+    return target;
+  }
+
   function loadReviewThreadMarkers() {
     if (!state.versionId) return;
     return apiGet(
       apiBase + '?action=review_threads&version_id=' + encodeURIComponent(String(state.versionId))
+        + '&sync=' + Date.now()
     ).then(function (res) {
       if (!res || !res.ok || !Array.isArray(res.threads)) return;
       canvasEl.querySelectorAll('.cpb-review-thread-pin').forEach(function (pin) {
@@ -3315,21 +3355,7 @@
       }
       var reviewRanges = [];
       res.threads.forEach(function (thread) {
-        var anchor = String(thread.stable_anchor || '');
-        var fragment = String(thread.source_fragment_id || '');
-        var target = null;
-        if (anchor) {
-          target = canvasEl.querySelector(
-            '[data-stable-anchor="' + CSS.escape(anchor) + '"],#' + CSS.escape(anchor)
-          );
-        }
-        if (!target && fragment) {
-          target = canvasEl.querySelector(
-            '[data-source-fragment-id="' + CSS.escape(fragment) + '"],'
-              + '[data-fragment-id="' + CSS.escape(fragment) + '"],'
-              + '[data-stable-anchor="' + CSS.escape(fragment) + '"]'
-          );
-        }
+        var target = reviewThreadTarget(thread);
         if (!target) return;
         var block = target.closest('.cpb-block') || target;
         var range = reviewThreadTextRange(target, thread);

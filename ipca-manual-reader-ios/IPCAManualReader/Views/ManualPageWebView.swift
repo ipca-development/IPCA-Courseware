@@ -82,6 +82,7 @@ struct ManualPageWebView: UIViewRepresentable {
         context.coordinator.onShareAnnex = onShareAnnex
         context.coordinator.onExternalLink = onExternalLink
         context.coordinator.onZoomChanged = onZoomChanged
+        context.coordinator.refreshZoomGestureState(in: webView.scrollView)
         let scaleExpression: String = switch zoomMode {
         case .fitPage:
             "Math.min(\(containerSize.width) / contentWidth, \(containerSize.height) / contentHeight)"
@@ -209,10 +210,22 @@ struct ManualPageWebView: UIViewRepresentable {
             zoomObservation = scrollView.observe(\.zoomScale, options: [.initial, .new]) {
                 [weak self, weak scrollView] _, _ in
                 guard let self, let scrollView else { return }
-                self.onZoomChanged(
-                    scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
-                )
+                self.refreshZoomGestureState(in: scrollView)
             }
+        }
+
+        func refreshZoomGestureState(in scrollView: UIScrollView) {
+            let zoomed = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
+            // A page at its fitted scale has nothing to pan. Letting the nested
+            // WKWebView pan recognizer remain active makes it compete with the
+            // enclosing UIPageViewController's landscape page-curl gesture,
+            // particularly on older iPads. Pinching remains available because
+            // UIScrollView uses a separate pinch recognizer; panning is restored
+            // as soon as the page is genuinely zoomed.
+            if scrollView.panGestureRecognizer.isEnabled != zoomed {
+                scrollView.panGestureRecognizer.isEnabled = zoomed
+            }
+            onZoomChanged(zoomed)
         }
 
         func userContentController(

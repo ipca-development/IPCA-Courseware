@@ -194,6 +194,8 @@ annotation_require(
     array(
         'loadReviewThreadMarkers',
         'reviewThreadTextRange',
+        'reviewThreadTarget',
+        "fragment.split('/').filter(Boolean).reverse()",
         'showReviewThreadPanel',
         'cpb-review-thread-pin',
         "CSS.highlights.set('cpb-review-remarks', new Highlight(...reviewRanges))",
