@@ -151,6 +151,7 @@ bm_contract_assert(
 bm_contract_assert(
     'revision page-map state is version-specific and generated on creation',
     str_contains($foundation, "unset(\$sourceMeta['reader_page_map'])")
+        && str_contains($workflow, 'refreshRevisionHighlights')
         && str_contains($workflow, 'queueInitialPageMap')
         && str_contains($workflow, "'mutation_kind' => 'create_revision'")
 );

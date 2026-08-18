@@ -17,6 +17,17 @@
 .cpb-image-resize {
   display: none !important;
 }
+.cpb-block--changed::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 4px;
+  background: #000;
+  border-radius: 2px;
+  pointer-events: none;
+}
 
 /* Authoritative page geometry: Book Style frames are the only layout. */
 .reader-canonical-page.cpb-sheet {
@@ -165,11 +176,11 @@
 }
 
 .cpb-header-preview .cpb-page-header {
-  margin-bottom: 12px;
+  margin-bottom: 20px;
 }
 
 .cpb-header-preview .cpb-page-footer {
-  margin-top: 0;
+  margin-top: 24px;
 }
 
 .cpb-sheet-org {
@@ -1029,7 +1040,7 @@ ol.cpb-list > li[data-indent-level="8"] {
   width: 100%;
   min-height: 220px;
   overflow: hidden;
-  background: #f1f5f9;
+  background: #0f2744;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1049,7 +1060,7 @@ ol.cpb-list > li[data-indent-level="8"] {
 .cpb-cover-image-placeholder {
   font-family: system-ui, sans-serif;
   font-size: 10pt;
-  color: #64748b;
+  color: #ffffff;
   padding: 48px 24px;
   text-align: center;
 }
@@ -1555,4 +1566,8 @@ ol.cpb-list > li[data-indent-level="8"] {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px dashed #cbd5e1;
+}
+
+.cpb-block {
+  position: relative;
 }

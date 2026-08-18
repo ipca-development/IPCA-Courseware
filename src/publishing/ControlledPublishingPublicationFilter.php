@@ -28,13 +28,6 @@ final class ControlledPublishingPublicationFilter
     );
 
     /** @var list<string> */
-    private const PUBLICATION_ONLY_STRIP_CLASSES = array(
-        'cpb-block--changed',
-        'cpb-block--new',
-        'cpb-block--modified',
-    );
-
-    /** @var list<string> */
     public const CHROME_ATTRIBUTES = array(
         'data-dropzone',
         'data-editor-only',
@@ -204,15 +197,6 @@ final class ControlledPublishingPublicationFilter
             }
             if ($element->hasAttribute('data-change-status')) {
                 $element->removeAttribute('data-change-status');
-            }
-            $classes = array_values(array_diff(
-                self::classTokens($element),
-                self::PUBLICATION_ONLY_STRIP_CLASSES
-            ));
-            if ($classes === array()) {
-                $element->removeAttribute('class');
-            } else {
-                $element->setAttribute('class', implode(' ', $classes));
             }
         }
         foreach ($remove as $element) {

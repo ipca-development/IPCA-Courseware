@@ -81,6 +81,17 @@ $header = <<<'CSS'
 .cpb-image-resize {
   display: none !important;
 }
+.cpb-block--changed::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 4px;
+  background: #000;
+  border-radius: 2px;
+  pointer-events: none;
+}
 
 /* Authoritative page geometry: Book Style frames are the only layout. */
 .reader-canonical-page.cpb-sheet {

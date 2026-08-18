@@ -39,6 +39,33 @@ assert_true(str_contains($filtered, '<img'), 'img element must remain', $failure
 assert_true(str_contains($filtered, 'Cabin safety diagram'), 'image caption must remain', $failures);
 assert_true(str_contains($filtered, 'cpb-image'), 'image figure must remain', $failures);
 
+$changed = '<article class="cpb-block cpb-block--paragraph cpb-block--changed cpb-block--modified"'
+    . ' data-change-status="modified"><div class="cpb-change-marker"></div>'
+    . '<p>Changed governed text.</p></article>';
+$changedFiltered = ControlledPublishingPublicationFilter::filterHtml($changed);
+assert_true(
+    str_contains($changedFiltered, 'cpb-block--changed'),
+    'published changed-block class must remain for the revision bar',
+    $failures
+);
+assert_true(
+    !str_contains($changedFiltered, 'cpb-change-marker'),
+    'editor change-marker element must be replaced by publication CSS',
+    $failures
+);
+assert_true(
+    !str_contains($changedFiltered, 'data-change-status'),
+    'editor-only change status attribute must not survive filtering',
+    $failures
+);
+$readerCss = (string)file_get_contents($root . '/public/assets/manual_reader_content.css');
+assert_true(
+    str_contains($readerCss, '.cpb-block--changed::before')
+        && str_contains($readerCss, 'background: #000'),
+    'reader publication CSS must draw a black revision bar',
+    $failures
+);
+
 $shell = '<div class="cpb-sheet" data-section-id="4">'
     . '<div class="cpb-page-layout-toggle" contenteditable="false">Hide header/footer</div>'
     . '<header class="cpb-page-header"><span>EuroPilot Center</span></header>'

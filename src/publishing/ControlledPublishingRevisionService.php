@@ -116,7 +116,8 @@ final class ControlledPublishingRevisionService
         }
 
         $stmt = $this->pdo->prepare("
-            SELECT b.*, s.title AS section_title, s.section_key
+            SELECT b.*, s.title AS section_title, s.section_key,
+                   s.sort_order AS section_sort_order
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
             WHERE b.book_version_id = :version_id
@@ -184,8 +185,9 @@ final class ControlledPublishingRevisionService
                  :payload_json, :content_hash, 1, :actor, :actor)
         ");
 
+        $versionLabel = $this->revisionDisplayLabel($versionId);
         $summaryPayload = array(
-            'text' => 'Auto-detected changes',
+            'text' => 'Revision ' . $versionLabel . ' Changes',
             'level' => 2,
         );
         $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, 'summary', 'heading', $summaryPayload, $sort, $actorUserId);
@@ -206,33 +208,59 @@ final class ControlledPublishingRevisionService
             return array('section_id' => $sectionId, 'blocks_created' => $created + 1, 'changes_count' => 0);
         }
 
-        $lastPart = null;
+        $byPart = array();
         foreach ($summaries as $summary) {
             $part = trim((string)($summary['part'] ?? ''));
-            if ($part !== '' && $part !== $lastPart) {
-                $partPayload = array(
-                    'html' => '<p>' . htmlspecialchars($part, ENT_QUOTES, 'UTF-8') . '</p>',
-                    'paragraph_style' => 'subtitle_2',
-                );
-                $partKey = 'part_' . substr(hash('sha256', $part), 0, 12);
-                $this->insertHighlightBlock(
-                    $ins,
-                    $versionId,
-                    $sectionId,
-                    $stableBase,
-                    $partKey,
-                    'paragraph',
-                    $partPayload,
-                    $sort,
-                    $actorUserId
-                );
-                $sort += 10;
-                $created++;
-                $lastPart = $part;
-            }
-            $para = array('html' => '<p>' . htmlspecialchars($summary['text'], ENT_QUOTES, 'UTF-8') . '</p>');
-            $key = 'change_' . substr(hash('sha256', $summary['key']), 0, 12);
-            $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, $key, 'paragraph', $para, $sort, $actorUserId);
+            $byPart[$part][] = $summary;
+        }
+        foreach ($byPart as $part => $partSummaries) {
+            $partPayload = array(
+                'html' => '<p>' . htmlspecialchars($part, ENT_QUOTES, 'UTF-8') . '</p>',
+                'paragraph_style' => 'subtitle_2',
+            );
+            $partKey = 'part_' . substr(hash('sha256', $part), 0, 12);
+            $this->insertHighlightBlock(
+                $ins,
+                $versionId,
+                $sectionId,
+                $stableBase,
+                $partKey,
+                'paragraph',
+                $partPayload,
+                $sort,
+                $actorUserId
+            );
+            $sort += 10;
+            $created++;
+
+            $items = array_map(
+                static fn(array $summary): string => htmlspecialchars(
+                    (string)$summary['text'],
+                    ENT_QUOTES,
+                    'UTF-8'
+                ),
+                $partSummaries
+            );
+            $listPayload = array(
+                'ordered' => false,
+                'items' => $items,
+            );
+            $listKey = 'changes_' . substr(
+                hash('sha256', implode('|', array_column($partSummaries, 'key'))),
+                0,
+                12
+            );
+            $this->insertHighlightBlock(
+                $ins,
+                $versionId,
+                $sectionId,
+                $stableBase,
+                $listKey,
+                'list',
+                $listPayload,
+                $sort,
+                $actorUserId
+            );
             $sort += 10;
             $created++;
         }
@@ -250,7 +278,8 @@ final class ControlledPublishingRevisionService
     private function blocksByKeyWithSection(int $versionId): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT b.*, s.title AS section_title, s.section_key
+            SELECT b.*, s.title AS section_title, s.section_key,
+                   s.sort_order AS section_sort_order
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
             WHERE b.book_version_id = :version_id
@@ -321,21 +350,19 @@ final class ControlledPublishingRevisionService
             $reference = trim((string)($context['reference'] ?? ''));
             $title = trim((string)($context['title'] ?? ''));
             $sectionTitle = trim((string)($change['section_title'] ?? ''));
-            $groupKey = implode('|', array($part, $sectionKey, $sectionTitle));
+            $groupKey = implode('|', array($part, $sectionKey, $reference, $title));
             if (!isset($groups[$groupKey])) {
                 $groups[$groupKey] = array(
                     'part' => $part,
                     'section_key' => $sectionKey,
+                    'section_sort_order' => (int)($change['section_sort_order'] ?? 0),
                     'section_title' => $sectionTitle,
-                    'locations' => array(),
+                    'reference' => $reference,
+                    'title' => $title,
                     'added' => array(),
                     'modified' => array(),
                     'deleted' => array(),
                 );
-            }
-            $location = trim(($reference !== '' ? '§' . $reference . ' ' : '') . $title);
-            if ($location !== '') {
-                $groups[$groupKey]['locations'][$location] = true;
             }
             $status = (string)($change['change_status'] ?? 'modified');
             $payload = $this->decodePayload($change['payload_json'] ?? null);
@@ -358,7 +385,19 @@ final class ControlledPublishingRevisionService
             if ($partOrder !== 0) {
                 return $partOrder;
             }
-            return strcmp(
+            $sectionOrder = (int)($left['section_sort_order'] ?? 0)
+                <=> (int)($right['section_sort_order'] ?? 0);
+            if ($sectionOrder !== 0) {
+                return $sectionOrder;
+            }
+            $referenceOrder = strnatcasecmp(
+                (string)($left['reference'] ?? ''),
+                (string)($right['reference'] ?? '')
+            );
+            if ($referenceOrder !== 0) {
+                return $referenceOrder;
+            }
+            return strnatcasecmp(
                 (string)($left['section_key'] ?? ''),
                 (string)($right['section_key'] ?? '')
             );
@@ -366,19 +405,18 @@ final class ControlledPublishingRevisionService
 
         $output = array();
         foreach ($groups as $key => $group) {
-            $location = $group['part'];
-            if ($group['section_title'] !== '') {
-                $location .= ($location !== '' ? ' — ' : '') . $group['section_title'];
+            $reference = trim((string)($group['reference'] ?? ''));
+            $title = trim((string)($group['title'] ?? ''));
+            if ($title === '') {
+                $title = trim((string)($group['section_title'] ?? ''));
             }
-            $subsections = array_keys($group['locations']);
-            if ($subsections !== array()) {
-                $shown = array_slice($subsections, 0, 3);
-                $location .= ' (' . implode('; ', $shown);
-                if (count($subsections) > count($shown)) {
-                    $location .= '; and ' . (count($subsections) - count($shown)) . ' more subsection'
-                        . ((count($subsections) - count($shown)) === 1 ? '' : 's');
-                }
-                $location .= ')';
+            $location = trim(
+                ($reference !== '' ? 'Section ' . $reference : '')
+                . ($reference !== '' && $title !== '' ? ' — ' : '')
+                . $title
+            );
+            if ($location === '') {
+                $location = 'General content';
             }
             $sentences = array();
             if ($group['modified'] !== array()) {
@@ -402,10 +440,23 @@ final class ControlledPublishingRevisionService
             $output[] = array(
                 'key' => $key,
                 'part' => (string)$group['part'],
-                'text' => ($location !== '' ? $location . ': ' : '') . implode(' ', $sentences),
+                'text' => $location . ': ' . implode(' ', $sentences),
             );
         }
         return $output;
+    }
+
+    private function revisionDisplayLabel(int $versionId): string
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT version_label FROM ipca_publishing_book_versions WHERE id = :id LIMIT 1'
+        );
+        $stmt->execute(array(':id' => $versionId));
+        $label = trim((string)$stmt->fetchColumn());
+        if ($label === '') {
+            return 'Draft';
+        }
+        return preg_replace('/\.0+$/', '', $label) ?: $label;
     }
 
     private function partLabel(string $sectionKey): string

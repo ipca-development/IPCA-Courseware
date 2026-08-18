@@ -292,6 +292,7 @@ final class BooksManualsWorkflowService
             'Copied from version ' . (string)$source['version_label'],
             $actorUserId
         );
+        $this->refreshRevisionHighlights((int)$created['version_id'], $actorUserId);
         $this->queueInitialPageMap((int)$created['version_id'], $actorUserId);
         return $created;
     }
@@ -905,6 +906,13 @@ final class BooksManualsWorkflowService
                     . $versionId . ': ' . $e->getMessage()
             );
         }
+    }
+
+    private function refreshRevisionHighlights(int $versionId, int $actorUserId): void
+    {
+        require_once __DIR__ . '/ControlledPublishingRevisionService.php';
+        (new ControlledPublishingRevisionService($this->pdo))
+            ->regenerateHighlightsSection($versionId, $actorUserId);
     }
 
     /**
