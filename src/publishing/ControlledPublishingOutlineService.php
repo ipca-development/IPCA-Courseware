@@ -297,7 +297,8 @@ final class ControlledPublishingOutlineService
         int $sectionId,
         string $sectionRef,
         int $insertBeforeSectionId = 0,
-        ?int $actorUserId = null
+        ?int $actorUserId = null,
+        int $sourceBlockId = 0
     ): int {
         $source = $this->requireEditableOutlineSection($versionId, $sectionId);
         $parentId = (int)($source['parent_section_id'] ?? 0);
@@ -341,7 +342,8 @@ final class ControlledPublishingOutlineService
             $versionId,
             $sectionId,
             $sectionRef,
-            $actorUserId
+            $actorUserId,
+            $sourceBlockId
         );
         if ($newId <= 0) {
             throw new RuntimeException('Could not make that heading a MAIN chapter.');
@@ -432,6 +434,7 @@ final class ControlledPublishingOutlineService
             }
             $title = trim((string)($item['title'] ?? ''));
             $nodes[$ref] = array(
+                'block_id' => (int)($item['block_id'] ?? 0),
                 'section_ref' => $ref,
                 'title' => $title,
                 'nav_label' => trim((string)($item['nav_label'] ?? '')) !== ''
@@ -529,7 +532,11 @@ final class ControlledPublishingOutlineService
      * @param list<array<string,mixed>> $nodes
      * @return list<array<string,mixed>>
      */
-    public static function headingBlockSlice(array $nodes, string $sectionRef): array
+    public static function headingBlockSlice(
+        array $nodes,
+        string $sectionRef,
+        int $sourceBlockId = 0
+    ): array
     {
         $sectionRef = trim($sectionRef);
         $start = -1;
@@ -537,7 +544,13 @@ final class ControlledPublishingOutlineService
             if (!is_array($node)) {
                 continue;
             }
-            if (trim((string)($node['section_ref'] ?? '')) === $sectionRef) {
+            if (
+                ($sourceBlockId > 0 && (int)($node['block_id'] ?? 0) === $sourceBlockId)
+                || (
+                    $sourceBlockId <= 0
+                    && trim((string)($node['section_ref'] ?? '')) === $sectionRef
+                )
+            ) {
                 $start = (int)$index;
                 break;
             }

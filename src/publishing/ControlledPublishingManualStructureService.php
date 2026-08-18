@@ -79,6 +79,7 @@ final class ControlledPublishingManualStructureService
 
         $this->foundation->ensureTemplates($actorUserId);
         $this->foundation->scaffoldVersionSections($versionId, $actorUserId);
+        $this->repairNestedMainChapterSections($versionId, $actorUserId);
 
         $bookKey = strtoupper(trim((string)($version['book_key'] ?? 'OM')));
         $sourceSetId = $this->resolveManualSourceSetId($versionId);
@@ -133,6 +134,166 @@ final class ControlledPublishingManualStructureService
             'source_set_id' => $sourceSetId,
             'canonical_chapters_found' => $canonicalChaptersFound,
         );
+    }
+
+    /**
+     * Repair legacy imports where a MAIN chapter shell was nested under the
+     * preceding chapter while its rich blocks remained in that parent.
+     *
+     * @return int Number of repaired chapter sections.
+     */
+    public function repairNestedMainChapterSections(
+        int $versionId,
+        ?int $actorUserId = null,
+        bool $replaceCanonicalTargets = false
+    ): int {
+        if ($this->blocks === null || $versionId <= 0) {
+            return 0;
+        }
+
+        $flat = $this->sections->listFlatSections($versionId);
+        $byId = array();
+        foreach ($flat as $row) {
+            if (is_array($row)) {
+                $byId[(int)($row['id'] ?? 0)] = $row;
+            }
+        }
+
+        $repaired = 0;
+        foreach ($flat as $nested) {
+            if (!is_array($nested)) {
+                continue;
+            }
+            $nestedId = (int)($nested['id'] ?? 0);
+            $parentId = (int)($nested['parent_section_id'] ?? 0);
+            $parent = $byId[$parentId] ?? null;
+            if ($nestedId <= 0 || !is_array($parent) || $this->chapterNumberFromSection($parent) <= 0) {
+                continue;
+            }
+            $partId = (int)($parent['parent_section_id'] ?? 0);
+            $part = $byId[$partId] ?? null;
+            if (!is_array($part)) {
+                continue;
+            }
+            $number = $this->nestedChapterNumber($nested);
+            if ($number <= 0) {
+                continue;
+            }
+
+            $target = null;
+            foreach ($flat as $candidate) {
+                if (!is_array($candidate)
+                    || (int)($candidate['parent_section_id'] ?? 0) !== $partId
+                    || (int)($candidate['id'] ?? 0) === $parentId) {
+                    continue;
+                }
+                if ($this->chapterNumberFromSection($candidate) === $number) {
+                    $target = $candidate;
+                    break;
+                }
+            }
+            if (is_array($target) && !$replaceCanonicalTargets) {
+                continue;
+            }
+
+            $parentBlocks = $this->blocks->listSectionBlocks($parentId);
+            $start = $this->nestedChapterBlockStart($parentBlocks, (string)($nested['title'] ?? ''));
+            if ($start < 0) {
+                continue;
+            }
+            $end = count($parentBlocks);
+            $otherTitles = array();
+            foreach ($flat as $otherNested) {
+                if (!is_array($otherNested)
+                    || (int)($otherNested['id'] ?? 0) === $nestedId
+                    || (int)($otherNested['parent_section_id'] ?? 0) !== $parentId) {
+                    continue;
+                }
+                $otherTitle = $this->comparableChapterTitle((string)($otherNested['title'] ?? ''));
+                if ($otherTitle !== '') {
+                    $otherTitles[$otherTitle] = true;
+                }
+            }
+            for ($index = $start + 1; $index < $end; $index++) {
+                $block = $parentBlocks[$index] ?? null;
+                if (!is_array($block)) {
+                    continue;
+                }
+                $payload = $this->blocks->decodePayload($block);
+                $text = $this->navBlockEntryText((string)($block['block_type'] ?? ''), $payload);
+                if (isset($otherTitles[$this->comparableChapterTitle($text)])) {
+                    $end = $index;
+                    break;
+                }
+            }
+
+            if (!is_array($target)) {
+                $partKey = (string)($part['section_key'] ?? ('part_' . max(1, $this->manualPartForSection($parent, $flat))));
+                $title = ControlledPublishingOutlineService::stripChapterNumberPrefix(
+                    (string)($nested['title'] ?? '')
+                );
+                $meta = $this->decodeMeta($nested);
+                $meta['chapter_number'] = $number;
+                $meta['manual_part'] = $this->manualPartForSection($parent, $flat);
+                $meta['nav_label'] = $number . '. ' . $title;
+                $meta['synced_from_canonical'] = true;
+                $stmt = $this->pdo->prepare(
+                    'UPDATE ipca_publishing_book_sections
+                     SET parent_section_id = :parent_id,
+                         section_key = :section_key,
+                         title = :title,
+                         metadata_json = :metadata_json,
+                         sort_order = :sort_order,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = :id'
+                );
+                $stmt->execute(array(
+                    ':parent_id' => $partId,
+                    ':section_key' => $this->chapterSectionKey($partKey, $number),
+                    ':title' => $title,
+                    ':metadata_json' => json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                    ':sort_order' => $number * 10,
+                    ':id' => $nestedId,
+                ));
+                $target = array_merge($nested, array('id' => $nestedId));
+            } else {
+                $targetMeta = $this->decodeMeta($target);
+                if (empty($targetMeta['synced_from_canonical'])) {
+                    continue;
+                }
+                foreach ($this->blocks->listSectionBlocks((int)$target['id']) as $block) {
+                    $this->blocks->deleteBlock((int)($block['id'] ?? 0), $actorUserId);
+                }
+            }
+
+            $targetId = (int)($target['id'] ?? 0);
+            $sortOrder = 10;
+            for ($index = $start; $index < $end; $index++) {
+                $block = $parentBlocks[$index];
+                if (!is_array($block)) {
+                    continue;
+                }
+                $payload = $this->blocks->decodePayload($block);
+                if ($index === $start) {
+                    $payload['paragraph_style'] = 'title';
+                    $payload['canonical_section_ref'] = (string)$number;
+                }
+                $this->blocks->relocateBlock(
+                    (int)($block['id'] ?? 0),
+                    $targetId,
+                    $sortOrder,
+                    $payload,
+                    $actorUserId
+                );
+                $sortOrder += 10;
+            }
+            if ($targetId !== $nestedId) {
+                $this->deleteSection($nestedId);
+            }
+            $repaired++;
+        }
+
+        return $repaired;
     }
 
     /**
@@ -1079,7 +1240,7 @@ final class ControlledPublishingManualStructureService
      * Subsection nav entries from styled blocks on a chapter page (same source as the TOC).
      *
      * @param array<int,string> $sectionNumberDisplay
-     * @return list<array{section_ref:string,title:string,nav_label:string}>
+     * @return list<array{block_id:int,section_ref:string,title:string,nav_label:string}>
      */
     public function listNavSubsectionsFromChapterBlocks(
         int $sectionId,
@@ -1134,6 +1295,7 @@ final class ControlledPublishingManualStructureService
             $numberLabel = $displayNumber !== '' ? rtrim($displayNumber, '.') : $sectionRef;
             $seen[$sectionRef] = true;
             $items[] = array(
+                'block_id' => $blockId,
                 'section_ref' => $sectionRef,
                 'title' => $title,
                 'nav_label' => $numberLabel . ' ' . $title,
@@ -1302,7 +1464,8 @@ final class ControlledPublishingManualStructureService
         int $versionId,
         int $sourceSectionId,
         string $sectionRef,
-        ?int $actorUserId = null
+        ?int $actorUserId = null,
+        int $sourceBlockId = 0
     ): int {
         if ($this->blocks === null || $sourceSectionId <= 0) {
             throw new RuntimeException('Could not move that heading.');
@@ -1319,7 +1482,11 @@ final class ControlledPublishingManualStructureService
         }
 
         $nodes = $this->flattenNodesFromSectionBlocks($this->blocks->listSectionBlocks($sourceSectionId));
-        $slice = ControlledPublishingOutlineService::headingBlockSlice($nodes, $sectionRef);
+        $slice = ControlledPublishingOutlineService::headingBlockSlice(
+            $nodes,
+            $sectionRef,
+            $sourceBlockId
+        );
         if ($slice === array()) {
             throw new RuntimeException('That heading was not found in this chapter.');
         }
@@ -1360,6 +1527,7 @@ final class ControlledPublishingManualStructureService
             }
             if ($index === 0) {
                 $payload['paragraph_style'] = 'title';
+                $payload['canonical_section_ref'] = (string)$nextNumber;
                 if (isset($payload['text']) && is_string($payload['text'])) {
                     $payload['text'] = $title;
                 }
@@ -1640,6 +1808,50 @@ final class ControlledPublishingManualStructureService
         }
 
         return $nodes;
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     */
+    private function nestedChapterNumber(array $section): int
+    {
+        $number = $this->chapterNumberFromSection($section);
+        if ($number > 0) {
+            return $number;
+        }
+        $title = trim((string)($section['title'] ?? ''));
+        return preg_match('/^(\d+)(?:\.|\s|[-–—])/u', $title, $match) === 1
+            ? (int)$match[1]
+            : 0;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $blocks
+     */
+    private function nestedChapterBlockStart(array $blocks, string $chapterTitle): int
+    {
+        $wanted = $this->comparableChapterTitle($chapterTitle);
+        if ($wanted === '') {
+            return -1;
+        }
+        foreach ($blocks as $index => $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            $payload = $this->blocks !== null ? $this->blocks->decodePayload($block) : array();
+            $text = $this->navBlockEntryText((string)($block['block_type'] ?? ''), $payload);
+            if ($this->comparableChapterTitle($text) === $wanted) {
+                return (int)$index;
+            }
+        }
+        return -1;
+    }
+
+    private function comparableChapterTitle(string $title): string
+    {
+        $title = ControlledPublishingOutlineService::stripChapterNumberPrefix($title);
+        $title = trim(preg_replace('/\s+/u', ' ', $title) ?? $title);
+        return mb_strtolower($title, 'UTF-8');
     }
 
     /**

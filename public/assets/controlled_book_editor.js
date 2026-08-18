@@ -3777,6 +3777,7 @@
         row.setAttribute('data-drag-kind', 'heading');
         row.setAttribute('data-section-id', String(chapter.section_id));
         row.setAttribute('data-section-ref', heading.section_ref || '');
+        row.setAttribute('data-block-id', String(heading.block_id || 0));
         row.setAttribute('data-part-id', String(part.section_id));
         var handle = document.createElement('span');
         handle.className = 'cpb-struct-handle';
@@ -3799,6 +3800,7 @@
           outlinePost('promote_outline_heading', {
             section_id: chapter.section_id,
             section_ref: heading.section_ref,
+            block_id: heading.block_id || 0,
           }).then(function (res) {
             if (res.section_id) loadSection(res.section_id);
           }).catch(showError);
@@ -3823,6 +3825,7 @@
         kind: row.getAttribute('data-drag-kind') || '',
         section_id: parseInt(row.getAttribute('data-section-id') || '0', 10),
         section_ref: row.getAttribute('data-section-ref') || '',
+        block_id: parseInt(row.getAttribute('data-block-id') || '0', 10),
         part_id: parseInt(row.getAttribute('data-part-id') || '0', 10),
       };
       event.dataTransfer.setData('application/json', JSON.stringify(payload));
@@ -3978,6 +3981,7 @@
         outlinePost('promote_outline_heading', {
           section_id: payload.section_id,
           section_ref: payload.section_ref,
+          block_id: payload.block_id || 0,
           insert_before_section_id: 0,
         }).then(function (res) {
           if (res.section_id) loadSection(res.section_id);

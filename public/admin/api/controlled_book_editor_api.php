@@ -2877,7 +2877,8 @@ function cp_editor_handle_outline_mutate(
                 $sectionId,
                 (string)($in['section_ref'] ?? ''),
                 (int)($in['insert_before_section_id'] ?? 0),
-                $uid
+                $uid,
+                (int)($in['block_id'] ?? 0)
             );
         } elseif ($op === 'demote_chapter') {
             $createdId = $outlineSvc->demoteChapter(

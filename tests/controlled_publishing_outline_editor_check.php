@@ -116,14 +116,15 @@ $assert(
 );
 
 $tree = ControlledPublishingOutlineService::headingTreeFromNavItems(array(
-    array('section_ref' => '4.1', 'title' => 'Theory Training Syllabus', 'nav_label' => '4.1 Theory Training Syllabus'),
-    array('section_ref' => '4.1.1', 'title' => 'Application', 'nav_label' => '4.1.1 Application'),
-    array('section_ref' => '4.2', 'title' => 'Test and Examination', 'nav_label' => '4.2 Test and Examination'),
+    array('block_id' => 41, 'section_ref' => '4.1', 'title' => 'Theory Training Syllabus', 'nav_label' => '4.1 Theory Training Syllabus'),
+    array('block_id' => 42, 'section_ref' => '4.1.1', 'title' => 'Application', 'nav_label' => '4.1.1 Application'),
+    array('block_id' => 43, 'section_ref' => '4.2', 'title' => 'Test and Examination', 'nav_label' => '4.2 Test and Examination'),
 ));
 $assert(count($tree) === 2, 'First-level headings 4.1 and 4.2 must be promotable MAIN-chapter candidates.');
 $assert(!empty($tree[0]['can_promote']), '4.1 must be promotable to a MAIN chapter.');
 $assert(($tree[0]['headings'][0]['section_ref'] ?? '') === '4.1.1', '4.1.1 must stay nested under 4.1.');
 $assert(empty($tree[0]['headings'][0]['can_promote']), 'Nested 4.1.1 must not promote in one step.');
+$assert(($tree[0]['block_id'] ?? 0) === 41, 'Promotable headings must preserve their source block identity.');
 
 $assert(
     ControlledPublishingOutlineService::rewritePromotedSectionRef('4.1', '4.1', 1) === '1',
@@ -152,6 +153,16 @@ $slice = ControlledPublishingOutlineService::headingBlockSlice(array(
 $assert(
     array_column($slice, 'block_id') === array(2, 3, 4),
     'Promoting 4.1 must take that heading, its children, and following body until 4.2.'
+);
+$fallbackSlice = ControlledPublishingOutlineService::headingBlockSlice(array(
+    array('section_ref' => '4', 'block_id' => 1),
+    array('section_ref' => '', 'block_id' => 2),
+    array('section_ref' => '', 'block_id' => 3),
+    array('section_ref' => '4.2', 'block_id' => 5),
+), '4.1', 2);
+$assert(
+    array_column($fallbackSlice, 'block_id') === array(2, 3),
+    'Promotion must find a computed-number heading by block identity when no canonical ref is stored.'
 );
 
 $outline = file_get_contents($root . '/src/publishing/ControlledPublishingOutlineService.php');
@@ -196,6 +207,7 @@ foreach (array(
     'move_outline_chapter',
     'promote_outline_heading',
     'demote_outline_chapter',
+    'block_id',
 ) as $marker) {
     if (!is_string($api) || !str_contains($api, $marker)) {
         $failures[] = 'Missing editor API marker: ' . $marker;
@@ -220,6 +232,7 @@ foreach (array(
     'demote_outline_chapter',
     'Make subchapter',
     "status !== 'released'",
+    'data-block-id',
 ) as $marker) {
     if (!is_string($js) || !str_contains($js, $marker)) {
         $failures[] = 'Missing editor JS marker: ' . $marker;

@@ -13,7 +13,7 @@ $pdo->exec('CREATE TABLE ipca_publishing_book_versions (
 )');
 $pdo->exec('CREATE TABLE ipca_publishing_book_sections (
     id INTEGER PRIMARY KEY, book_version_id INTEGER NOT NULL, section_key TEXT,
-    title TEXT, sort_order INTEGER
+    title TEXT, sort_order INTEGER, metadata_json TEXT
 )');
 $pdo->exec('CREATE TABLE ipca_publishing_book_blocks (
     id INTEGER PRIMARY KEY, book_version_id INTEGER NOT NULL, section_id INTEGER NOT NULL,
@@ -24,8 +24,8 @@ $pdo->exec("INSERT INTO ipca_publishing_books VALUES (1, 'OM')");
 $pdo->exec("INSERT INTO ipca_publishing_book_versions VALUES
     (10, 1, '6.0', NULL), (11, 1, '6.1', 10)");
 $pdo->exec("INSERT INTO ipca_publishing_book_sections VALUES
-    (100, 10, 'part_2_chapter_6', 'Technical', 10),
-    (110, 11, 'part_2_chapter_6', 'Technical', 10)");
+    (100, 10, 'part_2_chapter_6', 'Technical', 10, NULL),
+    (110, 11, 'part_2_chapter_6', 'Technical', 10, NULL)");
 $payload = json_encode(array('html' => '<p>Unchanged medication text.</p>'), JSON_THROW_ON_ERROR);
 $hash = hash('sha256', 'paragraph|' . $payload);
 $pdo->prepare('INSERT INTO ipca_publishing_book_blocks VALUES (?,?,?,?,?,?,?,?,?)')->execute(array(
@@ -105,6 +105,14 @@ foreach (array('Section 6.1.9', 'Medication', 'Changed', 'Added') as $required) 
 }
 if (preg_match('/BLOCK-|stable anchor|source fragment|source_fragment_id/i', $text) === 1) {
     throw new RuntimeException('Human change summary exposes an internal identifier.');
+}
+$dynamicPart = $summariesMethod->invoke(
+    $service,
+    $changes,
+    array('part_2' => 'Part 2 — Compliance Monitoring Manual')
+);
+if ((string)($dynamicPart[0]['part'] ?? '') !== 'Part 2 — Compliance Monitoring Manual') {
+    throw new RuntimeException('Revision summaries do not use the persisted manual part title.');
 }
 
 $ordered = $summariesMethod->invoke($service, array(
@@ -197,7 +205,9 @@ $pdo->exec('ALTER TABLE ipca_publishing_book_blocks ADD COLUMN is_system_managed
 $pdo->exec('ALTER TABLE ipca_publishing_book_blocks ADD COLUMN created_by INTEGER NULL');
 $pdo->exec('ALTER TABLE ipca_publishing_book_blocks ADD COLUMN updated_by INTEGER NULL');
 $pdo->exec("INSERT INTO ipca_publishing_book_sections VALUES
-    (111, 11, 'highlights', 'Highlight of Changes', 5)");
+    (111, 11, 'highlights', 'Highlight of Changes', 5, NULL),
+    (112, 11, 'part_2', 'PART 2 – Technical', 1,
+     '{\"nav_label\":\"PART 2 – COMPLIANCE MONITORING MANUAL\"}')");
 $currentPayload = json_encode(
     array('html' => '<p>Clarified medication controls.</p>'),
     JSON_THROW_ON_ERROR
@@ -242,9 +252,14 @@ $generatedPayloads = array_map(
 );
 if (
     strip_tags((string)($generatedPayloads[0]['html'] ?? '')) !== 'Revision 6.1 Changes'
-    || (string)($generatedPayloads[0]['paragraph_style'] ?? '') !== 'title'
+    || (string)($generatedPayloads[0]['paragraph_style'] ?? '') !== 'subtitle_2'
     || (string)($generatedRows[0]['block_type'] ?? '') !== 'paragraph'
+    || strip_tags((string)($generatedPayloads[1]['html'] ?? ''))
+        !== 'Part 2 — Compliance Monitoring Manual'
+    || (string)($generatedPayloads[1]['paragraph_style'] ?? '') !== 'body'
+    || empty($generatedPayloads[1]['font_bold'])
     || !in_array('list', array_column($generatedRows, 'block_type'), true)
+    || (string)($generatedPayloads[2]['paragraph_style'] ?? '') !== 'body'
     || str_contains(json_encode($generatedPayloads), 'Auto-detected changes')
     || str_contains(json_encode($generatedPayloads), 'governed section change(s)')
 ) {

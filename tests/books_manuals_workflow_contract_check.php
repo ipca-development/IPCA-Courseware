@@ -16,6 +16,9 @@ $workflow = (string)file_get_contents($root . '/src/publishing/BooksManualsWorkf
 $foundation = (string)file_get_contents(
     $root . '/src/publishing/ControlledPublishingFoundationService.php'
 );
+$manualStructure = (string)file_get_contents(
+    $root . '/src/publishing/ControlledPublishingManualStructureService.php'
+);
 $policy = (string)file_get_contents($root . '/src/publishing/BooksManualsReaderPolicyService.php');
 $readerService = (string)file_get_contents(
     $root . '/src/publishing/ControlledPublishingReaderService.php'
@@ -246,6 +249,12 @@ bm_contract_assert(
     'revision cloning safely reuses source selection transaction',
     str_contains($foundation, '$ownsTransaction = !$this->pdo->inTransaction()')
         && str_contains($foundation, 'if ($ownsTransaction && $this->pdo->inTransaction())')
+);
+bm_contract_assert(
+    'revision cloning repairs legacy nested MAIN chapter content',
+    str_contains($foundation, 'repairClonedNestedMainChapters')
+        && str_contains($manualStructure, 'repairNestedMainChapterSections')
+        && str_contains($manualStructure, 'nestedChapterBlockStart')
 );
 bm_contract_assert(
     'bulk override captures all blockers immutably',

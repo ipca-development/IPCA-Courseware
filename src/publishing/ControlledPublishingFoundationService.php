@@ -586,6 +586,7 @@ final class ControlledPublishingFoundationService
                 $newVersionLabel,
                 $actorUserId
             );
+            $this->repairClonedNestedMainChapters($newVersionId, $actorUserId);
 
             $this->pdo->commit();
         } catch (Throwable $e) {
@@ -602,6 +603,24 @@ final class ControlledPublishingFoundationService
             'version_id' => $newVersionId,
             'version_label' => $newVersionLabel,
         );
+    }
+
+    private function repairClonedNestedMainChapters(
+        int $versionId,
+        ?int $actorUserId
+    ): void {
+        require_once __DIR__ . '/ControlledPublishingBlockService.php';
+        require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
+        require_once __DIR__ . '/ControlledPublishingSectionService.php';
+
+        $sections = new ControlledPublishingSectionService($this->pdo);
+        $blocks = new ControlledPublishingBlockService($this->pdo);
+        (new ControlledPublishingManualStructureService(
+            $this->pdo,
+            $this,
+            $sections,
+            $blocks
+        ))->repairNestedMainChapterSections($versionId, $actorUserId);
     }
 
     /**

@@ -37,7 +37,7 @@ foreach ($paths as $path) {
 }
 
 $actual = hash_final($hash);
-$expected = '72fc22052946dd9cc1188183202e5eb0ca502aba2e49760367fdf2f3a359e617';
+$expected = '8d0d76a4628f942f5e14366c6da3876317eb83ffb3885ac9da981162500c01a5';
 if ($actual !== $expected) {
     fwrite(STDERR, "Books & Manuals protected boundary changed: {$actual}\n");
     exit(1);

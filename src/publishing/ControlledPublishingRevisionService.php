@@ -178,7 +178,10 @@ final class ControlledPublishingRevisionService
             $priorBlock['change_context'] = $priorContexts[$blockKey] ?? array();
             $changes[] = $priorBlock;
         }
-        $summaries = $this->humanChangeSummaries($changes);
+        $summaries = $this->humanChangeSummaries(
+            $changes,
+            $this->partLabelsForVersion($versionId)
+        );
 
         $this->pdo->prepare("
             DELETE FROM ipca_publishing_book_blocks
@@ -207,7 +210,7 @@ final class ControlledPublishingRevisionService
         $summaryPayload = array(
             'html' => '<p>Revision ' . htmlspecialchars($versionLabel, ENT_QUOTES, 'UTF-8')
                 . ' Changes</p>',
-            'paragraph_style' => 'title',
+            'paragraph_style' => 'subtitle_2',
         );
         $this->insertHighlightBlock(
             $ins,
@@ -237,7 +240,8 @@ final class ControlledPublishingRevisionService
         foreach ($byPart as $part => $partSummaries) {
             $partPayload = array(
                 'html' => '<p>' . htmlspecialchars($part, ENT_QUOTES, 'UTF-8') . '</p>',
-                'paragraph_style' => 'subtitle_2',
+                'paragraph_style' => 'body',
+                'font_bold' => true,
             );
             $partKey = 'part_' . substr(hash('sha256', $part), 0, 12);
             $this->insertHighlightBlock(
@@ -265,6 +269,7 @@ final class ControlledPublishingRevisionService
             $listPayload = array(
                 'ordered' => false,
                 'items' => $items,
+                'paragraph_style' => 'body',
             );
             $listKey = 'changes_' . substr(
                 hash('sha256', implode('|', array_column($partSummaries, 'key'))),
@@ -358,14 +363,15 @@ final class ControlledPublishingRevisionService
 
     /**
      * @param list<array<string,mixed>> $changes
+     * @param array<string,string> $partLabels
      * @return list<array{key:string,text:string,part:string}>
      */
-    private function humanChangeSummaries(array $changes): array
+    private function humanChangeSummaries(array $changes, array $partLabels = array()): array
     {
         $groups = array();
         foreach ($changes as $change) {
             $sectionKey = strtolower((string)($change['section_key'] ?? ''));
-            $part = $this->partLabel($sectionKey);
+            $part = $this->partLabel($sectionKey, $partLabels);
             $context = is_array($change['change_context'] ?? null)
                 ? $change['change_context']
                 : array();
@@ -525,17 +531,70 @@ final class ControlledPublishingRevisionService
         return preg_replace('/\.0+$/', '', $label) ?: $label;
     }
 
-    private function partLabel(string $sectionKey): string
+    /**
+     * @param array<string,string> $partLabels
+     */
+    private function partLabel(string $sectionKey, array $partLabels = array()): string
     {
-        if (str_contains($sectionKey, 'part_2')) return 'Part 2 — Technical';
-        if (str_contains($sectionKey, 'part_3')) return 'Part 3 — Route';
-        if (str_contains($sectionKey, 'part_4')) return 'Part 4 — Training';
+        if (str_contains($sectionKey, 'part_2')) {
+            return $partLabels['part_2'] ?? 'Part 2 — Technical';
+        }
+        if (str_contains($sectionKey, 'part_3')) {
+            return $partLabels['part_3'] ?? 'Part 3 — Route';
+        }
+        if (str_contains($sectionKey, 'part_4')) {
+            return $partLabels['part_4'] ?? 'Part 4 — Training';
+        }
         if (str_contains($sectionKey, 'part_1') || str_contains($sectionKey, 'main_content')) {
-            return 'Part 1 — General';
+            return $partLabels['part_1']
+                ?? $partLabels['main_content']
+                ?? 'Part 1 — General';
         }
         if (str_contains($sectionKey, 'part0')) return 'Part 0 — Manual Administration';
-        if (str_contains($sectionKey, 'annex')) return 'Annexes';
+        if (str_contains($sectionKey, 'annex')) {
+            return $partLabels['annexes'] ?? 'Annexes';
+        }
         return 'Other Changes';
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private function partLabelsForVersion(int $versionId): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT section_key, title, metadata_json
+             FROM ipca_publishing_book_sections
+             WHERE book_version_id = :version_id
+               AND section_key IN ('main_content','part_1','part_2','part_3','part_4','annexes')"
+        );
+        $stmt->execute(array(':version_id' => $versionId));
+        $labels = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $key = (string)($row['section_key'] ?? '');
+            $metadata = $this->decodePayload($row['metadata_json'] ?? null);
+            $raw = trim((string)($metadata['nav_label'] ?? ''));
+            if ($raw === '') {
+                $raw = trim((string)($row['title'] ?? ''));
+            }
+            if ($raw !== '') {
+                $labels[$key] = $this->formatPartLabel($raw);
+            }
+        }
+        return $labels;
+    }
+
+    private function formatPartLabel(string $label): string
+    {
+        $label = trim(preg_replace('/\s+/u', ' ', $label) ?? $label);
+        if (preg_match('/^PART\s+(\d+)\s*[-–—]\s*(.+)$/iu', $label, $match) !== 1) {
+            return $label;
+        }
+        $name = trim((string)$match[2]);
+        if ($name !== '' && mb_strtoupper($name, 'UTF-8') === $name) {
+            $name = mb_convert_case(mb_strtolower($name, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
+        }
+        return 'Part ' . (int)$match[1] . ' — ' . $name;
     }
 
     private function partSortOrder(string $part): int
