@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAccessService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsReaderPolicyService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleManifestService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
 
@@ -44,8 +45,8 @@ function mr_validate_book_key(string $bookKey): string
  */
 function mr_can_preview_drafts(?array $user, ControlledPublishingReaderAccessService $access): bool
 {
-    if (method_exists($access, 'canPreviewDraftManuals')) {
-        return $access->canPreviewDraftManuals($user);
+    if (method_exists($access, 'canReviewManuals')) {
+        return $access->canReviewManuals($user);
     }
     if (!is_array($user)) {
         return false;
@@ -96,6 +97,7 @@ function mr_reader_context(
     string $bookKey,
     array $input = array()
 ): array {
+    global $pdo;
     $canPreview = mr_can_preview_drafts($user, $access);
     $versionId = (int)($input['version_id'] ?? $_GET['version_id'] ?? 0);
     if (method_exists($reader, 'resolveReaderVersion')) {
@@ -107,6 +109,11 @@ function mr_reader_context(
     } else {
         $version = $reader->requireReleasedVersion($bookKey);
     }
+    $policy = new BooksManualsReaderPolicyService($pdo, $access);
+    if (!$policy->canReadVersion($version, $user)) {
+        throw new RuntimeException('You cannot view this manual version.');
+    }
+    $version = $policy->decorate($version);
     $lifecycle = (string)($version['lifecycle_status'] ?? '');
 
     return array(
@@ -133,6 +140,7 @@ try {
     }
 
     $reader = new ControlledPublishingReaderService($pdo);
+    $readerPolicy = new BooksManualsReaderPolicyService($pdo, $access);
     $annotations = new ControlledPublishingReaderAnnotationService($pdo);
     $canPreviewDrafts = mr_can_preview_drafts($user, $access);
     $canReviewManuals = $access->canReviewManuals($user);
@@ -232,7 +240,10 @@ try {
             mr_json(200, array(
                 'ok' => true,
                 'can_preview_draft_manuals' => $canPreviewDrafts,
-                'books' => mr_list_library_books($reader, $userId, $canPreviewDrafts),
+                'books' => $readerPolicy->filterAndDecorateLibrary(
+                    mr_list_library_books($reader, $userId, $canPreviewDrafts),
+                    $user
+                ),
             ));
 
         case 'nav':

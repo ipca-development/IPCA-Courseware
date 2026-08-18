@@ -361,6 +361,34 @@ return [
         'coming_soon' => true,
     ],
     [
+        'key' => 'books_manuals',
+        'label' => 'Books & Manuals',
+        'icon' => 'documents',
+        'match_paths' => [
+            '/admin/books_manuals/index.php',
+            '/admin/books_manuals/manual.php',
+            '/admin/books_manuals/annexes.php',
+        ],
+        'items' => [
+            [
+                'key' => 'books_manuals_library',
+                'label' => 'IPCA Library',
+                'icon' => 'documents',
+                'href' => '/admin/books_manuals/index.php',
+                'match_paths' => [
+                    '/admin/books_manuals/index.php',
+                    '/admin/books_manuals/manual.php',
+                ],
+            ],
+            [
+                'key' => 'books_manuals_annexes',
+                'label' => 'Annexes',
+                'icon' => 'documents',
+                'href' => '/admin/books_manuals/annexes.php',
+            ],
+        ],
+    ],
+    [
         'key' => 'compliance_os',
         'label' => 'Compliance',
         'icon' => 'compliance',
@@ -417,6 +445,12 @@ return [
                 'label' => 'Audits',
                 'icon' => 'reviews',
                 'href' => '/admin/compliance/audits.php',
+            ],
+            [
+                'key' => 'compliance_books_manuals_audits',
+                'label' => 'Books & Manuals Audit',
+                'icon' => 'reviews',
+                'href' => '/admin/compliance/books_manuals_audits.php',
             ],
             [
                 'key' => 'compliance_findings',
@@ -493,6 +527,7 @@ return [
                 'label' => 'Controlled Books',
                 'icon' => 'documents',
                 'href' => '/admin/compliance/controlled_books.php',
+                'visible' => false,
                 'match_paths' => [
                     '/admin/compliance/controlled_books.php',
                     '/admin/compliance/controlled_book_version.php',

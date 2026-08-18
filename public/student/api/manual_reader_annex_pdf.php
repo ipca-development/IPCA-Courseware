@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAccessService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsReaderPolicyService.php';
 
 function annex_pdf_fail(int $status, string $message): never
 {
@@ -42,6 +43,10 @@ try {
     $canPreview = $access->canPreviewDraftManuals($user);
     $reader = new ControlledPublishingReaderService($pdo);
     $version = $reader->resolveReaderVersion($bookKey, $versionId, $canPreview);
+    $policy = new BooksManualsReaderPolicyService($pdo, $access);
+    if (!$policy->canReadVersion($version, $user)) {
+        annex_pdf_fail(403, 'Manual access required.');
+    }
     if ((int)($version['id'] ?? 0) !== $versionId) {
         annex_pdf_fail(404, 'Manual version not found.');
     }

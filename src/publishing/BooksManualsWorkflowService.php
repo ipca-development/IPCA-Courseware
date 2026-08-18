@@ -1,0 +1,580 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/ControlledPublishingFoundationService.php';
+
+final class BooksManualsWorkflowService
+{
+    private const TRANSITIONS = array(
+        'draft' => array('publish_review' => 'in_review'),
+        'in_review' => array('revert_draft' => 'draft', 'ready_approval' => 'approved'),
+        'approved' => array(
+            'revert_review' => 'in_review',
+            'submit_authority' => 'approved',
+            'manual_approve' => 'released',
+        ),
+        'released' => array(),
+    );
+
+    public function __construct(
+        private PDO $pdo,
+        private ?ControlledPublishingFoundationService $foundation = null
+    ) {
+        $this->foundation ??= new ControlledPublishingFoundationService($pdo);
+    }
+
+    public function tablesPresent(): bool
+    {
+        try {
+            $stmt = $this->pdo->query("SHOW TABLES LIKE 'ipca_publishing_version_workflow'");
+            return (bool)$stmt->fetchColumn();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function listLibrary(bool $annexesOnly = false): array
+    {
+        $sql = "
+            SELECT
+              b.id AS book_id,
+              b.book_key,
+              b.title AS book_title,
+              b.book_type,
+              b.manual_code,
+              b.status AS book_status,
+              bv.id AS version_id,
+              bv.version_label,
+              bv.lifecycle_status,
+              bv.effective_date,
+              bv.updated_at AS version_updated_at,
+              bv.supersedes_version_id,
+              bp.manual_type,
+              bp.approval_route,
+              bp.authority_code,
+              vw.update_sequence,
+              vw.update_code,
+              vw.source_fingerprint,
+              vw.page_map_hash,
+              vw.manifest_hash,
+              updater.name AS updated_by_name,
+              COALESCE(aud.audience_count, 0) AS audience_count,
+              audit.status AS audit_status,
+              audit.coverage_percent,
+              al.parent_book_id,
+              al.legacy_section_id,
+              al.migration_status
+            FROM ipca_publishing_books b
+            LEFT JOIN ipca_publishing_book_versions bv
+              ON bv.id = (
+                SELECT MAX(latest.id)
+                FROM ipca_publishing_book_versions latest
+                WHERE latest.book_id = b.id
+              )
+            LEFT JOIN ipca_publishing_book_profiles bp ON bp.book_id = b.id
+            LEFT JOIN ipca_publishing_version_workflow vw ON vw.book_version_id = bv.id
+            LEFT JOIN users updater ON updater.id = vw.last_transition_by
+            LEFT JOIN (
+              SELECT book_version_id, COUNT(*) AS audience_count
+              FROM ipca_publishing_version_audiences
+              GROUP BY book_version_id
+            ) aud ON aud.book_version_id = bv.id
+            LEFT JOIN ipca_publishing_audit_snapshots audit
+              ON audit.id = (
+                SELECT MAX(a2.id)
+                FROM ipca_publishing_audit_snapshots a2
+                WHERE a2.book_version_id = bv.id
+              )
+            LEFT JOIN ipca_publishing_annex_book_links al ON al.annex_book_id = b.id
+            WHERE b.status = 'active'
+              AND " . ($annexesOnly ? 'al.id IS NOT NULL' : 'al.id IS NULL') . "
+            ORDER BY b.title, bv.id DESC
+        ";
+        $rows = $this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        foreach ($rows as &$row) {
+            if ((int)($row['version_id'] ?? 0) > 0) {
+                $identity = $this->syncUpdateIdentity((int)$row['version_id']);
+                $row = array_merge($row, $identity);
+            }
+            $row['phase_label'] = self::phaseLabel((string)($row['lifecycle_status'] ?? 'draft'));
+            $row['phase_tone'] = self::phaseTone((string)($row['lifecycle_status'] ?? 'draft'));
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public function getVersionDetail(int $versionId): ?array
+    {
+        $version = $this->foundation->getVersion($versionId);
+        if ($version === null) {
+            return null;
+        }
+        $profile = $this->profile((int)$version['book_id']);
+        $identity = $this->syncUpdateIdentity($versionId);
+        $version = array_merge($version, $profile, $identity);
+        $version['phase_label'] = self::phaseLabel((string)$version['lifecycle_status']);
+        $version['phase_tone'] = self::phaseTone((string)$version['lifecycle_status']);
+        $version['actions'] = self::actionsFor((string)$version['lifecycle_status']);
+        $version['audiences'] = $this->audiences($versionId);
+        $version['latest_audit'] = $this->latestAudit($versionId);
+        return $version;
+    }
+
+    /**
+     * @return array{book_id:int,version_id:int,book_key:string,version_label:string,copy_content:bool}
+     */
+    public function createBlankManual(
+        int $sourceVersionId,
+        string $bookKey,
+        string $title,
+        string $versionLabel,
+        string $manualType,
+        string $approvalRoute,
+        ?string $authorityCode,
+        int $actorUserId
+    ): array {
+        $created = $this->foundation->createManualFromVersion(
+            $sourceVersionId,
+            $bookKey,
+            $title,
+            $versionLabel,
+            false,
+            $actorUserId
+        );
+        $this->saveProfile(
+            (int)$created['book_id'],
+            $manualType,
+            $approvalRoute,
+            $authorityCode,
+            $actorUserId
+        );
+        $this->syncUpdateIdentity((int)$created['version_id']);
+        $this->recordEvent((int)$created['version_id'], '', 'draft', 'create_manual', null, $actorUserId);
+        return $created;
+    }
+
+    /**
+     * @return array{book_id:int,version_id:int,book_key:string,version_label:string,copy_content:bool}
+     */
+    public function createStandaloneAnnex(
+        int $parentBookId,
+        int $sourceVersionId,
+        string $annexKey,
+        string $bookKey,
+        string $title,
+        string $versionLabel,
+        string $revisionDate,
+        int $actorUserId
+    ): array {
+        $annexKey = strtoupper(trim($annexKey));
+        if (!preg_match('/^[A-Z0-9][A-Z0-9_.-]{0,63}$/', $annexKey)) {
+            throw new InvalidArgumentException('Annex identifier is invalid.');
+        }
+        $parent = $this->pdo->prepare(
+            "SELECT id FROM ipca_publishing_books
+             WHERE id = ? AND status = 'active' LIMIT 1"
+        );
+        $parent->execute(array($parentBookId));
+        if (!$parent->fetchColumn()) {
+            throw new RuntimeException('Parent manual not found.');
+        }
+        $created = $this->createBlankManual(
+            $sourceVersionId,
+            $bookKey,
+            $title,
+            $versionLabel,
+            'handbook',
+            'internal',
+            null,
+            $actorUserId
+        );
+        $this->pdo->prepare(
+            "UPDATE ipca_publishing_books SET book_type = 'annex' WHERE id = ?"
+        )->execute(array((int)$created['book_id']));
+        $this->pdo->prepare(
+            'UPDATE ipca_publishing_book_versions
+             SET effective_date = NULLIF(?, ?) WHERE id = ?'
+        )->execute(array($revisionDate, '', (int)$created['version_id']));
+        $this->pdo->prepare(
+            "INSERT INTO ipca_publishing_annex_book_links
+              (parent_book_id, annex_book_id, annex_key, migration_status,
+               migration_json, created_by)
+             VALUES (?, ?, ?, 'validated', ?, ?)"
+        )->execute(array(
+            $parentBookId,
+            (int)$created['book_id'],
+            $annexKey,
+            json_encode(array(
+                'created_as_standalone' => true,
+                'legacy_section_preserved' => true,
+            ), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            $actorUserId,
+        ));
+        return $created;
+    }
+
+    /**
+     * @return array{version_id:int,version_label:string}
+     */
+    public function createRevision(int $releasedVersionId, int $actorUserId): array
+    {
+        $source = $this->foundation->getVersion($releasedVersionId);
+        if ($source === null || (string)$source['lifecycle_status'] !== 'released') {
+            throw new RuntimeException('Only an approved manual can create a revision.');
+        }
+        $label = $this->foundation->suggestNextVersionLabel((string)$source['version_label']);
+        $created = $this->foundation->createNextDraftVersion($releasedVersionId, $label, $actorUserId);
+        $this->syncUpdateIdentity((int)$created['version_id']);
+        $this->recordEvent(
+            (int)$created['version_id'],
+            'released',
+            'draft',
+            'create_revision',
+            'Copied from version ' . (string)$source['version_label'],
+            $actorUserId
+        );
+        return $created;
+    }
+
+    public function transition(int $versionId, string $action, int $actorUserId, ?string $note = null): string
+    {
+        $version = $this->foundation->getVersion($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Manual version not found.');
+        }
+        $from = (string)$version['lifecycle_status'];
+        $to = self::TRANSITIONS[$from][$action] ?? null;
+        if (!is_string($to)) {
+            throw new RuntimeException('That lifecycle action is not available in the current phase.');
+        }
+        if ($action === 'submit_authority') {
+            $profile = $this->profile((int)$version['book_id']);
+            if (($profile['approval_route'] ?? '') !== 'authority') {
+                throw new RuntimeException('This manual uses internal approval.');
+            }
+            $this->assertPassingCurrentAudit($versionId, 'authority submission');
+            $this->recordEvent($versionId, $from, $to, $action, $note, $actorUserId);
+            $this->syncUpdateIdentity($versionId);
+            return $to;
+        }
+        if ($action === 'ready_approval') {
+            require_once __DIR__ . '/BooksManualsAuditService.php';
+            (new BooksManualsAuditService($this->pdo, $this->foundation))
+                ->createSnapshot($versionId, $actorUserId);
+        }
+        if ($action === 'manual_approve') {
+            $this->assertPassingCurrentAudit($versionId, 'approval');
+            $this->foundation->releaseVersion($versionId, $actorUserId);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'UPDATE ipca_publishing_book_versions
+                 SET lifecycle_status = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ? AND lifecycle_status = ?'
+            );
+            $stmt->execute(array($to, $versionId, $from));
+            if ($stmt->rowCount() !== 1) {
+                throw new RuntimeException('The manual phase changed before this action completed.');
+            }
+        }
+        $this->recordEvent($versionId, $from, $to, $action, $note, $actorUserId);
+        $this->syncUpdateIdentity($versionId);
+        return $to;
+    }
+
+    public function saveProfile(
+        int $bookId,
+        string $manualType,
+        string $approvalRoute,
+        ?string $authorityCode,
+        int $actorUserId
+    ): void {
+        $manualType = strtolower(trim($manualType));
+        $allowedTypes = array('operations', 'training', 'sop', 'course_book', 'handbook', 'other');
+        if (!in_array($manualType, $allowedTypes, true)) {
+            throw new InvalidArgumentException('Invalid manual type.');
+        }
+        $approvalRoute = strtolower(trim($approvalRoute));
+        if (!in_array($approvalRoute, array('internal', 'authority'), true)) {
+            throw new InvalidArgumentException('Invalid approval route.');
+        }
+        $authorityCode = $approvalRoute === 'authority'
+            ? strtoupper(substr(trim((string)$authorityCode), 0, 64))
+            : null;
+        if ($approvalRoute === 'authority' && $authorityCode === '') {
+            throw new InvalidArgumentException('Approval authority is required.');
+        }
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO ipca_publishing_book_profiles
+              (book_id, manual_type, approval_route, authority_code, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE manual_type = VALUES(manual_type),
+               approval_route = VALUES(approval_route), authority_code = VALUES(authority_code),
+               updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP(3)'
+        );
+        $stmt->execute(array(
+            $bookId,
+            $manualType,
+            $approvalRoute,
+            $authorityCode,
+            $actorUserId,
+            $actorUserId,
+        ));
+    }
+
+    /**
+     * @param list<array{type:string,key:string}> $audiences
+     */
+    public function replaceAudiences(int $versionId, array $audiences, int $actorUserId): void
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'DELETE FROM ipca_publishing_version_audiences WHERE book_version_id = ?'
+            )->execute(array($versionId));
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ipca_publishing_version_audiences
+                  (book_version_id, audience_type, audience_key, assigned_by)
+                 VALUES (?, ?, ?, ?)'
+            );
+            foreach ($audiences as $audience) {
+                $type = (string)($audience['type'] ?? '');
+                $key = substr(trim((string)($audience['key'] ?? '')), 0, 128);
+                if (!in_array($type, array('role', 'user'), true) || $key === '') {
+                    continue;
+                }
+                $insert->execute(array($versionId, $type, $key, $actorUserId));
+            }
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function syncUpdateIdentity(int $versionId): array
+    {
+        $version = $this->foundation->getVersion($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Manual version not found.');
+        }
+        $fingerprint = $this->sourceFingerprint($versionId);
+        $stmt = $this->pdo->prepare(
+            'SELECT update_sequence, update_code, source_fingerprint, page_map_hash, manifest_hash
+             FROM ipca_publishing_version_workflow WHERE book_version_id = ? LIMIT 1'
+        );
+        $stmt->execute(array($versionId));
+        $current = $stmt->fetch(PDO::FETCH_ASSOC);
+        $sequence = max(1, (int)($current['update_sequence'] ?? 1));
+        if (is_array($current)
+            && (string)($current['source_fingerprint'] ?? '') !== ''
+            && (string)$current['source_fingerprint'] !== $fingerprint) {
+            $sequence++;
+        }
+        $code = sprintf(
+            '%s-V%d-%s-U%06d',
+            substr(strtoupper((string)$version['book_key']), 0, 48),
+            $versionId,
+            substr((string)$version['version_label'], 0, 64),
+            $sequence
+        );
+        $hashes = $this->publicationHashes($version);
+        $upsert = $this->pdo->prepare(
+            'INSERT INTO ipca_publishing_version_workflow
+              (book_version_id, update_sequence, update_code, source_fingerprint, page_map_hash, manifest_hash)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE update_sequence = VALUES(update_sequence),
+               update_code = VALUES(update_code), source_fingerprint = VALUES(source_fingerprint),
+               page_map_hash = VALUES(page_map_hash), manifest_hash = VALUES(manifest_hash)'
+        );
+        $upsert->execute(array(
+            $versionId,
+            $sequence,
+            $code,
+            $fingerprint,
+            $hashes['page_map_hash'],
+            $hashes['manifest_hash'],
+        ));
+        return array(
+            'update_sequence' => $sequence,
+            'update_code' => $code,
+            'source_fingerprint' => $fingerprint,
+            'page_map_hash' => $hashes['page_map_hash'],
+            'manifest_hash' => $hashes['manifest_hash'],
+        );
+    }
+
+    public static function phaseLabel(string $status): string
+    {
+        return match ($status) {
+            'draft' => 'DRAFT',
+            'in_review' => 'DRAFT REVIEW',
+            'approved' => 'AWAITING APPROVAL',
+            'released' => 'APPROVED',
+            default => strtoupper(str_replace('_', ' ', $status)),
+        };
+    }
+
+    public static function phaseTone(string $status): string
+    {
+        return match ($status) {
+            'draft' => 'neutral',
+            'in_review' => 'review',
+            'approved' => 'warning',
+            'released' => 'approved',
+            default => 'neutral',
+        };
+    }
+
+    /**
+     * @return list<array{action:string,label:string,tone:string}>
+     */
+    public static function actionsFor(string $status): array
+    {
+        return match ($status) {
+            'draft' => array(
+                array('action' => 'publish_review', 'label' => 'Publish for Draft Review', 'tone' => 'primary'),
+            ),
+            'in_review' => array(
+                array('action' => 'revert_draft', 'label' => 'Revert to Draft', 'tone' => 'secondary'),
+                array('action' => 'ready_approval', 'label' => 'Ready for Approval', 'tone' => 'primary'),
+            ),
+            'approved' => array(
+                array('action' => 'revert_review', 'label' => 'Revert to Draft Review', 'tone' => 'secondary'),
+                array('action' => 'submit_authority', 'label' => 'Submit for Authority Approval', 'tone' => 'primary'),
+                array('action' => 'manual_approve', 'label' => 'Manually Approve', 'tone' => 'primary'),
+            ),
+            default => array(),
+        };
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function profile(int $bookId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT manual_type, approval_route, authority_code
+             FROM ipca_publishing_book_profiles WHERE book_id = ? LIMIT 1'
+        );
+        $stmt->execute(array($bookId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : array(
+            'manual_type' => 'operations',
+            'approval_route' => 'internal',
+            'authority_code' => null,
+        );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function audiences(int $versionId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT audience_type, audience_key, assigned_at
+             FROM ipca_publishing_version_audiences
+             WHERE book_version_id = ? ORDER BY audience_type, audience_key'
+        );
+        $stmt->execute(array($versionId));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    private function latestAudit(int $versionId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ipca_publishing_audit_snapshots
+             WHERE book_version_id = ? ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute(array($versionId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    private function assertPassingCurrentAudit(int $versionId, string $purpose): void
+    {
+        $audit = $this->latestAudit($versionId);
+        if (($audit['status'] ?? '') !== 'passed') {
+            throw new RuntimeException("A passing Compliance audit is required before {$purpose}.");
+        }
+        $identity = $this->syncUpdateIdentity($versionId);
+        if (!hash_equals(
+            (string)($audit['source_fingerprint'] ?? ''),
+            (string)$identity['source_fingerprint']
+        )) {
+            throw new RuntimeException(
+                "The manual changed after its audit snapshot. Create a new snapshot before {$purpose}."
+            );
+        }
+    }
+
+    private function sourceFingerprint(int $versionId): string
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT s.id, s.section_key, s.title, s.updated_at,
+                    b.id AS block_id, b.stable_anchor, b.updated_at AS block_updated_at,
+                    SHA2(COALESCE(b.payload_json, ?), 256) AS payload_hash
+             FROM ipca_publishing_book_sections s
+             LEFT JOIN ipca_publishing_book_blocks b ON b.section_id = s.id
+             WHERE s.book_version_id = ?
+             ORDER BY s.sort_order, s.id, b.sort_order, b.id'
+        );
+        $stmt->execute(array('', $versionId));
+        return hash('sha256', json_encode(
+            $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array(),
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+        ));
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     * @return array{page_map_hash:?string,manifest_hash:?string}
+     */
+    private function publicationHashes(array $version): array
+    {
+        $meta = $version['metadata_json'] ?? array();
+        if (is_string($meta)) {
+            $meta = json_decode($meta, true);
+        }
+        $meta = is_array($meta) ? $meta : array();
+        $map = is_array($meta['reader_page_map'] ?? null) ? $meta['reader_page_map'] : array();
+        return array(
+            'page_map_hash' => isset($map['page_map_hash']) ? (string)$map['page_map_hash'] : null,
+            'manifest_hash' => isset($map['manifest_hash']) ? (string)$map['manifest_hash'] : null,
+        );
+    }
+
+    private function recordEvent(
+        int $versionId,
+        string $from,
+        string $to,
+        string $action,
+        ?string $note,
+        int $actorUserId
+    ): void {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO ipca_publishing_lifecycle_events
+              (book_version_id, from_status, to_status, action_key, note, actor_user_id)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute(array($versionId, $from, $to, $action, $note, $actorUserId));
+        $this->pdo->prepare(
+            'UPDATE ipca_publishing_version_workflow
+             SET last_transition_at = CURRENT_TIMESTAMP(3), last_transition_by = ?
+             WHERE book_version_id = ?'
+        )->execute(array($actorUserId, $versionId));
+    }
+}

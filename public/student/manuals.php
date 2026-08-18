@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../src/publishing/ControlledPublishingReaderAccessService.php';
+require_once __DIR__ . '/../../src/publishing/BooksManualsReaderPolicyService.php';
 
 cw_require_login();
 
@@ -38,7 +39,11 @@ function manuals_fmt_date(?string $value): string
 $userId = (int)($u['id'] ?? 0);
 $reader = new ControlledPublishingReaderService($pdo);
 $canPreviewDrafts = $access->canPreviewDraftManuals($u);
-$library = $reader->listActiveLibrary($userId, $canPreviewDrafts);
+$readerPolicy = new BooksManualsReaderPolicyService($pdo, $access);
+$library = $readerPolicy->filterAndDecorateLibrary(
+    $reader->listActiveLibrary($userId, $canPreviewDrafts),
+    $u
+);
 
 $shelfCssVersion = @filemtime(__DIR__ . '/../assets/manual_shelf.css') ?: time();
 

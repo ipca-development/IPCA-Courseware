@@ -8,6 +8,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../src/publishing/ControlledPublishingReaderAccessService.php';
+require_once __DIR__ . '/../../src/publishing/BooksManualsReaderPolicyService.php';
 
 cw_require_login();
 
@@ -29,6 +30,10 @@ if (!in_array($bookKey, array('OM', 'OMM'), true)) {
 
 $reader = new ControlledPublishingReaderService($pdo);
 $version = $reader->resolveLatestReleasedVersion($bookKey);
+$readerPolicy = new BooksManualsReaderPolicyService($pdo, $access);
+if ($version !== null && !$readerPolicy->canReadVersion($version, $u)) {
+    $version = null;
+}
 $error = null;
 $sectionHtml = '';
 $sectionTitle = '';

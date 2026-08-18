@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAccessService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsReaderPolicyService.php';
 
 function reader_cover_fail(int $status, string $message): never
 {
@@ -31,6 +32,10 @@ try {
     $canPreview = $access->canPreviewDraftManuals($user);
     $reader = new ControlledPublishingReaderService($pdo);
     $version = $reader->resolveReaderVersion($bookKey, $versionId, $canPreview);
+    $policy = new BooksManualsReaderPolicyService($pdo, $access);
+    if (!$policy->canReadVersion($version, $user)) {
+        reader_cover_fail(403, 'Manual access required.');
+    }
     $map = $reader->loadReaderPageMap($version, $canPreview);
     $firstPageNumber = (int)($map['pages'][0]['page_number'] ?? 1);
     $page = $reader->loadReaderPage($version, $firstPageNumber, $canPreview);

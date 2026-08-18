@@ -48,7 +48,7 @@ function mr_auth_can_preview_drafts(
     ControlledPublishingReaderAccessService $access
 ): bool
 {
-    return $access->canPreviewDraftManuals($user);
+    return $access->canReviewManuals($user);
 }
 
 function mr_auth_review_user(PDO $pdo, ?array $user): ?array
