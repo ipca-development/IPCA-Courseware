@@ -216,7 +216,7 @@ final class ControlledPublishingTocService
             FROM ipca_publishing_book_sections
             WHERE book_version_id = :version_id
               AND section_key REGEXP '^part_[0-9]+_chapter_[0-9]+$'
-            ORDER BY section_key
+            ORDER BY sort_order, id
         ");
         $stmt->execute(array(':version_id' => $versionId));
         $grouped = array();
@@ -238,12 +238,37 @@ final class ControlledPublishingTocService
             if (!isset($grouped[$partKey])) {
                 continue;
             }
-            usort($grouped[$partKey], static function (array $a, array $b): int {
-                return strcmp((string)($a['section_key'] ?? ''), (string)($b['section_key'] ?? ''));
-            });
+            usort($grouped[$partKey], array(self::class, 'compareChapterRows'));
         }
 
         return $grouped;
+    }
+
+    /**
+     * Preserve the outline order first and use numeric section-key components
+     * as a deterministic fallback (chapter 2 must precede chapter 10).
+     *
+     * @param array<string,mixed> $a
+     * @param array<string,mixed> $b
+     */
+    private static function compareChapterRows(array $a, array $b): int
+    {
+        $sort = (int)($a['sort_order'] ?? 0) <=> (int)($b['sort_order'] ?? 0);
+        if ($sort !== 0) {
+            return $sort;
+        }
+
+        $keyA = (string)($a['section_key'] ?? '');
+        $keyB = (string)($b['section_key'] ?? '');
+        $partsA = preg_match('/^part_(\d+)_chapter_(\d+)$/', $keyA, $matchA)
+            ? array((int)$matchA[1], (int)$matchA[2])
+            : array(PHP_INT_MAX, PHP_INT_MAX);
+        $partsB = preg_match('/^part_(\d+)_chapter_(\d+)$/', $keyB, $matchB)
+            ? array((int)$matchB[1], (int)$matchB[2])
+            : array(PHP_INT_MAX, PHP_INT_MAX);
+
+        return ($partsA[0] <=> $partsB[0])
+            ?: (($partsA[1] <=> $partsB[1]) ?: strcmp($keyA, $keyB));
     }
 
     private function resolvePartTitle(int $versionId, string $partKey): string

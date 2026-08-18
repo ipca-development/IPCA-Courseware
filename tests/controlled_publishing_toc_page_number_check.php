@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__);
 require_once $root . '/src/publishing/ControlledPublishingAuthoritativePaginationService.php';
+require_once $root . '/src/publishing/ControlledPublishingTocService.php';
 
 $reflection = new ReflectionClass(ControlledPublishingAuthoritativePaginationService::class);
 $service = $reflection->newInstanceWithoutConstructor();
@@ -56,6 +57,38 @@ $malformed = '<div class="cpb-toc-row"><a data-section-id="43"'
 $repaired = $injectMethod->invoke($service, $malformed, array('43' => 109), $anchorIndex);
 if (!str_contains($repaired, 'data-toc-page="110">110</span>')) {
     throw new RuntimeException('Previously malformed stored TOC markup was not repaired.');
+}
+
+$tocReflection = new ReflectionClass(ControlledPublishingTocService::class);
+$chapterComparator = $tocReflection->getMethod('compareChapterRows');
+$chapterRows = array(
+    array('section_key' => 'part_1_chapter_1', 'sort_order' => 100),
+    array('section_key' => 'part_1_chapter_10', 'sort_order' => 100),
+    array('section_key' => 'part_1_chapter_2', 'sort_order' => 100),
+);
+usort(
+    $chapterRows,
+    static fn(array $a, array $b): int => $chapterComparator->invoke(null, $a, $b)
+);
+$chapterKeys = array_column($chapterRows, 'section_key');
+if ($chapterKeys !== array(
+    'part_1_chapter_1',
+    'part_1_chapter_2',
+    'part_1_chapter_10',
+)) {
+    throw new RuntimeException('TOC chapter fallback ordering is lexicographic instead of numeric.');
+}
+
+$outlineRows = array(
+    array('section_key' => 'part_1_chapter_1', 'sort_order' => 30),
+    array('section_key' => 'part_1_chapter_10', 'sort_order' => 20),
+);
+usort(
+    $outlineRows,
+    static fn(array $a, array $b): int => $chapterComparator->invoke(null, $a, $b)
+);
+if ((string)$outlineRows[0]['section_key'] !== 'part_1_chapter_10') {
+    throw new RuntimeException('TOC chapter ordering did not preserve explicit outline sort order.');
 }
 
 echo "Controlled publishing TOC page numbers: PASS\n";
