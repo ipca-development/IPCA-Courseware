@@ -4,7 +4,8 @@
 
 1. Back up the database.
 2. Apply `scripts/sql/2026_08_18_books_manuals_workflow.sql`.
-3. Run:
+3. Apply `scripts/sql/2026_08_18_books_manuals_library_ux.sql`.
+4. Run:
    - `php tests/books_manuals_protected_boundary_check.php`
    - `php tests/books_manuals_workflow_contract_check.php`
 4. Open `/admin/books_manuals/index.php` as an administrator.

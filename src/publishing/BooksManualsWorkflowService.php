@@ -55,6 +55,7 @@ final class BooksManualsWorkflowService
               bp.manual_type,
               bp.approval_route,
               bp.authority_code,
+              bp.approved_reader_policy,
               vw.update_sequence,
               vw.update_code,
               vw.source_fingerprint,
@@ -62,6 +63,7 @@ final class BooksManualsWorkflowService
               vw.manifest_hash,
               updater.name AS updated_by_name,
               COALESCE(aud.audience_count, 0) AS audience_count,
+              COALESCE(reviewers.reviewer_count, 0) AS reviewer_count,
               audit.status AS audit_status,
               audit.coverage_percent,
               al.parent_book_id,
@@ -82,6 +84,11 @@ final class BooksManualsWorkflowService
               FROM ipca_publishing_version_audiences
               GROUP BY book_version_id
             ) aud ON aud.book_version_id = bv.id
+            LEFT JOIN (
+              SELECT book_id, COUNT(*) AS reviewer_count
+              FROM ipca_publishing_book_reviewers
+              GROUP BY book_id
+            ) reviewers ON reviewers.book_id = b.id
             LEFT JOIN ipca_publishing_audit_snapshots audit
               ON audit.id = (
                 SELECT MAX(a2.id)
@@ -122,6 +129,7 @@ final class BooksManualsWorkflowService
         $version['phase_tone'] = self::phaseTone((string)$version['lifecycle_status']);
         $version['actions'] = self::actionsFor((string)$version['lifecycle_status']);
         $version['audiences'] = $this->audiences($versionId);
+        $version['reviewers'] = $this->bookReviewers((int)$version['book_id']);
         $version['latest_audit'] = $this->latestAudit($versionId);
         return $version;
     }
@@ -292,7 +300,8 @@ final class BooksManualsWorkflowService
         string $manualType,
         string $approvalRoute,
         ?string $authorityCode,
-        int $actorUserId
+        int $actorUserId,
+        string $approvedReaderPolicy = 'all_readers'
     ): void {
         $manualType = strtolower(trim($manualType));
         $allowedTypes = array('operations', 'training', 'sop', 'course_book', 'handbook', 'other');
@@ -309,12 +318,18 @@ final class BooksManualsWorkflowService
         if ($approvalRoute === 'authority' && $authorityCode === '') {
             throw new InvalidArgumentException('Approval authority is required.');
         }
+        $approvedReaderPolicy = strtolower(trim($approvedReaderPolicy));
+        if (!in_array($approvedReaderPolicy, array('all_readers', 'selected_reviewers'), true)) {
+            throw new InvalidArgumentException('Invalid approved reader policy.');
+        }
         $stmt = $this->pdo->prepare(
             'INSERT INTO ipca_publishing_book_profiles
-              (book_id, manual_type, approval_route, authority_code, created_by, updated_by)
-             VALUES (?, ?, ?, ?, ?, ?)
+              (book_id, manual_type, approval_route, authority_code,
+               approved_reader_policy, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE manual_type = VALUES(manual_type),
                approval_route = VALUES(approval_route), authority_code = VALUES(authority_code),
+               approved_reader_policy = VALUES(approved_reader_policy),
                updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP(3)'
         );
         $stmt->execute(array(
@@ -322,9 +337,106 @@ final class BooksManualsWorkflowService
             $manualType,
             $approvalRoute,
             $authorityCode,
+            $approvedReaderPolicy,
             $actorUserId,
             $actorUserId,
         ));
+    }
+
+    /**
+     * @return list<array{id:int,name:string,email:string,role:string}>
+     */
+    public function availableReviewers(): array
+    {
+        $stmt = $this->pdo->query(
+            "SELECT id, name, email, role
+             FROM users
+             WHERE role IN ('instructor','supervisor','chief_instructor')
+             ORDER BY name, email"
+        );
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        return array_map(
+            static fn(array $row): array => array(
+                'id' => (int)$row['id'],
+                'name' => (string)($row['name'] ?? ''),
+                'email' => (string)($row['email'] ?? ''),
+                'role' => (string)($row['role'] ?? ''),
+            ),
+            $rows
+        );
+    }
+
+    /**
+     * @return list<array{id:int,name:string,email:string,role:string}>
+     */
+    public function bookReviewers(int $bookId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT u.id, u.name, u.email, u.role
+             FROM ipca_publishing_book_reviewers br
+             INNER JOIN users u ON u.id = br.reviewer_user_id
+             WHERE br.book_id = ?
+             ORDER BY u.name, u.email'
+        );
+        $stmt->execute(array($bookId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        return array_map(
+            static fn(array $row): array => array(
+                'id' => (int)$row['id'],
+                'name' => (string)($row['name'] ?? ''),
+                'email' => (string)($row['email'] ?? ''),
+                'role' => (string)($row['role'] ?? ''),
+            ),
+            $rows
+        );
+    }
+
+    /**
+     * @param list<int> $reviewerUserIds
+     */
+    public function replaceBookReviewers(
+        int $bookId,
+        array $reviewerUserIds,
+        int $actorUserId
+    ): void {
+        $reviewerUserIds = array_values(array_unique(array_filter(
+            array_map('intval', $reviewerUserIds),
+            static fn(int $id): bool => $id > 0
+        )));
+        $eligible = array_column($this->availableReviewers(), 'id');
+        foreach ($reviewerUserIds as $reviewerUserId) {
+            if (!in_array($reviewerUserId, $eligible, true)) {
+                throw new InvalidArgumentException(
+                    'Only instructor or instructor-supervisor accounts can review a manual.'
+                );
+            }
+        }
+        $this->pdo->beginTransaction();
+        try {
+            if ($reviewerUserIds !== array()) {
+                $in = implode(',', array_fill(0, count($reviewerUserIds), '?'));
+                $this->pdo->prepare(
+                    "UPDATE users SET can_manual_reviewer = 1 WHERE id IN ({$in})"
+                )->execute($reviewerUserIds);
+            }
+            $this->pdo->prepare(
+                'DELETE FROM ipca_publishing_book_reviewers WHERE book_id = ?'
+            )->execute(array($bookId));
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ipca_publishing_book_reviewers
+                  (book_id, reviewer_user_id, assigned_by)
+                 VALUES (?, ?, ?)'
+            );
+            foreach ($reviewerUserIds as $reviewerUserId) {
+                $insert->execute(array($bookId, $reviewerUserId, $actorUserId));
+            }
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -464,7 +576,7 @@ final class BooksManualsWorkflowService
     private function profile(int $bookId): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT manual_type, approval_route, authority_code
+            'SELECT manual_type, approval_route, authority_code, approved_reader_policy
              FROM ipca_publishing_book_profiles WHERE book_id = ? LIMIT 1'
         );
         $stmt->execute(array($bookId));
@@ -473,6 +585,7 @@ final class BooksManualsWorkflowService
             'manual_type' => 'operations',
             'approval_route' => 'internal',
             'authority_code' => null,
+            'approved_reader_policy' => 'all_readers',
         );
     }
 

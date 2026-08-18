@@ -125,7 +125,7 @@ compliance_page_open(array(
         <input type="hidden" name="action" value="snapshot">
         <button class="app-btn app-btn--primary" type="submit">Create immutable snapshot</button>
       </form>
-      <a class="app-btn app-btn--secondary" href="/admin/books_manuals/manual.php?version_id=<?= $versionId ?>">Manual settings</a>
+      <a class="app-btn app-btn--secondary" href="/admin/books_manuals/index.php?open=<?= $versionId ?>">Manual settings</a>
     </div>
   </section>
 

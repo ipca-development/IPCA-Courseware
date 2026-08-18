@@ -24,8 +24,12 @@ $annexCommand = (string)file_get_contents(
 $migration = (string)file_get_contents(
     $root . '/scripts/sql/2026_08_18_books_manuals_workflow.sql'
 );
+$libraryMigration = (string)file_get_contents(
+    $root . '/scripts/sql/2026_08_18_books_manuals_library_ux.sql'
+);
 $readerApi = (string)file_get_contents($root . '/public/student/api/manual_reader_api.php');
 $nav = (string)file_get_contents($root . '/src/nav/admin.php');
+$libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
 
 foreach (array(
     "'draft' => array('publish_review' => 'in_review')" => 'Draft to Draft Review',
@@ -66,8 +70,14 @@ bm_contract_assert(
         && str_contains($policy, 'isApprovedReviewer')
 );
 bm_contract_assert(
-    'Approved reader access uses assigned audiences',
-    str_contains($policy, 'matchesAudience')
+    'review phases require book-specific reviewer assignment',
+    str_contains($policy, 'isBookReviewer')
+        && str_contains($libraryMigration, 'ipca_publishing_book_reviewers')
+);
+bm_contract_assert(
+    'Approved reader access uses the selected book policy',
+    str_contains($policy, 'approvedReaderPolicy')
+        && str_contains($libraryMigration, 'approved_reader_policy')
 );
 bm_contract_assert(
     'reader API decorates optional workflow fields',
@@ -87,6 +97,17 @@ bm_contract_assert(
         && str_contains($nav, "'label' => 'IPCA Library'")
         && str_contains($nav, "'label' => 'Annexes'")
 );
+foreach (array(
+    "array('label' => '+', 'modal' => 'bm-create-manual')" => 'hero plus-button creation',
+    'Create NEW Revision Draft' => 'card revision overflow action',
+    'manual_reader_cover_thumbnail.php' => 'authoritative front-page thumbnails',
+    'controlled_book_page_preview.php' => 'standalone exact page viewer',
+    'bm-lifecycle-track' => 'four-stage lifecycle progress',
+    'data-bm-settings-toggle' => 'manual settings modal',
+    '+ Add person as reviewer' => 'book reviewer assignment',
+) as $needle => $label) {
+    bm_contract_assert($label, str_contains($libraryPage, $needle));
+}
 bm_contract_assert(
     'Awaiting Approval creates an immutable audit snapshot',
     str_contains($workflow, "if (\$action === 'ready_approval')")

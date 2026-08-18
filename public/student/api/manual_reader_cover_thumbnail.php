@@ -33,7 +33,9 @@ try {
     $reader = new ControlledPublishingReaderService($pdo);
     $version = $reader->resolveReaderVersion($bookKey, $versionId, $canPreview);
     $policy = new BooksManualsReaderPolicyService($pdo, $access);
-    if (!$policy->canReadVersion($version, $user)) {
+    $adminPreview = !empty($_GET['admin_preview'])
+        && strtolower((string)($user['role'] ?? '')) === 'admin';
+    if (!$adminPreview && !$policy->canReadVersion($version, $user)) {
         reader_cover_fail(403, 'Manual access required.');
     }
     $map = $reader->loadReaderPageMap($version, $canPreview);

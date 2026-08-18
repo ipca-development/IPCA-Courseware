@@ -49,15 +49,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 (string)($_POST['manual_type'] ?? ''),
                 (string)($_POST['approval_route'] ?? ''),
                 isset($_POST['authority_code']) ? (string)$_POST['authority_code'] : null,
-                $actorId
+                $actorId,
+                (string)($detail['approved_reader_policy'] ?? 'all_readers')
             );
-            $roles = is_array($_POST['audience_roles'] ?? null) ? $_POST['audience_roles'] : array();
-            $audiences = array();
-            foreach ($roles as $role) {
-                $audiences[] = array('type' => 'role', 'key' => (string)$role);
-            }
-            $workflow->replaceAudiences($versionId, $audiences, $actorId);
-            bm_manual_flash('success', 'Manual settings and audience saved.');
+            bm_manual_flash('success', 'Manual settings saved.');
         } elseif ($action === 'create_revision') {
             $created = $workflow->createRevision($versionId, $actorId);
             bm_manual_flash('success', 'Revision ' . (string)$created['version_label'] . ' created in Draft.');
@@ -79,19 +74,6 @@ if ($detail === null) {
 }
 $flash = $_SESSION['books_manuals_manual_flash'] ?? null;
 unset($_SESSION['books_manuals_manual_flash']);
-$selectedRoles = array();
-foreach ((array)$detail['audiences'] as $audience) {
-    if (($audience['audience_type'] ?? '') === 'role') {
-        $selectedRoles[] = (string)$audience['audience_key'];
-    }
-}
-$roleOptions = array(
-    'admin' => 'Administrators',
-    'supervisor' => 'Supervisors',
-    'chief_instructor' => 'Chief Instructors',
-    'instructor' => 'Instructors',
-    'student' => 'Students',
-);
 $lifecycle = (string)$detail['lifecycle_status'];
 $approvalRoute = (string)($detail['approval_route'] ?? 'internal');
 $audit = is_array($detail['latest_audit'] ?? null) ? $detail['latest_audit'] : null;
@@ -179,7 +161,7 @@ books_manuals_page_open(array(
 </div>
 
 <section class="cmp-card" style="margin-top:18px;">
-  <h2 style="margin-top:0;">Manual settings and reader audience</h2>
+  <h2 style="margin-top:0;">Manual settings</h2>
   <form method="post" class="bm-form-grid">
     <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
     <input type="hidden" name="version_id" value="<?= $versionId ?>">
@@ -203,16 +185,13 @@ books_manuals_page_open(array(
       <span>Authority code</span>
       <input name="authority_code" maxlength="64" value="<?= h((string)($detail['authority_code'] ?? '')) ?>">
     </label>
-    <fieldset class="bm-form-field" style="border:0;padding:0;">
-      <legend>Approved-version audience</legend>
-      <?php foreach ($roleOptions as $role => $label): ?>
-        <label><input type="checkbox" name="audience_roles[]" value="<?= h($role) ?>" <?= in_array($role, $selectedRoles, true) ? 'checked' : '' ?>> <?= h($label) ?></label>
-      <?php endforeach; ?>
-    </fieldset>
     <div class="bm-actions" style="align-self:end;">
       <button class="app-btn app-btn--primary" type="submit">Save settings</button>
     </div>
   </form>
+  <p style="margin-bottom:0;color:#64748b;font-size:12px;">
+    Reviewer assignments and approved-reader policy are managed from the IPCA Library settings modal.
+  </p>
 </section>
 
 <?php

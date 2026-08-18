@@ -46,20 +46,26 @@ final class BooksManualsReaderPolicyService
         }
 
         $status = strtolower(trim((string)($version['lifecycle_status'] ?? '')));
+        $bookId = (int)($version['book_id'] ?? 0);
         if ($status === 'draft') {
-            return false;
-        }
-        if (in_array($status, array('in_review', 'approved'), true)) {
-            return $this->isApprovedReviewer($user);
-        }
-        if ($status !== 'released') {
             return false;
         }
         if (strtolower((string)($user['role'] ?? '')) === 'admin') {
             return true;
         }
-
-        return $this->matchesAudience((int)($version['id'] ?? $version['version_id'] ?? 0), $user);
+        if (in_array($status, array('in_review', 'approved'), true)) {
+            return $this->isApprovedReviewer($user)
+                && $this->isBookReviewer($bookId, (int)($user['id'] ?? 0));
+        }
+        if ($status !== 'released') {
+            return false;
+        }
+        $policy = $this->approvedReaderPolicy($bookId);
+        if ($policy === 'selected_reviewers') {
+            return $this->isApprovedReviewer($user)
+                && $this->isBookReviewer($bookId, (int)($user['id'] ?? 0));
+        }
+        return true;
     }
 
     /**
@@ -117,25 +123,40 @@ final class BooksManualsReaderPolicyService
     /**
      * @param array<string,mixed>|null $user
      */
-    private function matchesAudience(int $versionId, ?array $user): bool
+    private function approvedReaderPolicy(int $bookId): string
     {
-        if ($versionId <= 0 || !is_array($user)) {
+        if ($bookId <= 0) {
+            return 'all_readers';
+        }
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT approved_reader_policy
+                 FROM ipca_publishing_book_profiles WHERE book_id = ? LIMIT 1'
+            );
+            $stmt->execute(array($bookId));
+            return $stmt->fetchColumn() === 'selected_reviewers'
+                ? 'selected_reviewers'
+                : 'all_readers';
+        } catch (Throwable) {
+            return 'all_readers';
+        }
+    }
+
+    private function isBookReviewer(int $bookId, int $userId): bool
+    {
+        if ($bookId <= 0 || $userId <= 0) {
             return false;
         }
-        $role = strtolower(trim((string)($user['role'] ?? '')));
-        $userId = (int)($user['id'] ?? 0);
-        $stmt = $this->pdo->prepare(
-            "SELECT 1
-             FROM ipca_publishing_version_audiences
-             WHERE book_version_id = ?
-               AND (
-                 (audience_type = 'role' AND LOWER(audience_key) = ?)
-                 OR (audience_type = 'user' AND audience_key = ?)
-               )
-             LIMIT 1"
-        );
-        $stmt->execute(array($versionId, $role, (string)$userId));
-        return (bool)$stmt->fetchColumn();
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT 1 FROM ipca_publishing_book_reviewers
+                 WHERE book_id = ? AND reviewer_user_id = ? LIMIT 1'
+            );
+            $stmt->execute(array($bookId, $userId));
+            return (bool)$stmt->fetchColumn();
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**
