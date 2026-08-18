@@ -308,8 +308,41 @@ cases.push(["A. one ordinary segment fits one page", () => {
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
   assert.strictEqual(result.error, undefined);
   assert.strictEqual(result.pages.length, 1);
-  assert.strictEqual(result.engine_version, "live-authoritative-flow-v1");
+  assert.strictEqual(result.engine_version, "live-authoritative-flow-v2");
   assertHeaderFooter(result.pages);
+}]);
+
+cases.push(["A2. revision bars are page overlays with zero pagination impact", () => {
+  const ordinary = '<article class="cpb-block cpb-block--paragraph" '
+    + 'data-block-id="2" data-stable-anchor="block-two"><p>Geometry-neutral revision text.</p></article>';
+  const changed = ordinary.replace(
+    'cpb-block cpb-block--paragraph',
+    'cpb-block cpb-block--paragraph cpb-block--changed cpb-block--modified'
+  );
+  const baseline = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-two", "paragraph", ordinary)
+    ])
+  ]));
+  const marked = runWorker(sourceWith([
+    section(1, "section-one", "Section One", {}, [
+      unit("block-two", "paragraph", changed)
+    ])
+  ]));
+  assert.strictEqual(baseline.execution.status, 0, baseline.execution.stderr || baseline.execution.stdout);
+  assert.strictEqual(marked.execution.status, 0, marked.execution.stderr || marked.execution.stdout);
+  assert.strictEqual(marked.result.pages.length, baseline.result.pages.length);
+  assert.deepStrictEqual(
+    marked.result.pages.map((page) => page.metrics.content_used_height),
+    baseline.result.pages.map((page) => page.metrics.content_used_height),
+    "revision presentation must not alter measured content height"
+  );
+  const html = marked.result.pages[0].page_html;
+  assert.ok(html.includes("reader-revision-change-marker"), "page-level revision marker missing");
+  assert.ok(
+    html.indexOf("reader-revision-change-marker") > html.indexOf("</main>"),
+    "revision marker must be outside the page body"
+  );
 }]);
 
 cases.push(["B. multiple ordinary blocks exceed intended page", () => {
