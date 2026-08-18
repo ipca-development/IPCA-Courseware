@@ -725,6 +725,26 @@
   text-decoration: none;
 }
 
+.bmca-impact__requirement {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border-left: 3px solid #5b9fd3;
+  border-radius: 0 8px 8px 0;
+  color: #40566d;
+  background: #f2f8fd;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bmca-impact__requirement strong {
+  color: #1768aa;
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
 a.bmca-citation:hover {
   text-decoration: underline;
 }

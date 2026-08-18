@@ -536,14 +536,28 @@ final class BooksManualsChangeAssistantService
     public function buildContentChunks(int $projectId): array
     {
         $this->assertAvailable();
+        $this->pdo->prepare(
+            "DELETE c FROM ipca_manual_ai_content_chunks c
+             JOIN ipca_publishing_book_blocks b ON b.id=c.block_id
+             JOIN ipca_publishing_book_sections s ON s.id=c.section_id
+             WHERE c.project_id=? AND (
+               b.is_system_managed=1 OR s.is_system_managed=1 OR s.is_generated=1
+               OR s.section_type IN ('toc','highlights')
+             )"
+        )->execute(array($projectId));
         $rows = $this->rows(
-            'SELECT b.id block_id,b.book_version_id,b.section_id,b.block_type,b.payload_json,b.content_hash,
+            "SELECT b.id block_id,b.book_version_id,b.section_id,b.block_type,b.payload_json,b.content_hash,
                     s.title section_title,s.section_key,s.stable_anchor section_stable_anchor,
                     s.metadata_json section_metadata_json,b.stable_anchor
              FROM ipca_manual_ai_version_scopes sc
              JOIN ipca_publishing_book_sections s ON s.book_version_id=sc.book_version_id
              JOIN ipca_publishing_book_blocks b ON b.section_id=s.id
-             WHERE sc.project_id=? ORDER BY b.book_version_id,s.sort_order,b.sort_order,b.id',
+             WHERE sc.project_id=?
+               AND b.is_system_managed=0
+               AND s.is_system_managed=0
+               AND s.is_generated=0
+               AND s.section_type NOT IN ('toc','highlights')
+             ORDER BY b.book_version_id,s.sort_order,b.sort_order,b.id",
             array($projectId)
         );
         $chunkLimit = max(100, min(50000, (int)(getenv('CW_MANUAL_AI_CHUNK_LIMIT') ?: 15000)));
@@ -1310,14 +1324,18 @@ final class BooksManualsChangeAssistantService
             }
         }
         $rows = $this->rows(
-            'SELECT c.*,b.block_type,b.payload_json,b.stable_anchor,s.title section_title,s.section_key,
+            "SELECT c.*,b.block_type,b.payload_json,b.stable_anchor,s.title section_title,s.section_key,
                     bk.book_key,bv.version_label
              FROM ipca_manual_ai_content_chunks c
              JOIN ipca_publishing_book_blocks b ON b.id=c.block_id
              JOIN ipca_publishing_book_sections s ON s.id=c.section_id
              JOIN ipca_publishing_book_versions bv ON bv.id=c.book_version_id
              JOIN ipca_publishing_books bk ON bk.id=bv.book_id
-             WHERE c.project_id=?',
+             WHERE c.project_id=?
+               AND b.is_system_managed=0
+               AND s.is_system_managed=0
+               AND s.is_generated=0
+               AND s.section_type NOT IN ('toc','highlights')",
             array($projectId)
         );
         foreach ($rows as &$row) {
@@ -1515,7 +1533,9 @@ final class BooksManualsChangeAssistantService
             'type' => 'impact',
             'action' => $exact ? 'no_change' : 'add',
             'confidence' => $exact ? 0.9 : min(0.82, 0.45 + ((int)$top['_score'] * 0.04)),
-            'title' => $exact ? 'Requirement already represented' : 'Potential manual impact',
+            'title' => $exact
+                ? 'Requirement already represented'
+                : 'Potential impact — ' . trim((string)($top['section_title'] ?? 'manual section')),
             'rationale' => $exact
                 ? 'The exact normalized requirement is already present in the cited block.'
                 : 'Keyword and common-variant retrieval found a related passage requiring administrator review.',

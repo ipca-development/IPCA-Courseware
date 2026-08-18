@@ -119,35 +119,39 @@ if ($job !== array()) {
     $progress = max($progress, max(0, min(100, (int)bmca_value($job, array('progress_percent'), 0))));
 }
 
-foreach ($proposals as &$proposal) {
-    $evidence = bmca_array(bmca_value($proposal, array('evidence', 'evidence_items', 'evidence_json'), array()));
+$normalizeFinding = static function (array $finding): array {
+    $evidence = bmca_array(bmca_value($finding, array('evidence', 'evidence_items', 'evidence_json'), array()));
     $versionEvidence = bmca_array($evidence['version'] ?? array());
     $sectionEvidence = bmca_array($evidence['section'] ?? array());
     $blockEvidence = bmca_array($evidence['block'] ?? array());
     $sourceEvidence = bmca_array($evidence['source'] ?? array());
-    $confidenceValue = (float)bmca_value($proposal, array('confidence'), 0.0);
-    $proposal['version_id'] = (int)bmca_value($proposal, array('version_id', 'book_version_id'), bmca_value($versionEvidence, array('id'), 0));
-    $proposal['section_id'] = (int)bmca_value($proposal, array('section_id'), bmca_value($sectionEvidence, array('id'), 0));
-    $proposal['block_id'] = (int)bmca_value($proposal, array('block_id'), bmca_value($blockEvidence, array('id'), 0));
-    $proposal['stable_anchor'] = (string)bmca_value($proposal, array('stable_anchor'), bmca_value($blockEvidence, array('stable_anchor'), ''));
-    $proposal['manual_code'] = (string)bmca_value($proposal, array('manual_code', 'book_key'), bmca_value($versionEvidence, array('book_key'), 'Manual'));
-    $proposal['section_label'] = (string)bmca_value($proposal, array('section_label'), bmca_value($sectionEvidence, array('key', 'title'), 'Section'));
-    $proposal['exact_citation'] = $proposal['manual_code']
+    $confidenceValue = (float)bmca_value($finding, array('confidence'), 0.0);
+    $finding['version_id'] = (int)bmca_value($finding, array('version_id', 'book_version_id'), bmca_value($versionEvidence, array('id'), 0));
+    $finding['section_id'] = (int)bmca_value($finding, array('section_id'), bmca_value($sectionEvidence, array('id'), 0));
+    $finding['block_id'] = (int)bmca_value($finding, array('block_id'), bmca_value($blockEvidence, array('id'), 0));
+    $finding['stable_anchor'] = (string)bmca_value($finding, array('stable_anchor'), bmca_value($blockEvidence, array('stable_anchor'), ''));
+    $finding['manual_code'] = (string)bmca_value($finding, array('manual_code', 'book_key'), bmca_value($versionEvidence, array('book_key'), 'Manual'));
+    $finding['section_label'] = (string)bmca_value($finding, array('section_label'), bmca_value($sectionEvidence, array('key', 'title'), 'Section'));
+    $finding['exact_citation'] = $finding['manual_code']
         . ' ' . (string)bmca_value($versionEvidence, array('version_label'), '')
-        . ' · ' . $proposal['section_label']
+        . ' · ' . $finding['section_label']
         . ($blockEvidence !== array() ? ' · block ' . (string)bmca_value($blockEvidence, array('stable_anchor', 'id'), '') : '');
-    $proposal['confidence_label'] = (string)bmca_value(
-        $proposal,
+    $finding['confidence_label'] = (string)bmca_value(
+        $finding,
         array('confidence_label'),
         $confidenceValue >= 0.8 ? 'high' : ($confidenceValue >= 0.5 ? 'medium' : 'low')
     );
-    $proposal['action'] = (string)bmca_value($proposal, array('action', 'action_classification'), 'investigate');
-    $proposal['evidence'] = array_values(array_filter(array(
+    $finding['action'] = (string)bmca_value($finding, array('action', 'action_classification'), 'investigate');
+    $finding['evidence'] = array_values(array_filter(array(
         bmca_value($sourceEvidence, array('exact_quote', 'quote', 'text'), ''),
         bmca_value($blockEvidence, array('current_text', 'text'), ''),
     )));
-}
-unset($proposal);
+    return $finding;
+};
+$impacts = array_map($normalizeFinding, $impacts);
+$proposals = array_map($normalizeFinding, $proposals);
+$conflicts = array_map($normalizeFinding, $conflicts);
+$approvedChanges = array_map($normalizeFinding, $approvedChanges);
 
 if (!array_key_exists('proposals', $detail) && !array_key_exists('proposed_changes', $detail)) {
     $allFindings = $proposals;
@@ -376,6 +380,12 @@ books_manuals_page_open(array(
             <a class="bmca-citation" href="<?= h((string)bmca_value($impact, array('reader_url'), '/admin/books_manuals/reader.php?version_id=' . (int)bmca_value($impact, array('version_id'), 0))) ?>" target="_blank" rel="noopener">
               <?= h((string)bmca_value($impact, array('citation', 'exact_citation', 'section_label'), 'Citation unavailable')) ?> ↗
             </a>
+            <?php if ((string)bmca_value($impact, array('requirement_text'), '') !== ''): ?>
+              <div class="bmca-impact__requirement">
+                <strong><?= h((string)bmca_value($impact, array('requirement_key'), 'Source requirement')) ?></strong>
+                <span><?= h((string)bmca_value($impact, array('requirement_text'), '')) ?></span>
+              </div>
+            <?php endif; ?>
             <p><?= h((string)bmca_value($impact, array('reason', 'rationale', 'summary'), '')) ?></p>
             <?php $evidence = bmca_array(bmca_value($impact, array('evidence', 'evidence_items'), array())); ?>
             <?php if ($evidence !== array()): ?>

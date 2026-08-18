@@ -57,6 +57,11 @@ bmca_assert(
     'Project creation must provide explicit selectable manual-version checkboxes.'
 );
 bmca_assert(str_contains($detail, 'Impact Finder') && str_contains($detail, 'Consistency &amp; Conflicts'), 'Full review stages are missing.');
+bmca_assert(
+    str_contains($detail, '$impacts = array_map($normalizeFinding, $impacts)')
+        && str_contains($detail, 'bmca-impact__requirement'),
+    'Impact cards must show normalized citations and their source requirement.'
+);
 bmca_assert(str_contains($detail, 'data-bmca-create-revision'), 'Released-scope draft revision action is missing.');
 
 foreach (array(
@@ -90,6 +95,11 @@ foreach (array('add', 'replace', 'cross_reference', 'investigate', 'no_change') 
 }
 bmca_assert(str_contains($service, 'untrusted evidence'), 'Prompt-injection boundary is missing.');
 bmca_assert(str_contains($service, 'openAiEmbeddings') && str_contains($service, 'cosineSimilarity'), 'Embedding reranking is missing.');
+bmca_assert(
+    substr_count($service, 's.is_system_managed=0') >= 2
+        && substr_count($service, "s.section_type NOT IN ('toc','highlights')") >= 2,
+    'Generated TOC and system-managed content must be excluded from retrieval.'
+);
 bmca_assert(str_contains($service, 'ComplianceAiRunLogger::insert'), 'Central AI provenance logging is missing.');
 bmca_assert(str_contains($service, 'AuditEventService') && str_contains($service, 'manual_change_assistant.apply'), 'Immutable audit event coverage is missing.');
 bmca_assert(str_contains($service, 'startIntegrityRefresh') && str_contains($service, 'ControlledPublishingLivePageMapService'), 'Post-apply governed refreshes are missing.');
