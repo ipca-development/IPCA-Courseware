@@ -30,6 +30,7 @@ $libraryMigration = (string)file_get_contents(
 $readerApi = (string)file_get_contents($root . '/public/student/api/manual_reader_api.php');
 $nav = (string)file_get_contents($root . '/src/nav/admin.php');
 $libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
+$bookReader = (string)file_get_contents($root . '/public/admin/books_manuals/reader.php');
 
 foreach (array(
     "'draft' => array('publish_review' => 'in_review')" => 'Draft to Draft Review',
@@ -101,13 +102,20 @@ foreach (array(
     "array('label' => '+', 'modal' => 'bm-create-manual')" => 'hero plus-button creation',
     'Create NEW Revision Draft' => 'card revision overflow action',
     'manual_reader_cover_thumbnail.php' => 'authoritative front-page thumbnails',
-    'controlled_book_page_preview.php' => 'standalone exact page viewer',
+    '/admin/books_manuals/reader.php' => 'modal read-only page viewer',
     'bm-lifecycle-track' => 'four-stage lifecycle progress',
     'data-bm-settings-toggle' => 'manual settings modal',
     '+ Add person as reviewer' => 'book reviewer assignment',
 ) as $needle => $label) {
     bm_contract_assert($label, str_contains($libraryPage, $needle));
 }
+bm_contract_assert(
+    'modal book reader exposes pages without publishing controls',
+    str_contains($bookReader, "action=stored_preview")
+        && !str_contains($bookReader, 'cpp-generate')
+        && !str_contains($bookReader, 'cpp-approve')
+        && !str_contains($bookReader, 'Back to Editor')
+);
 bm_contract_assert(
     'Awaiting Approval creates an immutable audit snapshot',
     str_contains($workflow, "if (\$action === 'ready_approval')")

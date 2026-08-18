@@ -10,6 +10,30 @@
     if (input) input.required = route.value === 'authority';
   }
 
+  function openReader(url) {
+    var modal = document.getElementById('bm-reader-modal');
+    var frame = modal ? modal.querySelector('.bm-reader-modal__frame') : null;
+    if (!modal || !frame || !url) return;
+    frame.src = url;
+    if (typeof modal.showModal === 'function') {
+      modal.showModal();
+    } else {
+      modal.setAttribute('open', '');
+    }
+  }
+
+  function closeReader() {
+    var modal = document.getElementById('bm-reader-modal');
+    var frame = modal ? modal.querySelector('.bm-reader-modal__frame') : null;
+    if (!modal) return;
+    if (typeof modal.close === 'function') {
+      modal.close();
+    } else {
+      modal.removeAttribute('open');
+    }
+    if (frame) frame.removeAttribute('src');
+  }
+
   function addReviewer(select) {
     var option = select.options[select.selectedIndex];
     var id = option ? option.value : '';
@@ -61,6 +85,18 @@
   });
 
   document.addEventListener('click', function (event) {
+    var readerLink = event.target.closest('[data-bm-reader-open]');
+    if (readerLink) {
+      event.preventDefault();
+      openReader(readerLink.getAttribute('href') || '');
+      return;
+    }
+
+    if (event.target.closest('[data-bm-reader-close]')) {
+      closeReader();
+      return;
+    }
+
     var toggle = event.target.closest('[data-bm-settings-toggle]');
     if (toggle) {
       var dialog = toggle.closest('dialog');
@@ -85,7 +121,7 @@
 
     var card = event.target.closest('[data-bm-reader-url]');
     if (card && !event.target.closest('a, button, summary, details, form, input, select, label')) {
-      window.location.href = card.getAttribute('data-bm-reader-url');
+      openReader(card.getAttribute('data-bm-reader-url'));
       return;
     }
 

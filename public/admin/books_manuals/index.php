@@ -208,20 +208,20 @@ books_manuals_page_open(array(
       $stageIndex = array_search((string)$row['lifecycle_status'], $stageKeys, true);
       $stageIndex = $stageIndex === false ? 0 : (int)$stageIndex;
       $reviewers = is_array($row['reviewers'] ?? null) ? $row['reviewers'] : array();
-      $previewUrl = '/admin/compliance/controlled_book_page_preview.php?version_id=' . $versionId;
+      $previewUrl = '/admin/books_manuals/reader.php?version_id=' . $versionId;
       $coverUrl = '/student/api/manual_reader_cover_thumbnail.php?book='
           . rawurlencode((string)$row['book_key']) . '&version_id=' . $versionId . '&admin_preview=1';
       $settingsModalId = 'bm-manual-settings-' . $versionId;
     ?>
     <article class="cmp-card bm-book-card" data-bm-reader-url="<?= h($previewUrl) ?>">
-      <a class="bm-cover bm-cover--thumbnail" href="<?= h($previewUrl) ?>" aria-label="Open <?= h((string)$row['book_title']) ?> page viewer">
+      <a class="bm-cover bm-cover--thumbnail" href="<?= h($previewUrl) ?>" data-bm-reader-open aria-label="Open <?= h((string)$row['book_title']) ?> page viewer">
         <img src="<?= h($coverUrl) ?>" alt="<?= h((string)$row['book_title']) ?> front page">
         <span class="bm-cover__fallback"><?= h((string)$row['book_key']) ?></span>
       </a>
       <div class="bm-book-card__body">
         <?= books_manuals_phase_pill((string)$row['phase_label'], (string)$row['phase_tone']) ?>
         <h2 class="bm-book-card__title">
-          <a href="<?= h($previewUrl) ?>"><?= h((string)$row['book_title']) ?></a>
+          <a href="<?= h($previewUrl) ?>" data-bm-reader-open><?= h((string)$row['book_title']) ?></a>
         </h2>
         <dl class="bm-meta">
           <dt>Revision</dt><dd><?= h((string)($row['version_label'] ?? '—')) ?></dd>
@@ -401,6 +401,11 @@ books_manuals_page_open(array(
     <div class="cmp-card bm-empty">No manuals are registered yet.</div>
   <?php endif; ?>
 </section>
+
+<dialog class="bm-reader-modal" id="bm-reader-modal" aria-label="Book reader">
+  <button type="button" class="bm-reader-modal__close" data-bm-reader-close aria-label="Close book">&times;</button>
+  <iframe class="bm-reader-modal__frame" title="Book pages"></iframe>
+</dialog>
 
 <script src="/assets/books-manuals.js?v=<?= (int)(@filemtime(__DIR__ . '/../../assets/books-manuals.js') ?: time()) ?>"></script>
 <?php
