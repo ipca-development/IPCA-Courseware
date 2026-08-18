@@ -14,11 +14,26 @@
 ## Install and worker
 
 1. Run `php scripts/apply_ai_manual_change_assistant.php`.
-2. Verify with `php tests/books_manuals_change_assistant_contract_check.php`.
-3. Process queued work with `php scripts/books_manuals_change_assistant_worker.php --drain`. Web requests also attempt to launch a one-shot worker.
-4. Monitor `ipca_manual_ai_jobs` for `retry` or `failed` and `storage/logs/manual_change_assistant_<project>.log` for worker diagnostics.
+2. Run `php scripts/apply_ai_manual_change_context_pipeline.php`.
+3. Verify with `php tests/books_manuals_change_assistant_contract_check.php`.
+4. Run the provider-free quality fixture with `php tests/books_manuals_context_impact_fixture_check.php`.
+5. Process queued work with `php scripts/books_manuals_change_assistant_worker.php --drain`. Web requests also attempt to launch a one-shot worker.
+6. Monitor `ipca_manual_ai_jobs` for `retry` or `failed` and `storage/logs/manual_change_assistant_<project>.log` for worker diagnostics.
 
-Jobs are idempotent for the project source and scope fingerprints, use a ten-minute lease, and retry three times with bounded exponential delay.
+Jobs are idempotent for the project source and scope fingerprints, use a ten-minute renewable lease, report stage-level progress, and retry three times with bounded exponential delay.
+
+## Context-preserving reasoning
+
+Impact analysis and amendment composition are deliberately separate:
+
+1. Analysis creates one authoritative Change Intent and Target-State model from all project sources.
+2. Deterministic legacy scanning runs over every non-generated block before semantic process discovery.
+3. Scope is resolved against the frozen manual outline and findings are reasoned and consolidated at section/subsection level.
+4. Reviewers approve or dismiss consolidated impact areas.
+5. The Amendment Composer creates controlled redlines only for approved areas.
+6. A post-proposal consistency pass checks the proposed whole-manual state before controlled apply.
+
+Requirements marked `needs_review` or `extraction_error` remain auditable but are excluded from impact generation. Explicit legacy-term assertions must reach zero unless a retained reference has a recorded justification.
 
 ## Retention
 

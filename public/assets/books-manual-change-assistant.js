@@ -235,7 +235,10 @@
       badge.textContent = status.replace(/_/g, ' ').replace(/\b\w/g, function (letter) { return letter.toUpperCase(); });
       badge.className = 'bmca-status bmca-status--' + status.replace(/[^a-z0-9_-]/g, '-');
     }
-    if (detail) detail.textContent = job.error_message || (status === 'completed' ? 'Analysis complete. Loading cited findings…' : 'The worker is analyzing scoped controlled content.');
+    var isComposer = String(job.job_type || '') === 'compose';
+    if (detail) detail.textContent = job.error_message || (status === 'completed'
+      ? (isComposer ? 'Amendments composed. Loading controlled redlines…' : 'Analysis complete. Loading cited findings…')
+      : (isComposer ? 'The composer is building coherent amendments from approved impact areas.' : 'The worker is analyzing scoped controlled content.'));
     return status;
   }
 
@@ -275,6 +278,20 @@
           start.textContent = 'Analyzing…';
           startPolling();
         } catch (error) { toast(error.message, 'error'); setBusy(start, false); }
+      });
+    }
+    var compose = root.querySelector('[data-bmca-start-compose]');
+    if (compose) {
+      compose.addEventListener('click', async function () {
+        var ids = String(compose.dataset.impactAreaIds || '').split(',').map(Number).filter(function (id) { return id > 0; });
+        if (!ids.length) return toast('Approve at least one impact area before composing amendments.', 'error');
+        setBusy(compose, true, 'Starting composer…');
+        try {
+          var result = await request('start_compose', { project_id: projectId, impact_area_ids: ids });
+          updateProgress(result.job, { status: 'queued' });
+          compose.textContent = 'Composing amendments…';
+          startPolling();
+        } catch (error) { toast(error.message, 'error'); setBusy(compose, false); }
       });
     }
     if (root.dataset.polling === 'true') startPolling();
@@ -339,6 +356,35 @@
     });
 
     root.addEventListener('click', async function (event) {
+      var impactButton = event.target.closest('[data-bmca-impact-decision]');
+      if (impactButton) {
+        var impact = impactButton.closest('[data-bmca-impact-finding]');
+        var impactRationale = String(impact.querySelector('[data-bmca-impact-rationale]').value || '').trim();
+        var impactDecision = impactButton.dataset.bmcaImpactDecision;
+        if (impactDecision === 'rejected' && impactRationale.length < 5) {
+          return toast('Record a rationale before dismissing an impact.', 'error');
+        }
+        setBusy(impactButton, true, 'Saving…');
+        try {
+          await request('decision', {
+            project_id: projectId,
+            target_type: 'finding',
+            target_id: Number(impact.dataset.bmcaImpactFinding),
+            decision: impactDecision,
+            note: impactRationale
+          });
+          var impactBadge = impact.querySelector('[data-bmca-impact-status]');
+          impactBadge.textContent = impactDecision.charAt(0).toUpperCase() + impactDecision.slice(1);
+          impactBadge.className = 'bmca-status bmca-status--' + impactDecision;
+          toast('Impact decision recorded.');
+          window.setTimeout(function () { window.location.reload(); }, 350);
+        } catch (error) {
+          toast(error.message, 'error');
+        } finally {
+          setBusy(impactButton, false);
+        }
+        return;
+      }
       var button = event.target.closest('[data-bmca-decision]');
       if (!button) return;
       var proposal = button.closest('[data-bmca-proposal]');

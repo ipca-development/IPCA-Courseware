@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/BooksManualsChangeAssistantService.php';
+require_once __DIR__ . '/BooksManualsContextImpactService.php';
 
 /**
  * Small database queue with atomic leases and bounded exponential retry.
@@ -20,7 +21,7 @@ final class BooksManualsChangeAssistantJobService
         $assistant = new BooksManualsChangeAssistantService($this->pdo);
         $project = $assistant->getProject($projectId);
         $key = hash('sha256', implode('|', array(
-            'analysis-v2-no-system-content',
+            'analysis-v3-context-impact',
             $projectId,
             (string)($project['source_fingerprint'] ?? ''),
             (string)($project['scope_fingerprint'] ?? ''),
@@ -54,6 +55,59 @@ final class BooksManualsChangeAssistantJobService
         return $this->format($job, false) + array('worker_spawned' => $spawned);
     }
 
+    /** @param list<int> $impactAreaIds @return array<string,mixed> */
+    public function enqueueComposition(int $projectId, array $impactAreaIds, int $actorUserId): array
+    {
+        $assistant = new BooksManualsChangeAssistantService($this->pdo);
+        $project = $assistant->getProject($projectId);
+        $impactAreaIds = array_values(array_unique(array_filter(
+            array_map('intval', $impactAreaIds),
+            static fn(int $id): bool => $id > 0
+        )));
+        if ($impactAreaIds === array()) {
+            throw new InvalidArgumentException('Approve and select at least one impact area before composing amendments.');
+        }
+        sort($impactAreaIds, SORT_NUMERIC);
+        $key = hash('sha256', implode('|', array(
+            'compose-v1-context-impact',
+            $projectId,
+            (string)($project['source_fingerprint'] ?? ''),
+            (string)($project['scope_fingerprint'] ?? ''),
+            implode(',', $impactAreaIds),
+        )));
+        $existing = $this->row('SELECT * FROM ipca_manual_ai_jobs WHERE idempotency_key=?', array($key));
+        if ($existing !== null) {
+            if (in_array((string)$existing['status'], array('queued', 'retry'), true)) {
+                $this->spawnBackgroundWorker($projectId);
+            }
+            return $this->format($existing, true);
+        }
+        $dailyLimit = max(1, min(200, (int)(getenv('CW_MANUAL_AI_DAILY_JOB_LIMIT') ?: 20)));
+        $limitStmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ipca_manual_ai_jobs
+             WHERE created_by=? AND created_at>=CURRENT_DATE'
+        );
+        $limitStmt->execute(array($actorUserId));
+        if ((int)$limitStmt->fetchColumn() >= $dailyLimit) {
+            throw new RuntimeException('Daily AI job limit reached. Continue tomorrow or ask an administrator to adjust the limit.');
+        }
+        $payload = json_encode(
+            array('impact_area_ids' => $impactAreaIds),
+            JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+        );
+        $this->pdo->prepare(
+            "INSERT INTO ipca_manual_ai_jobs
+             (project_id,job_type,idempotency_key,status,result_json,created_by)
+             VALUES (?,'compose',?,'queued',?,?)"
+        )->execute(array($projectId, $key, $payload, $actorUserId));
+        $job = $this->row('SELECT * FROM ipca_manual_ai_jobs WHERE id=?', array((int)$this->pdo->lastInsertId()));
+        if ($job === null) {
+            throw new RuntimeException('Amendment composition job could not be created.');
+        }
+        $spawned = $this->spawnBackgroundWorker($projectId);
+        return $this->format($job, false) + array('worker_spawned' => $spawned);
+    }
+
     /** @return array<string,mixed>|null */
     public function status(int $projectId): ?array
     {
@@ -81,12 +135,36 @@ final class BooksManualsChangeAssistantJobService
             $this->pdo->prepare(
                 'UPDATE ipca_manual_ai_jobs SET ai_run_id=?,progress_percent=10 WHERE id=? AND lease_token=?'
             )->execute(array($runId, $jobId, $lease));
-            $result = (new BooksManualsChangeAssistantService($this->pdo))
-                ->analyzeProject(
+            $this->pdo->prepare(
+                "UPDATE ipca_manual_ai_projects SET status='analyzing',updated_at=CURRENT_TIMESTAMP WHERE id=?"
+            )->execute(array((int)$job['project_id']));
+            $progress = function (int $percent, string $stage = '') use ($jobId, $lease): void {
+                $this->pdo->prepare(
+                    'UPDATE ipca_manual_ai_jobs
+                     SET progress_percent=?,lease_expires_at=(CURRENT_TIMESTAMP + INTERVAL '
+                     . self::LEASE_SECONDS . ' SECOND) WHERE id=? AND lease_token=?'
+                )->execute(array(max(10, min(95, $percent)), $jobId, $lease));
+            };
+            $engine = new BooksManualsContextImpactService($this->pdo);
+            if ((string)($job['job_type'] ?? 'analysis') === 'compose') {
+                $request = json_decode((string)($job['result_json'] ?? ''), true);
+                $impactAreaIds = is_array($request) && is_array($request['impact_area_ids'] ?? null)
+                    ? array_map('intval', $request['impact_area_ids'])
+                    : array();
+                $result = $engine->compose(
+                    (int)$job['project_id'],
+                    $impactAreaIds,
+                    (int)($job['created_by'] ?? 0),
+                    $progress
+                );
+            } else {
+                $result = $engine->analyze(
                     (int)$job['project_id'],
                     $runId,
-                    isset($job['created_by']) ? (int)$job['created_by'] : null
+                    (int)($job['created_by'] ?? 0),
+                    $progress
                 );
+            }
             $stmt = $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_jobs
                  SET status='completed',progress_percent=100,result_json=?,completed_at=CURRENT_TIMESTAMP,
@@ -97,6 +175,9 @@ final class BooksManualsChangeAssistantJobService
                 json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
                 $jobId, $lease,
             ));
+            $this->pdo->prepare(
+                "UPDATE ipca_manual_ai_projects SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?"
+            )->execute(array((int)$job['project_id']));
             return array('processed' => true, 'done' => true, 'job_id' => $jobId, 'status' => 'completed');
         } catch (Throwable $e) {
             $attempt = (int)$job['attempt_count'];

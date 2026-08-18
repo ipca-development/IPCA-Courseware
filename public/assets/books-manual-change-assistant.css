@@ -745,6 +745,36 @@
   text-transform: uppercase;
 }
 
+.bmca-impact__decision {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #dce6ef;
+}
+
+.bmca-impact__decision .bmca-field {
+  margin: 0;
+}
+
+.bmca-intent-summary {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.bmca-intent-summary__areas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.bmca-scope-warnings {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 a.bmca-citation:hover {
   text-decoration: underline;
 }

@@ -30,13 +30,15 @@ $servicePath = $root . '/src/publishing/BooksManualsChangeAssistantService.php';
 $apiPath = $root . '/public/admin/api/books_manuals_change_assistant_api.php';
 $workerPath = $root . '/scripts/books_manuals_change_assistant_worker.php';
 $migrationPath = $root . '/scripts/sql/2026_08_18_ai_manual_change_assistant.sql';
+$contextMigrationPath = $root . '/scripts/sql/2026_08_18_ai_manual_change_context_pipeline.sql';
+$contextServicePath = $root . '/src/publishing/BooksManualsContextImpactService.php';
 $listPath = $root . '/public/admin/books_manuals/change_projects.php';
 $detailPath = $root . '/public/admin/books_manuals/change_project.php';
 $indexPath = $root . '/public/admin/books_manuals/index.php';
 $navPath = $root . '/src/nav/admin.php';
 $jsPath = $root . '/public/assets/books-manual-change-assistant.js';
 
-foreach (array($servicePath, $apiPath, $workerPath, $migrationPath, $listPath, $detailPath, $jsPath) as $path) {
+foreach (array($servicePath, $contextServicePath, $apiPath, $workerPath, $migrationPath, $contextMigrationPath, $listPath, $detailPath, $jsPath) as $path) {
     bmca_assert(is_file($path), 'Required assistant file is missing: ' . basename($path));
 }
 
@@ -44,6 +46,8 @@ $service = bmca_source($servicePath);
 $jobService = bmca_source($root . '/src/publishing/BooksManualsChangeAssistantJobService.php');
 $api = bmca_source($apiPath);
 $migration = bmca_source($migrationPath);
+$contextMigration = bmca_source($contextMigrationPath);
+$contextService = bmca_source($contextServicePath);
 $detail = bmca_source($detailPath);
 $index = bmca_source($indexPath);
 $nav = bmca_source($navPath);
@@ -63,6 +67,12 @@ bmca_assert(
     'Impact cards must show normalized citations and their source requirement.'
 );
 bmca_assert(str_contains($detail, 'data-bmca-create-revision'), 'Released-scope draft revision action is missing.');
+bmca_assert(
+    str_contains($detail, 'data-bmca-start-compose')
+        && str_contains($js, "request('start_compose'")
+        && str_contains($api, "case 'start_compose'"),
+    'Impact approval and amendment composition must remain separate operations.'
+);
 
 foreach (array(
     'ipca_manual_ai_projects',
@@ -78,6 +88,66 @@ foreach (array(
     bmca_assert(str_contains($migration, 'CREATE TABLE IF NOT EXISTS ' . $table), "Migration table {$table} is missing.");
 }
 bmca_assert(str_contains($migration, 'embedding_content_hash') && str_contains($migration, 'embedding_json'), 'Content-hash-aware embedding cache is missing.');
+foreach (array(
+    'ipca_manual_ai_analysis_runs',
+    'ipca_manual_ai_change_intents',
+    'ipca_manual_ai_target_workflow_areas',
+    'ipca_manual_ai_impact_areas',
+    'ipca_manual_ai_legacy_hits',
+    'ipca_manual_ai_scope_warnings',
+    'ipca_manual_ai_composer_runs',
+    'ipca_manual_ai_consistency_assertions',
+) as $table) {
+    bmca_assert(
+        str_contains($contextMigration, 'CREATE TABLE IF NOT EXISTS ' . $table),
+        "Context pipeline table {$table} is missing."
+    );
+}
+foreach (array(
+    'legacy_concepts_json',
+    'replacement_concepts_json',
+    'affected_workflows_json',
+    'affected_roles_json',
+    'important_controls_json',
+    'transitional_arrangements_json',
+    'unrelated_subjects_json',
+) as $intentField) {
+    bmca_assert(
+        str_contains($contextMigration, $intentField) && str_contains($contextService, $intentField),
+        "Complete Change Intent field {$intentField} is not persisted and propagated."
+    );
+}
+bmca_assert(
+    str_contains($contextService, 'scanLegacyContent')
+        && str_contains($contextService, 'buildSectionBundles')
+        && str_contains($contextService, 'persistImpactAreas'),
+    'Deterministic legacy scan, structural expansion, or section consolidation is missing.'
+);
+foreach (array('KEEP', 'DELETE', 'REPLACE', 'AMEND', 'ADD', 'CROSS_REFERENCE', 'REVIEW') as $classification) {
+    bmca_assert(str_contains($contextService, "'{$classification}'"), "Context action {$classification} is missing.");
+}
+bmca_assert(
+    str_contains($contextService, 'validation_status')
+        && str_contains($contextService, 'extraction_error')
+        && str_contains($contextService, 'needs_review'),
+    'Malformed requirement validation states are missing.'
+);
+foreach (array(
+    'legacy_term',
+    'obsolete_url',
+    'contradiction',
+    'duplication',
+    'dangling_reference',
+    'coverage',
+    'role_consistency',
+    'system_name',
+    'transition',
+) as $assertionType) {
+    bmca_assert(
+        str_contains($contextService, "'{$assertionType}'"),
+        "Post-proposal consistency assertion {$assertionType} is missing."
+    );
+}
 
 bmca_assert(str_contains($api, 'compliance_require_access($pdo)'), 'Compliance authorization gate is missing.');
 bmca_assert(str_contains($api, 'manual_ai_require_csrf'), 'CSRF mutation gate is missing.');
@@ -105,7 +175,7 @@ bmca_assert(str_contains($service, 'AuditEventService') && str_contains($service
 bmca_assert(str_contains($service, 'startIntegrityRefresh') && str_contains($service, 'ControlledPublishingLivePageMapService'), 'Post-apply governed refreshes are missing.');
 bmca_assert(str_contains($js, "request('decision'") && str_contains($js, 'proposed_text'), 'Human-edited decision persistence is missing.');
 bmca_assert(str_contains($js, "request('create_revision'"), 'Explicit revision creation flow is missing.');
-$assistantSqlSources = $service . "\n" . $jobService;
+$assistantSqlSources = $service . "\n" . $contextService . "\n" . $jobService;
 foreach (array('status="', 'role="', 'lifecycle_status="', 'extraction_status="', 'IN ("', 'VALUES (?,"') as $forbiddenSql) {
     bmca_assert(
         !str_contains($assistantSqlSources, $forbiddenSql),

@@ -121,15 +121,25 @@ if ($job !== array()) {
 
 $normalizeFinding = static function (array $finding): array {
     $evidence = bmca_array(bmca_value($finding, array('evidence', 'evidence_items', 'evidence_json'), array()));
-    $versionEvidence = bmca_array($evidence['version'] ?? array());
+    $versionEvidence = bmca_array($evidence['version'] ?? $evidence['book'] ?? array());
     $sectionEvidence = bmca_array($evidence['section'] ?? array());
     $blockEvidence = bmca_array($evidence['block'] ?? array());
+    $blocksEvidence = bmca_array($evidence['blocks'] ?? array());
+    $areaEvidence = bmca_array($evidence['impact_area'] ?? array());
     $sourceEvidence = bmca_array($evidence['source'] ?? array());
     $confidenceValue = (float)bmca_value($finding, array('confidence'), 0.0);
-    $finding['version_id'] = (int)bmca_value($finding, array('version_id', 'book_version_id'), bmca_value($versionEvidence, array('id'), 0));
+    $finding['version_id'] = (int)bmca_value($finding, array('version_id', 'book_version_id'), bmca_value($versionEvidence, array('id', 'version_id'), 0));
     $finding['section_id'] = (int)bmca_value($finding, array('section_id'), bmca_value($sectionEvidence, array('id'), 0));
     $finding['block_id'] = (int)bmca_value($finding, array('block_id'), bmca_value($blockEvidence, array('id'), 0));
     $finding['stable_anchor'] = (string)bmca_value($finding, array('stable_anchor'), bmca_value($blockEvidence, array('stable_anchor'), ''));
+    if ($finding['stable_anchor'] === '' && isset($blocksEvidence[0]) && is_array($blocksEvidence[0])) {
+        $finding['stable_anchor'] = (string)bmca_value($blocksEvidence[0], array('stable_anchor'), '');
+    }
+    $finding['impact_area_id'] = (int)bmca_value(
+        $finding,
+        array('impact_area_id'),
+        bmca_value($areaEvidence, array('id'), bmca_value($evidence, array('impact_area_id'), 0))
+    );
     $finding['manual_code'] = (string)bmca_value($finding, array('manual_code', 'book_key'), bmca_value($versionEvidence, array('book_key'), 'Manual'));
     $finding['section_label'] = (string)bmca_value($finding, array('section_label'), bmca_value($sectionEvidence, array('key', 'title'), 'Section'));
     $finding['exact_citation'] = $finding['manual_code']
@@ -141,11 +151,18 @@ $normalizeFinding = static function (array $finding): array {
         array('confidence_label'),
         $confidenceValue >= 0.8 ? 'high' : ($confidenceValue >= 0.5 ? 'medium' : 'low')
     );
-    $finding['action'] = (string)bmca_value($finding, array('action', 'action_classification'), 'investigate');
-    $finding['evidence'] = array_values(array_filter(array(
+    $finding['action'] = strtolower((string)bmca_value(
+        $finding,
+        array('impact_treatment', 'action', 'action_classification'),
+        'review'
+    ));
+    $finding['evidence'] = array_values(array_filter(array_merge(array(
         bmca_value($sourceEvidence, array('exact_quote', 'quote', 'text'), ''),
         bmca_value($blockEvidence, array('current_text', 'text'), ''),
-    )));
+    ), array_map(
+        static fn(array $block): string => (string)bmca_value($block, array('excerpt', 'current_text', 'text'), ''),
+        array_filter($blocksEvidence, 'is_array')
+    ))));
     return $finding;
 };
 $impacts = array_map($normalizeFinding, $impacts);
@@ -163,6 +180,15 @@ $isAnalyzing = in_array($status, array('queued', 'analyzing', 'processing', 'in_
 $canApply = (bool)bmca_value($detail, array('can_apply', 'apply_ready'), false);
 $blockers = bmca_array(bmca_value($detail, array('apply_blockers', 'blockers'), array()));
 $requirements = bmca_array(bmca_value($detail, array('requirements'), array()));
+$changeIntent = bmca_array(bmca_value($detail, array('change_intent'), array()));
+$targetWorkflowAreas = bmca_array(bmca_value($detail, array('target_workflow_areas'), array()));
+$scopeWarnings = bmca_array(bmca_value($detail, array('scope_warnings'), array()));
+$approvedImpactAreaIds = array_values(array_unique(array_filter(array_map(
+    static fn(array $impact): int => strtolower((string)bmca_value($impact, array('decision', 'status'), '')) === 'approved'
+        ? (int)bmca_value($impact, array('impact_area_id'), 0)
+        : 0,
+    $impacts
+))));
 $totalProposals = count($proposals);
 $approvedCount = count($approvedChanges);
 $reviewedCount = 0;
@@ -324,6 +350,20 @@ books_manuals_page_open(array(
           </div>
         </article>
       </div>
+      <?php if ($changeIntent !== array()): ?>
+        <article class="cmp-card bmca-panel bmca-intent-summary">
+          <div>
+            <span class="bmca-kicker">Authoritative change intent</span>
+            <h3><?= h((string)bmca_value($changeIntent, array('change_type'), 'Change')) ?> · <?= h((string)bmca_value($changeIntent, array('primary_domain'), 'Controlled manuals')) ?></h3>
+            <p><?= h((string)bmca_value($changeIntent, array('summary'), '')) ?></p>
+          </div>
+          <div class="bmca-intent-summary__areas">
+            <?php foreach ($targetWorkflowAreas as $area): ?>
+              <?php if (is_array($area)): ?><span class="bmca-chip"><?= h((string)bmca_value($area, array('title'), 'Workflow area')) ?></span><?php endif; ?>
+            <?php endforeach; ?>
+          </div>
+        </article>
+      <?php endif; ?>
     </section>
 
     <section class="bmca-stage" data-bmca-stage="scope" hidden>
@@ -354,15 +394,22 @@ books_manuals_page_open(array(
         <?php endforeach; ?>
         <?php if ($versions === array()): ?><div class="cmp-card bmca-empty">No controlled manual versions are currently available.</div><?php endif; ?>
       </div>
+      <?php if ($scopeWarnings !== array()): ?>
+        <div class="bmca-scope-warnings">
+          <?php foreach ($scopeWarnings as $warning): ?>
+            <?php if (is_array($warning)): ?><div class="bmca-alert bmca-alert--warning"><strong>Scope warning</strong><span><?= h((string)bmca_value($warning, array('message'), 'Review the resolved manual scope.')) ?></span></div><?php endif; ?>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
     </section>
 
     <section class="bmca-stage" data-bmca-stage="impact" hidden>
       <div class="bmca-stage-heading">
-        <div><span class="bmca-kicker">Step 3</span><h2>Impact Finder</h2><p>Potentially affected clauses ranked by evidence-backed confidence.</p></div>
+        <div><span class="bmca-kicker">Step 3</span><h2>Impact Finder</h2><p>Consolidated amendment areas reasoned from the complete change intent and current section context.</p></div>
         <div class="bmca-filters">
           <select data-bmca-filter="manual" aria-label="Filter impacted manual"><option value="">All manuals</option><?php foreach ($scope as $scopeItem): ?><?php if (is_array($scopeItem)): ?><option value="<?= h(strtolower((string)bmca_value($scopeItem, array('book_key'), ''))) ?>"><?= h((string)bmca_value($scopeItem, array('book_key', 'book_title'), 'Manual')) ?></option><?php endif; ?><?php endforeach; ?></select>
           <select data-bmca-filter="confidence" aria-label="Filter impact confidence"><option value="">All confidence</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
-          <select data-bmca-filter="action" aria-label="Filter action"><option value="">All actions</option><option value="add">Add</option><option value="replace">Replace</option><option value="cross_reference">Cross-reference</option><option value="investigate">Investigate</option><option value="no_change">No change</option></select>
+          <select data-bmca-filter="action" aria-label="Filter action"><option value="">All actions</option><option value="keep">Keep</option><option value="delete">Delete</option><option value="replace">Replace</option><option value="amend">Amend</option><option value="add">Add</option><option value="cross_reference">Cross-reference</option><option value="review">Review</option></select>
         </div>
       </div>
       <div class="bmca-impact-list">
@@ -371,12 +418,13 @@ books_manuals_page_open(array(
             $confidence = strtolower((string)bmca_value($impact, array('confidence_label', 'confidence'), 'unknown'));
             $action = strtolower((string)bmca_value($impact, array('action', 'change_action'), 'investigate'));
           ?>
-          <article class="cmp-card bmca-impact" data-bmca-filter-item data-manual="<?= h(strtolower((string)bmca_value($impact, array('manual_code', 'book_key'), ''))) ?>" data-confidence="<?= h($confidence) ?>" data-action="<?= h($action) ?>">
+          <article class="cmp-card bmca-impact" data-bmca-impact-finding="<?= (int)bmca_value($impact, array('id'), 0) ?>" data-bmca-impact-area="<?= (int)bmca_value($impact, array('impact_area_id'), 0) ?>" data-bmca-filter-item data-manual="<?= h(strtolower((string)bmca_value($impact, array('manual_code', 'book_key'), ''))) ?>" data-confidence="<?= h($confidence) ?>" data-action="<?= h($action) ?>">
             <div class="bmca-impact__meta">
               <span class="bmca-confidence bmca-confidence--<?= h($confidence) ?>"><?= h(ucfirst($confidence)) ?> confidence</span>
               <span class="bmca-chip"><?= h(ucfirst($action)) ?></span>
             </div>
-            <h3><?= h((string)bmca_value($impact, array('manual_title', 'book_title', 'manual_code'), 'Controlled manual')) ?></h3>
+            <span class="bmca-kicker"><?= h((string)bmca_value($impact, array('manual_code', 'book_key'), 'Controlled manual')) ?></span>
+            <h3><?= h((string)bmca_value($impact, array('impact_title', 'title', 'summary', 'section_label'), 'Affected manual area')) ?></h3>
             <a class="bmca-citation" href="<?= h((string)bmca_value($impact, array('reader_url'), '/admin/books_manuals/reader.php?version_id=' . (int)bmca_value($impact, array('version_id'), 0))) ?>" target="_blank" rel="noopener">
               <?= h((string)bmca_value($impact, array('citation', 'exact_citation', 'section_label'), 'Citation unavailable')) ?> ↗
             </a>
@@ -386,13 +434,29 @@ books_manuals_page_open(array(
                 <span><?= h((string)bmca_value($impact, array('requirement_text'), '')) ?></span>
               </div>
             <?php endif; ?>
-            <p><?= h((string)bmca_value($impact, array('reason', 'rationale', 'summary'), '')) ?></p>
+            <p><?= h((string)bmca_value($impact, array('impact_summary', 'reason', 'rationale', 'summary'), '')) ?></p>
             <?php $evidence = bmca_array(bmca_value($impact, array('evidence', 'evidence_items'), array())); ?>
             <?php if ($evidence !== array()): ?>
               <details class="bmca-evidence"><summary>Evidence (<?= count($evidence) ?>)</summary>
                 <?php foreach ($evidence as $item): ?><blockquote><?= h(is_array($item) ? (string)bmca_value($item, array('quote', 'text', 'excerpt'), '') : (string)$item) ?></blockquote><?php endforeach; ?>
               </details>
             <?php endif; ?>
+            <?php
+              $canDecideImpact = $isOwner
+                  || (int)bmca_value($impact, array('assigned_reviewer_id'), 0) === (int)($user['id'] ?? 0);
+              $impactDecision = strtolower((string)bmca_value($impact, array('decision', 'status'), 'proposed'));
+            ?>
+            <div class="bmca-impact__decision">
+              <label class="bmca-field">
+                <span>Impact decision rationale <small>required for dismissal</small></span>
+                <textarea rows="2" maxlength="4000" data-bmca-impact-rationale <?= $canDecideImpact ? '' : 'disabled' ?>><?= h((string)bmca_value($impact, array('decision_note'), '')) ?></textarea>
+              </label>
+              <div class="bmca-proposal__actions">
+                <button class="app-btn app-btn--primary" type="button" data-bmca-impact-decision="approved" <?= $canDecideImpact ? '' : 'disabled' ?>>Approve impact</button>
+                <button class="app-btn app-btn--danger" type="button" data-bmca-impact-decision="rejected" <?= $canDecideImpact ? '' : 'disabled' ?>>Dismiss</button>
+                <span class="bmca-status bmca-status--<?= h($impactDecision) ?>" data-bmca-impact-status><?= h(ucfirst($impactDecision)) ?></span>
+              </div>
+            </div>
           </article>
         <?php endforeach; ?>
         <?php if ($impacts === array()): ?><div class="cmp-card bmca-empty">No impacts yet. Save source and scope, then start analysis.</div><?php endif; ?>
@@ -401,12 +465,15 @@ books_manuals_page_open(array(
 
     <section class="bmca-stage" data-bmca-stage="proposals" hidden>
       <div class="bmca-stage-heading">
-        <div><span class="bmca-kicker">Step 4</span><h2>Proposed Changes</h2><p>Compare exact current text to the proposed redline, then make a recorded human decision.</p></div>
+        <div><span class="bmca-kicker">Step 4</span><h2>Proposed Changes</h2><p>Generate coherent amendments only from approved impact areas, then review each controlled redline.</p></div>
+        <?php if ($isOwner && $approvedImpactAreaIds !== array()): ?>
+          <button class="app-btn app-btn--primary" type="button" data-bmca-start-compose data-impact-area-ids="<?= h(implode(',', $approvedImpactAreaIds)) ?>">Generate proposed amendments</button>
+        <?php endif; ?>
         <div class="bmca-filters">
           <select data-bmca-filter="manual" aria-label="Filter proposal manual"><option value="">All manuals</option><?php foreach ($scope as $scopeItem): ?><?php if (is_array($scopeItem)): ?><option value="<?= h(strtolower((string)bmca_value($scopeItem, array('book_key'), ''))) ?>"><?= h((string)bmca_value($scopeItem, array('book_key', 'book_title'), 'Manual')) ?></option><?php endif; ?><?php endforeach; ?></select>
           <select data-bmca-filter="status" aria-label="Filter decision status"><option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="edited">Edited</option><option value="dismissed">Dismissed</option></select>
           <select data-bmca-filter="confidence" aria-label="Filter confidence"><option value="">All confidence</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
-          <select data-bmca-filter="action" aria-label="Filter action"><option value="">All actions</option><option value="add">Add</option><option value="replace">Replace</option><option value="cross_reference">Cross-reference</option><option value="investigate">Investigate</option></select>
+          <select data-bmca-filter="action" aria-label="Filter action"><option value="">All actions</option><option value="add">Add</option><option value="delete">Delete</option><option value="replace">Replace</option><option value="amend">Amend</option><option value="cross_reference">Cross-reference</option><option value="review">Review</option></select>
         </div>
       </div>
       <div class="bmca-review-layout">
@@ -423,7 +490,8 @@ books_manuals_page_open(array(
             <article>
               <span><?= h((string)bmca_value($requirement, array('requirement_key'), 'Requirement')) ?></span>
               <p><?= h(mb_strimwidth((string)bmca_value($requirement, array('requirement_text'), ''), 0, 180, '…')) ?></p>
-              <small><?= $covered > 0 ? $covered . ' cited finding' . ($covered === 1 ? '' : 's') : 'No retrieved coverage' ?></small>
+              <?php $validationStatus = (string)bmca_value($requirement, array('validation_status'), 'active'); ?>
+              <small><?= h($validationStatus !== 'active' ? ucwords(str_replace('_', ' ', $validationStatus)) . ' · excluded from impact generation' : ($covered > 0 ? $covered . ' cited finding' . ($covered === 1 ? '' : 's') : 'No retrieved coverage')) ?></small>
             </article>
           <?php endforeach; ?>
           <?php if ($requirements === array()): ?><p class="bmca-muted">Requirements appear after analysis.</p><?php endif; ?>
@@ -525,7 +593,7 @@ books_manuals_page_open(array(
               </div>
             </article>
           <?php endforeach; ?>
-          <?php if ($proposals === array()): ?><div class="cmp-card bmca-empty">No proposed changes are available yet.</div><?php endif; ?>
+          <?php if ($proposals === array()): ?><div class="cmp-card bmca-empty">Approve relevant Impact Finder areas, then generate proposed amendments.</div><?php endif; ?>
         </div>
       </div>
     </section>
@@ -540,7 +608,7 @@ books_manuals_page_open(array(
           <article class="cmp-card bmca-conflict bmca-conflict--<?= h($severity) ?>">
             <div><span class="bmca-status"><?= h(ucfirst($severity)) ?></span><span class="bmca-chip"><?= h(ucwords(str_replace('_', ' ', (string)bmca_value($conflict, array('type', 'conflict_type'), 'consistency')))) ?></span></div>
             <h3><?= h((string)bmca_value($conflict, array('title', 'summary'), 'Potential conflict')) ?></h3>
-            <p><?= h((string)bmca_value($conflict, array('description', 'reason'), '')) ?></p>
+            <p><?= h((string)bmca_value($conflict, array('description', 'reason', 'rationale'), '')) ?></p>
             <?php foreach (bmca_array(bmca_value($conflict, array('citations', 'affected_citations'), array())) as $citation): ?><span class="bmca-citation"><?= h(is_array($citation) ? (string)bmca_value($citation, array('citation', 'label'), '') : (string)$citation) ?></span><?php endforeach; ?>
           </article>
         <?php endforeach; ?>

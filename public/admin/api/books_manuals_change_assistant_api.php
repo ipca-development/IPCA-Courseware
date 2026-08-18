@@ -197,6 +197,7 @@ try {
         'set_scope',
         'create_revision',
         'start_analysis',
+        'start_compose',
         'decision',
         'assign_reviewer',
         'apply',
@@ -268,6 +269,21 @@ try {
             manual_ai_json(202, array(
                 'ok' => true,
                 'job' => $jobs->enqueueAnalysis((int)($input['project_id'] ?? 0), $uid),
+            ));
+
+        case 'start_compose':
+            $projectId = (int)($input['project_id'] ?? 0);
+            $assistant->assertProjectOwner($projectId, $uid);
+            $impactAreaIds = $input['impact_area_ids'] ?? array();
+            if (is_string($impactAreaIds)) {
+                $impactAreaIds = preg_split('/[\s,]+/', $impactAreaIds) ?: array();
+            }
+            if (!is_array($impactAreaIds)) {
+                throw new InvalidArgumentException('impact_area_ids must be an array.');
+            }
+            manual_ai_json(202, array(
+                'ok' => true,
+                'job' => $jobs->enqueueComposition($projectId, $impactAreaIds, $uid),
             ));
 
         case 'create_revision':

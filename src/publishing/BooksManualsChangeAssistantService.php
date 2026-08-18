@@ -8,6 +8,7 @@ require_once __DIR__ . '/BooksManualsWorkflowService.php';
 require_once __DIR__ . '/BooksManualsAuditService.php';
 require_once dirname(__DIR__) . '/AuditEventService.php';
 require_once dirname(__DIR__) . '/compliance/ComplianceAiRunLogger.php';
+require_once __DIR__ . '/BooksManualsContextImpactService.php';
 
 /**
  * Persistence, retrieval, analysis and guarded application for manual changes.
@@ -30,6 +31,24 @@ final class BooksManualsChangeAssistantService
         'ipca_manual_ai_proposals',
         'ipca_manual_ai_decisions',
         'ipca_manual_ai_jobs',
+        'ipca_manual_ai_analysis_runs',
+        'ipca_manual_ai_change_intents',
+        'ipca_manual_ai_target_workflow_areas',
+        'ipca_manual_ai_impact_areas',
+        'ipca_manual_ai_impact_area_requirements',
+        'ipca_manual_ai_impact_area_sections',
+        'ipca_manual_ai_impact_area_blocks',
+        'ipca_manual_ai_impact_area_findings',
+        'ipca_manual_ai_legacy_hits',
+        'ipca_manual_ai_scope_warnings',
+        'ipca_manual_ai_composer_runs',
+        'ipca_manual_ai_composer_proposals',
+        'ipca_manual_ai_consistency_assertions',
+        'ipca_manual_ai_assertion_requirements',
+        'ipca_manual_ai_assertion_sections',
+        'ipca_manual_ai_assertion_blocks',
+        'ipca_manual_ai_assertion_findings',
+        'ipca_manual_ai_assertion_proposals',
     );
 
     public function __construct(private PDO $pdo)
@@ -81,7 +100,9 @@ final class BooksManualsChangeAssistantService
             throw new RuntimeException('AI Manual Change Assistant is disabled.');
         }
         if (!$this->tablesPresent()) {
-            throw new RuntimeException('Apply scripts/sql/2026_08_18_ai_manual_change_assistant.sql first.');
+            throw new RuntimeException(
+                'Apply the AI Manual Change Assistant foundation and context-pipeline migrations first.'
+            );
         }
     }
 
@@ -174,30 +195,115 @@ final class BooksManualsChangeAssistantService
             array($projectId)
         );
         $project['requirements'] = $this->rows(
-            'SELECT * FROM ipca_manual_ai_requirements WHERE project_id=? ORDER BY source_id,id',
+            'SELECT * FROM ipca_manual_ai_requirements r
+             WHERE project_id=?
+               AND (
+                 NOT EXISTS (
+                   SELECT 1 FROM ipca_manual_ai_analysis_runs any_run
+                   WHERE any_run.project_id=r.project_id
+                 )
+                 OR r.analysis_run_id=(
+                   SELECT latest_run.id FROM ipca_manual_ai_analysis_runs latest_run
+                   WHERE latest_run.project_id=r.project_id
+                   ORDER BY latest_run.id DESC LIMIT 1
+                 )
+               )
+             ORDER BY source_id,id',
             array($projectId)
         );
         $project['findings'] = $this->rows(
-            'SELECT f.*,p.id proposal_id,p.book_version_id,p.section_id,p.block_id,p.current_text,
+            'SELECT f.*,iaf.impact_area_id,ia.recommended_treatment impact_treatment,
+                    ia.title impact_title,ia.summary impact_summary,
+                    p.id proposal_id,p.book_version_id,p.section_id,p.block_id,p.current_text,
                     p.proposed_text,p.expected_block_hash,p.status proposal_status,
                     d.decision,d.note decision_note,d.decided_at,
                     f.assigned_reviewer_id,reviewer.name assigned_reviewer_name,
                     r.requirement_key,r.requirement_text,r.confidence requirement_confidence
              FROM ipca_manual_ai_findings f
              LEFT JOIN ipca_manual_ai_requirements r ON r.id=f.requirement_id
+             LEFT JOIN ipca_manual_ai_impact_area_findings iaf
+               ON iaf.finding_id=f.id AND iaf.link_role IN (\'primary\',\'compatibility\')
+             LEFT JOIN ipca_manual_ai_impact_areas ia ON ia.id=iaf.impact_area_id
              LEFT JOIN ipca_manual_ai_proposals p ON p.finding_id=f.id
              LEFT JOIN ipca_manual_ai_decisions d ON d.finding_id=f.id
              LEFT JOIN users reviewer ON reviewer.id=f.assigned_reviewer_id
-             WHERE f.project_id=? ORDER BY f.confidence DESC,f.id',
+             WHERE f.project_id=?
+               AND (
+                 NOT EXISTS (
+                   SELECT 1 FROM ipca_manual_ai_analysis_runs any_run
+                   WHERE any_run.project_id=f.project_id
+                 )
+                 OR ia.analysis_run_id=(
+                   SELECT latest_run.id FROM ipca_manual_ai_analysis_runs latest_run
+                   WHERE latest_run.project_id=f.project_id
+                   ORDER BY latest_run.id DESC LIMIT 1
+                 )
+               )
+             ORDER BY f.confidence DESC,f.id',
             array($projectId)
         );
         $project['job'] = $this->row(
             'SELECT * FROM ipca_manual_ai_jobs WHERE project_id=? ORDER BY id DESC LIMIT 1',
             array($projectId)
         );
-        foreach (array('sources', 'requirements', 'findings') as $key) {
+        $project['analysis_run'] = $this->row(
+            'SELECT * FROM ipca_manual_ai_analysis_runs WHERE project_id=? ORDER BY id DESC LIMIT 1',
+            array($projectId)
+        );
+        $analysisRunId = (int)($project['analysis_run']['id'] ?? 0);
+        $project['change_intent'] = $analysisRunId > 0 ? $this->row(
+            'SELECT * FROM ipca_manual_ai_change_intents
+             WHERE analysis_run_id=? ORDER BY intent_version DESC LIMIT 1',
+            array($analysisRunId)
+        ) : null;
+        $project['target_workflow_areas'] = $analysisRunId > 0 ? $this->rows(
+            'SELECT * FROM ipca_manual_ai_target_workflow_areas
+             WHERE analysis_run_id=? ORDER BY sort_order,id',
+            array($analysisRunId)
+        ) : array();
+        $project['impact_areas'] = $analysisRunId > 0 ? $this->rows(
+            'SELECT ia.*,
+               (SELECT COUNT(*) FROM ipca_manual_ai_impact_area_requirements ir WHERE ir.impact_area_id=ia.id) requirement_count,
+               (SELECT COUNT(*) FROM ipca_manual_ai_impact_area_blocks ib WHERE ib.impact_area_id=ia.id) block_count
+             FROM ipca_manual_ai_impact_areas ia
+             WHERE ia.analysis_run_id=? ORDER BY ia.priority DESC,ia.confidence DESC,ia.id',
+            array($analysisRunId)
+        ) : array();
+        $project['scope_warnings'] = $analysisRunId > 0 ? $this->rows(
+            'SELECT * FROM ipca_manual_ai_scope_warnings
+             WHERE analysis_run_id=? ORDER BY severity DESC,id',
+            array($analysisRunId)
+        ) : array();
+        $project['consistency_assertions'] = $analysisRunId > 0 ? $this->rows(
+            'SELECT * FROM ipca_manual_ai_consistency_assertions
+             WHERE analysis_run_id=? ORDER BY severity DESC,status,id',
+            array($analysisRunId)
+        ) : array();
+        foreach (array(
+            'sources',
+            'requirements',
+            'findings',
+            'target_workflow_areas',
+            'impact_areas',
+            'scope_warnings',
+            'consistency_assertions',
+        ) as $key) {
             foreach ($project[$key] as &$row) {
-                foreach (array('metadata_json', 'source_evidence_json', 'evidence_json', 'result_json') as $jsonKey) {
+                foreach (array(
+                    'metadata_json',
+                    'source_evidence_json',
+                    'evidence_json',
+                    'result_json',
+                    'target_state_json',
+                    'roles_json',
+                    'controls_json',
+                    'legacy_concepts_json',
+                    'target_concepts_json',
+                    'context_json',
+                    'expected_value_json',
+                    'actual_value_json',
+                    'validation_diagnostics_json',
+                ) as $jsonKey) {
                     if (isset($row[$jsonKey]) && is_string($row[$jsonKey])) {
                         $decoded = json_decode($row[$jsonKey], true);
                         $row[$jsonKey] = is_array($decoded) ? $decoded : null;
@@ -205,6 +311,23 @@ final class BooksManualsChangeAssistantService
                 }
             }
             unset($row);
+        }
+        if (is_array($project['change_intent'])) {
+            foreach (array(
+                'legacy_concepts_json',
+                'replacement_concepts_json',
+                'affected_workflows_json',
+                'affected_roles_json',
+                'important_controls_json',
+                'transitional_arrangements_json',
+                'unrelated_subjects_json',
+                'source_evidence_json',
+            ) as $jsonKey) {
+                if (isset($project['change_intent'][$jsonKey]) && is_string($project['change_intent'][$jsonKey])) {
+                    $decoded = json_decode($project['change_intent'][$jsonKey], true);
+                    $project['change_intent'][$jsonKey] = is_array($decoded) ? $decoded : null;
+                }
+            }
         }
         return $project;
     }
@@ -311,6 +434,22 @@ final class BooksManualsChangeAssistantService
                 true
             )
         ));
+        foreach ($project['consistency_assertions'] ?? array() as $assertion) {
+            $project['conflicts'][] = array(
+                'id' => 'assertion-' . (int)($assertion['id'] ?? 0),
+                'finding_type' => 'consistency',
+                'type' => (string)($assertion['assertion_type'] ?? 'consistency'),
+                'action_classification' => (string)($assertion['status'] ?? 'needs_review'),
+                'confidence' => in_array((string)($assertion['severity'] ?? ''), array('high', 'critical'), true)
+                    ? 0.95
+                    : 0.75,
+                'title' => (string)($assertion['subject'] ?? $assertion['assertion_type'] ?? 'Consistency assertion'),
+                'rationale' => (string)($assertion['rationale'] ?? ''),
+                'severity' => (string)($assertion['severity'] ?? 'medium'),
+                'evidence_json' => $assertion['evidence_json'] ?? array(),
+                'status' => (string)($assertion['status'] ?? 'needs_review'),
+            );
+        }
         $project['approved_changes'] = array_values(array_filter(
             $project['proposals'],
             static fn(array $row): bool => (string)($row['decision'] ?? '') === 'approved'
@@ -331,6 +470,19 @@ final class BooksManualsChangeAssistantService
         }
         if (!$editable) {
             $project['apply_blockers'][] = 'Every apply target must be in Draft; review, approved, or released scope requires a governed draft and re-analysis.';
+        }
+        $blockingAssertions = array_values(array_filter(
+            $project['consistency_assertions'] ?? array(),
+            static fn(array $assertion): bool =>
+                (string)($assertion['status'] ?? '') === 'failed'
+                && in_array((string)($assertion['severity'] ?? ''), array('high', 'critical'), true)
+        ));
+        if ($blockingAssertions !== array()) {
+            $project['can_apply'] = false;
+            $project['apply_blockers'][] = count($blockingAssertions)
+                . ' high-confidence post-change consistency '
+                . (count($blockingAssertions) === 1 ? 'failure requires' : 'failures require')
+                . ' resolution or recorded justification.';
         }
         return $project;
     }
@@ -625,60 +777,13 @@ final class BooksManualsChangeAssistantService
     public function analyzeProject(int $projectId, ?string $aiRunId = null, ?int $actorUserId = null): array
     {
         $this->assertAvailable();
-        $project = $this->requireProject($projectId);
-        $sources = $this->rows(
-            "SELECT * FROM ipca_manual_ai_sources WHERE project_id=? AND extraction_status='ready'",
-            array($projectId)
-        );
-        $scopes = $this->rows('SELECT * FROM ipca_manual_ai_version_scopes WHERE project_id=?', array($projectId));
-        if ($sources === array() || $scopes === array()) {
-            throw new RuntimeException('Analysis requires at least one source and one selected manual version.');
-        }
-        $this->activeProjectId = $projectId;
-        $this->activeActorUserId = $actorUserId;
         $this->pdo->prepare(
             "UPDATE ipca_manual_ai_projects SET status='analyzing' WHERE id=?"
         )->execute(array($projectId));
-        $chunks = $this->buildContentChunks($projectId);
-        $this->pdo->prepare('DELETE FROM ipca_manual_ai_requirements WHERE project_id=?')->execute(array($projectId));
-        $method = $this->openAiAvailable() ? 'openai' : 'deterministic';
-        $requirements = array();
-        foreach ($sources as $source) {
-            $text = $this->sourceText($source);
-            $items = $method === 'openai' ? $this->extractRequirementsAi($source, $text, $aiRunId) : array();
-            if ($items === array()) {
-                $items = $this->extractRequirementsFallback($source, $text);
-            }
-            foreach ($items as $item) {
-                $requirements[] = $this->persistRequirement($projectId, (int)$source['id'], $item, $method, $aiRunId);
-            }
-        }
-        $this->pdo->prepare('DELETE FROM ipca_manual_ai_findings WHERE project_id=?')->execute(array($projectId));
-        $findingCount = 0;
-        foreach ($requirements as $requirement) {
-            $matches = $this->retrieveChunks($projectId, (string)$requirement['requirement_text']);
-            $aiFindings = $method === 'openai'
-                ? $this->analyzeMatchesAi($requirement, $matches, $aiRunId)
-                : array();
-            if ($aiFindings === array()) {
-                $aiFindings = $this->fallbackFindings($requirement, $matches);
-            }
-            foreach ($aiFindings as $finding) {
-                $this->persistFinding($projectId, $requirement, $finding, $aiRunId);
-                $findingCount++;
-            }
-        }
-        $findingCount += $this->persistCrossManualFindings($projectId, $aiRunId);
-        $this->pdo->prepare(
-            "UPDATE ipca_manual_ai_projects SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?"
-        )->execute(array($projectId));
-        return array(
-            'project_id' => $projectId,
-            'method' => $method,
-            'requirements' => count($requirements),
-            'findings' => $findingCount,
-            'chunks' => $chunks,
-            'project_name' => (string)$project['name'],
+        return (new BooksManualsContextImpactService($this->pdo))->analyze(
+            $projectId,
+            $aiRunId ?? ('manual-context-' . $projectId . '-' . bin2hex(random_bytes(6))),
+            (int)($actorUserId ?? 0)
         );
     }
 
@@ -740,6 +845,16 @@ final class BooksManualsChangeAssistantService
             $this->pdo->prepare('UPDATE ipca_manual_ai_findings SET status=? WHERE id=?')->execute(array($status, $targetId));
             $this->pdo->prepare('UPDATE ipca_manual_ai_proposals SET status=? WHERE finding_id=?')
                 ->execute(array($decision === 'approved' ? 'approved' : $decision, $targetId));
+            $impactStatus = $decision === 'approved'
+                ? 'approved'
+                : ($decision === 'rejected' ? 'dismissed' : 'proposed');
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_ai_impact_areas ia
+                 JOIN ipca_manual_ai_impact_area_findings iaf ON iaf.impact_area_id=ia.id
+                 LEFT JOIN ipca_manual_ai_proposals proposal ON proposal.finding_id=iaf.finding_id
+                 SET ia.status=?,ia.updated_at=CURRENT_TIMESTAMP
+                 WHERE iaf.finding_id=? AND proposal.id IS NULL'
+            )->execute(array($impactStatus, $targetId));
         }
         (new AuditEventService($this->pdo))->record(
             'manual_change_assistant.decision_recorded',
@@ -760,6 +875,9 @@ final class BooksManualsChangeAssistantService
             1,
             'books_manuals_change_assistant'
         );
+        if ($humanEditedText !== null) {
+            (new BooksManualsContextImpactService($this->pdo))->runConsistency($projectId, $actorUserId);
+        }
     }
 
     public function assignReviewer(
@@ -790,6 +908,12 @@ final class BooksManualsChangeAssistantService
              WHERE id=? AND project_id=?'
         );
         $stmt->execute(array($reviewerUserId, $findingId, $projectId));
+        $this->pdo->prepare(
+            'UPDATE ipca_manual_ai_impact_areas ia
+             JOIN ipca_manual_ai_impact_area_findings iaf ON iaf.impact_area_id=ia.id
+             SET ia.assigned_reviewer_id=?,ia.updated_at=CURRENT_TIMESTAMP
+             WHERE iaf.finding_id=?'
+        )->execute(array($reviewerUserId, $findingId));
         (new AuditEventService($this->pdo))->record(
             'manual_change_assistant.reviewer_assigned',
             'manual_change_project',
@@ -824,6 +948,12 @@ final class BooksManualsChangeAssistantService
             'scopes' => $project['scopes'],
             'requirements' => $project['requirements'],
             'findings' => $project['findings'],
+            'analysis_run' => $project['analysis_run'] ?? null,
+            'change_intent' => $project['change_intent'] ?? null,
+            'target_workflow_areas' => $project['target_workflow_areas'] ?? array(),
+            'impact_areas' => $project['impact_areas'] ?? array(),
+            'scope_warnings' => $project['scope_warnings'] ?? array(),
+            'consistency_assertions' => $project['consistency_assertions'] ?? array(),
         );
         $manifest['manifest_sha256'] = hash('sha256', $this->canonicalJson($manifest));
         $signingKey = trim((string)(getenv('CW_MANUAL_AI_MANIFEST_KEY') ?: ''));
@@ -874,6 +1004,11 @@ final class BooksManualsChangeAssistantService
             'manual_scope' => $project['scopes'],
             'requirements' => $project['requirements'],
             'cited_findings' => $project['findings'],
+            'change_intent' => $project['change_intent'] ?? null,
+            'target_workflow_areas' => $project['target_workflow_areas'] ?? array(),
+            'consolidated_impact_areas' => $project['impact_areas'] ?? array(),
+            'scope_warnings' => $project['scope_warnings'] ?? array(),
+            'post_change_consistency' => $project['consistency_assertions'] ?? array(),
         );
     }
 
@@ -906,6 +1041,16 @@ final class BooksManualsChangeAssistantService
         $rationale = trim($rationale);
         if (mb_strlen($rationale) < 10) {
             throw new InvalidArgumentException('An apply rationale of at least 10 characters is required.');
+        }
+        $consistencyGate = $this->pdo->prepare(
+            "SELECT COUNT(*) FROM ipca_manual_ai_consistency_assertions
+             WHERE project_id=? AND status='failed' AND severity IN ('high','critical')"
+        );
+        $consistencyGate->execute(array($projectId));
+        if ((int)$consistencyGate->fetchColumn() > 0) {
+            throw new RuntimeException(
+                'Resolve or formally justify all high-confidence post-change consistency failures before apply.'
+            );
         }
         $params = array($projectId);
         $filter = '';
