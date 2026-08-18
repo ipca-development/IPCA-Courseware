@@ -239,7 +239,16 @@ try {
             cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
             break;
         case 'update_block':
-            cp_editor_handle_update_block($blocks, $renderer, $styleSvc, $foundation, $numberSvc, $annexSvc, $uid);
+            cp_editor_handle_update_block(
+                $blocks,
+                $renderer,
+                $styleSvc,
+                $foundation,
+                $numberSvc,
+                $annexSvc,
+                $revision,
+                $uid
+            );
             break;
         case 'split_block_page_break':
             cp_editor_handle_split_block_page_break($pdo, $blocks, $manualPageBreakSvc, $uid);
@@ -2611,6 +2620,7 @@ function cp_editor_handle_update_block(
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionNumberService $numberSvc,
     ControlledPublishingAnnexService $annexSvc,
+    ControlledPublishingRevisionService $revision,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -2634,6 +2644,11 @@ function cp_editor_handle_update_block(
     if ($block === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Block not found'));
     }
+    $annotated = $revision->annotateChangeStatus(
+        (int)($block['book_version_id'] ?? 0),
+        array($block)
+    );
+    $block = $annotated[0] ?? $block;
 
     $response = array_merge(array(
         'ok' => true,

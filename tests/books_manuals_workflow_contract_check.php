@@ -40,6 +40,8 @@ $overrideMigration = (string)file_get_contents(
     $root . '/scripts/sql/2026_08_18_books_manuals_compliance_overrides.sql'
 );
 $readerApi = (string)file_get_contents($root . '/public/student/api/manual_reader_api.php');
+$editorApi = (string)file_get_contents($root . '/public/admin/api/controlled_book_editor_api.php');
+$editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
 $nav = (string)file_get_contents($root . '/src/nav/admin.php');
 $libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
 $bookReader = (string)file_get_contents($root . '/public/admin/books_manuals/reader.php');
@@ -243,6 +245,20 @@ bm_contract_assert(
         && str_contains($overrideMigration, 'blockers_json JSON NOT NULL')
         && str_contains($workflow, "'all_release_blockers'")
         && str_contains($workflow, "'gap_items' => \$gapItems")
+);
+bm_contract_assert(
+    'bulk override repairs required safety evidence before release',
+    str_contains($workflow, 'ensureOverridePageMapStylesCurrent')
+        && str_contains($workflow, "'legacy_override_style_refresh'")
+        && str_contains($workflow, 'freezeSourceBaseline($sourceVersionId, $actorUserId)')
+        && str_contains($workflow, 'Wait for generation to complete')
+);
+bm_contract_assert(
+    'editor refreshes revision bars and change list after saves',
+    str_contains($editorApi, '$revision->annotateChangeStatus')
+        && str_contains($editorJs, 'syncBlockChangePresentation')
+        && str_contains($editorJs, 'scheduleAutomaticHighlights')
+        && str_contains($editorJs, "apiPost('regenerate_highlights'")
 );
 bm_contract_assert(
     'library exposes one confirmed override-all action',

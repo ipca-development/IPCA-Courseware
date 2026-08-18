@@ -334,11 +334,11 @@ final class BooksManualsWorkflowService
         if (!$tablePresent) {
             throw new RuntimeException('Install the compliance override migration first.');
         }
+        $this->ensureOverridePageMapStylesCurrent($source, $actorUserId);
 
         require_once __DIR__ . '/BooksManualsAuditService.php';
         $coverage = (new BooksManualsAuditService($this->pdo, $this->foundation))
             ->liveCoverage($sourceVersionId);
-        $identity = $this->syncUpdateIdentity($sourceVersionId);
         $gapItems = array();
         foreach ((array)($coverage['requirements'] ?? array()) as $requirement) {
             if (($requirement['coverage_state'] ?? '') === 'covered') {
@@ -365,6 +365,16 @@ final class BooksManualsWorkflowService
             'foundation_errors' => (array)($coverage['foundation_errors'] ?? array()),
             'gap_items' => $gapItems,
         );
+        if (empty($source['source_baseline_id'])) {
+            $this->foundation->freezeSourceBaseline($sourceVersionId, $actorUserId);
+            $source = $this->foundation->getVersion($sourceVersionId);
+            if ($source === null || empty($source['source_baseline_id'])) {
+                throw new RuntimeException(
+                    'The governed source baseline required for the override could not be created.'
+                );
+            }
+        }
+        $identity = $this->syncUpdateIdentity($sourceVersionId);
         $overrideUuid = $this->uuidV4();
         $from = (string)$source['lifecycle_status'];
 
@@ -913,6 +923,57 @@ final class BooksManualsWorkflowService
         require_once __DIR__ . '/ControlledPublishingRevisionService.php';
         (new ControlledPublishingRevisionService($this->pdo))
             ->regenerateHighlightsSection($versionId, $actorUserId);
+    }
+
+    /**
+     * A legacy compliance override may waive approval blockers, but it cannot
+     * bind frozen HTML to a different publication stylesheet. Queue a fresh
+     * authoritative map first and let the administrator retry once it is current.
+     *
+     * @param array<string,mixed> $version
+     */
+    private function ensureOverridePageMapStylesCurrent(array $version, int $actorUserId): void
+    {
+        $metadata = $version['metadata_json'] ?? array();
+        if (is_string($metadata)) {
+            $metadata = json_decode($metadata, true);
+        }
+        $metadata = is_array($metadata) ? $metadata : array();
+        $map = is_array($metadata['reader_page_map'] ?? null)
+            ? $metadata['reader_page_map']
+            : array();
+        $generation = is_array($map['generation'] ?? null)
+            ? $map['generation']
+            : array();
+
+        require_once __DIR__ . '/ControlledPublishingReaderService.php';
+        $reader = new ControlledPublishingReaderService($this->pdo);
+        $source = $reader->loadReaderPaginateSource($version);
+        $package = $reader->paginationPublicationPackage($version, $source);
+        $currentStyleHash = (string)($package['css']['hash'] ?? '');
+        $frozenStyleHash = (string)($generation['style_hash'] ?? '');
+        if (
+            $currentStyleHash !== ''
+            && $frozenStyleHash !== ''
+            && hash_equals($currentStyleHash, $frozenStyleHash)
+        ) {
+            return;
+        }
+
+        require_once __DIR__ . '/ControlledPublishingLivePageMapService.php';
+        (new ControlledPublishingLivePageMapService($this->pdo, $reader))->ensure(
+            (int)$version['id'],
+            $actorUserId,
+            null,
+            array(
+                'mutation_kind' => 'legacy_override_style_refresh',
+                'layout_impact' => 'global',
+            )
+        );
+        throw new RuntimeException(
+            'The authoritative page map is being refreshed for the current publication styles. '
+            . 'Wait for generation to complete, then select Override blockers again.'
+        );
     }
 
     /**

@@ -626,6 +626,41 @@
     detect_hyperlinks: 'global',
     detect_annex_refs: 'global',
   };
+  var AUTO_HIGHLIGHT_ACTIONS = {
+    update_block: true,
+    create_block: true,
+    delete_block: true,
+    move_block: true,
+    split_block_page_break: true,
+    upload_image: true,
+    create_subsection: true,
+    rename_outline_part: true,
+    rename_outline_chapter: true,
+    add_outline_chapter: true,
+    delete_outline_chapter: true,
+    move_outline_chapter: true,
+    promote_outline_heading: true,
+    save_part0_page: true,
+  };
+  var autoHighlightsTimer = null;
+
+  function scheduleAutomaticHighlights(action) {
+    if (!AUTO_HIGHLIGHT_ACTIONS[action] || !state.editable || state.versionId <= 0) return;
+    if (autoHighlightsTimer) clearTimeout(autoHighlightsTimer);
+    autoHighlightsTimer = setTimeout(function () {
+      autoHighlightsTimer = null;
+      apiPost('regenerate_highlights', {
+        version_id: state.versionId,
+        section_id: 0,
+      }).then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Automatic change-list refresh failed');
+        if (state.part0SectionKey === 'highlights' && res.page_html) {
+          applyPageHtmlFromResponse(res.page_html);
+          refreshPart0TypographyFromBookStyles();
+        }
+      }).catch(showError);
+    }, 700);
+  }
 
   function livePaginationPayload(payload) {
     if (payload && payload.live_draft) return payload.live_draft;
@@ -881,6 +916,7 @@
       detail: detail,
     }));
     scheduleLivePagination(detail);
+    scheduleAutomaticHighlights(action);
     return detail;
   }
 
@@ -5205,6 +5241,28 @@
     return flushSave(blockEl);
   }
 
+  function syncBlockChangePresentation(blockEl, blockHtml) {
+    if (!blockEl || !blockHtml) return;
+    var holder = document.createElement('div');
+    holder.innerHTML = blockHtml;
+    var source = holder.querySelector('.cpb-block');
+    if (!source) return;
+    ['cpb-block--changed', 'cpb-block--new', 'cpb-block--modified'].forEach(function (className) {
+      blockEl.classList.toggle(className, source.classList.contains(className));
+    });
+    var status = source.getAttribute('data-change-status');
+    if (status) blockEl.setAttribute('data-change-status', status);
+    else blockEl.removeAttribute('data-change-status');
+    var currentMarker = blockEl.querySelector(':scope > .cpb-change-marker');
+    var sourceMarker = source.querySelector(':scope > .cpb-change-marker');
+    if (sourceMarker && !currentMarker) {
+      blockEl.insertBefore(sourceMarker.cloneNode(true), blockEl.firstChild);
+    } else if (!sourceMarker && currentMarker) {
+      currentMarker.remove();
+    }
+    scheduleUnifiedPrintLayout(0);
+  }
+
   function flushSave(blockEl, refreshNumbering) {
     if (!state.editable || !blockEl || !isConnectedEl(blockEl)) return;
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
@@ -5222,6 +5280,7 @@
       if (res.cross_ref_annex) {
         applyCrossRefAnnexCatalog(res.cross_ref_annex);
       }
+      syncBlockChangePresentation(blockEl, res.block_html || '');
       setStatus('Saved', 'saved');
       markPaginationChanged();
       if (blockNeedsTocRefresh(blockEl)) {

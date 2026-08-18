@@ -205,10 +205,21 @@ final class ControlledPublishingRevisionService
 
         $versionLabel = $this->revisionDisplayLabel($versionId);
         $summaryPayload = array(
-            'text' => 'Revision ' . $versionLabel . ' Changes',
-            'level' => 2,
+            'html' => '<p>Revision ' . htmlspecialchars($versionLabel, ENT_QUOTES, 'UTF-8')
+                . ' Changes</p>',
+            'paragraph_style' => 'subtitle_2',
         );
-        $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, 'summary', 'heading', $summaryPayload, $sort, $actorUserId);
+        $this->insertHighlightBlock(
+            $ins,
+            $versionId,
+            $sectionId,
+            $stableBase,
+            'summary',
+            'paragraph',
+            $summaryPayload,
+            $sort,
+            $actorUserId
+        );
         $sort += 10;
         $created++;
 
