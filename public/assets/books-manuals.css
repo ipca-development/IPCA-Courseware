@@ -296,9 +296,15 @@
   display: grid !important;
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 10px;
-  align-items: start;
+  align-items: start !important;
+  justify-content: stretch !important;
+  height: auto !important;
   min-height: 0 !important;
+  max-height: none !important;
   padding: 11px !important;
+  box-shadow: none !important;
+  line-height: 1.35 !important;
+  transform: none !important;
 }
 
 .bm-overflow-menu__panel .bm-overflow-action--warning {
@@ -308,6 +314,9 @@
 
 .bm-overflow-menu__panel .bm-overflow-action--warning:hover {
   background: #ffedca !important;
+  color: #6f4912 !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
 .bm-overflow-action__icon {
