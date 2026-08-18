@@ -413,6 +413,8 @@ return [
             '/admin/books_manuals/index.php',
             '/admin/books_manuals/manual.php',
             '/admin/books_manuals/annexes.php',
+            '/admin/books_manuals/change_projects.php',
+            '/admin/books_manuals/change_project.php',
         ],
         'items' => [
             [
@@ -430,6 +432,16 @@ return [
                 'label' => 'Annexes',
                 'icon' => 'documents',
                 'href' => '/admin/books_manuals/annexes.php',
+            ],
+            [
+                'key' => 'books_manuals_change_projects',
+                'label' => 'Change Projects',
+                'icon' => 'tools',
+                'href' => '/admin/books_manuals/change_projects.php',
+                'match_paths' => [
+                    '/admin/books_manuals/change_projects.php',
+                    '/admin/books_manuals/change_project.php',
+                ],
             ],
         ],
     ],

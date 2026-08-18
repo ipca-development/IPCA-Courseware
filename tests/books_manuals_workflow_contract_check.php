@@ -48,6 +48,15 @@ $editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_ed
 $nav = (string)file_get_contents($root . '/src/nav/admin.php');
 $libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
 $bookReader = (string)file_get_contents($root . '/public/admin/books_manuals/reader.php');
+$changeAssistant = (string)file_get_contents(
+    $root . '/src/publishing/BooksManualsChangeAssistantService.php'
+);
+$changeProjects = (string)file_get_contents(
+    $root . '/public/admin/books_manuals/change_projects.php'
+);
+$changeProject = (string)file_get_contents(
+    $root . '/public/admin/books_manuals/change_project.php'
+);
 $iosModels = (string)file_get_contents(
     $root . '/ipca-manual-reader-ios/IPCAManualReader/Models/ManualReaderModels.swift'
 );
@@ -125,6 +134,20 @@ bm_contract_assert(
     str_contains($nav, "'key' => 'books_manuals'")
         && str_contains($nav, "'label' => 'IPCA Library'")
         && str_contains($nav, "'label' => 'Annexes'")
+);
+bm_contract_assert(
+    'AI Manual Change Assistant surface is connected to Books & Manuals',
+    str_contains($nav, "'label' => 'Change Projects'")
+        && str_contains($libraryPage, 'AI Change Assistant')
+        && str_contains($changeProjects, 'New Change Project')
+        && str_contains($changeProject, 'Impact Finder')
+);
+bm_contract_assert(
+    'AI analysis is advisory while controlled apply remains draft-only',
+    str_contains($changeAssistant, 'Only Draft versions can receive an AI change set')
+        && str_contains($changeAssistant, 'createDraftRevisionForScope')
+        && str_contains($changeAssistant, 'expected_block_hash')
+        && str_contains($changeAssistant, 'source_fingerprint')
 );
 foreach (array(
     "array('label' => '+', 'modal' => 'bm-create-manual')" => 'hero plus-button creation',
