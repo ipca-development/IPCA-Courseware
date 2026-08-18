@@ -102,6 +102,12 @@ foreach (array('status="', 'role="', 'lifecycle_status="', 'extraction_status="'
         'Assistant SQL must use ANSI-compatible single-quoted literals.'
     );
 }
+bmca_assert(
+    str_contains($jobService, 'cliPhpBinary')
+        && str_contains($jobService, "str_contains(\$name, 'fpm')")
+        && str_contains($jobService, 'CW_PHP_CLI'),
+    'Web requests must launch jobs with PHP CLI rather than PHP-FPM.'
+);
 
 require_once $servicePath;
 $reflection = new ReflectionClass(BooksManualsChangeAssistantService::class);

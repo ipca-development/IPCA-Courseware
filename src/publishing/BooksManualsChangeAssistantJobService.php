@@ -182,7 +182,7 @@ final class BooksManualsChangeAssistantJobService
             return false;
         }
         $logFile = $logDir . '/manual_change_assistant_' . $projectId . '.log';
-        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $php = $this->cliPhpBinary();
         $delaySeconds = max(0, min(3600, $delaySeconds));
         if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
             $prefix = $delaySeconds > 0 ? 'timeout /T ' . $delaySeconds . ' /NOBREAK >NUL & ' : '';
@@ -196,6 +196,28 @@ final class BooksManualsChangeAssistantJobService
         }
         exec($command);
         return true;
+    }
+
+    private function cliPhpBinary(): string
+    {
+        $configured = trim((string)(getenv('CW_PHP_CLI') ?: ''));
+        $candidates = array_filter(array(
+            $configured,
+            PHP_BINDIR !== '' ? PHP_BINDIR . DIRECTORY_SEPARATOR . 'php' : '',
+            '/usr/bin/php',
+            '/usr/local/bin/php',
+            PHP_BINARY,
+        ));
+        foreach ($candidates as $candidate) {
+            $name = strtolower(basename((string)$candidate));
+            if (str_contains($name, 'fpm') || str_contains($name, 'cgi')) {
+                continue;
+            }
+            if (is_file($candidate) && is_executable($candidate)) {
+                return (string)$candidate;
+            }
+        }
+        return 'php';
     }
 
     /** @return array<string,mixed> */
