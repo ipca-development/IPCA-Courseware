@@ -32,6 +32,12 @@ struct MainShellView: View {
                     } else {
                         MessagesRootView()
                     }
+                case .safety:
+                    if session.capabilities.safetyReportingEnabled {
+                        SafetyView()
+                    } else {
+                        MessagesRootView()
+                    }
                 case .me:
                     MeView()
                 }
@@ -43,6 +49,7 @@ struct MainShellView: View {
                     communityEnabled: session.capabilities.communityEnabled,
                     trainingEnabled: session.capabilities.trainingEnabled,
                     trainingVideosEnabled: session.capabilities.trainingVideosEnabled,
+                    safetyReportingEnabled: session.capabilities.safetyReportingEnabled,
                     messagesBadge: messagesBadge
                 )
                 .ignoresSafeArea(.keyboard)
@@ -60,6 +67,11 @@ struct MainShellView: View {
         }
         .onChange(of: session.capabilities.trainingVideosEnabled) { _, enabled in
             if !enabled, session.selectedTab == .trainingVideos {
+                session.selectedTab = .messages
+            }
+        }
+        .onChange(of: session.capabilities.safetyReportingEnabled) { _, enabled in
+            if !enabled, session.selectedTab == .safety {
                 session.selectedTab = .messages
             }
         }

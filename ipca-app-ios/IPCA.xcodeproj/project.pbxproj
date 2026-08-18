@@ -37,6 +37,9 @@
 		B1000000000000000000001D /* IPCATheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001D /* IPCATheme.swift */; };
 		B1000000000000000000001E /* TrainingVideosView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001E /* TrainingVideosView.swift */; };
 		B1000000000000000000001F /* TrainingVideoDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001F /* TrainingVideoDownloadManager.swift */; };
+		B10000000000000000000024 /* SafetyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000024 /* SafetyModels.swift */; };
+		B10000000000000000000025 /* AnonymousSafetyReceiptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000025 /* AnonymousSafetyReceiptStore.swift */; };
+		B10000000000000000000026 /* SafetyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000026 /* SafetyView.swift */; };
 		B10000000000000000000013 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000013 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -73,6 +76,9 @@
 		B2000000000000000000001D /* IPCATheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCATheme.swift; sourceTree = "<group>"; };
 		B2000000000000000000001E /* TrainingVideosView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingVideosView.swift; sourceTree = "<group>"; };
 		B2000000000000000000001F /* TrainingVideoDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingVideoDownloadManager.swift; sourceTree = "<group>"; };
+		B20000000000000000000024 /* SafetyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyModels.swift; sourceTree = "<group>"; };
+		B20000000000000000000025 /* AnonymousSafetyReceiptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnonymousSafetyReceiptStore.swift; sourceTree = "<group>"; };
+		B20000000000000000000026 /* SafetyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyView.swift; sourceTree = "<group>"; };
 		B20000000000000000000013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B20000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000000000000000000015 /* IPCA.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IPCA.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -139,6 +145,7 @@
 			children = (
 				B20000000000000000000002 /* KeychainStore.swift */,
 				B20000000000000000000003 /* DeviceIdentity.swift */,
+				B20000000000000000000025 /* AnonymousSafetyReceiptStore.swift */,
 			);
 			path = Auth;
 			sourceTree = "<group>";
@@ -148,6 +155,7 @@
 			children = (
 				B20000000000000000000004 /* APIModels.swift */,
 				B20000000000000000000005 /* APIClient.swift */,
+				B20000000000000000000024 /* SafetyModels.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -177,6 +185,7 @@
 				B2000000000000000000000B /* RootView.swift */,
 				B2000000000000000000000C /* LoginView.swift */,
 				B2000000000000000000000D /* MainShellView.swift */,
+				B20000000000000000000026 /* SafetyView.swift */,
 				B2000000000000000000000E /* MessagesRootView.swift */,
 				B2000000000000000000000F /* ConversationListView.swift */,
 				B20000000000000000000010 /* ConversationView.swift */,
@@ -301,6 +310,9 @@
 				B1000000000000000000001D /* IPCATheme.swift in Sources */,
 				B1000000000000000000001E /* TrainingVideosView.swift in Sources */,
 				B1000000000000000000001F /* TrainingVideoDownloadManager.swift in Sources */,
+				B10000000000000000000024 /* SafetyModels.swift in Sources */,
+				B10000000000000000000025 /* AnonymousSafetyReceiptStore.swift in Sources */,
+				B10000000000000000000026 /* SafetyView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

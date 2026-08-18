@@ -469,6 +469,7 @@ struct IPCATabBar: View {
     var communityEnabled: Bool
     var trainingEnabled: Bool
     var trainingVideosEnabled: Bool
+    var safetyReportingEnabled: Bool
     var messagesBadge: Int
 
     var body: some View {
@@ -482,6 +483,9 @@ struct IPCATabBar: View {
             }
             if trainingVideosEnabled {
                 tab(.trainingVideos, title: "Videos", systemImage: "play.rectangle.fill")
+            }
+            if safetyReportingEnabled {
+                tab(.safety, title: "Safety", systemImage: "shield.fill")
             }
             tab(.me, title: "Me", systemImage: "person.crop.circle.fill")
         }

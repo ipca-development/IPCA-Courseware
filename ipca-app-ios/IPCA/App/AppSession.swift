@@ -22,6 +22,7 @@ final class AppSession: ObservableObject {
     @Published var people: [PublicUser] = []
     @Published var selectedTab: AppTab = .messages
     @Published var pendingCommunityPostUUID: String?
+    @Published var pendingSafetyReportUUID: String?
     @Published var isOnline = true
     @Published var showingPushPrimer = false
     @Published var lastSyncAt: Date?
@@ -528,6 +529,160 @@ final class AppSession: ObservableObject {
         }
     }
 
+    func loadSafetyReports() async throws -> [SafetyReportDTO] {
+        try await api.safetyReports()
+    }
+
+    func loadSafetyReport(_ reportUUID: String) async throws -> SafetyReportDTO {
+        try await api.safetyReport(reportUUID)
+    }
+
+    func createAndSubmitSafetyReport(
+        _ input: SafetyReportInput,
+        attachments: [SafetyDraftAttachment] = []
+    ) async throws -> SafetyReportDTO {
+        guard isOnline else {
+            throw SafetySubmissionError.offline
+        }
+        guard let userUUID = user?.uuid, !userUUID.isEmpty else {
+            throw SafetySubmissionError.missingIdentity
+        }
+        var state = IdentifiedSafetyDraftStore.loadSubmission(userUUID: userUUID)
+            ?? SafetySubmissionDraft(
+                input: input,
+                idempotencyKey: UUID().uuidString.lowercased(),
+                remoteReportUUID: nil,
+                attachments: attachments
+            )
+        let priorAttachments = Dictionary(
+            uniqueKeysWithValues: state.attachments.map { ($0.attachmentUUID, $0) }
+        )
+        state.input = input
+        state.attachments = attachments.map { attachment in
+            var reconciled = attachment
+            reconciled.uploaded = priorAttachments[attachment.attachmentUUID]?.uploaded ?? attachment.uploaded
+            return reconciled
+        }
+        IdentifiedSafetyDraftStore.save(state, userUUID: userUUID)
+
+        let reportUUID: String
+        if let existing = state.remoteReportUUID, !existing.isEmpty {
+            if state.remoteInput != input {
+                _ = try await api.updateSafetyReport(existing, input: input)
+                state.remoteInput = input
+                IdentifiedSafetyDraftStore.save(state, userUUID: userUUID)
+            }
+            reportUUID = existing
+        } else {
+            let created = try await api.createSafetyReport(input, idempotencyKey: state.idempotencyKey)
+            reportUUID = created.reportUUID
+            state.remoteReportUUID = reportUUID
+            state.remoteInput = input
+            IdentifiedSafetyDraftStore.save(state, userUUID: userUUID)
+        }
+
+        for index in state.attachments.indices where !state.attachments[index].uploaded {
+            let attachment = state.attachments[index]
+            let data = try SafetyDraftAttachmentFileStore.data(for: attachment)
+            let presign = try await api.safetyAttachmentPresign(
+                reportUUID: reportUUID,
+                attachmentUUID: attachment.attachmentUUID,
+                filename: attachment.filename,
+                mimeType: attachment.mimeType,
+                byteSize: data.count
+            )
+            guard let putURL = URL(string: presign.putURL) else {
+                throw APIClientError.invalidURL
+            }
+            try await api.uploadPresigned(
+                url: putURL,
+                data: data,
+                contentType: attachment.mimeType,
+                extraHeaders: presign.headers
+            )
+            _ = try await api.completeSafetyAttachment(attachment.attachmentUUID)
+            state.attachments[index].uploaded = true
+            IdentifiedSafetyDraftStore.save(state, userUUID: userUUID)
+        }
+
+        do {
+            return try await api.submitSafetyReport(reportUUID)
+        } catch let error as APIClientError
+            where error.httpStatus == 409 && error.errorCode == "workflow_gate_failed" {
+            let report = try await api.safetyReport(reportUUID)
+            guard report.status != "draft", report.status != "returned" else { throw error }
+            return report
+        }
+    }
+
+    func loadSafetyMailbox(_ reportUUID: String) async throws -> [SafetyMailboxMessageDTO] {
+        try await api.safetyMailbox(reportUUID)
+    }
+
+    func postSafetyMailbox(_ reportUUID: String, body: String) async throws {
+        guard isOnline else { throw SafetySubmissionError.offline }
+        try await api.postSafetyMailbox(
+            reportUUID,
+            body: body.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    func submitAnonymousSafetyReport(_ input: SafetyReportInput) async throws -> AnonymousSafetyReceipt {
+        var draft = AnonymousSafetyDraftStore.load()
+        if draft?.input != input {
+            draft = SafetySubmissionDraft(
+                input: input,
+                idempotencyKey: UUID().uuidString.lowercased(),
+                remoteReportUUID: nil,
+                attachments: []
+            )
+        }
+        guard let draft else { throw SafetySubmissionError.invalidDraft }
+        AnonymousSafetyDraftStore.save(draft)
+        guard isOnline else {
+            throw SafetySubmissionError.offlineAnonymous
+        }
+        let receipt = try await api.submitAnonymousSafetyReport(input, idempotencyKey: draft.idempotencyKey)
+        try AnonymousSafetyReceiptStore.save(receipt)
+        AnonymousSafetyDraftStore.clear()
+        return receipt
+    }
+
+    func configureSafetyServer(_ serverURL: String) async {
+        let trimmed = serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: trimmed) else { return }
+        await api.setBaseURL(url)
+    }
+
+    func loadAnonymousSafetyStatus() async throws -> AnonymousSafetyStatus {
+        guard let receiptID = AnonymousSafetyReceiptStore.receiptID,
+              let secret = AnonymousSafetyReceiptStore.receiptSecret else {
+            throw SafetySubmissionError.missingReceipt
+        }
+        return try await api.anonymousSafetyStatus(receiptID: receiptID, receiptSecret: secret)
+    }
+
+    func loadAnonymousSafetyMailbox() async throws -> [SafetyMailboxMessageDTO] {
+        guard let receiptID = AnonymousSafetyReceiptStore.receiptID,
+              let secret = AnonymousSafetyReceiptStore.receiptSecret else {
+            throw SafetySubmissionError.missingReceipt
+        }
+        return try await api.anonymousSafetyMailbox(receiptID: receiptID, receiptSecret: secret)
+    }
+
+    func postAnonymousSafetyMailbox(_ body: String) async throws {
+        guard isOnline else { throw SafetySubmissionError.offlineAnonymous }
+        guard let receiptID = AnonymousSafetyReceiptStore.receiptID,
+              let secret = AnonymousSafetyReceiptStore.receiptSecret else {
+            throw SafetySubmissionError.missingReceipt
+        }
+        try await api.postAnonymousSafetyMailbox(
+            receiptID: receiptID,
+            receiptSecret: secret,
+            body: body.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
     func publishCommunityPost(caption: String, body: String, data: Data, filename: String, mimeType: String, durationMs: Int, poster: Data? = nil) async -> CommunityPostDTO? {
         actionError = nil
         do {
@@ -655,6 +810,12 @@ final class AppSession: ObservableObject {
             openCommunityPost(uuid)
             return
         }
+        if url.host == "safety" {
+            let uuid = url.pathComponents.dropFirst().first
+            guard let uuid, !uuid.isEmpty else { return }
+            openSafetyReport(uuid)
+            return
+        }
         guard url.host == "c" else { return }
         let uuid = url.pathComponents.dropFirst().first
         guard let uuid, !uuid.isEmpty else { return }
@@ -671,6 +832,11 @@ final class AppSession: ObservableObject {
     func openCommunityPost(_ postUUID: String) {
         selectedTab = .community
         pendingCommunityPostUUID = postUUID
+    }
+
+    func openSafetyReport(_ reportUUID: String) {
+        selectedTab = .safety
+        pendingSafetyReportUUID = reportUUID
     }
 
     func refreshBadge() async {
@@ -786,6 +952,7 @@ final class AppSession: ObservableObject {
         people = []
         selectedTab = .messages
         pendingCommunityPostUUID = nil
+        pendingSafetyReportUUID = nil
         showingPushPrimer = false
         lastSyncAt = nil
         notificationsAuthorized = false
@@ -805,6 +972,29 @@ final class AppSession: ObservableObject {
         let stored = UserDefaults.standard.string(forKey: key)
         if stored == nil || stored == "https://courseware.europilotcenter.com" {
             UserDefaults.standard.set(productionServerURL, forKey: key)
+        }
+    }
+}
+
+enum SafetySubmissionError: LocalizedError {
+    case offline
+    case offlineAnonymous
+    case missingReceipt
+    case missingIdentity
+    case invalidDraft
+
+    var errorDescription: String? {
+        switch self {
+        case .offline:
+            return "You're offline. Your identified report remains saved as a draft on this device."
+        case .offlineAnonymous:
+            return "You're offline. Your anonymous draft remains saved only on this device and is not linked to an account."
+        case .missingReceipt:
+            return "No anonymous report receipt is saved on this device."
+        case .missingIdentity:
+            return "Sign in again before submitting this identified report."
+        case .invalidDraft:
+            return "The saved safety draft could not be prepared."
         }
     }
 }

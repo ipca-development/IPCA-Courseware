@@ -3,10 +3,28 @@ import Foundation
 actor APIClient {
     private var baseURL: URL
     private var token: String?
+    private let urlSession: URLSession
+    private let anonymousURLSession: URLSession
 
-    init(baseURL: URL, token: String? = nil) {
+    init(
+        baseURL: URL,
+        token: String? = nil,
+        urlSession: URLSession = .shared,
+        anonymousURLSession: URLSession? = nil
+    ) {
         self.baseURL = baseURL
         self.token = token
+        self.urlSession = urlSession
+        if let anonymousURLSession {
+            self.anonymousURLSession = anonymousURLSession
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.httpCookieStorage = nil
+            configuration.httpShouldSetCookies = false
+            configuration.urlCache = nil
+            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            self.anonymousURLSession = URLSession(configuration: configuration)
+        }
     }
 
     func setBaseURL(_ url: URL) {
@@ -233,7 +251,7 @@ actor APIClient {
         }
         let response: URLResponse
         do {
-            (_, response) = try await URLSession.shared.data(for: request)
+            (_, response) = try await urlSession.data(for: request)
         } catch {
             throw APIClientError.transport
         }
@@ -456,12 +474,144 @@ actor APIClient {
         ])
     }
 
+    func createSafetyReport(_ input: SafetyReportInput, idempotencyKey: String) async throws -> SafetyReportDTO {
+        var body = input.apiPayload
+        body["action"] = "create"
+        let envelope: SafetyReportEnvelope = try await post(
+            "api/safety/reports.php",
+            body: body,
+            idempotencyKey: idempotencyKey
+        )
+        return envelope.report
+    }
+
+    func safetyReports() async throws -> [SafetyReportDTO] {
+        let envelope: SafetyReportsEnvelope = try await get("api/safety/reports.php", query: ["action": "list"])
+        return envelope.reports
+    }
+
+    func safetyReport(_ reportUUID: String) async throws -> SafetyReportDTO {
+        let envelope: SafetyReportEnvelope = try await get("api/safety/reports.php", query: [
+            "action": "detail",
+            "report_uuid": reportUUID
+        ])
+        return envelope.report
+    }
+
+    func updateSafetyReport(_ reportUUID: String, input: SafetyReportInput) async throws -> SafetyReportDTO {
+        var body = input.apiPayload
+        body["action"] = "update"
+        body["report_uuid"] = reportUUID
+        let envelope: SafetyReportEnvelope = try await post("api/safety/reports.php", body: body)
+        return envelope.report
+    }
+
+    func submitSafetyReport(_ reportUUID: String) async throws -> SafetyReportDTO {
+        let envelope: SafetyReportEnvelope = try await post("api/safety/reports.php", body: [
+            "action": "submit",
+            "report_uuid": reportUUID
+        ])
+        return envelope.report
+    }
+
+    func safetyMailbox(_ reportUUID: String) async throws -> [SafetyMailboxMessageDTO] {
+        let envelope: SafetyMailboxEnvelope = try await get("api/safety/mailbox.php", query: [
+            "report_uuid": reportUUID
+        ])
+        return envelope.messages
+    }
+
+    func postSafetyMailbox(_ reportUUID: String, body: String) async throws {
+        let _: SafetyUpdateEnvelope = try await post("api/safety/mailbox.php", body: [
+            "report_uuid": reportUUID,
+            "body": body
+        ])
+    }
+
+    func safetyAttachmentPresign(
+        reportUUID: String,
+        attachmentUUID: String,
+        filename: String,
+        mimeType: String,
+        byteSize: Int
+    ) async throws -> SafetyAttachmentPresignDTO {
+        let envelope: SafetyAttachmentPresignEnvelope = try await post("api/safety/attachments.php", body: [
+            "action": "presign",
+            "report_uuid": reportUUID,
+            "attachment_uuid": attachmentUUID,
+            "filename": filename,
+            "mime_type": mimeType,
+            "byte_size": byteSize
+        ])
+        return envelope.attachment
+    }
+
+    func completeSafetyAttachment(_ attachmentUUID: String) async throws -> SafetyAttachmentDTO {
+        let envelope: SafetyAttachmentEnvelope = try await post("api/safety/attachments.php", body: [
+            "action": "complete",
+            "attachment_uuid": attachmentUUID
+        ])
+        return envelope.attachment
+    }
+
+    func submitAnonymousSafetyReport(
+        _ input: SafetyReportInput,
+        idempotencyKey: String
+    ) async throws -> AnonymousSafetyReceipt {
+        try await post(
+            "api/safety/anonymous/submit.php",
+            body: input.apiPayload,
+            authorized: false,
+            idempotencyKey: idempotencyKey,
+            privacyIsolated: true
+        )
+    }
+
+    func anonymousSafetyStatus(receiptID: String, receiptSecret: String) async throws -> AnonymousSafetyStatus {
+        try await post("api/safety/anonymous/status.php", body: [
+            "receipt_id": receiptID,
+            "secret": receiptSecret
+        ], authorized: false, privacyIsolated: true)
+    }
+
+    func anonymousSafetyMailbox(receiptID: String, receiptSecret: String) async throws -> [SafetyMailboxMessageDTO] {
+        let envelope: SafetyMailboxEnvelope = try await post("api/safety/anonymous/mailbox.php", body: [
+            "action": "list",
+            "receipt_id": receiptID,
+            "secret": receiptSecret
+        ], authorized: false, privacyIsolated: true)
+        return envelope.messages
+    }
+
+    func postAnonymousSafetyMailbox(receiptID: String, receiptSecret: String, body: String) async throws {
+        let _: SafetyUpdateEnvelope = try await post("api/safety/anonymous/mailbox.php", body: [
+            "action": "post",
+            "receipt_id": receiptID,
+            "secret": receiptSecret,
+            "body": body
+        ], authorized: false, privacyIsolated: true)
+    }
+
     private func get<T: Decodable>(_ path: String, query: [String: String] = [:], authorized: Bool = true) async throws -> T {
         try await send(path, method: "GET", query: query, body: nil, authorized: authorized)
     }
 
-    private func post<T: Decodable>(_ path: String, body: [String: Any], authorized: Bool = true) async throws -> T {
-        try await send(path, method: "POST", query: [:], body: body, authorized: authorized)
+    private func post<T: Decodable>(
+        _ path: String,
+        body: [String: Any],
+        authorized: Bool = true,
+        idempotencyKey: String? = nil,
+        privacyIsolated: Bool = false
+    ) async throws -> T {
+        try await send(
+            path,
+            method: "POST",
+            query: [:],
+            body: body,
+            authorized: authorized,
+            idempotencyKey: idempotencyKey,
+            privacyIsolated: privacyIsolated
+        )
     }
 
     private func send<T: Decodable>(
@@ -471,7 +621,9 @@ actor APIClient {
         body: [String: Any]?,
         authorized: Bool,
         rawBody: Data? = nil,
-        contentType: String? = nil
+        contentType: String? = nil,
+        idempotencyKey: String? = nil,
+        privacyIsolated: Bool = false
     ) async throws -> T {
         guard var components = URLComponents(url: baseURL.appendingAPIPath(path), resolvingAgainstBaseURL: false) else {
             throw APIClientError.invalidURL
@@ -484,6 +636,9 @@ actor APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if method == "POST" {
+            request.setValue(idempotencyKey ?? UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
+        }
         if authorized, let token, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -498,7 +653,8 @@ actor APIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            let session = privacyIsolated ? anonymousURLSession : urlSession
+            (data, response) = try await session.data(for: request)
         } catch {
             throw APIClientError.transport
         }

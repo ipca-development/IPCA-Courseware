@@ -361,6 +361,41 @@ return [
         'coming_soon' => true,
     ],
     [
+        'key' => 'safety_management',
+        'label' => 'Safety Management',
+        'icon' => 'safety',
+        'href' => '/admin/safety/index.php',
+        'match_paths' => [
+            '/admin/safety/index.php',
+        ],
+        'visible' => static function (): bool {
+            global $pdo;
+            if (!isset($pdo) || !($pdo instanceof PDO) || !function_exists('cw_current_user')) {
+                return false;
+            }
+            $accessFile = __DIR__ . '/../safety/SafetyAccessService.php';
+            if (is_file($accessFile)) {
+                require_once $accessFile;
+            }
+            if (!class_exists('SafetyAccessService')) {
+                return false;
+            }
+            try {
+                $user = cw_current_user($pdo);
+                if (!is_array($user)) {
+                    return false;
+                }
+                $access = new SafetyAccessService($pdo);
+                return $access->hasPermission(
+                    array('user' => $user + array('organization_id' => 1)),
+                    'report.read_all'
+                );
+            } catch (Throwable) {
+                return false;
+            }
+        },
+    ],
+    [
         'key' => 'books_manuals',
         'label' => 'Books & Manuals',
         'icon' => 'documents',

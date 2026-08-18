@@ -41,6 +41,8 @@ final class CommunicationConfigService
             'training_videos_enabled' => $this->enabled('training_videos_enabled'),
             'community_enabled' => $this->enabled('community_enabled'),
             'community_posting_enabled' => $this->enabled('community_posting_enabled'),
+            'safety_reporting_enabled' => $this->enabled('safety_reporting_enabled'),
+            'anonymous_reporting_enabled' => $this->enabled('anonymous_reporting_enabled'),
         );
     }
 

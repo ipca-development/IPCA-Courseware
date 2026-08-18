@@ -92,6 +92,13 @@ final class ComplianceMonitorView
             'title' => $pageTitle,
             'description' => $blurb,
             'flash' => $flash,
+            'actions' => $kind === 'SAFETY'
+                ? array(array(
+                    'label' => 'Open Safety Management',
+                    'href' => '/admin/safety/index.php',
+                    'icon' => 'safety',
+                ))
+                : array(),
             'stats' => array(
                 array('label' => 'Open', 'value' => (int)$stats['open'], 'tone' => $tone),
                 array('label' => 'Critical (open)', 'value' => (int)$stats['critical'], 'tone' => ($stats['critical'] ?? 0) > 0 ? 'crit' : ''),

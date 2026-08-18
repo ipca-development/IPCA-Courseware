@@ -9,6 +9,7 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     private var pendingToken: String?
     private var pendingConversationUUID: String?
     private var pendingCommunityPostUUID: String?
+    private var pendingSafetyReportUUID: String?
 
     func application(
         _ application: UIApplication,
@@ -18,6 +19,7 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         if let info = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
             pendingConversationUUID = Self.conversationUUID(from: info)
             pendingCommunityPostUUID = Self.communityPostUUID(from: info)
+            pendingSafetyReportUUID = Self.safetyReportUUID(from: info)
         }
         return true
     }
@@ -56,7 +58,10 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if let uuid = Self.communityPostUUID(from: response.notification.request.content.userInfo) {
+        if let uuid = Self.safetyReportUUID(from: response.notification.request.content.userInfo) {
+            pendingSafetyReportUUID = uuid
+            flushPending()
+        } else if let uuid = Self.communityPostUUID(from: response.notification.request.content.userInfo) {
             pendingCommunityPostUUID = uuid
             flushPending()
         } else if let uuid = Self.conversationUUID(from: response.notification.request.content.userInfo) {
@@ -90,6 +95,12 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
                 session.openCommunityPost(uuid)
             }
         }
+        if let uuid = pendingSafetyReportUUID {
+            pendingSafetyReportUUID = nil
+            Task { @MainActor in
+                session.openSafetyReport(uuid)
+            }
+        }
     }
 
     static func conversationUUID(from userInfo: [AnyHashable: Any]) -> String? {
@@ -101,6 +112,18 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
 
     static func communityPostUUID(from userInfo: [AnyHashable: Any]) -> String? {
         if let value = userInfo["community_post_uuid"] as? String, !value.isEmpty {
+            return value
+        }
+        return nil
+    }
+
+    static func safetyReportUUID(from userInfo: [AnyHashable: Any]) -> String? {
+        if let value = userInfo["safety_report_uuid"] as? String, !value.isEmpty {
+            return value
+        }
+        if let value = userInfo["report_uuid"] as? String,
+           (userInfo["type"] as? String)?.hasPrefix("safety") == true,
+           !value.isEmpty {
             return value
         }
         return nil

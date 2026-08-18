@@ -131,6 +131,50 @@ final class CommunicationPushService
         }
     }
 
+    public function notifySafetyUpdate(int $userId, string $reportUuid): void
+    {
+        if ($userId < 1 || trim($reportUuid) === '') {
+            return;
+        }
+        foreach ($this->userDevices($userId, 0) as $device) {
+            if (!$this->isConfigured()) {
+                return;
+            }
+            $environment = strtolower(trim((string)($device['apns_environment'] ?? 'sandbox')));
+            if ($environment !== 'production') {
+                $environment = 'sandbox';
+            }
+            $payload = array(
+                'aps' => array(
+                    'alert' => array(
+                        'title' => 'Safety report update',
+                        'body' => 'The Safety team posted an update to your private report.',
+                    ),
+                    'sound' => 'default',
+                    'category' => 'SAFETY_REPORT',
+                    'thread-id' => $reportUuid,
+                ),
+                'safety_report_uuid' => $reportUuid,
+            );
+            $result = $this->transport->send((string)$device['apns_token'], $environment, $payload);
+            if ($result->invalidateToken) {
+                $this->pdo->prepare(
+                    'UPDATE ipca_communication_devices
+                     SET apns_token = NULL, push_authorized = 0, updated_at_utc = ? WHERE id = ?'
+                )->execute(array(CommunicationSupport::nowUtc(), (int)$device['id']));
+            }
+            CommunicationSupport::log(
+                $result->accepted ? 'communication.safety.push.accepted' : 'communication.safety.push.failed',
+                array(
+                    'report_digest' => hash('sha256', $reportUuid),
+                    'environment' => $environment,
+                    'http_status' => $result->httpStatus,
+                    'reason' => $result->reason,
+                )
+            );
+        }
+    }
+
     /**
      * Community comments must not write message delivery evidence.
      *

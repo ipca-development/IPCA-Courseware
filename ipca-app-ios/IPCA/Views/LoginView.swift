@@ -5,6 +5,7 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var serverURL = ""
+    @State private var showingAnonymousSafety = false
     @FocusState private var focused: Field?
 
     private enum Field {
@@ -75,6 +76,14 @@ struct LoginView: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(IPCATheme.Colors.ipcaBlue)
                         .frame(maxWidth: .infinity)
+                        Button {
+                            showingAnonymousSafety = true
+                        } label: {
+                            Label("Report a Safety Concern Anonymously", systemImage: "shield.lefthalf.filled")
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(IPCATheme.Colors.textSecondary)
+                        .frame(maxWidth: .infinity)
                     }
                     if let error = session.loginError {
                         Text(error)
@@ -99,6 +108,10 @@ struct LoginView: View {
             }
             .onAppear {
                 serverURL = session.serverURLString
+            }
+            .sheet(isPresented: $showingAnonymousSafety) {
+                AnonymousSafetyAccessView(serverURL: serverURL.isEmpty ? session.serverURLString : serverURL)
+                    .environmentObject(session)
             }
         }
     }

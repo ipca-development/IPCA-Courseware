@@ -56,6 +56,8 @@ struct ServerCapabilities: Codable, Equatable {
     var trainingVideosEnabled: Bool
     var communityEnabled: Bool
     var communityPostingEnabled: Bool
+    var safetyReportingEnabled: Bool
+    var anonymousReportingEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol_version"
@@ -69,6 +71,8 @@ struct ServerCapabilities: Codable, Equatable {
         case trainingVideosEnabled = "training_videos_enabled"
         case communityEnabled = "community_enabled"
         case communityPostingEnabled = "community_posting_enabled"
+        case safetyReportingEnabled = "safety_reporting_enabled"
+        case anonymousReportingEnabled = "anonymous_reporting_enabled"
     }
 
     init(
@@ -82,7 +86,9 @@ struct ServerCapabilities: Codable, Equatable {
         trainingEnabled: Bool,
         trainingVideosEnabled: Bool,
         communityEnabled: Bool,
-        communityPostingEnabled: Bool
+        communityPostingEnabled: Bool,
+        safetyReportingEnabled: Bool = false,
+        anonymousReportingEnabled: Bool = false
     ) {
         self.protocolVersion = protocolVersion
         self.minAppVersion = minAppVersion
@@ -95,6 +101,8 @@ struct ServerCapabilities: Codable, Equatable {
         self.trainingVideosEnabled = trainingVideosEnabled
         self.communityEnabled = communityEnabled
         self.communityPostingEnabled = communityPostingEnabled
+        self.safetyReportingEnabled = safetyReportingEnabled
+        self.anonymousReportingEnabled = anonymousReportingEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -110,6 +118,8 @@ struct ServerCapabilities: Codable, Equatable {
         trainingVideosEnabled = try container.decodeIfPresent(Bool.self, forKey: .trainingVideosEnabled) ?? false
         communityEnabled = try container.decodeIfPresent(Bool.self, forKey: .communityEnabled) ?? false
         communityPostingEnabled = try container.decodeIfPresent(Bool.self, forKey: .communityPostingEnabled) ?? false
+        safetyReportingEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyReportingEnabled) ?? false
+        anonymousReportingEnabled = try container.decodeIfPresent(Bool.self, forKey: .anonymousReportingEnabled) ?? false
     }
 
     static let disabled = ServerCapabilities(
@@ -123,7 +133,9 @@ struct ServerCapabilities: Codable, Equatable {
         trainingEnabled: false,
         trainingVideosEnabled: false,
         communityEnabled: false,
-        communityPostingEnabled: false
+        communityPostingEnabled: false,
+        safetyReportingEnabled: false,
+        anonymousReportingEnabled: false
     )
 }
 
@@ -786,6 +798,7 @@ enum AppTab: Hashable {
     case community
     case training
     case trainingVideos
+    case safety
     case me
 }
 

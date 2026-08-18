@@ -121,8 +121,10 @@ return [
         'key' => 'safety',
         'label' => 'Safety',
         'icon' => 'safety',
-        'href' => null,
-        'coming_soon' => true,
+        'href' => '/student/safety.php',
+        'match_paths' => [
+            '/student/safety.php',
+        ],
     ],
     [
         'key' => 'schedule',

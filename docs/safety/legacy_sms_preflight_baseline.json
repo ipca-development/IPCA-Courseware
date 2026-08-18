@@ -1,0 +1,153 @@
+{
+    "schema_version": 1,
+    "mode": "read_only_aggregate_preflight",
+    "source": {
+        "sha256": "a28a4256facfdf325c97cdba7485c5906cf02533779583030659dfbe3eb8d5a9",
+        "bytes": 201265,
+        "path_emitted": false,
+        "content_emitted": false
+    },
+    "count_checks": {
+        "hazards": {
+            "expected": 246,
+            "actual": 246,
+            "pass": true
+        },
+        "categories": {
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+        },
+        "undesirable_events": {
+            "expected": 48,
+            "actual": 48,
+            "pass": true
+        },
+        "reports": {
+            "expected": 123,
+            "actual": 123,
+            "pass": true
+        },
+        "map_ud_haz": {
+            "expected": 139,
+            "actual": 139,
+            "pass": true
+        },
+        "map_ud_or": {
+            "expected": 153,
+            "actual": 152,
+            "pass": false
+        }
+    },
+    "orphan_mappings": {
+        "map_ud_haz": {
+            "expected_zero_id": 19,
+            "actual_zero_id": 19,
+            "zero_id_pass": true,
+            "missing_nonzero_reference": 0
+        },
+        "map_ud_or": {
+            "expected_zero_id": 18,
+            "actual_zero_id": 18,
+            "zero_id_pass": true,
+            "missing_nonzero_reference": 0
+        }
+    },
+    "duplicate_relationships": {
+        "map_ud_haz": {
+            "rows": 139,
+            "unique_pairs": 135,
+            "duplicate_pair_groups": 4,
+            "duplicate_rows": 4
+        },
+        "map_ud_or": {
+            "rows": 152,
+            "unique_pairs": 144,
+            "duplicate_pair_groups": 4,
+            "duplicate_rows": 8
+        }
+    },
+    "dates": {
+        "reports_issued": {
+            "blank": 4,
+            "malformed": 7
+        },
+        "reports_updated": {
+            "blank": 100,
+            "malformed": 1
+        },
+        "undesirable_events_issued": {
+            "malformed": 0
+        },
+        "undesirable_events_updated": {
+            "malformed": 0
+        },
+        "malformed_total": 8
+    },
+    "mojibake": {
+        "haz": {
+            "records": 0,
+            "fields": 0,
+            "indicators": 0
+        },
+        "haz_cat": {
+            "records": 0,
+            "fields": 0,
+            "indicators": 0
+        },
+        "map_ud_haz": {
+            "records": 0,
+            "fields": 0,
+            "indicators": 0
+        },
+        "map_ud_or": {
+            "records": 0,
+            "fields": 0,
+            "indicators": 0
+        },
+        "ocr": {
+            "records": 8,
+            "fields": 8,
+            "indicators": 13
+        },
+        "ud": {
+            "records": 0,
+            "fields": 0,
+            "indicators": 0
+        }
+    },
+    "blank_report_96": {
+        "exists": true,
+        "flagged_blank": true,
+        "blank_fields": 6
+    },
+    "pdf_references": {
+        "referenced": 30,
+        "missing": 30,
+        "unsafe_reference": 0
+    },
+    "hazards": {
+        "blank_name": 0,
+        "blank_description": 126,
+        "blank_defences": 125,
+        "invalid_category": 0,
+        "invalid_risk_fields": 0,
+        "legacy_default_risk_profile": 125,
+        "default_or_incomplete_records": 126
+    },
+    "credential_safety": {
+        "legacy_php_credential_read": false,
+        "credential_emitted": false,
+        "external_rotation_required": true
+    },
+    "summary": {
+        "count_check_failures": 1,
+        "zero_id_orphan_mappings": 37,
+        "duplicate_relationship_rows": 12,
+        "malformed_dates": 8,
+        "mojibake_records": 8,
+        "missing_pdf_references": 30,
+        "default_or_incomplete_hazards": 126,
+        "migration_ready": false
+    }
+}
