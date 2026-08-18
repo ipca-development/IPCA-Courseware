@@ -371,18 +371,17 @@ final class CommunicationProfileService
             'eye_color' => trim((string)($input['eye_color'] ?? '')) ?: null,
             'marital_status' => trim((string)($input['marital_status'] ?? '')) ?: null,
         );
-        $existing = $this->pdo->prepare('SELECT id FROM user_profiles WHERE user_id = ? LIMIT 1');
+        $existing = $this->pdo->prepare('SELECT user_id FROM user_profiles WHERE user_id = ? LIMIT 1');
         $existing->execute(array($userId));
-        $id = (int)$existing->fetchColumn();
-        if ($id > 0) {
+        if ($existing->fetchColumn() !== false) {
             $this->pdo->prepare(
                 'UPDATE user_profiles SET
                     street_address = ?, street_number = ?, zip_code = ?, city = ?, state_region = ?,
                     country_code = ?, cellphone = ?, secondary_email = ?, date_of_birth = ?, place_of_birth = ?,
                     nationality = ?, id_passport_number = ?, gender = ?, weight = ?, height_cm = ?,
                     hair_color = ?, eye_color = ?, marital_status = ?, updated_at = ?
-                 WHERE id = ?'
-            )->execute(array_merge(array_values($fields), array($now, $id)));
+                 WHERE user_id = ?'
+            )->execute(array_merge(array_values($fields), array($now, $userId)));
             return;
         }
         $this->pdo->prepare(

@@ -446,8 +446,7 @@ function comm_sqlite(): PDO
         ('a1000000-0000-4000-8000-000000000003', 'ipca_administration', 'IPCA Administration', 1)
     ");
     $pdo->exec("CREATE TABLE user_profiles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL PRIMARY KEY,
       street_address TEXT NULL,
       street_number TEXT NULL,
       zip_code TEXT NULL,
@@ -2270,6 +2269,8 @@ comm_assert(
     && str_contains((string)file_get_contents($root . '/public/api/communication/auth.php'), 'forgot_password')
     && str_contains((string)file_get_contents($root . '/public/reset_password.php'), 'ipca://reset')
     && str_contains((string)file_get_contents($root . '/src/communication/CommunicationProfileService.php'), 'app_reset_link')
+    && str_contains((string)file_get_contents($root . '/src/communication/CommunicationProfileService.php'), 'SELECT user_id FROM user_profiles')
+    && !str_contains((string)file_get_contents($root . '/src/communication/CommunicationProfileService.php'), 'SELECT id FROM user_profiles')
 );
 
 foreach (glob($root . '/public/api/communication/*.php') ?: array() as $apiFile) {
