@@ -364,7 +364,6 @@ return [
         'key' => 'safety_management',
         'label' => 'Safety Management',
         'icon' => 'safety',
-        'href' => '/admin/safety/index.php',
         'match_paths' => [
             '/admin/safety/index.php',
         ],
@@ -394,6 +393,17 @@ return [
                 return false;
             }
         },
+        'items' => [
+            [
+                'key' => 'safety_management_system',
+                'label' => 'System',
+                'icon' => 'safety',
+                'href' => '/admin/safety/index.php',
+                'match_paths' => [
+                    '/admin/safety/index.php',
+                ],
+            ],
+        ],
     ],
     [
         'key' => 'books_manuals',
