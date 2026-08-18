@@ -119,6 +119,7 @@ final class BooksManualsContextImpactService
                 $projectId,
                 $workflowIds,
                 $extraction['targets'],
+                $extraction['intent'],
                 $blocks
             );
 
@@ -1564,18 +1565,37 @@ final class BooksManualsContextImpactService
      * @param array<string,int> $targetIds
      * @param list<array<string,mixed>> $targets
      * @param list<array<string,mixed>> $blocks
-     * @return array{sections:array<int,array<int,bool>>,warning_count:int}
+     * @param array<string,mixed> $intent
+     * @return array{sections:array<int,array<int,bool>>,domain_sections:array<int,bool>,warning_count:int}
      */
     private function resolveScopes(
         int $analysisRunId,
         int $projectId,
         array $workflowIds,
         array $targets,
+        array $intent,
         array $blocks
     ): array
     {
         $sections = array();
+        $domainSections = array();
         $warnings = 0;
+        $domainTerms = array_values(array_filter(
+            preg_split('/[^\pL\pN]+/u', $this->normalizeForSearch(
+                (string)($intent['primary_domain'] ?? '')
+            )) ?: array(),
+            static fn(string $term): bool => mb_strlen($term) >= 5
+                && !in_array($term, array('management', 'operations', 'process'), true)
+        ));
+        foreach ($blocks as $block) {
+            $title = $this->normalizeForSearch((string)$block['section_title']);
+            foreach ($domainTerms as $domainTerm) {
+                if (preg_match('/(?<![\pL\pN])' . preg_quote($domainTerm, '/') . '(?![\pL\pN])/u', $title) === 1) {
+                    $domainSections[(int)$block['section_id']] = true;
+                    break;
+                }
+            }
+        }
         foreach ($targets as $target) {
             $key = $this->safeKey((string)($target['area_key'] ?? ''));
             $workflowId = $workflowIds[$key] ?? 0;
@@ -1616,7 +1636,11 @@ final class BooksManualsContextImpactService
                 ));
             }
         }
-        return array('sections' => $sections, 'warning_count' => $warnings);
+        return array(
+            'sections' => $sections,
+            'domain_sections' => $domainSections,
+            'warning_count' => $warnings,
+        );
     }
 
     /**
@@ -1845,7 +1869,7 @@ final class BooksManualsContextImpactService
      * @param list<array<string,mixed>> $requirements
      * @param array<int,array<string,mixed>> $bundles
      * @param list<array<string,mixed>> $hits
-     * @param array{sections:array<int,array<int,bool>>,warning_count:int} $scope
+     * @param array{sections:array<int,array<int,bool>>,domain_sections?:array<int,bool>,warning_count:int} $scope
      * @param array<int,array<int,bool>> $semantic
      * @return list<array<string,mixed>>
      */
@@ -1873,8 +1897,10 @@ final class BooksManualsContextImpactService
                 ), $terms);
                 $hasLegacy = isset($hitIndex[$sectionId]);
                 $inScope = isset($scope['sections'][$workflowId][$sectionId]);
+                $inDomainScope = isset($scope['domain_sections'][$sectionId]);
                 $semanticSupport = isset($semantic[$requirementId][$sectionId]);
                 if (!$hasLegacy
+                    && !$inDomainScope
                     && !($inScope && $gate['distinctive'] >= 2)
                     && !($semanticSupport && $gate['distinctive'] >= 2)) {
                     continue;
@@ -1896,7 +1922,7 @@ final class BooksManualsContextImpactService
                 $aggregated[$key]['mapped_requirements'][] = $requirement;
                 $aggregated[$key]['relevance_by_requirement'][$requirementId] = array(
                     'legacy_hit' => $hasLegacy,
-                    'structure_scope' => $inScope,
+                    'structure_scope' => $inScope || $inDomainScope,
                     'semantic_support' => $semanticSupport,
                     'distinctive_matches' => $gate['distinctive'],
                     'matched_terms' => $gate['terms'],

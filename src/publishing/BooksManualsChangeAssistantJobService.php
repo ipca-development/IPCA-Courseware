@@ -21,7 +21,7 @@ final class BooksManualsChangeAssistantJobService
         $assistant = new BooksManualsChangeAssistantService($this->pdo);
         $project = $assistant->getProject($projectId);
         $key = hash('sha256', implode('|', array(
-            'analysis-v7-lexical-gating',
+            'analysis-v8-domain-sections',
             $projectId,
             (string)($project['source_fingerprint'] ?? ''),
             (string)($project['scope_fingerprint'] ?? ''),
