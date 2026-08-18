@@ -273,6 +273,20 @@ private extension LibraryBook {
             lifecycleStatus ?? "",
         ].joined(separator: " ").lowercased()
     }
+
+    var lifecycleBadgeLabel: String {
+        switch lifecycleStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "released": "Approved"
+        case "in_review": "Draft Review"
+        case "approved": "Awaiting Approval"
+        default: "Draft"
+        }
+    }
+
+    var lifecycleBadgeColor: Color {
+        lifecycleStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            == "released" ? Color.green : Color.orange
+    }
 }
 
 private struct LibrarySidebar: View {
@@ -814,6 +828,22 @@ private struct ManualCoverCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open \(book.displayTitle)")
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(book.lifecycleBadgeLabel)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(book.lifecycleBadgeColor.opacity(0.94))
+                    )
+                Text("Revision \(book.versionLabel)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(IPCAReaderTheme.navy)
+                    .lineLimit(1)
+            }
 
             HStack(spacing: 8) {
                 if showsProgress || book.hasProgress {

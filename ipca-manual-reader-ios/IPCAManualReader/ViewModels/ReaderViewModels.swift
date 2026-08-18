@@ -211,7 +211,7 @@ final class ReaderViewModel: ObservableObject {
             bookKey: book.bookKey,
             versionID: book.versionId
         )
-        if ManualReaderSessionStore.shared.canAddReviewerNotes {
+        if ManualReaderSessionStore.shared.canAddReviewerNotes && book.isDraftPreview {
             openingMessage = "Loading reviewer notes…"
             await loadReviewThreads()
         }
@@ -554,7 +554,8 @@ final class ReaderViewModel: ObservableObject {
         showLoading: Bool = true,
         reportErrors: Bool = true
     ) async {
-        guard ManualReaderSessionStore.shared.canAddReviewerNotes,
+        guard book.isDraftPreview,
+              ManualReaderSessionStore.shared.canAddReviewerNotes,
               let client = ManualReaderSessionStore.shared.client else { return }
         if showLoading {
             isLoadingReviewThreads = true

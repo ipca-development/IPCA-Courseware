@@ -540,6 +540,9 @@ final class ControlledPublishingFoundationService
             if (!is_array($sourceMeta)) {
                 $sourceMeta = array();
             }
+            // Reader page-map approval belongs to one immutable version and
+            // must never be inherited by its successor.
+            unset($sourceMeta['reader_page_map']);
 
             $upd = $this->pdo->prepare("
                 UPDATE ipca_publishing_book_versions

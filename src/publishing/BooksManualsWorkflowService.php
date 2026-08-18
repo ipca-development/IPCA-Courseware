@@ -292,6 +292,7 @@ final class BooksManualsWorkflowService
             'Copied from version ' . (string)$source['version_label'],
             $actorUserId
         );
+        $this->queueInitialPageMap((int)$created['version_id'], $actorUserId);
         return $created;
     }
 
@@ -386,6 +387,11 @@ final class BooksManualsWorkflowService
                 (string)$identity['source_fingerprint'],
                 $actorUserId,
             ));
+            $this->approveStoredPageMapUnderOverride(
+                $source,
+                $actorUserId,
+                $overrideUuid
+            );
             $release = $this->pdo->prepare(
                 "UPDATE ipca_publishing_book_versions
                  SET lifecycle_status = 'released',
@@ -874,5 +880,80 @@ final class BooksManualsWorkflowService
             substr($hex, 16, 4),
             substr($hex, 20)
         );
+    }
+
+    private function queueInitialPageMap(int $versionId, int $actorUserId): void
+    {
+        try {
+            require_once __DIR__ . '/ControlledPublishingLivePageMapService.php';
+            (new ControlledPublishingLivePageMapService($this->pdo))->ensure(
+                $versionId,
+                $actorUserId,
+                null,
+                array(
+                    'mutation_kind' => 'create_revision',
+                    'layout_impact' => 'global',
+                )
+            );
+        } catch (Throwable $e) {
+            error_log(
+                'Unable to queue initial revision page map for version '
+                    . $versionId . ': ' . $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * A bulk legacy override governs the exact stored page map even when its
+     * historical layout fingerprint would fail today's ordinary approval gate.
+     *
+     * @param array<string,mixed> $version
+     */
+    private function approveStoredPageMapUnderOverride(
+        array $version,
+        int $actorUserId,
+        string $overrideUuid
+    ): void {
+        $metadata = $version['metadata_json'] ?? array();
+        if (is_string($metadata)) {
+            $metadata = json_decode($metadata, true);
+        }
+        $metadata = is_array($metadata) ? $metadata : array();
+        $map = $metadata['reader_page_map'] ?? null;
+        if (!is_array($map) || (string)($map['status'] ?? '') !== 'draft') {
+            return;
+        }
+        $profile = trim((string)($map['layout_profile'] ?? ''));
+        if ($profile === '') {
+            return;
+        }
+        $countStmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ipca_publishing_reader_page_maps
+             WHERE book_version_id = ? AND layout_profile = ?'
+        );
+        $countStmt->execute(array((int)$version['id'], $profile));
+        $pageCount = (int)$countStmt->fetchColumn();
+        if ($pageCount <= 0) {
+            return;
+        }
+        $metadata['reader_page_map'] = array_merge($map, array(
+            'status' => 'approved',
+            'page_count' => $pageCount,
+            'approved_at' => gmdate('Y-m-d H:i:s'),
+            'approved_by_user_id' => $actorUserId,
+            'approval_basis' => 'legacy_compliance_override',
+            'approval_override_uuid' => $overrideUuid,
+        ));
+        $this->pdo->prepare(
+            'UPDATE ipca_publishing_book_versions
+             SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?'
+        )->execute(array(
+            json_encode(
+                $metadata,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            ),
+            (int)$version['id'],
+        ));
     }
 }

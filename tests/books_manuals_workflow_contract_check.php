@@ -17,6 +17,9 @@ $foundation = (string)file_get_contents(
     $root . '/src/publishing/ControlledPublishingFoundationService.php'
 );
 $policy = (string)file_get_contents($root . '/src/publishing/BooksManualsReaderPolicyService.php');
+$readerService = (string)file_get_contents(
+    $root . '/src/publishing/ControlledPublishingReaderService.php'
+);
 $audit = (string)file_get_contents($root . '/src/publishing/BooksManualsAuditService.php');
 $auditPage = (string)file_get_contents(
     $root . '/public/admin/compliance/books_manuals_audits.php'
@@ -40,6 +43,15 @@ $readerApi = (string)file_get_contents($root . '/public/student/api/manual_reade
 $nav = (string)file_get_contents($root . '/src/nav/admin.php');
 $libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
 $bookReader = (string)file_get_contents($root . '/public/admin/books_manuals/reader.php');
+$iosModels = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Models/ManualReaderModels.swift'
+);
+$iosLibrary = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/LibraryView.swift'
+);
+$iosViewModel = (string)file_get_contents(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/ViewModels/ReaderViewModels.swift'
+);
 
 foreach (array(
     "'draft' => array('publish_review' => 'in_review')" => 'Draft to Draft Review',
@@ -73,6 +85,8 @@ bm_contract_assert(
 bm_contract_assert(
     'Draft is hidden by governed reader policy',
     str_contains($policy, "if (\$status === 'draft')")
+        && strpos($policy, "if (strtolower((string)(\$user['role'] ?? '')) === 'admin')")
+            < strpos($policy, "if (\$status === 'draft')")
 );
 bm_contract_assert(
     'review phases require approved reviewers',
@@ -128,6 +142,39 @@ bm_contract_assert(
         && str_contains($workflow, 'bv.released_at')
         && str_contains($workflow, 'approved_by_name')
         && str_contains($workflow, 'audit.coverage_percent')
+);
+bm_contract_assert(
+    'reader advertises only stored page maps',
+    str_contains($readerService, '$hasStoredPageMap = false')
+        && str_contains($readerService, '? $hasStoredPageMap')
+);
+bm_contract_assert(
+    'revision page-map state is version-specific and generated on creation',
+    str_contains($foundation, "unset(\$sourceMeta['reader_page_map'])")
+        && str_contains($workflow, 'queueInitialPageMap')
+        && str_contains($workflow, "'mutation_kind' => 'create_revision'")
+);
+bm_contract_assert(
+    'legacy approval override approves its existing page map',
+    str_contains($workflow, 'approveStoredPageMapUnderOverride')
+        && str_contains($workflow, "'approval_basis' => 'legacy_compliance_override'")
+        && str_contains($workflow, "'approval_override_uuid' => \$overrideUuid")
+);
+bm_contract_assert(
+    'iOS distinguishes approved and review versions',
+    str_contains($iosModels, 'var isDraftPreview: Bool')
+        && str_contains($iosLibrary, 'case "released": "Approved"')
+        && str_contains($iosLibrary, 'case "in_review": "Draft Review"')
+        && str_contains($iosLibrary, '.font(.system(size: 9, weight: .bold))')
+        && str_contains($iosLibrary, 'Text("Revision \(book.versionLabel)")')
+);
+bm_contract_assert(
+    'iOS reviewer notes stay disabled for released manuals',
+    substr_count($iosViewModel, 'book.isDraftPreview') >= 3
+        && str_contains(
+            $iosViewModel,
+            'ManualReaderSessionStore.shared.canAddReviewerNotes && book.isDraftPreview'
+        )
 );
 bm_contract_assert(
     'modal book reader exposes pages without publishing controls',

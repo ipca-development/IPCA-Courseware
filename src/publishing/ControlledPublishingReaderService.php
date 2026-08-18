@@ -123,10 +123,12 @@ final class ControlledPublishingReaderService
         $lifecycle = (string)($version['lifecycle_status'] ?? '');
         $pageMapHash = '';
         $manifestHash = '';
+        $hasStoredPageMap = false;
         try {
             require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
             $profile = ControlledPublishingReaderLayoutProfile::profileKey();
             if ($this->pageMapStore()->pageCount((int)$version['id'], $profile) > 0) {
+                $hasStoredPageMap = true;
                 $summary = $this->pageMapStore()->loadPageMapSummary(
                     (int)$version['id'],
                     $profile
@@ -156,7 +158,9 @@ final class ControlledPublishingReaderService
             'logo_url' => $cover['logo_url'],
             'cover_fallback' => $cover['fallback'],
             'has_progress' => is_array($progress),
-            'has_page_map' => $isPreview ? true : $this->safeHasApprovedPageMap($version, $bookKey),
+            'has_page_map' => $isPreview
+                ? $hasStoredPageMap
+                : $this->safeHasApprovedPageMap($version, $bookKey),
             'page_map_hash' => $pageMapHash !== '' ? $pageMapHash : null,
             'manifest_hash' => $manifestHash !== '' ? $manifestHash : null,
             'continue_section_id' => is_array($progress) ? (int)($progress['section_id'] ?? 0) : null,

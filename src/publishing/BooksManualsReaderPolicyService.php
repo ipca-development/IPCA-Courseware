@@ -47,11 +47,11 @@ final class BooksManualsReaderPolicyService
 
         $status = strtolower(trim((string)($version['lifecycle_status'] ?? '')));
         $bookId = (int)($version['book_id'] ?? 0);
-        if ($status === 'draft') {
-            return false;
-        }
         if (strtolower((string)($user['role'] ?? '')) === 'admin') {
             return true;
+        }
+        if ($status === 'draft') {
+            return false;
         }
         if (in_array($status, array('in_review', 'approved'), true)) {
             return $this->isApprovedReviewer($user)
