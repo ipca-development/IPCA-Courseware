@@ -333,7 +333,7 @@ final class ControlledPublishingOutlineService
                         break;
                     }
                 }
-                $insertAt = $index + $headingIndex;
+                $insertAt = $index + 1 + $headingIndex;
                 break;
             }
         }
@@ -364,8 +364,11 @@ final class ControlledPublishingOutlineService
         $this->writeChapterOrder($versionId, $parentId, $ordered);
 
         $remaining = $this->manualStructure->listNavSubsectionsFromChapterBlocks($sectionId, array());
-        $sourceRow = $this->sections->getSection($versionId, $sectionId);
-        $blockCount = is_array($sourceRow) ? (int)($sourceRow['block_count'] ?? 0) : 1;
+        $blockCountStmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ipca_publishing_book_blocks WHERE section_id = :section_id'
+        );
+        $blockCountStmt->execute(array(':section_id' => $sectionId));
+        $blockCount = (int)$blockCountStmt->fetchColumn();
         if ($remaining === array() && $blockCount <= 0) {
             $this->deleteChapter($versionId, $sectionId, $actorUserId);
         }
