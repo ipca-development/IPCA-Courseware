@@ -20,7 +20,9 @@ final class BooksManualsContextImpactService
         'manual', 'section', 'process', 'procedure', 'system', 'record', 'document',
         'information', 'requirement', 'operation', 'management', 'company', 'staff',
         'personnel', 'training', 'responsibility', 'applicable', 'ensure', 'shall',
-        'must', 'should', 'update', 'change', 'new', 'current',
+        'must', 'should', 'update', 'change', 'new', 'current', 'the', 'all', 'any',
+        'each', 'use', 'using', 'used', 'relevant', 'part', 'chapter', 'book',
+        'omm', 'om', 'general', 'safety',
     );
 
     private ?int $activeProjectId = null;
@@ -1114,7 +1116,124 @@ final class BooksManualsContextImpactService
     private function fallbackWholeRequest(array $sources): array
     {
         $requirements = array();
-        $allTerms = array();
+        $completeText = implode("\n\n", array_map(
+            static fn(array $source): string => (string)$source['_full_text'],
+            $sources
+        ));
+        $normalizedSource = trim($this->normalizeForSearch($completeText));
+        $workflowDefinitions = array(
+            'system-platform' => array(
+                'title' => 'System and platform',
+                'terms' => array('safety management system tool', 'ipca.training', 'automatic system action', 'workflow'),
+                'roles' => array(),
+                'controls' => array('auditable event record', 'integrity hashes'),
+            ),
+            'initial-reporting' => array(
+                'title' => 'Initial reporting',
+                'terms' => array('initial safety report', 'reporter', 'reporting channel', 'submission'),
+                'roles' => array('Reporter', 'Safety Manager'),
+                'controls' => array('unique safety report', 'submission time', 'confidentiality'),
+            ),
+            'reportability-assessment' => array(
+                'title' => 'Reportability assessment',
+                'terms' => array('reportability', 'reportable occurrence', 'reporting deadline'),
+                'roles' => array('Safety Manager'),
+                'controls' => array('human decision', 'decision rationale', 'authority reporting deadline'),
+            ),
+            'ecairs-initial-notification' => array(
+                'title' => 'ECCAIRS initial notification and transmission',
+                'terms' => array('ECCAIRS', 'initial notification', 'Approve and queue', 'transmission'),
+                'roles' => array('Safety Manager'),
+                'controls' => array('approval rationale', 'canonical occurrence digest', 'delivery status', 'duplicate submission'),
+            ),
+            'investigation' => array(
+                'title' => 'Investigation',
+                'terms' => array('investigation', 'causal factors', 'contributing factors', 'findings', 'conclusions'),
+                'roles' => array('Safety Manager'),
+                'controls' => array('investigation evidence', 'risk assessment'),
+            ),
+            'corrective-actions' => array(
+                'title' => 'Corrective and mitigating actions',
+                'terms' => array('corrective action', 'mitigating action', 'Action Owner', 'implementation evidence'),
+                'roles' => array('Safety Manager', 'Action Owner'),
+                'controls' => array('action evidence', 'assigned responsibility'),
+            ),
+            'effectiveness-residual-risk' => array(
+                'title' => 'Effectiveness review and residual risk',
+                'terms' => array('effectiveness review', 'residual risk', 'partially effective', 'ineffective'),
+                'roles' => array('Safety Manager', 'Action Owner'),
+                'controls' => array('effectiveness result', 'residual-risk acceptance'),
+            ),
+            'ecairs-follow-up' => array(
+                'title' => 'Intermediate and final ECCAIRS follow-up',
+                'terms' => array('intermediate ECCAIRS', 'final ECCAIRS', 'follow-up control log', 'weekly'),
+                'roles' => array('Safety Manager'),
+                'controls' => array('intermediate-report deadline', 'final update', 'acceptance evidence'),
+            ),
+            'records-evidence' => array(
+                'title' => 'Records and evidence',
+                'terms' => array('evidence', 'records', 'auditable', 'retained', 'control log'),
+                'roles' => array('Safety Manager'),
+                'controls' => array('submission evidence', 'acceptance evidence', 'integrity evidence'),
+            ),
+            'closure' => array(
+                'title' => 'Occurrence closure',
+                'terms' => array('occurrence closure', 'closure authorization', 'closure rationale', 'internal closure'),
+                'roles' => array('Safety Manager'),
+                'controls' => array('closure gates', 'completion reference', 'reporter feedback'),
+            ),
+            'competence-training' => array(
+                'title' => 'Competence and training',
+                'terms' => array('training', 'competence', 'assigned functions operationally'),
+                'roles' => array('Reporter', 'Safety Manager', 'Action Owner'),
+                'controls' => array('role-specific training'),
+            ),
+        );
+        $targets = array();
+        foreach ($workflowDefinitions as $key => $definition) {
+            $present = false;
+            foreach ($definition['terms'] as $term) {
+                if (str_contains($normalizedSource, trim($this->normalizeForSearch($term)))) {
+                    $present = true;
+                    break;
+                }
+            }
+            if (!$present) {
+                continue;
+            }
+            $targets[] = array(
+                'area_key' => $key,
+                'title' => $definition['title'],
+                'description' => 'Target workflow area derived deterministically from complete source context.',
+                'target_state' => array(
+                    'desired_outcome' => $definition['title'] . ' reflects the supplied end-to-end process.',
+                    'scope_terms' => $definition['terms'],
+                    'replacement_concepts' => array(),
+                ),
+                'roles' => $definition['roles'],
+                'controls' => $definition['controls'],
+                'evidence' => array(),
+                'status' => 'active',
+                'confidence' => 0.72,
+            );
+        }
+        if ($targets === array()) {
+            $targets[] = array(
+                'area_key' => 'general-change',
+                'title' => 'Source-defined affected content',
+                'description' => 'Workflow area inferred deterministically from complete source evidence.',
+                'target_state' => array(
+                    'desired_outcome' => 'The selected manuals reflect the complete supplied change request.',
+                    'scope_terms' => array_slice($this->distinctiveTerms($completeText), 0, 20),
+                    'replacement_concepts' => array(),
+                ),
+                'roles' => array(),
+                'controls' => array(),
+                'evidence' => array(),
+                'status' => 'needs_review',
+                'confidence' => 0.45,
+            );
+        }
         foreach ($sources as $source) {
             $sentences = preg_split('/(?<=[.!?;:])\s+|\R{2,}/u', (string)$source['_full_text']) ?: array();
             foreach ($sentences as $sentence) {
@@ -1125,14 +1244,13 @@ final class BooksManualsContextImpactService
                 if (preg_match('/\b(shall|must|required|should|may not|will|replace|remove|rename|change|introduce|use)\b/iu', $sentence) !== 1) {
                     continue;
                 }
-                $terms = $this->distinctiveTerms($sentence);
-                array_push($allTerms, ...$terms);
+                $workflowKey = $this->bestWorkflowKey($sentence, $targets);
                 $requirements[] = array(
                     'source_id' => (int)$source['id'],
-                    'workflow_area_key' => 'general-change',
+                    'workflow_area_key' => $workflowKey,
                     'text' => $sentence,
                     'exact_quote' => $sentence,
-                    'confidence' => 0.62,
+                    'confidence' => 0.72,
                 );
             }
         }
@@ -1143,11 +1261,9 @@ final class BooksManualsContextImpactService
                     if (mb_strlen($line) < 18) {
                         continue;
                     }
-                    $terms = $this->distinctiveTerms($line);
-                    array_push($allTerms, ...$terms);
                     $requirements[] = array(
                         'source_id' => (int)$source['id'],
-                        'workflow_area_key' => 'general-change',
+                        'workflow_area_key' => $this->bestWorkflowKey($line, $targets),
                         'text' => $line,
                         'exact_quote' => $line,
                         'confidence' => 0.35,
@@ -1155,43 +1271,99 @@ final class BooksManualsContextImpactService
                 }
             }
         }
-        $allTerms = array_values(array_unique($allTerms));
+        $legacyConcepts = array();
+        if (preg_match_all(
+            '/(?:outdated|legacy|old)\s+(?:system|platform|tool|terminology)?\s*:?\s*([^.\r\n;]{2,100})/iu',
+            $completeText,
+            $legacyMatches
+        ) > 0) {
+            $legacyConcepts = array_merge($legacyConcepts, (array)($legacyMatches[1] ?? array()));
+        }
+        preg_match_all('~https?://[^\s<>"\']+~iu', $completeText, $sourceUrls);
+        foreach ((array)($sourceUrls[0] ?? array()) as $url) {
+            if (preg_match('/\b(?:old|legacy|outdated|superseded)\b.{0,100}' . preg_quote($url, '/') . '/iu', $completeText) === 1) {
+                $legacyConcepts[] = $url;
+            }
+        }
+        $legacyConcepts = array_values(array_unique(array_filter(array_map(
+            static fn(string $term): string => trim($term, " \t\n\r\0\x0B.,:;"),
+            $legacyConcepts
+        ))));
+        $replacementConcepts = array();
+        if (preg_match('/new\s+([^.\\n]{3,140})/iu', $completeText, $newMatch) === 1) {
+            $replacementConcepts[] = trim((string)$newMatch[1]);
+        }
+        if (preg_match('/(?:uses|implemented)\s+(?:our\s+)?(?:the\s+)?([A-Z][^.\\n]{3,120}?(?:System|Tool|Platform))/u', $completeText, $replacementMatch) === 1) {
+            $replacementConcepts[] = trim((string)$replacementMatch[1]);
+        }
+        if (str_contains($normalizedSource, 'ipca.training')) {
+            $replacementConcepts[] = 'IPCA.training Safety Management System Tool';
+        }
+        $replacementConcepts = array_values(array_unique(array_filter($replacementConcepts)));
+        foreach ($targets as &$target) {
+            $target['target_state']['replacement_concepts'] = $replacementConcepts;
+        }
+        unset($target);
+        $roles = array_values(array_filter(
+            array('Reporter', 'Safety Manager', 'Action Owner'),
+            fn(string $role): bool => str_contains($normalizedSource, trim($this->normalizeForSearch($role)))
+        ));
+        $transitions = array();
+        foreach (preg_split('/(?<=[.!?])\s+/u', $completeText) ?: array() as $sentence) {
+            if (preg_match('/\b(?:not yet operational|until .+ (?:implemented|operational)|currently .+ manually|shall be performed directly)\b/iu', $sentence) === 1) {
+                $transitions[] = trim(preg_replace('/\s+/u', ' ', $sentence) ?? $sentence);
+            }
+        }
         return array(
             'method' => 'deterministic',
             'intent' => array(
-                'change_type' => 'manual_content_change',
-                'primary_domain' => 'source-defined operations',
-                'summary' => 'Apply the supplied source change request while preserving surrounding manual context.',
-                'legacy_concepts' => array_slice($allTerms, 0, 20),
-                'replacement_concepts' => array(),
-                'affected_workflows' => array('source-defined affected content'),
-                'affected_roles' => array(),
-                'important_controls' => array(),
-                'transitional_arrangements' => array(),
+                'change_type' => $legacyConcepts !== array() && $replacementConcepts !== array()
+                    ? 'SYSTEM_REPLACEMENT'
+                    : 'PROCESS_CHANGE',
+                'primary_domain' => str_contains($normalizedSource, 'safety management')
+                    ? 'Safety Management and occurrence reporting'
+                    : 'Source-defined operations',
+                'summary' => $legacyConcepts !== array()
+                    ? 'Replace obsolete ' . implode(', ', $legacyConcepts) . ' references and align the complete affected workflow with the target operating model.'
+                    : 'Apply the supplied process change while preserving the complete amendment context.',
+                'legacy_concepts' => $legacyConcepts,
+                'replacement_concepts' => $replacementConcepts,
+                'affected_workflows' => array_column($targets, 'title'),
+                'affected_roles' => $roles,
+                'important_controls' => array_values(array_unique(array_merge(
+                    ...array_map(static fn(array $target): array => $target['controls'], $targets)
+                ))),
+                'transitional_arrangements' => $transitions,
                 'unrelated_subjects' => array(),
                 'source_evidence' => array_map(
                     static fn(array $source): string => (string)$source['title'],
                     $sources
                 ),
-                'confidence' => 0.5,
+                'confidence' => $legacyConcepts !== array() ? 0.8 : 0.62,
             ),
-            'targets' => array(array(
-                'area_key' => 'general-change',
-                'title' => 'Source-defined affected content',
-                'description' => 'Workflow area inferred deterministically from complete source evidence.',
-                'target_state' => array(
-                    'desired_outcome' => 'The selected manuals reflect the complete supplied change request.',
-                    'scope_terms' => array_slice($allTerms, 0, 30),
-                    'replacement_concepts' => array(),
-                ),
-                'roles' => array(),
-                'controls' => array(),
-                'evidence' => array(),
-                'status' => 'needs_review',
-                'confidence' => 0.45,
-            )),
+            'targets' => $targets,
             'requirements' => array_slice($requirements, 0, 500),
         );
+    }
+
+    /** @param list<array<string,mixed>> $targets */
+    private function bestWorkflowKey(string $text, array $targets): string
+    {
+        $normalized = $this->normalizeForSearch($text);
+        $bestKey = (string)($targets[0]['area_key'] ?? 'general-change');
+        $bestScore = 0;
+        foreach ($targets as $target) {
+            $state = is_array($target['target_state'] ?? null) ? $target['target_state'] : array();
+            $score = $this->termMatches(
+                $normalized,
+                $this->expandConcepts($this->stringList($state['scope_terms'] ?? array()))
+            )['distinctive'];
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestKey = (string)$target['area_key'];
+            }
+        }
+        return $bestKey;
     }
 
     /** @param array<string,mixed> $intent */

@@ -19,6 +19,7 @@ $normalize = $reflection->getMethod('normalizeForSearch');
 $expand = $reflection->getMethod('expandConcepts');
 $match = $reflection->getMethod('termMatches');
 $validate = $reflection->getMethod('validateRequirement');
+$fallback = $reflection->getMethod('fallbackWholeRequest');
 
 $legacyTerms = $expand->invoke($service, array(
     'Pipedrive',
@@ -74,6 +75,37 @@ context_fixture_assert(
 context_fixture_assert(
     !in_array((string)$invalid['status'], array('active', 'valid'), true),
     'A truncated requirement must be excluded from impact generation.'
+);
+
+$fallbackSource = implode("\n\n", array(
+    'The OMM Safety Management content must remove references to the outdated system: Pipedrive.',
+    'The ATO implemented its new Safety Management System in the IPCA.training platform.',
+    'The Safety Manager shall determine reportability and prepare the initial ECCAIRS notification.',
+    'The Action Owner shall provide corrective-action evidence.',
+    'Intermediate and final ECCAIRS updates shall be performed directly until automated amendments are operational.',
+));
+$fallbackResult = $fallback->invoke($service, array(array(
+    'id' => 1,
+    'title' => 'SMS change',
+    '_full_text' => $fallbackSource,
+)));
+$fallbackIntent = $fallbackResult['intent'];
+context_fixture_assert(
+    (string)$fallbackIntent['change_type'] === 'SYSTEM_REPLACEMENT',
+    'Deterministic fallback must preserve a system-replacement intent.'
+);
+context_fixture_assert(
+    in_array('Pipedrive', $fallbackIntent['legacy_concepts'], true),
+    'Deterministic fallback must extract the explicit obsolete system.'
+);
+context_fixture_assert(
+    !in_array('the', $fallbackIntent['legacy_concepts'], true)
+        && !in_array('safety', $fallbackIntent['legacy_concepts'], true),
+    'Deterministic legacy concepts must not contain generic source words.'
+);
+context_fixture_assert(
+    count($fallbackResult['targets']) >= 4,
+    'Deterministic fallback must preserve coherent target workflow areas.'
 );
 
 echo "PASS: Context-preserving SMS/Pipedrive impact fixtures\n";
