@@ -85,6 +85,14 @@
   });
 
   document.addEventListener('click', function (event) {
+    var overflowModalAction = event.target.closest(
+      '.bm-overflow-menu [data-compliance-modal-open]'
+    );
+    if (overflowModalAction) {
+      var overflowMenu = overflowModalAction.closest('.bm-overflow-menu');
+      if (overflowMenu) overflowMenu.removeAttribute('open');
+    }
+
     var readerLink = event.target.closest('[data-bm-reader-open]');
     if (readerLink) {
       event.preventDefault();

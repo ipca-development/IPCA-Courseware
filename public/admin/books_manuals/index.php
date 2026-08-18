@@ -263,8 +263,16 @@ books_manuals_page_open(array(
                   <button type="submit">Create NEW Revision Draft</button>
                 </form>
               <?php else: ?>
-                <button type="button" data-compliance-modal-open="<?= h($overrideModalId) ?>">
-                  Override blockers &amp; create NEW Revision
+                <button
+                  class="bm-overflow-action bm-overflow-action--warning"
+                  type="button"
+                  data-compliance-modal-open="<?= h($overrideModalId) ?>"
+                >
+                  <span class="bm-overflow-action__icon" aria-hidden="true">!</span>
+                  <span class="bm-overflow-action__copy">
+                    <strong>Override approval blockers</strong>
+                    <small>Requires a rationale and creates a new revision.</small>
+                  </span>
                 </button>
               <?php endif; ?>
             </div>
