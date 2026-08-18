@@ -31,7 +31,7 @@ function sliceBetween(source, startMarker, endMarker) {
   );
   const measureFunction = sliceBetween(
     editorJS,
-    "function measurePrintFurnitureGeometry(",
+    "function tmGenAuthoritativeEditorGeometry(",
     "function applyUnifiedPrintLayout("
   );
 
@@ -59,7 +59,9 @@ function sliceBetween(source, startMarker, endMarker) {
             book_title: "Operations Manual",
             part_title: "PART 1 – MAIN CONTENT"
           },
-          versionInfo: {}
+          versionInfo: {},
+          authoritativeEditorGeometryEnabled: false,
+          authoritativeEditorGeometry: null
         };
         var PRINT_PAGE = {
           width: 816, height: 1056, gap: 28, side: 56,
@@ -156,9 +158,32 @@ function sliceBetween(source, startMarker, endMarker) {
         1,
         10
       );
+      const measuredHeader = PRINT_PAGE.headerHeight;
+      const measuredFooter = PRINT_PAGE.footerHeight;
+      state.versionInfo = { manual_code: "TM_GEN" };
+      state.authoritativeEditorGeometryEnabled = true;
+      state.authoritativeEditorGeometry = {
+        headerTop: 48,
+        headerHeight: 91,
+        contentTop: 159,
+        contentHeight: 748,
+        footerTop: 931,
+        footerHeight: 61,
+      };
+      measurePrintFurnitureGeometry(sheet);
+      const tmGenGeometry = {
+        headerTop: PRINT_PAGE.headerTop,
+        headerHeight: PRINT_PAGE.headerHeight,
+        contentTop: PRINT_PAGE.contentTop,
+        contentHeight: PRINT_PAGE.contentHeight,
+        footerTop: PRINT_PAGE.footerTop,
+        footerHeight: PRINT_PAGE.footerHeight,
+      };
+      state.versionInfo = { manual_code: "OM" };
+      measurePrintFurnitureGeometry(sheet);
       return {
-        measuredHeader: PRINT_PAGE.headerHeight,
-        measuredFooter: PRINT_PAGE.footerHeight,
+        measuredHeader,
+        measuredFooter,
         modalHeader: modal.querySelector(".cpb-page-header").getBoundingClientRect().height,
         modalFooter: modal.querySelector(".cpb-page-footer").getBoundingClientRect().height,
         editorHeader: editorHeader.getBoundingClientRect().height,
@@ -167,6 +192,9 @@ function sliceBetween(source, startMarker, endMarker) {
         iosFooter: iosFooter.getBoundingClientRect().height,
         modalWidth: modal.querySelector(".cpb-page-header").getBoundingClientRect().width,
         disabledHTML,
+        tmGenGeometry,
+        omFallbackHeader: PRINT_PAGE.headerHeight,
+        omFallbackFooter: PRINT_PAGE.footerHeight,
       };
     });
 
@@ -190,6 +218,23 @@ function sliceBetween(source, startMarker, endMarker) {
     }
     if (result.disabledHTML !== "") {
       throw new Error("Disabled page furniture is still rendered.");
+    }
+    const expectedTMGenGeometry = {
+      headerTop: 48,
+      headerHeight: 91,
+      contentTop: 159,
+      contentHeight: 748,
+      footerTop: 931,
+      footerHeight: 61,
+    };
+    if (JSON.stringify(result.tmGenGeometry) !== JSON.stringify(expectedTMGenGeometry)) {
+      throw new Error(`TM_GEN authoritative geometry override failed: ${JSON.stringify(result.tmGenGeometry)}`);
+    }
+    if (
+      !close(result.omFallbackHeader, result.measuredHeader)
+      || !close(result.omFallbackFooter, result.measuredFooter)
+    ) {
+      throw new Error("Authoritative geometry leaked outside TM_GEN.");
     }
     process.stdout.write("Controlled book header surface parity check: PASS\n");
   } finally {

@@ -896,6 +896,8 @@ function cp_editor_handle_load(
         'publication_font_css' => ControlledPublishingPublicationFontService::enabledForVersion($version)
             ? ControlledPublishingPublicationFontService::css(dirname(__DIR__, 3))
             : '',
+        'authoritative_editor_geometry_enabled'
+            => ControlledPublishingPublicationFontService::editorAuthoritativeGeometryEnabledForVersion($version),
         'page_header' => $pageHeaderConfig['page_header'],
         'page_footer' => $pageHeaderConfig['page_footer'],
         'page_header_scope' => cp_editor_page_header_scope_for_section($section),

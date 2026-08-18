@@ -137,6 +137,9 @@
     pageHeaderScope: 'main',
     versionInfo: {},
     publicationFontCSS: '',
+    authoritativeEditorGeometryEnabled: false,
+    authoritativeEditorGeometry: null,
+    authoritativeEditorGeometryVersionId: 0,
     sectionTitle: '',
     calloutPresets: [],
     bookStyles: null,
@@ -1351,6 +1354,75 @@
     }
   }
 
+  function tmGenAuthoritativeEditorGeometry() {
+    if (!state.authoritativeEditorGeometryEnabled) return null;
+    var version = state.versionInfo || {};
+    var manualCode = String(version.manual_code || version.book_key || '').trim().toUpperCase();
+    if (manualCode !== 'TM_GEN') return null;
+    return state.authoritativeEditorGeometry;
+  }
+
+  function authoritativeEditorGeometryFromResult(result) {
+    var pages = result && Array.isArray(result.pages) ? result.pages : [];
+    for (var index = 0; index < pages.length; index++) {
+      if (pages[index].is_cover) continue;
+      var metadata = pages[index].metadata && typeof pages[index].metadata === 'object'
+        ? pages[index].metadata
+        : {};
+      var metrics = metadata.metrics && typeof metadata.metrics === 'object'
+        ? metadata.metrics
+        : {};
+      var header = metrics.header_frame || {};
+      var content = metrics.content_frame || {};
+      var footer = metrics.footer_frame || {};
+      var geometry = {
+        headerTop: Number(header.y),
+        headerHeight: Number(header.height),
+        contentTop: Number(content.y),
+        contentHeight: Number(content.height),
+        footerTop: Number(footer.y),
+        footerHeight: Number(footer.height),
+      };
+      if (
+        Number.isFinite(geometry.headerTop)
+        && Number.isFinite(geometry.headerHeight)
+        && Number.isFinite(geometry.contentTop)
+        && Number.isFinite(geometry.contentHeight)
+        && Number.isFinite(geometry.footerTop)
+        && Number.isFinite(geometry.footerHeight)
+        && geometry.headerHeight > 0
+        && geometry.contentHeight > 0
+        && geometry.footerHeight > 0
+        && geometry.footerTop >= geometry.contentTop + geometry.contentHeight
+      ) {
+        return geometry;
+      }
+    }
+    return null;
+  }
+
+  function loadTMGenAuthoritativeEditorGeometry() {
+    if (!state.authoritativeEditorGeometryEnabled) {
+      state.authoritativeEditorGeometry = null;
+      state.authoritativeEditorGeometryVersionId = 0;
+      return Promise.resolve(true);
+    }
+    if (tmGenAuthoritativeEditorGeometry() && state.authoritativeEditorGeometryVersionId === state.versionId) {
+      return Promise.resolve(true);
+    }
+    var url = '/admin/api/controlled_book_page_map_api.php?action=stored_preview'
+      + '&book_version_id=' + state.versionId
+      + '&section_id=' + state.sectionId
+      + '&include_style=0&check_freshness=0';
+    return paginationRequest(url).then(function (response) {
+      var geometry = authoritativeEditorGeometryFromResult(response.result || {});
+      if (!geometry) return false;
+      state.authoritativeEditorGeometry = geometry;
+      state.authoritativeEditorGeometryVersionId = state.versionId;
+      return true;
+    });
+  }
+
   function measurePrintFurnitureGeometry(sheet) {
     var hideFurniture = !!(state.pageLayout && state.pageLayout.hide_header_footer);
     var host = document.createElement('div');
@@ -1405,6 +1477,15 @@
       PRINT_PAGE.headerHeight = 84;
       PRINT_PAGE.footerTop = 920;
       PRINT_PAGE.footerHeight = 72;
+    }
+    var authoritativeGeometry = tmGenAuthoritativeEditorGeometry();
+    if (authoritativeGeometry) {
+      PRINT_PAGE.headerTop = authoritativeGeometry.headerTop;
+      PRINT_PAGE.headerHeight = authoritativeGeometry.headerHeight;
+      PRINT_PAGE.contentTop = authoritativeGeometry.contentTop;
+      PRINT_PAGE.contentHeight = authoritativeGeometry.contentHeight;
+      PRINT_PAGE.footerTop = authoritativeGeometry.footerTop;
+      PRINT_PAGE.footerHeight = authoritativeGeometry.footerHeight;
     }
 
     sheet.style.setProperty('--cpb-print-content-top', PRINT_PAGE.contentTop + 'px');
@@ -3341,6 +3422,11 @@
       state.pageHeaderScope = res.page_header_scope || 'main';
       state.versionInfo = res.version || {};
       state.publicationFontCSS = res.publication_font_css || '';
+      state.authoritativeEditorGeometryEnabled = !!res.authoritative_editor_geometry_enabled;
+      if (!state.authoritativeEditorGeometryEnabled) {
+        state.authoritativeEditorGeometry = null;
+        state.authoritativeEditorGeometryVersionId = 0;
+      }
       if (publicationCssEl) publicationCssEl.textContent = state.publicationFontCSS;
       state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
       state.isCoverSection = !!res.is_cover_section;
@@ -3408,7 +3494,16 @@
         loadUnifiedManualBreaks(false).then(function () { return true; }),
         6000
       );
-      return Promise.all([fontReady, imagesReady, rulesReady]).then(function (readiness) {
+      var authoritativeGeometryReady = settleWithin(
+        loadTMGenAuthoritativeEditorGeometry(),
+        6000
+      );
+      return Promise.all([
+        fontReady,
+        imagesReady,
+        rulesReady,
+        authoritativeGeometryReady,
+      ]).then(function (readiness) {
         if (loadSequence !== state.sectionLoadSequence) return false;
         var incomplete = readiness.some(function (ready) { return ready !== true; });
         setSectionAssembly(true, 'Assembling pages…', 84);
