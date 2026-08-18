@@ -69,8 +69,8 @@ compliance_page_open(array(
     'title' => (string)$version['book_key'] . ' ' . (string)$version['version_label'] . ' — Editor',
     'description' => 'Document-style manual editor with section tree and governed content blocks.',
     'back' => array(
-        'href' => '/admin/compliance/controlled_book_version.php?id=' . $versionId,
-        'label' => 'Version settings',
+        'href' => '/admin/books_manuals/index.php?open=' . $versionId,
+        'label' => 'IPCA Library',
     ),
     'actions' => array(
         array(
