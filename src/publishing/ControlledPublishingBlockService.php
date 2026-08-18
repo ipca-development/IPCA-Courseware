@@ -89,7 +89,12 @@ final class ControlledPublishingBlockService
         $contentHash = $this->contentHash($blockType, $payload);
 
         $sortOrder = $this->nextSortOrder($sectionId);
-        $blockSeq = $this->nextBlockSequence($versionId, (string)$section['stable_anchor']);
+        $blockSeq = $this->nextBlockSequence(
+            $versionId,
+            (string)$section['stable_anchor'],
+            (string)$section['section_key'],
+            $blockType
+        );
         $blockKey = $this->blockKey((string)$section['section_key'], $blockType, $blockSeq);
         $stableAnchor = (string)$section['stable_anchor'] . '-BLOCK-' . str_pad((string)$blockSeq, 3, '0', STR_PAD_LEFT);
 
@@ -1053,27 +1058,46 @@ final class ControlledPublishingBlockService
         return ((int)$stmt->fetchColumn()) + 10;
     }
 
-    private function nextBlockSequence(int $versionId, string $sectionStableAnchor): int
+    private function nextBlockSequence(
+        int $versionId,
+        string $sectionStableAnchor,
+        string $sectionKey,
+        string $blockType
+    ): int
     {
         $stmt = $this->pdo->prepare("
-            SELECT stable_anchor
+            SELECT stable_anchor, block_key
             FROM ipca_publishing_book_blocks
             WHERE book_version_id = :version_id
-              AND stable_anchor LIKE :anchor_prefix
+              AND (
+                stable_anchor LIKE :anchor_prefix
+                OR block_key LIKE :block_key_prefix
+              )
         ");
         $prefix = $sectionStableAnchor . '-BLOCK-';
+        $blockKeyPrefix = $sectionKey . '_' . $blockType . '_';
         $stmt->execute(array(
             ':version_id' => $versionId,
             ':anchor_prefix' => $prefix . '%',
+            ':block_key_prefix' => $blockKeyPrefix . '%',
         ));
 
         $max = 0;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $anchor = (string)($row['stable_anchor'] ?? '');
-            if (preg_match('/-BLOCK-(\d+)$/', $anchor, $matches) !== 1) {
-                continue;
+            if (preg_match('/-BLOCK-(\d+)$/', $anchor, $matches) === 1) {
+                $max = max($max, (int)$matches[1]);
             }
-            $max = max($max, (int)$matches[1]);
+            $blockKey = (string)($row['block_key'] ?? '');
+            if (
+                preg_match(
+                    '/^' . preg_quote($blockKeyPrefix, '/') . '(\d+)$/',
+                    $blockKey,
+                    $matches
+                ) === 1
+            ) {
+                $max = max($max, (int)$matches[1]);
+            }
         }
 
         return $max + 1;

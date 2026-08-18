@@ -120,17 +120,22 @@ $templates = $foundation->listBooksWithVersions();
 $availableReviewers = $tablesReady ? $workflow->availableReviewers() : array();
 $approved = 0;
 $inReview = 0;
-foreach ($rows as $row) {
-    $status = (string)($row['lifecycle_status'] ?? '');
-    $approved += $status === 'released' ? 1 : 0;
-    $inReview += in_array($status, array('in_review', 'approved'), true) ? 1 : 0;
-}
 foreach ($rows as &$row) {
     $row['reviewers'] = $workflow->bookReviewers((int)$row['book_id']);
     $row['previous_versions'] = $workflow->listPreviousVersions(
         (int)$row['book_id'],
         (int)$row['version_id']
     );
+    $status = (string)($row['lifecycle_status'] ?? '');
+    $inReview += in_array($status, array('in_review', 'approved'), true) ? 1 : 0;
+    $hasApprovedVersion = $status === 'released';
+    foreach ($row['previous_versions'] as $previousVersion) {
+        if ((string)($previousVersion['lifecycle_status'] ?? '') === 'released') {
+            $hasApprovedVersion = true;
+            break;
+        }
+    }
+    $approved += $hasApprovedVersion ? 1 : 0;
 }
 unset($row);
 

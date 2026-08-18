@@ -242,7 +242,7 @@ $generatedPayloads = array_map(
 );
 if (
     strip_tags((string)($generatedPayloads[0]['html'] ?? '')) !== 'Revision 6.1 Changes'
-    || (string)($generatedPayloads[0]['paragraph_style'] ?? '') !== 'subtitle_2'
+    || (string)($generatedPayloads[0]['paragraph_style'] ?? '') !== 'title'
     || (string)($generatedRows[0]['block_type'] ?? '') !== 'paragraph'
     || !in_array('list', array_column($generatedRows, 'block_type'), true)
     || str_contains(json_encode($generatedPayloads), 'Auto-detected changes')

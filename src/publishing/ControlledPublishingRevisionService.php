@@ -207,7 +207,7 @@ final class ControlledPublishingRevisionService
         $summaryPayload = array(
             'html' => '<p>Revision ' . htmlspecialchars($versionLabel, ENT_QUOTES, 'UTF-8')
                 . ' Changes</p>',
-            'paragraph_style' => 'subtitle_2',
+            'paragraph_style' => 'title',
         );
         $this->insertHighlightBlock(
             $ins,

@@ -146,6 +146,14 @@ bm_contract_assert(
         && str_contains($workflow, 'audit.coverage_percent')
 );
 bm_contract_assert(
+    'hero approved count includes historical released versions',
+    str_contains($libraryPage, '$hasApprovedVersion = $status === \'released\'')
+        && str_contains(
+            $libraryPage,
+            "(string)(\$previousVersion['lifecycle_status'] ?? '') === 'released'"
+        )
+);
+bm_contract_assert(
     'reader advertises only stored page maps',
     str_contains($readerService, '$hasStoredPageMap = false')
         && str_contains($readerService, '? $hasStoredPageMap')
