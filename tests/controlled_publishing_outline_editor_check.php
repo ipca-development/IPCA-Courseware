@@ -70,6 +70,51 @@ $assert(
     'Sidebar PART labels must use the stored outline title.'
 );
 
+$manualStructure = (new ReflectionClass(
+    ControlledPublishingManualStructureService::class
+))->newInstanceWithoutConstructor();
+$legacyPart = array(
+    'id' => 10,
+    'section_key' => 'main_content',
+    'title' => 'Main Content',
+    'parent_section_id' => null,
+);
+$canonicalPart = array(
+    'id' => 54,
+    'section_key' => 'part_1',
+    'title' => 'PART 1 – General',
+    'parent_section_id' => null,
+);
+$legacyChapter = array(
+    'id' => 35,
+    'section_key' => 'part_1_chapter_1',
+    'title' => 'Introduction',
+    'parent_section_id' => 10,
+);
+$assert(
+    $manualStructure->resolvePartTitleForSection(
+        $legacyChapter,
+        array($legacyPart, $canonicalPart, $legacyChapter)
+    ) === 'PART 1 – GENERAL',
+    'Legacy main_content chapters must use the canonical PART 1 title.'
+);
+$assert(
+    $manualStructure->resolvePartTitleForSection(
+        $legacyChapter,
+        array($legacyPart, $legacyChapter)
+    ) === 'PART 1 – GENERAL',
+    'Generic legacy Main Content must fall back to PART 1 – GENERAL.'
+);
+$customLegacyPart = $legacyPart;
+$customLegacyPart['title'] = 'Company Procedures';
+$assert(
+    $manualStructure->resolvePartTitleForSection(
+        $legacyChapter,
+        array($customLegacyPart, $legacyChapter)
+    ) === 'PART 1 – COMPANY PROCEDURES',
+    'A deliberately customized legacy PART title must remain intact.'
+);
+
 $tree = ControlledPublishingOutlineService::headingTreeFromNavItems(array(
     array('section_ref' => '4.1', 'title' => 'Theory Training Syllabus', 'nav_label' => '4.1 Theory Training Syllabus'),
     array('section_ref' => '4.1.1', 'title' => 'Application', 'nav_label' => '4.1.1 Application'),

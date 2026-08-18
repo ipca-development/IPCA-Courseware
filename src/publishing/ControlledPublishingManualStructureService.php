@@ -1973,7 +1973,7 @@ final class ControlledPublishingManualStructureService
     {
         $key = (string)($section['section_key'] ?? '');
         if (isset(self::PART_TITLES[$key])) {
-            return ControlledPublishingOutlineService::partNavTitle($section, self::PART_TITLES[$key]);
+            return $this->resolvedPartTitleRow($section, $flatSections);
         }
         if (in_array($key, self::PART0_SECTION_KEYS, true)) {
             return ControlledPublishingPart0PageService::PART_TITLE;
@@ -1992,7 +1992,7 @@ final class ControlledPublishingManualStructureService
             }
             $parentKey = (string)($parent['section_key'] ?? '');
             if (isset(self::PART_TITLES[$parentKey])) {
-                return ControlledPublishingOutlineService::partNavTitle($parent, self::PART_TITLES[$parentKey]);
+                return $this->resolvedPartTitleRow($parent, $flatSections);
             }
             if (in_array($parentKey, self::PART0_SECTION_KEYS, true)) {
                 return ControlledPublishingPart0PageService::PART_TITLE;
@@ -2001,6 +2001,35 @@ final class ControlledPublishingManualStructureService
         }
 
         return '';
+    }
+
+    /**
+     * Prefer the canonical PART 1 label when an older manual still keeps its
+     * chapters under the legacy main_content container.
+     *
+     * @param list<array<string,mixed>> $flatSections
+     */
+    private function resolvedPartTitleRow(array $row, array $flatSections): string
+    {
+        $key = (string)($row['section_key'] ?? '');
+        $fallback = self::PART_TITLES[$key] ?? '';
+        if ($key !== 'main_content') {
+            return ControlledPublishingOutlineService::partNavTitle($row, $fallback);
+        }
+
+        foreach ($flatSections as $candidate) {
+            if ((string)($candidate['section_key'] ?? '') === 'part_1') {
+                return ControlledPublishingOutlineService::partNavTitle(
+                    $candidate,
+                    self::PART_TITLES['part_1']
+                );
+            }
+        }
+
+        $legacyTitle = ControlledPublishingOutlineService::partNavTitle($row, $fallback);
+        return $legacyTitle === 'PART 1 – MAIN CONTENT'
+            ? ControlledPublishingOutlineService::formatPartNavTitle(1, 'General')
+            : $legacyTitle;
     }
 
     /**
