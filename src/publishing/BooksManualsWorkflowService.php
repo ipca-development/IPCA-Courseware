@@ -387,11 +387,6 @@ final class BooksManualsWorkflowService
                 (string)$identity['source_fingerprint'],
                 $actorUserId,
             ));
-            $this->approveStoredPageMapUnderOverride(
-                $source,
-                $actorUserId,
-                $overrideUuid
-            );
             $release = $this->pdo->prepare(
                 "UPDATE ipca_publishing_book_versions
                  SET lifecycle_status = 'released',
@@ -404,6 +399,15 @@ final class BooksManualsWorkflowService
             if ($release->rowCount() !== 1) {
                 throw new RuntimeException('The manual phase changed before the override completed.');
             }
+            $releasedSource = $this->foundation->getVersion($sourceVersionId);
+            if ($releasedSource === null) {
+                throw new RuntimeException('The released manual version could not be reloaded.');
+            }
+            $this->approveStoredPageMapUnderOverride(
+                $releasedSource,
+                $actorUserId,
+                $overrideUuid
+            );
             $this->recordEvent(
                 $sourceVersionId,
                 $from,
@@ -936,8 +940,29 @@ final class BooksManualsWorkflowService
         if ($pageCount <= 0) {
             return;
         }
+        $generation = is_array($map['generation'] ?? null)
+            ? $map['generation']
+            : array();
+        require_once __DIR__ . '/ControlledPublishingReaderService.php';
+        $reader = new ControlledPublishingReaderService($this->pdo);
+        $source = $reader->loadReaderPaginateSource($version);
+        $package = $reader->paginationPublicationPackage($version, $source);
+        $currentStyleHash = (string)($package['css']['hash'] ?? '');
+        $frozenStyleHash = (string)($generation['style_hash'] ?? '');
+        if (
+            $frozenStyleHash !== ''
+            && $currentStyleHash !== ''
+            && !hash_equals($frozenStyleHash, $currentStyleHash)
+        ) {
+            throw new RuntimeException(
+                'The stored page map uses different publication styles and cannot be overridden safely.'
+            );
+        }
+        $generation['style_hash'] = $currentStyleHash;
+        $generation['manifest_hash'] = (string)($package['manifest_hash'] ?? '');
         $metadata['reader_page_map'] = array_merge($map, array(
             'status' => 'approved',
+            'generation' => $generation,
             'page_count' => $pageCount,
             'approved_at' => gmdate('Y-m-d H:i:s'),
             'approved_by_user_id' => $actorUserId,

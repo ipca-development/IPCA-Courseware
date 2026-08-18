@@ -13,6 +13,7 @@ require_once __DIR__ . '/../src/db.php';
 require_once __DIR__ . '/../src/publishing/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/../src/publishing/ControlledPublishingReaderLayoutProfile.php';
 require_once __DIR__ . '/../src/publishing/ControlledPublishingReaderPageMapStore.php';
+require_once __DIR__ . '/../src/publishing/ControlledPublishingReaderService.php';
 
 $versionId = 0;
 foreach (array_slice($argv, 1) as $argument) {
@@ -44,11 +45,7 @@ if (!is_array($override)) {
 
 $store = new ControlledPublishingReaderPageMapStore($pdo);
 $map = $store->approvalMeta($versionId);
-if ((string)($map['status'] ?? '') === 'approved') {
-    echo "page_map=already_approved\nok\n";
-    exit(0);
-}
-if ((string)($map['status'] ?? '') !== 'draft') {
+if (!in_array((string)($map['status'] ?? ''), array('draft', 'approved'), true)) {
     throw new RuntimeException('The released version has no draft page-map evidence to finalize.');
 }
 $profile = (string)($map['layout_profile'] ?? '');
@@ -63,6 +60,24 @@ if ((string)($map['layout_hash'] ?? '') !== ControlledPublishingReaderLayoutProf
     throw new RuntimeException('The page-map layout hash is stale.');
 }
 
+$reader = new ControlledPublishingReaderService($pdo);
+$source = $reader->loadReaderPaginateSource($version);
+$package = $reader->paginationPublicationPackage($version, $source);
+$generation = is_array($map['generation'] ?? null) ? $map['generation'] : array();
+$frozenStyleHash = (string)($generation['style_hash'] ?? '');
+$currentStyleHash = (string)($package['css']['hash'] ?? '');
+if (
+    $frozenStyleHash !== ''
+    && $currentStyleHash !== ''
+    && !hash_equals($frozenStyleHash, $currentStyleHash)
+) {
+    throw new RuntimeException(
+        'The frozen map uses different publication styles and cannot be rebound safely.'
+    );
+}
+$generation['style_hash'] = $currentStyleHash;
+$generation['manifest_hash'] = (string)($package['manifest_hash'] ?? '');
+
 $metadata = $version['metadata_json'] ?? array();
 if (is_string($metadata)) {
     $metadata = json_decode($metadata, true);
@@ -71,6 +86,7 @@ $metadata = is_array($metadata) ? $metadata : array();
 $now = gmdate('Y-m-d H:i:s');
 $metadata['reader_page_map'] = array_merge($map, array(
     'status' => 'approved',
+    'generation' => $generation,
     'page_count' => $pageCount,
     'approved_at' => $now,
     'approved_by_user_id' => (int)($override['actor_user_id'] ?? 0),
@@ -93,5 +109,6 @@ if ($update->rowCount() !== 1) {
 
 echo 'page_map=approved' . PHP_EOL;
 echo 'page_count=' . $pageCount . PHP_EOL;
+echo 'manifest_hash=' . $generation['manifest_hash'] . PHP_EOL;
 echo 'override_uuid=' . (string)$override['override_uuid'] . PHP_EOL;
 echo "ok\n";

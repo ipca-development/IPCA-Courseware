@@ -155,10 +155,13 @@ bm_contract_assert(
         && str_contains($workflow, "'mutation_kind' => 'create_revision'")
 );
 bm_contract_assert(
-    'legacy approval override approves its existing page map',
+    'legacy approval override safely binds its existing page map to the released package',
     str_contains($workflow, 'approveStoredPageMapUnderOverride')
         && str_contains($workflow, "'approval_basis' => 'legacy_compliance_override'")
         && str_contains($workflow, "'approval_override_uuid' => \$overrideUuid")
+        && str_contains($workflow, 'paginationPublicationPackage')
+        && str_contains($workflow, "\$generation['manifest_hash']")
+        && str_contains($workflow, 'hash_equals($frozenStyleHash, $currentStyleHash)')
 );
 bm_contract_assert(
     'iOS distinguishes approved and review versions',
