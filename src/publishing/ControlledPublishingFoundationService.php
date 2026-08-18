@@ -249,7 +249,10 @@ final class ControlledPublishingFoundationService
             throw new RuntimeException('Released versions cannot change source selections.');
         }
 
-        $this->pdo->beginTransaction();
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
         try {
             $del = $this->pdo->prepare('DELETE FROM ipca_publishing_book_version_source_sets WHERE book_version_id = :version_id');
             $del->execute(array(':version_id' => $versionId));
@@ -270,9 +273,13 @@ final class ControlledPublishingFoundationService
                     ':notes' => $sel['notes'] ?? null,
                 ));
             }
-            $this->pdo->commit();
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
         } catch (Throwable $e) {
-            $this->pdo->rollBack();
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
             throw $e;
         }
     }

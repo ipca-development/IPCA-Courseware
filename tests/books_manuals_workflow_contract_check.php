@@ -13,6 +13,9 @@ function bm_contract_assert(string $label, bool $condition): void
 }
 
 $workflow = (string)file_get_contents($root . '/src/publishing/BooksManualsWorkflowService.php');
+$foundation = (string)file_get_contents(
+    $root . '/src/publishing/ControlledPublishingFoundationService.php'
+);
 $policy = (string)file_get_contents($root . '/src/publishing/BooksManualsReaderPolicyService.php');
 $audit = (string)file_get_contents($root . '/src/publishing/BooksManualsAuditService.php');
 $auditPage = (string)file_get_contents(
@@ -166,6 +169,11 @@ bm_contract_assert(
         && str_contains($workflow, 'strlen($rationale) < 20')
         && str_contains($workflow, "'bulk_override_legacy_approval'")
         && str_contains($workflow, 'createRevision($sourceVersionId, $actorUserId)')
+);
+bm_contract_assert(
+    'revision cloning safely reuses source selection transaction',
+    str_contains($foundation, '$ownsTransaction = !$this->pdo->inTransaction()')
+        && str_contains($foundation, 'if ($ownsTransaction && $this->pdo->inTransaction())')
 );
 bm_contract_assert(
     'bulk override captures all blockers immutably',
