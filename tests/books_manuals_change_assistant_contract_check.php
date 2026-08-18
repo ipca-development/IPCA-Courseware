@@ -41,6 +41,7 @@ foreach (array($servicePath, $apiPath, $workerPath, $migrationPath, $listPath, $
 }
 
 $service = bmca_source($servicePath);
+$jobService = bmca_source($root . '/src/publishing/BooksManualsChangeAssistantJobService.php');
 $api = bmca_source($apiPath);
 $migration = bmca_source($migrationPath);
 $detail = bmca_source($detailPath);
@@ -89,6 +90,13 @@ bmca_assert(str_contains($service, 'AuditEventService') && str_contains($service
 bmca_assert(str_contains($service, 'startIntegrityRefresh') && str_contains($service, 'ControlledPublishingLivePageMapService'), 'Post-apply governed refreshes are missing.');
 bmca_assert(str_contains($js, "request('decision'") && str_contains($js, 'proposed_text'), 'Human-edited decision persistence is missing.');
 bmca_assert(str_contains($js, "request('create_revision'"), 'Explicit revision creation flow is missing.');
+$assistantSqlSources = $service . "\n" . $jobService;
+foreach (array('status="', 'role="', 'lifecycle_status="', 'extraction_status="', 'IN ("', 'VALUES (?,"') as $forbiddenSql) {
+    bmca_assert(
+        !str_contains($assistantSqlSources, $forbiddenSql),
+        'Assistant SQL must use ANSI-compatible single-quoted literals.'
+    );
+}
 
 require_once $servicePath;
 $reflection = new ReflectionClass(BooksManualsChangeAssistantService::class);

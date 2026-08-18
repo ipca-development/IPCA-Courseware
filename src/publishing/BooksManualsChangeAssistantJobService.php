@@ -42,9 +42,9 @@ final class BooksManualsChangeAssistantJobService
             throw new RuntimeException('Daily AI analysis limit reached. Continue tomorrow or ask an administrator to adjust the limit.');
         }
         $this->pdo->prepare(
-            'INSERT INTO ipca_manual_ai_jobs
+            "INSERT INTO ipca_manual_ai_jobs
              (project_id,job_type,idempotency_key,status,created_by)
-             VALUES (?,"analysis",?,"queued",?)'
+             VALUES (?,'analysis',?,'queued',?)"
         )->execute(array($projectId, $key, $actorUserId));
         $job = $this->row('SELECT * FROM ipca_manual_ai_jobs WHERE id=?', array((int)$this->pdo->lastInsertId()));
         if ($job === null) {
@@ -88,10 +88,10 @@ final class BooksManualsChangeAssistantJobService
                     isset($job['created_by']) ? (int)$job['created_by'] : null
                 );
             $stmt = $this->pdo->prepare(
-                'UPDATE ipca_manual_ai_jobs
-                 SET status="completed",progress_percent=100,result_json=?,completed_at=CURRENT_TIMESTAMP,
+                "UPDATE ipca_manual_ai_jobs
+                 SET status='completed',progress_percent=100,result_json=?,completed_at=CURRENT_TIMESTAMP,
                      lease_token=NULL,lease_expires_at=NULL,error_message=NULL
-                 WHERE id=? AND lease_token=?'
+                 WHERE id=? AND lease_token=?"
             );
             $stmt->execute(array(
                 json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
@@ -104,11 +104,11 @@ final class BooksManualsChangeAssistantJobService
             $terminal = $attempt >= $max;
             $delay = min(3600, 30 * (2 ** max(0, $attempt - 1)));
             $sql = $terminal
-                ? 'UPDATE ipca_manual_ai_jobs
-                   SET status="failed",error_message=?,completed_at=CURRENT_TIMESTAMP,
-                       lease_token=NULL,lease_expires_at=NULL WHERE id=? AND lease_token=?'
+                ? "UPDATE ipca_manual_ai_jobs
+                   SET status='failed',error_message=?,completed_at=CURRENT_TIMESTAMP,
+                       lease_token=NULL,lease_expires_at=NULL WHERE id=? AND lease_token=?"
                 : "UPDATE ipca_manual_ai_jobs
-                   SET status=\"retry\",error_message=?,available_at=(CURRENT_TIMESTAMP + INTERVAL {$delay} SECOND),
+                   SET status='retry',error_message=?,available_at=(CURRENT_TIMESTAMP + INTERVAL {$delay} SECOND),
                        lease_token=NULL,lease_expires_at=NULL WHERE id=? AND lease_token=?";
             $this->pdo->prepare($sql)->execute(array(mb_substr($e->getMessage(), 0, 4000), $jobId, $lease));
             $this->pdo->prepare(
@@ -139,10 +139,10 @@ final class BooksManualsChangeAssistantJobService
                 $params[] = $projectId;
             }
             $stmt = $this->pdo->prepare(
-                'SELECT * FROM ipca_manual_ai_jobs
-                 WHERE status IN ("queued","retry")
+                "SELECT * FROM ipca_manual_ai_jobs
+                 WHERE status IN ('queued','retry')
                    AND available_at<=CURRENT_TIMESTAMP
-                   AND (lease_expires_at IS NULL OR lease_expires_at<CURRENT_TIMESTAMP)'
+                   AND (lease_expires_at IS NULL OR lease_expires_at<CURRENT_TIMESTAMP)"
                 . $filter . ' ORDER BY id LIMIT 1 FOR UPDATE'
             );
             $stmt->execute($params);
@@ -153,11 +153,11 @@ final class BooksManualsChangeAssistantJobService
             }
             $lease = $this->uuid();
             $this->pdo->prepare(
-                'UPDATE ipca_manual_ai_jobs
-                 SET status="running",attempt_count=attempt_count+1,lease_token=?,
-                     lease_expires_at=(CURRENT_TIMESTAMP + INTERVAL ' . self::LEASE_SECONDS . ' SECOND),
+                "UPDATE ipca_manual_ai_jobs
+                 SET status='running',attempt_count=attempt_count+1,lease_token=?,
+                     lease_expires_at=(CURRENT_TIMESTAMP + INTERVAL " . self::LEASE_SECONDS . " SECOND),
                      started_at=COALESCE(started_at,CURRENT_TIMESTAMP),progress_percent=5
-                 WHERE id=?'
+                 WHERE id=?"
             )->execute(array($lease, (int)$job['id']));
             $this->pdo->commit();
             $job['lease_token'] = $lease;

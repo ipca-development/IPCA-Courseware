@@ -126,9 +126,9 @@ final class BooksManualsChangeAssistantService
             throw new InvalidArgumentException('Project name is required and must not exceed 255 characters.');
         }
         $stmt = $this->pdo->prepare(
-            'INSERT INTO ipca_manual_ai_projects
+            "INSERT INTO ipca_manual_ai_projects
              (project_uuid,name,description,status,created_by,updated_by)
-             VALUES (?,?,?,"draft",?,?)'
+             VALUES (?,?,?,'draft',?,?)"
         );
         $stmt->execute(array($this->uuid(), $name, $description, $actorUserId, $actorUserId));
         $projectId = (int)$this->pdo->lastInsertId();
@@ -269,15 +269,15 @@ final class BooksManualsChangeAssistantService
     {
         $this->assertAvailable();
         return $this->rows(
-            'SELECT v.id version_id,v.book_id,v.version_label,v.lifecycle_status,v.effective_date,
+            "SELECT v.id version_id,v.book_id,v.version_label,v.lifecycle_status,v.effective_date,
                     b.book_key,b.title book_title,b.title
              FROM ipca_publishing_book_versions v
              JOIN ipca_publishing_books b ON b.id=v.book_id
-             WHERE v.lifecycle_status IN ("draft","in_review","approved","released")
+             WHERE v.lifecycle_status IN ('draft','in_review','approved','released')
              ORDER BY b.title,
-               CASE v.lifecycle_status WHEN "draft" THEN 1 WHEN "in_review" THEN 2
-                 WHEN "approved" THEN 3 ELSE 4 END,
-               v.id DESC'
+               CASE v.lifecycle_status WHEN 'draft' THEN 1 WHEN 'in_review' THEN 2
+                 WHEN 'approved' THEN 3 ELSE 4 END,
+               v.id DESC"
         );
     }
 
@@ -286,8 +286,8 @@ final class BooksManualsChangeAssistantService
     {
         $this->assertAvailable();
         return $this->rows(
-            'SELECT id,name,email,role FROM users
-             WHERE role="admin" ORDER BY name,email,id'
+            "SELECT id,name,email,role FROM users
+             WHERE role='admin' ORDER BY name,email,id"
         );
     }
 
@@ -394,10 +394,10 @@ final class BooksManualsChangeAssistantService
         $meta = $metadata;
         $meta['private_text'] = true;
         $stmt = $this->pdo->prepare(
-            'INSERT INTO ipca_manual_ai_sources
+            "INSERT INTO ipca_manual_ai_sources
              (project_id,source_uuid,source_type,original_name,mime_type,storage_path,title,issuer,
               reference_code,effective_date,content_sha256,byte_size,extraction_status,metadata_json,uploaded_by)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?, "ready",?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'ready',?,?)"
         );
         $stmt->execute(array(
             $projectId, $sourceUuid, $type, $metadata['original_name'] ?? null,
@@ -511,9 +511,9 @@ final class BooksManualsChangeAssistantService
             'DELETE FROM ipca_manual_ai_version_scopes WHERE project_id=? AND book_version_id=?'
         )->execute(array($projectId, $releasedVersionId));
         $this->pdo->prepare(
-            'INSERT INTO ipca_manual_ai_version_scopes
+            "INSERT INTO ipca_manual_ai_version_scopes
              (project_id,book_version_id,version_content_hash,lifecycle_status_snapshot,selected_by)
-             VALUES (?,?,?,"draft",?)'
+             VALUES (?,?,?,'draft',?)"
         )->execute(array(
             $projectId,
             (int)$created['version_id'],
@@ -612,14 +612,19 @@ final class BooksManualsChangeAssistantService
     {
         $this->assertAvailable();
         $project = $this->requireProject($projectId);
-        $sources = $this->rows('SELECT * FROM ipca_manual_ai_sources WHERE project_id=? AND extraction_status="ready"', array($projectId));
+        $sources = $this->rows(
+            "SELECT * FROM ipca_manual_ai_sources WHERE project_id=? AND extraction_status='ready'",
+            array($projectId)
+        );
         $scopes = $this->rows('SELECT * FROM ipca_manual_ai_version_scopes WHERE project_id=?', array($projectId));
         if ($sources === array() || $scopes === array()) {
             throw new RuntimeException('Analysis requires at least one source and one selected manual version.');
         }
         $this->activeProjectId = $projectId;
         $this->activeActorUserId = $actorUserId;
-        $this->pdo->prepare('UPDATE ipca_manual_ai_projects SET status="analyzing" WHERE id=?')->execute(array($projectId));
+        $this->pdo->prepare(
+            "UPDATE ipca_manual_ai_projects SET status='analyzing' WHERE id=?"
+        )->execute(array($projectId));
         $chunks = $this->buildContentChunks($projectId);
         $this->pdo->prepare('DELETE FROM ipca_manual_ai_requirements WHERE project_id=?')->execute(array($projectId));
         $method = $this->openAiAvailable() ? 'openai' : 'deterministic';
@@ -651,7 +656,7 @@ final class BooksManualsChangeAssistantService
         }
         $findingCount += $this->persistCrossManualFindings($projectId, $aiRunId);
         $this->pdo->prepare(
-            'UPDATE ipca_manual_ai_projects SET status="completed",updated_at=CURRENT_TIMESTAMP WHERE id=?'
+            "UPDATE ipca_manual_ai_projects SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=?"
         )->execute(array($projectId));
         return array(
             'project_id' => $projectId,
@@ -753,7 +758,7 @@ final class BooksManualsChangeAssistantService
         $this->assertProjectOwner($projectId, $actorUserId);
         if ($reviewerUserId !== null) {
             $reviewer = $this->row(
-                'SELECT id FROM users WHERE id=? AND role="admin"',
+                "SELECT id FROM users WHERE id=? AND role='admin'",
                 array($reviewerUserId)
             );
             if ($reviewer === null) {
@@ -896,11 +901,11 @@ final class BooksManualsChangeAssistantService
             array_push($params, ...$findingIds);
         }
         $proposals = $this->rows(
-            'SELECT p.*,f.id finding_id,f.status finding_status,v.lifecycle_status
+            "SELECT p.*,f.id finding_id,f.status finding_status,v.lifecycle_status
              FROM ipca_manual_ai_proposals p
              JOIN ipca_manual_ai_findings f ON f.id=p.finding_id
              JOIN ipca_publishing_book_versions v ON v.id=p.book_version_id
-             WHERE f.project_id=? AND f.status="approved" AND p.status="approved"' . $filter . '
+             WHERE f.project_id=? AND f.status='approved' AND p.status='approved'" . $filter . '
              ORDER BY p.book_version_id,p.id',
             $params
         );
@@ -957,9 +962,9 @@ final class BooksManualsChangeAssistantService
                 $payload = $this->sanitizePayload($payload);
                 $blockService->updateBlock((int)$proposal['block_id'], $payload, $actorUserId);
                 $this->pdo->prepare(
-                    'UPDATE ipca_manual_ai_proposals SET status="applied",applied_at=CURRENT_TIMESTAMP,applied_by=? WHERE id=?'
+                    "UPDATE ipca_manual_ai_proposals SET status='applied',applied_at=CURRENT_TIMESTAMP,applied_by=? WHERE id=?"
                 )->execute(array($actorUserId, (int)$proposal['id']));
-                $this->pdo->prepare('UPDATE ipca_manual_ai_findings SET status="applied" WHERE id=?')
+                $this->pdo->prepare("UPDATE ipca_manual_ai_findings SET status='applied' WHERE id=?")
                     ->execute(array((int)$proposal['finding_id']));
             }
             foreach ($versionIds as $versionId) {
@@ -1574,10 +1579,10 @@ final class BooksManualsChangeAssistantService
             (int)$requirement['id'], (int)$match['block_id'], (string)($finding['type'] ?? 'impact'),
         )));
         $stmt = $this->pdo->prepare(
-            'INSERT INTO ipca_manual_ai_findings
+            "INSERT INTO ipca_manual_ai_findings
              (project_id,requirement_id,finding_key,finding_type,action_classification,confidence,title,
               rationale,evidence_json,status,ai_run_id)
-             VALUES (?,?,?,?,?,?,?,?,?,"proposed",?)'
+             VALUES (?,?,?,?,?,?,?,?,?,'proposed',?)"
         );
         $stmt->execute(array(
             $projectId, (int)$requirement['id'], $key,
@@ -1658,11 +1663,11 @@ final class BooksManualsChangeAssistantService
             ), $group);
             $evidence = array('manual_citations' => $evidence, 'source_evidence' => $sourceEvidence);
             $this->pdo->prepare(
-                'INSERT IGNORE INTO ipca_manual_ai_findings
+                "INSERT IGNORE INTO ipca_manual_ai_findings
                  (project_id,finding_key,finding_type,action_classification,confidence,title,rationale,
                   evidence_json,status,ai_run_id)
-                 VALUES (?,?,"duplication","investigate",0.9000,"Duplicate content across selected manuals",
-                  "The same normalized passage appears in multiple selected manual versions.",?,"proposed",?)'
+                 VALUES (?,?,'duplication','investigate',0.9000,'Duplicate content across selected manuals',
+                  'The same normalized passage appears in multiple selected manual versions.',?,'proposed',?)"
             )->execute(array($projectId, hash('sha256', 'duplicate:' . $signature), $this->json($evidence), $aiRunId));
             $count += (int)$this->pdo->query('SELECT ROW_COUNT()')->fetchColumn();
         }
@@ -1689,11 +1694,11 @@ final class BooksManualsChangeAssistantService
                     'source_evidence' => $sourceEvidence,
                 );
                 $this->pdo->prepare(
-                    'INSERT IGNORE INTO ipca_manual_ai_findings
+                    "INSERT IGNORE INTO ipca_manual_ai_findings
                      (project_id,finding_key,finding_type,action_classification,confidence,title,rationale,
                       evidence_json,status,ai_run_id)
-                     VALUES (?,?,"conflict","investigate",0.6500,"Potential cross-manual conflict",
-                      "Related passages use potentially opposing modal language.",?,"proposed",?)'
+                     VALUES (?,?,'conflict','investigate',0.6500,'Potential cross-manual conflict',
+                      'Related passages use potentially opposing modal language.',?,'proposed',?)"
                 )->execute(array($projectId, $key, $this->json($evidence), $aiRunId));
                 $count += (int)$this->pdo->query('SELECT ROW_COUNT()')->fetchColumn();
             }
@@ -1722,8 +1727,8 @@ final class BooksManualsChangeAssistantService
             'version_content_hash'
         );
         $this->pdo->prepare(
-            'UPDATE ipca_manual_ai_projects
-             SET source_fingerprint=?,scope_fingerprint=?,updated_by=?,status="ready" WHERE id=?'
+            "UPDATE ipca_manual_ai_projects
+             SET source_fingerprint=?,scope_fingerprint=?,updated_by=?,status='ready' WHERE id=?"
         )->execute(array(
             $sourceHashes === array() ? null : hash('sha256', implode('|', $sourceHashes)),
             $scopeHashes === array() ? null : hash('sha256', implode('|', $scopeHashes)),
