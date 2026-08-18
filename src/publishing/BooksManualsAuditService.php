@@ -25,11 +25,19 @@ final class BooksManualsAuditService
             throw new RuntimeException('Manual version not found.');
         }
         $sourceSets = $this->foundation->getVersionSourceSelections($versionId);
+        $requiredSourceSets = array();
         $requirements = array();
         foreach ($sourceSets as $sourceSet) {
             if (empty($sourceSet['is_required_for_release'])) {
                 continue;
             }
+            $requiredSourceSets[] = array(
+                'source_set_id' => (int)$sourceSet['source_set_id'],
+                'source_set_key' => (string)($sourceSet['source_set_key'] ?? ''),
+                'source_family' => (string)($sourceSet['source_family'] ?? ''),
+                'revision_label' => (string)($sourceSet['revision_label'] ?? ''),
+                'source_hash' => (string)($sourceSet['source_hash'] ?? ''),
+            );
             foreach ($this->requirementsForSourceSet((int)$sourceSet['source_set_id']) as $row) {
                 $requirements[] = $row;
             }
@@ -63,6 +71,7 @@ final class BooksManualsAuditService
             'insufficient_count' => $insufficient,
             'missing_count' => $missing,
             'coverage_percent' => $coverage,
+            'required_source_sets' => $requiredSourceSets,
             'requirements' => $requirements,
             'source_baseline_ok' => $foundationCheck['source_baseline_ok'],
             'authoritative_pagination_ok' => $foundationCheck['authoritative_pagination_ok'],

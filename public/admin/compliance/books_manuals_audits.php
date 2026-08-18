@@ -63,9 +63,42 @@ if ($detail !== null) {
 }
 $snapshots = $detail !== null ? $auditService->listSnapshots($versionId) : array();
 $library = $workflow->tablesPresent() ? $workflow->listLibrary(false) : array();
+$gapFilter = strtolower(trim((string)($_GET['gap'] ?? 'all')));
+if (!in_array($gapFilter, array('all', 'missing', 'insufficient'), true)) {
+    $gapFilter = 'all';
+}
+$gapRequirements = array();
+if (is_array($coverage)) {
+    foreach ((array)($coverage['requirements'] ?? array()) as $requirement) {
+        $state = (string)($requirement['coverage_state'] ?? '');
+        if (!in_array($state, array('missing', 'insufficient'), true)) {
+            continue;
+        }
+        if ($gapFilter !== 'all' && $gapFilter !== $state) {
+            continue;
+        }
+        $gapRequirements[] = $requirement;
+    }
+    usort($gapRequirements, static function (array $a, array $b): int {
+        $stateOrder = array('missing' => 0, 'insufficient' => 1);
+        $state = ($stateOrder[(string)($a['coverage_state'] ?? '')] ?? 9)
+            <=> ($stateOrder[(string)($b['coverage_state'] ?? '')] ?? 9);
+        if ($state !== 0) {
+            return $state;
+        }
+        $scoreA = $a['score'] === null ? -1 : (int)$a['score'];
+        $scoreB = $b['score'] === null ? -1 : (int)$b['score'];
+        return ($scoreA <=> $scoreB)
+            ?: strnatcasecmp(
+                (string)($a['requirement_key'] ?? ''),
+                (string)($b['requirement_key'] ?? '')
+            );
+    });
+}
 
 cw_header('Compliance · Books & Manuals Audit');
-echo '<link rel="stylesheet" href="/assets/books-manuals.css?v=1">';
+$booksManualsCssVersion = @filemtime(__DIR__ . '/../../assets/books-manuals.css') ?: time();
+echo '<link rel="stylesheet" href="/assets/books-manuals.css?v=' . (int)$booksManualsCssVersion . '">';
 compliance_page_open(array(
     'title' => 'Books & Manuals Audit',
     'description' => 'Compliance-owned MCCF coverage, source-baseline and authoritative-pagination evidence.',
@@ -128,6 +161,134 @@ compliance_page_open(array(
       <a class="app-btn app-btn--secondary" href="/admin/books_manuals/index.php?open=<?= $versionId ?>">Manual settings</a>
     </div>
   </section>
+
+  <?php if ($coverage !== null && (array)($coverage['required_source_sets'] ?? array()) !== array()): ?>
+    <section class="cmp-card bm-bcaa-submission" style="margin-bottom:16px;">
+      <div class="bm-bcaa-submission__intro">
+        <div>
+          <div class="bm-audit-gap__eyebrow">Authority submission view</div>
+          <h2>BCAA MCCF version</h2>
+          <p>
+            BCAA-format checklist for
+            <strong><?= h((string)$detail['book_key']) ?> <?= h((string)$detail['version_label']) ?></strong>.
+          </p>
+        </div>
+        <span class="bm-bcaa-readiness <?= !empty($coverage['passed']) ? 'is-ready' : 'is-blocked' ?>">
+          <?= !empty($coverage['passed']) ? 'SUBMISSION READY' : 'NOT READY' ?>
+        </span>
+      </div>
+
+      <div class="bm-bcaa-source-list">
+        <?php foreach ((array)$coverage['required_source_sets'] as $sourceSet): ?>
+          <?php
+            $sourceSetId = (int)($sourceSet['source_set_id'] ?? 0);
+            $bcaaUrl = '/admin/compliance/mccf_browser.php?'
+                . http_build_query(array(
+                    'source_set_id' => $sourceSetId,
+                    'layout' => 'bcaa',
+                ));
+            $sourceHash = trim((string)($sourceSet['source_hash'] ?? ''));
+          ?>
+          <article class="bm-bcaa-source">
+            <div>
+              <strong><?= h((string)($sourceSet['source_set_key'] ?? 'MCCF')) ?></strong>
+              <span>
+                Source revision <?= h((string)($sourceSet['revision_label'] ?? 'Not labelled')) ?>
+                <?php if ($sourceHash !== ''): ?>
+                  · <?= h(substr($sourceHash, 0, 12)) ?>…
+                <?php endif; ?>
+              </span>
+            </div>
+            <a class="app-btn app-btn--primary" href="<?= h($bcaaUrl) ?>">View BCAA Submission MCCF</a>
+          </article>
+        <?php endforeach; ?>
+      </div>
+
+      <?php if (empty($coverage['passed'])): ?>
+        <p class="bm-bcaa-submission__warning">
+          This is the current BCAA-format candidate, but it must not be submitted yet:
+          <?= (int)$coverage['missing_count'] ?> missing and
+          <?= (int)$coverage['insufficient_count'] ?> insufficient requirements remain,
+          and all release checks must pass.
+        </p>
+      <?php endif; ?>
+    </section>
+  <?php endif; ?>
+
+  <?php if ($coverage !== null): ?>
+    <section class="cmp-card bm-audit-gaps" style="margin-bottom:16px;">
+      <div class="bm-audit-gaps__head">
+        <div>
+          <h2>MCCF items requiring attention</h2>
+          <p>Open an item to compare the regulation requirement with its linked manual coverage and evidence.</p>
+        </div>
+        <div class="bm-audit-gap-filters" aria-label="Coverage gap filters">
+          <a class="<?= $gapFilter === 'all' ? 'is-active' : '' ?>" href="?version_id=<?= $versionId ?>&amp;gap=all">
+            All <?= (int)$coverage['missing_count'] + (int)$coverage['insufficient_count'] ?>
+          </a>
+          <a class="<?= $gapFilter === 'missing' ? 'is-active' : '' ?>" href="?version_id=<?= $versionId ?>&amp;gap=missing">
+            Missing <?= (int)$coverage['missing_count'] ?>
+          </a>
+          <a class="<?= $gapFilter === 'insufficient' ? 'is-active' : '' ?>" href="?version_id=<?= $versionId ?>&amp;gap=insufficient">
+            Insufficient <?= (int)$coverage['insufficient_count'] ?>
+          </a>
+        </div>
+      </div>
+
+      <?php if ($gapRequirements === array()): ?>
+        <div class="bm-audit-gaps__empty">No requirements match this filter.</div>
+      <?php else: ?>
+        <div class="bm-audit-gap-list">
+          <?php foreach ($gapRequirements as $requirement): ?>
+            <?php
+              $state = (string)$requirement['coverage_state'];
+              $score = $requirement['score'] === null ? null : (int)$requirement['score'];
+              $reasons = is_array($requirement['reasons'] ?? null)
+                  ? array_values(array_filter(array_map('strval', $requirement['reasons'])))
+                  : array();
+              $mccfUrl = '/admin/compliance/mccf_browser.php?'
+                  . http_build_query(array(
+                      'source_set_id' => (int)$requirement['source_set_id'],
+                      'req' => (int)$requirement['id'],
+                      'layout' => 'bcaa',
+                  ));
+            ?>
+            <article class="bm-audit-gap bm-audit-gap--<?= h($state) ?>">
+              <div class="bm-audit-gap__status">
+                <span><?= h(strtoupper($state)) ?></span>
+                <strong><?= $score === null ? 'Not scored' : $score . '%' ?></strong>
+              </div>
+              <div class="bm-audit-gap__copy">
+                <div class="bm-audit-gap__eyebrow">
+                  <?= h((string)($requirement['requirement_key'] ?? 'MCCF item')) ?>
+                  <?php if (trim((string)($requirement['manual_part'] ?? '')) !== ''): ?>
+                    · <?= h((string)$requirement['manual_part']) ?>
+                  <?php endif; ?>
+                </div>
+                <h3><?= h((string)($requirement['subject'] ?? 'Requirement')) ?></h3>
+                <dl>
+                  <dt>Regulation</dt>
+                  <dd><?= h((string)($requirement['regulation_ref'] ?? 'Not linked')) ?></dd>
+                  <dt>Manual reference</dt>
+                  <dd><?= h((string)($requirement['manual_section_ref'] ?? 'Not linked')) ?></dd>
+                </dl>
+                <?php if ($reasons !== array()): ?>
+                  <ul>
+                    <?php foreach (array_slice($reasons, 0, 3) as $reason): ?>
+                      <li><?= h($reason) ?></li>
+                    <?php endforeach; ?>
+                  </ul>
+                <?php elseif ($score === null): ?>
+                  <p class="bm-audit-gap__reason">No MCCF integrity score is available. Refresh MCCF scores first.</p>
+                <?php endif; ?>
+              </div>
+              <a class="app-btn app-btn--secondary bm-audit-gap__action" href="<?= h($mccfUrl) ?>">Open in MCCF</a>
+            </article>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+    </section>
+  <?php endif; ?>
 
   <section class="cmp-card">
     <h2 style="margin-top:0;">Immutable audit history</h2>

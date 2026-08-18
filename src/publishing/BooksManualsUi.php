@@ -5,7 +5,8 @@ require_once __DIR__ . '/../compliance/ComplianceUi.php';
 
 function books_manuals_page_open(array $options): void
 {
-    echo '<link rel="stylesheet" href="/assets/books-manuals.css?v=1">';
+    $cssVersion = @filemtime(dirname(__DIR__, 2) . '/public/assets/books-manuals.css') ?: time();
+    echo '<link rel="stylesheet" href="/assets/books-manuals.css?v=' . (int)$cssVersion . '">';
     $options['overline'] = (string)($options['overline'] ?? 'Books & Manuals');
     compliance_page_open($options);
 }

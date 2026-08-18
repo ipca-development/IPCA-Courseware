@@ -548,6 +548,236 @@
   line-height: 1;
 }
 
+.bm-audit-gaps__head {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.bm-bcaa-submission__intro {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+
+.bm-bcaa-submission__intro h2 {
+  margin: 3px 0 5px;
+  color: #17345d;
+}
+
+.bm-bcaa-submission__intro p {
+  margin: 0;
+  color: #65778c;
+  font-size: 13px;
+}
+
+.bm-bcaa-readiness {
+  padding: 7px 10px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+
+.bm-bcaa-readiness.is-ready {
+  border-color: #a6d8b8;
+  color: #176b38;
+  background: #e7f7ed;
+}
+
+.bm-bcaa-readiness.is-blocked {
+  border-color: #ebbdc5;
+  color: #9a2e3e;
+  background: #fcecef;
+}
+
+.bm-bcaa-source-list {
+  display: grid;
+  gap: 8px;
+}
+
+.bm-bcaa-source {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 14px;
+  border: 1px solid #dce5ef;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.bm-bcaa-source > div {
+  display: grid;
+  gap: 3px;
+}
+
+.bm-bcaa-source strong {
+  color: #263f5b;
+  font-size: 13px;
+}
+
+.bm-bcaa-source span {
+  color: #718297;
+  font-size: 11px;
+}
+
+.bm-bcaa-submission__warning {
+  margin: 12px 0 0;
+  padding: 11px 13px;
+  border-left: 3px solid #bd3f50;
+  border-radius: 7px;
+  color: #77434b;
+  background: #fff4f5;
+  font-size: 12px;
+}
+
+.bm-audit-gaps__head h2 {
+  margin: 0 0 5px;
+  color: #17345d;
+}
+
+.bm-audit-gaps__head p {
+  margin: 0;
+  color: #6a7c91;
+  font-size: 13px;
+}
+
+.bm-audit-gap-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.bm-audit-gap-filters a {
+  padding: 7px 10px;
+  border: 1px solid #d8e0ea;
+  border-radius: 999px;
+  color: #50657d;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.bm-audit-gap-filters a.is-active {
+  border-color: #17345d;
+  color: #fff;
+  background: linear-gradient(180deg, #1b3d6c 0%, #102440 100%);
+}
+
+.bm-audit-gap-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bm-audit-gap {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 15px 16px;
+  border: 1px solid #e0e6ee;
+  border-left-width: 4px;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.bm-audit-gap--missing {
+  border-left-color: #bd3f50;
+}
+
+.bm-audit-gap--insufficient {
+  border-left-color: #d19424;
+}
+
+.bm-audit-gap__status {
+  display: grid;
+  gap: 4px;
+}
+
+.bm-audit-gap__status span {
+  color: #7a899a;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .08em;
+}
+
+.bm-audit-gap--missing .bm-audit-gap__status strong {
+  color: #a72d3e;
+}
+
+.bm-audit-gap--insufficient .bm-audit-gap__status strong {
+  color: #9a6810;
+}
+
+.bm-audit-gap__status strong {
+  font-size: 15px;
+}
+
+.bm-audit-gap__eyebrow {
+  color: #77889a;
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.bm-audit-gap__copy h3 {
+  margin: 3px 0 8px;
+  color: #1b334f;
+  font-size: 14px;
+}
+
+.bm-audit-gap__copy dl {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  gap: 3px 9px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.bm-audit-gap__copy dt {
+  color: #8391a1;
+}
+
+.bm-audit-gap__copy dd {
+  margin: 0;
+  color: #4c6077;
+  font-weight: 650;
+}
+
+.bm-audit-gap__copy ul {
+  margin: 9px 0 0;
+  padding-left: 17px;
+  color: #6b5660;
+  font-size: 11px;
+}
+
+.bm-audit-gap__reason {
+  margin: 9px 0 0;
+  color: #7b5960;
+  font-size: 11px;
+}
+
+.bm-audit-gap__action {
+  white-space: nowrap;
+}
+
+.bm-audit-gaps__empty {
+  padding: 26px;
+  border-radius: 10px;
+  color: #738399;
+  background: #f6f8fb;
+  text-align: center;
+}
+
 @media (max-width: 560px) {
   .bm-book-card {
     grid-template-columns: 85px minmax(0, 1fr);
@@ -579,5 +809,26 @@
 
   .bm-lifecycle-step small {
     font-size: 8px;
+  }
+
+  .bm-audit-gaps__head {
+    display: grid;
+  }
+
+  .bm-bcaa-submission__intro,
+  .bm-bcaa-source {
+    display: grid;
+  }
+
+  .bm-bcaa-source .app-btn {
+    justify-self: start;
+  }
+
+  .bm-audit-gap {
+    grid-template-columns: 1fr;
+  }
+
+  .bm-audit-gap__action {
+    justify-self: start;
   }
 }

@@ -15,6 +15,9 @@ function bm_contract_assert(string $label, bool $condition): void
 $workflow = (string)file_get_contents($root . '/src/publishing/BooksManualsWorkflowService.php');
 $policy = (string)file_get_contents($root . '/src/publishing/BooksManualsReaderPolicyService.php');
 $audit = (string)file_get_contents($root . '/src/publishing/BooksManualsAuditService.php');
+$auditPage = (string)file_get_contents(
+    $root . '/public/admin/compliance/books_manuals_audits.php'
+);
 $annexMigration = (string)file_get_contents(
     $root . '/src/publishing/BooksManualsAnnexMigrationService.php'
 );
@@ -135,6 +138,25 @@ foreach (array(
 ) as $needle => $label) {
     bm_contract_assert($label, str_contains($audit, $needle));
 }
+foreach (array(
+    "'requirements' =>" => 'live MCCF requirement details',
+    'MCCF items requiring attention' => 'visible audit gap list',
+    'coverage_state' => 'missing and insufficient filters',
+    '/admin/compliance/mccf_browser.php?' => 'deep links into MCCF requirements',
+    "'req' => (int)\$requirement['id']" => 'requirement-specific MCCF links',
+) as $needle => $label) {
+    bm_contract_assert(
+        $label,
+        str_contains($needle === "'requirements' =>" ? $audit : $auditPage, $needle)
+    );
+}
+bm_contract_assert(
+    'audit identifies the BCAA submission MCCF source version',
+    str_contains($audit, "'required_source_sets' =>")
+        && str_contains($auditPage, 'BCAA MCCF version')
+        && str_contains($auditPage, 'View BCAA Submission MCCF')
+        && str_contains($auditPage, "'layout' => 'bcaa'")
+);
 foreach (array(
     "LIKE 'annexes_annex_%'" => 'embedded annex inventory',
     'dryRunReport' => 'annex dry-run report',
