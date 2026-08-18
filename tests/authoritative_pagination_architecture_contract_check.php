@@ -6,7 +6,7 @@ $failures = array();
 
 $protected = array(
     'src/publishing/ControlledPublishingBlockService.php'
-        => '3317718f7bd5e77f537b07c9dc95d51198321b5a0a05ff89629b5bc50baeb22f',
+        => '7657371be4bd2a7a2821af68130e76403e3e02bb167478087681ee9f146e169d',
 );
 foreach ($protected as $relative => $hash) {
     if (!is_file($root . '/' . $relative) || hash_file('sha256', $root . '/' . $relative) !== $hash) {
@@ -16,7 +16,7 @@ foreach ($protected as $relative => $hash) {
 
 $contracts = array(
     'src/publishing/ControlledPublishingAuthoritativePaginationService.php' => array(
-        'live-authoritative-flow-v1',
+        'live-authoritative-flow-v2',
         'MANUAL_BREAK_REQUIRED',
         'There is deliberately no heuristic fallback',
         'validation',
@@ -130,7 +130,7 @@ $contracts = array(
     ),
     'ipca-manual-reader-ios/IPCAManualReader/Services/ReaderPaginationCore.js' => array(
         'MANUAL_BREAK_REQUIRED',
-        'live-authoritative-flow-v1',
+        'live-authoritative-flow-v2',
         'automatic_author_flow',
         'heading_keep_with_following',
         'main_title_section_start',

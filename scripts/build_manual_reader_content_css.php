@@ -81,12 +81,10 @@ $header = <<<'CSS'
 .cpb-image-resize {
   display: none !important;
 }
-.cpb-block--changed::before {
-  content: "";
+.reader-revision-change-marker {
   position: absolute;
-  left: 0;
-  top: 2px;
-  bottom: 2px;
+  z-index: 3;
+  display: block;
   width: 4px;
   background: #000;
   border-radius: 2px;

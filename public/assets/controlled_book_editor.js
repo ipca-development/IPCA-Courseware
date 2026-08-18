@@ -1370,7 +1370,7 @@
     sheet.querySelectorAll('.cpb-block--changed').forEach(function (block) {
       var blockTop = printY(block, sheet);
       var blockBottom = printBottom(block, sheet);
-      var markerLeft = printX(block, sheet);
+      var markerLeft = printX(block, sheet) - 8;
       for (var pageIndex = 0; pageIndex < pageCount; pageIndex++) {
         var pageStart = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap);
         var bodyTop = pageStart + PRINT_PAGE.contentTop;

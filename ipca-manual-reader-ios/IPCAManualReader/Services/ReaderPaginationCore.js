@@ -7,7 +7,7 @@
   }
 
   const NORMALIZER_VERSION = "reader-normalizer-v1";
-  const ENGINE_VERSION = "live-authoritative-flow-v1";
+  const ENGINE_VERSION = "live-authoritative-flow-v2";
   const VALIDATOR_VERSION = "pagination-validator-v2";
   // Chromium reports scrollWidth/clientWidth as integers. A visually flush
   // 100%-wide table can therefore round to a 1px overflow even when every
@@ -1426,6 +1426,60 @@
     return element;
   }
 
+  function addRevisionChangeOverlays(element) {
+    const canonicalPage = element.querySelector(".reader-canonical-page");
+    const body = element.querySelector(".reader-page-body:not(.reader-page-cover)");
+    if (!canonicalPage || !body) return;
+    const changed = Array.from(body.querySelectorAll(".cpb-block--changed"));
+    if (!changed.length) return;
+
+    canonicalPage.querySelectorAll(":scope > .reader-revision-change-marker")
+      .forEach((marker) => marker.remove());
+    const scale = Math.max(0.0001, pageScale());
+    const pageRect = canonicalPage.getBoundingClientRect();
+    const bodyRect = body.getBoundingClientRect();
+    const bodyTop = (bodyRect.top - pageRect.top) / scale;
+    const bodyBottom = (bodyRect.bottom - pageRect.top) / scale;
+    const segments = changed.map((block) => {
+      const rect = block.getBoundingClientRect();
+      return {
+        top: Math.max(bodyTop, (rect.top - pageRect.top) / scale),
+        bottom: Math.min(bodyBottom, (rect.bottom - pageRect.top) / scale)
+      };
+    }).filter((segment) => segment.bottom > segment.top + 1)
+      .sort((a, b) => a.top - b.top);
+    const merged = [];
+    segments.forEach((segment) => {
+      const prior = merged[merged.length - 1];
+      if (prior && segment.top <= prior.bottom + 2) {
+        prior.bottom = Math.max(prior.bottom, segment.bottom);
+      } else {
+        merged.push({ ...segment });
+      }
+    });
+
+    const left = Math.max(
+      2,
+      ((bodyRect.left - pageRect.left) / scale) - 8
+    );
+    merged.forEach((segment) => {
+      const marker = document.createElement("span");
+      marker.className = "reader-revision-change-marker";
+      marker.setAttribute("aria-hidden", "true");
+      marker.style.left = `${left}px`;
+      marker.style.top = `${segment.top + 2}px`;
+      marker.style.height = `${Math.max(1, segment.bottom - segment.top - 4)}px`;
+      canonicalPage.appendChild(marker);
+    });
+  }
+
+  function serializedPageHTML(page, pageNumber, total) {
+    const element = buildPageElement(page, pageNumber, total);
+    host.replaceChildren(element);
+    addRevisionChangeOverlays(element);
+    return element.outerHTML;
+  }
+
   function applyReaderScale(root) {
     root.style.setProperty("--reader-page-scale", String(pageScale()));
     const body = root.querySelector(".reader-page-body:not(.reader-page-cover)");
@@ -2691,7 +2745,7 @@
         .map((item) => Object.assign({}, item, { page_number: pageNumber }));
       return {
         page_number: pageNumber,
-        page_html: buildPageElement(page, pageNumber, total).outerHTML,
+        page_html: serializedPageHTML(page, pageNumber, total),
         section_id: Number(page.section && page.section.section_id || 0) || null,
         section_title: String(page.section && page.section.title || ""),
         is_cover: Boolean(page.isCover),

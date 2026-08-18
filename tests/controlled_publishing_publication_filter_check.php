@@ -60,9 +60,10 @@ assert_true(
 );
 $readerCss = (string)file_get_contents($root . '/public/assets/manual_reader_content.css');
 assert_true(
-    str_contains($readerCss, '.cpb-block--changed::before')
-        && str_contains($readerCss, 'background: #000'),
-    'reader publication CSS must draw a black revision bar',
+    str_contains($readerCss, '.reader-revision-change-marker')
+        && str_contains($readerCss, 'background: #000')
+        && !str_contains($readerCss, '.cpb-block--changed {'),
+    'reader publication CSS must draw revision bars without changing block geometry',
     $failures
 );
 

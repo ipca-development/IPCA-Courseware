@@ -2469,10 +2469,6 @@ span.cpb-flow-page-break {
   transition: box-shadow 0.15s ease;
 }
 
-.cpb-block--changed {
-  padding-left: 10px;
-}
-
 .cpb-block--image {
   display: flex;
   flex-direction: column;
@@ -2481,7 +2477,7 @@ span.cpb-flow-page-break {
 
 .cpb-change-marker {
   position: absolute;
-  left: 0;
+  left: -8px;
   top: 2px;
   bottom: 2px;
   width: 4px;

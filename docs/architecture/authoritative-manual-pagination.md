@@ -1,6 +1,6 @@
 # Authoritative manual pagination
 
-## Active draft policy: `live-authoritative-flow-v1`
+## Active draft policy: `live-authoritative-flow-v2`
 
 The staged WYSIWYG implementation uses one continuous authoritative source whose
 ordinary content flows automatically. Manual Page Breaks are explicit page-start
@@ -9,7 +9,7 @@ overrides, projected fragments remain read-only views of source objects, and
 
 Canonical controlled-manual flow:
 
-`Author edits one continuous source document → live server generation flows content into pages (`live-authoritative-flow-v1`) → read-only projection and Exact Page Preview show stored page_html → release freezes the map → iOS displays the same pages`
+`Author edits one continuous source document → live server generation flows content into pages (`live-authoritative-flow-v2`) → read-only projection and Exact Page Preview show stored page_html → release freezes the map → iOS displays the same pages`
 
 ## Policy
 
