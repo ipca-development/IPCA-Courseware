@@ -2599,8 +2599,8 @@ final class BooksManualsContextImpactService
     private function expandConcepts(array $terms): array
     {
         $groups = array(
-            array('sms', 'safety management system', 'safety reporting', 'safety assurance', 'text message', 'messaging'),
-            array('pipedrive', 'crm', 'customer relationship management', 'sales pipeline', 'deal pipeline'),
+            array('sms', 'safety management system', 'safety reporting', 'safety assurance'),
+            array('pipedrive'),
             array('paper', 'printed', 'physical', 'hardcopy'),
             array('file', 'record', 'dossier', 'folder', 'archive'),
             array('retain', 'retention', 'store', 'storage', 'archive'),

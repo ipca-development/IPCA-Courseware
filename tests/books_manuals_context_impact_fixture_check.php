@@ -29,7 +29,10 @@ $legacyTerms = $expand->invoke($service, array(
     'sms.europilotcenter.be',
 ));
 context_fixture_assert(in_array('pipedrive', $legacyTerms, true), 'Pipedrive must remain an exact legacy scan term.');
-context_fixture_assert(in_array('crm', $legacyTerms, true), 'Pipedrive must retain its normalized CRM variant.');
+context_fixture_assert(
+    !in_array('crm', $legacyTerms, true),
+    'Pipedrive scanning must not treat the ambiguous CRM acronym as an exact legacy reference.'
+);
 
 $smsSection = $normalize->invoke(
     $service,
