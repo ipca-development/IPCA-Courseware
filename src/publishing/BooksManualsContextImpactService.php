@@ -1869,60 +1869,42 @@ final class BooksManualsContextImpactService
                 ), $terms);
                 $hasLegacy = isset($hitIndex[$sectionId]);
                 $inScope = isset($scope['sections'][$workflowId][$sectionId]);
-                $semanticOnly = isset($semantic[$requirementId][$sectionId]) && !$hasLegacy && !$inScope;
-                if ($gate['distinctive'] === 0 || (!$hasLegacy && !$inScope && $semanticOnly)) {
+                $semanticSupport = isset($semantic[$requirementId][$sectionId]);
+                if (!$hasLegacy
+                    && !($inScope && $gate['distinctive'] >= 2)
+                    && !($semanticSupport && $gate['distinctive'] >= 2)) {
                     continue;
                 }
-                $key = $sectionId . ':' . $workflowId;
+                $key = (string)$sectionId;
                 if (!isset($aggregated[$key])) {
                     $aggregated[$key] = $bundle + array(
                         'workflow_area_id' => $workflowId ?: null,
+                        'workflow_area_ids' => array(),
                         'mapped_requirements' => array(),
                         'requirement_ids' => array(),
                         'relevance_by_requirement' => array(),
                     );
+                }
+                if ($workflowId > 0) {
+                    $aggregated[$key]['workflow_area_ids'][] = $workflowId;
                 }
                 $aggregated[$key]['requirement_ids'][] = $requirementId;
                 $aggregated[$key]['mapped_requirements'][] = $requirement;
                 $aggregated[$key]['relevance_by_requirement'][$requirementId] = array(
                     'legacy_hit' => $hasLegacy,
                     'structure_scope' => $inScope,
-                    'semantic_support' => isset($semantic[$requirementId][$sectionId]),
+                    'semantic_support' => $semanticSupport,
                     'distinctive_matches' => $gate['distinctive'],
                     'matched_terms' => $gate['terms'],
                 );
             }
         }
         foreach ($aggregated as &$candidate) {
-            $workflowId = (int)($candidate['workflow_area_id'] ?? 0);
-            $sectionId = (int)$candidate['section_id'];
-            $sectionText = $this->normalizeForSearch(
-                $candidate['book_title'] . ' ' . $candidate['parent_section_title'] . ' '
-                . $candidate['section_title'] . ' '
-                . implode(' ', array_column($candidate['blocks'], 'text'))
-            );
-            foreach ($requirements as $requirement) {
-                $requirementId = (int)$requirement['id'];
-                if ((int)($requirement['workflow_area_id'] ?? 0) !== $workflowId
-                    || in_array($requirementId, $candidate['requirement_ids'], true)) {
-                    continue;
-                }
-                $gate = $this->termMatches(
-                    $sectionText,
-                    $this->expandConcepts($this->distinctiveTerms(
-                        (string)$requirement['requirement_text']
-                    ))
-                );
-                $candidate['requirement_ids'][] = $requirementId;
-                $candidate['mapped_requirements'][] = $requirement;
-                $candidate['relevance_by_requirement'][$requirementId] = array(
-                    'legacy_hit' => isset($hitIndex[$sectionId]),
-                    'structure_scope' => isset($scope['sections'][$workflowId][$sectionId]),
-                    'semantic_support' => isset($semantic[$requirementId][$sectionId]),
-                    'distinctive_matches' => $gate['distinctive'],
-                    'matched_terms' => $gate['terms'],
-                );
-            }
+            $candidate['workflow_area_ids'] = array_values(array_unique(array_map(
+                'intval',
+                $candidate['workflow_area_ids']
+            )));
+            $candidate['workflow_area_id'] = $candidate['workflow_area_ids'][0] ?? null;
             $candidate['requirement_ids'] = array_values(array_unique(array_map(
                 'intval',
                 $candidate['requirement_ids']
@@ -1965,7 +1947,7 @@ final class BooksManualsContextImpactService
                 $candidate,
                 $this->relevantContextModel(
                     $contextModel,
-                    (int)($candidate['workflow_area_id'] ?? 0)
+                    $candidate['workflow_area_ids'] ?? array()
                 ),
                 $aiRunId
             );
@@ -2713,12 +2695,16 @@ final class BooksManualsContextImpactService
      *
      * @return array<string,mixed>
      */
-    private function relevantContextModel(array $contextModel, int $workflowAreaId): array
+    /** @param int|list<int> $workflowAreaIds */
+    private function relevantContextModel(array $contextModel, int|array $workflowAreaIds): array
     {
+        $ids = is_array($workflowAreaIds)
+            ? array_values(array_unique(array_map('intval', $workflowAreaIds)))
+            : ($workflowAreaIds > 0 ? array($workflowAreaIds) : array());
         $targets = array_values(array_filter(
             (array)($contextModel['target_workflow_areas'] ?? array()),
-            static fn(array $target): bool => $workflowAreaId <= 0
-                || (int)($target['id'] ?? 0) === $workflowAreaId
+            static fn(array $target): bool => $ids === array()
+                || in_array((int)($target['id'] ?? 0), $ids, true)
         ));
         return array(
             'change_intent' => $contextModel['change_intent'] ?? array(),

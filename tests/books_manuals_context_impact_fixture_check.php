@@ -20,6 +20,7 @@ $expand = $reflection->getMethod('expandConcepts');
 $match = $reflection->getMethod('termMatches');
 $validate = $reflection->getMethod('validateRequirement');
 $fallback = $reflection->getMethod('fallbackWholeRequest');
+$candidates = $reflection->getMethod('candidateBundles');
 
 $legacyTerms = $expand->invoke($service, array(
     'Pipedrive',
@@ -106,6 +107,35 @@ context_fixture_assert(
 context_fixture_assert(
     count($fallbackResult['targets']) >= 4,
     'Deterministic fallback must preserve coherent target workflow areas.'
+);
+
+$candidateRequirements = array(array(
+    'id' => 10,
+    'workflow_area_id' => 20,
+    'requirement_text' => 'The Safety Manager shall assess reportability and record the authority reporting deadline.',
+));
+$candidateBundle = static fn(int $sectionId, string $title, string $text): array => array(
+    'section_id' => $sectionId,
+    'book_title' => 'Organization Management Manual',
+    'parent_section_title' => 'Safety Management',
+    'section_title' => $title,
+    'blocks' => array(array('block_id' => $sectionId * 10, 'text' => $text)),
+);
+$candidateResult = $candidates->invoke(
+    $service,
+    $candidateRequirements,
+    array(
+        1 => $candidateBundle(1, 'Reportability Assessment', 'The Safety Manager records the authority reporting deadline.'),
+        2 => $candidateBundle(2, 'Description of Aircraft', 'The aircraft management system records general information.'),
+        3 => $candidateBundle(3, 'Legacy Workflow', 'Pipedrive is used for safety reports.'),
+    ),
+    array(array('section_id' => 3)),
+    array('sections' => array(20 => array(1 => true, 2 => true)), 'warning_count' => 0),
+    array()
+);
+context_fixture_assert(
+    count($candidateResult) === 2,
+    'Candidate selection must retain scoped procedural and explicit legacy sections while excluding generic aircraft content.'
 );
 
 echo "PASS: Context-preserving SMS/Pipedrive impact fixtures\n";
