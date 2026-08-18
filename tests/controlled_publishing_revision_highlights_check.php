@@ -85,7 +85,7 @@ if (count($summaries) !== 1) {
     throw new RuntimeException('Low-level changes were not grouped by logical subsection.');
 }
 $text = (string)($summaries[0]['text'] ?? '');
-foreach (array('Section 6.1.9', 'Medication', 'Updated', 'Added') as $required) {
+foreach (array('Section 6.1.9', 'Medication', 'Changed', 'Added') as $required) {
     if (!str_contains($text, $required)) {
         throw new RuntimeException('Human change summary is missing: ' . $required);
     }
@@ -150,6 +150,31 @@ if (
     throw new RuntimeException('Generated change bullets are not ordered by chapter and subsection.');
 }
 
+$longPrefix = str_repeat('Shared operational wording ', 8);
+$focusedDiff = $summariesMethod->invoke($service, array(array(
+    'block_key' => 'focused_wording_change',
+    'section_key' => 'part_1_chapter_2',
+    'section_sort_order' => 10,
+    'section_title' => 'Responsibilities',
+    'change_status' => 'modified',
+    'payload_json' => json_encode(
+        array('html' => '<p>' . $longPrefix . 'must be reported immediately.</p>'),
+        JSON_THROW_ON_ERROR
+    ),
+    'prior_payload_json' => json_encode(
+        array('html' => '<p>' . $longPrefix . 'should be reported promptly.</p>'),
+        JSON_THROW_ON_ERROR
+    ),
+    'change_context' => array('reference' => '2.4', 'title' => 'Responsibilities'),
+)));
+$focusedText = (string)($focusedDiff[0]['text'] ?? '');
+if (
+    !str_contains($focusedText, 'Changed “should be reported promptly.”')
+    || !str_contains($focusedText, 'to “must be reported immediately.”')
+) {
+    throw new RuntimeException('Modified content summary does not isolate the actual changed wording.');
+}
+
 $labelMethod = new ReflectionMethod($service, 'revisionDisplayLabel');
 if ($labelMethod->invoke($service, 11) !== '6.1' || $labelMethod->invoke($service, 10) !== '6') {
     throw new RuntimeException('Revision change title labels are not human readable.');
@@ -180,6 +205,14 @@ $pdo->prepare(
     $currentPayload,
     hash('sha256', 'paragraph|' . $currentPayload),
 ));
+$systemAnnotated = $service->annotateChangeStatus(11, array(array(
+    'block_key' => 'generated_toc',
+    'content_hash' => 'new-generated-hash',
+    'is_system_managed' => 1,
+)));
+if ((string)($systemAnnotated[0]['change_status'] ?? '') !== 'unchanged') {
+    throw new RuntimeException('Generated TOC/system content must not create revision-change noise.');
+}
 $generated = $service->regenerateHighlightsSection(11, 1);
 if ((int)$generated['changes_count'] !== 1) {
     throw new RuntimeException('Highlight regeneration did not report the logical revision change.');

@@ -65,6 +65,10 @@ final class ControlledPublishingRevisionService
         $priorHashes = $prior !== null ? $this->blockHashesByKey((int)$prior['id']) : array();
 
         foreach ($blocks as $idx => $block) {
+            if (!empty($block['is_system_managed'])) {
+                $blocks[$idx]['change_status'] = 'unchanged';
+                continue;
+            }
             $blockKey = (string)($block['block_key'] ?? '');
             $hash = (string)($block['content_hash'] ?? '');
             if ($blockKey === '') {
@@ -122,6 +126,7 @@ final class ControlledPublishingRevisionService
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
             WHERE b.book_version_id = :version_id
               AND s.section_key != 'highlights'
+              AND b.is_system_managed = 0
             ORDER BY s.sort_order, b.sort_order, b.id
         ");
         $stmt->execute(array(':version_id' => $versionId));
@@ -284,6 +289,7 @@ final class ControlledPublishingRevisionService
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
             WHERE b.book_version_id = :version_id
               AND s.section_key != 'highlights'
+              AND b.is_system_managed = 0
             ORDER BY s.sort_order, b.sort_order, b.id
         ");
         $stmt->execute(array(':version_id' => $versionId));
@@ -366,10 +372,10 @@ final class ControlledPublishingRevisionService
             }
             $status = (string)($change['change_status'] ?? 'modified');
             $payload = $this->decodePayload($change['payload_json'] ?? null);
-            $currentText = $this->truncateText($this->payloadText($payload));
-            $priorText = $this->truncateText($this->payloadText(
+            $currentText = $this->payloadText($payload);
+            $priorText = $this->payloadText(
                 $this->decodePayload($change['prior_payload_json'] ?? null)
-            ));
+            );
             if ($status === 'new') {
                 $groups[$groupKey]['added'][] = $currentText;
             } elseif ($status === 'deleted') {
@@ -421,19 +427,25 @@ final class ControlledPublishingRevisionService
             $sentences = array();
             if ($group['modified'] !== array()) {
                 $pair = $group['modified'][0];
-                $detail = $pair[0] !== '' && $pair[1] !== ''
-                    ? ' from “' . $pair[0] . '” to “' . $pair[1] . '”'
-                    : '';
-                $sentences[] = 'Updated ' . count($group['modified'])
-                    . ' content item' . (count($group['modified']) === 1 ? '' : 's') . $detail . '.';
+                $detail = $this->modificationDetail((string)$pair[0], (string)$pair[1]);
+                if (count($group['modified']) === 1) {
+                    $sentences[] = $detail . '.';
+                } else {
+                    $sentences[] = 'Updated ' . count($group['modified'])
+                        . ' content items. Example: ' . $detail . '.';
+                }
             }
             if ($group['added'] !== array()) {
-                $example = $group['added'][0] !== '' ? ': “' . $group['added'][0] . '”' : '';
+                $example = $group['added'][0] !== ''
+                    ? ': “' . $this->truncateText((string)$group['added'][0]) . '”'
+                    : '';
                 $sentences[] = 'Added ' . count($group['added'])
                     . ' content item' . (count($group['added']) === 1 ? '' : 's') . $example . '.';
             }
             if ($group['deleted'] !== array()) {
-                $example = $group['deleted'][0] !== '' ? ': “' . $group['deleted'][0] . '”' : '';
+                $example = $group['deleted'][0] !== ''
+                    ? ': “' . $this->truncateText((string)$group['deleted'][0]) . '”'
+                    : '';
                 $sentences[] = 'Removed ' . count($group['deleted'])
                     . ' previous content item' . (count($group['deleted']) === 1 ? '' : 's') . $example . '.';
             }
@@ -444,6 +456,44 @@ final class ControlledPublishingRevisionService
             );
         }
         return $output;
+    }
+
+    private function modificationDetail(string $priorText, string $currentText): string
+    {
+        if ($priorText === '' || $currentText === '') {
+            return 'Updated the content wording';
+        }
+        $priorWords = preg_split('/\s+/u', $priorText) ?: array();
+        $currentWords = preg_split('/\s+/u', $currentText) ?: array();
+        $prefix = 0;
+        $prefixLimit = min(count($priorWords), count($currentWords));
+        while ($prefix < $prefixLimit && $priorWords[$prefix] === $currentWords[$prefix]) {
+            $prefix++;
+        }
+        $suffix = 0;
+        while (
+            $suffix < count($priorWords) - $prefix
+            && $suffix < count($currentWords) - $prefix
+            && $priorWords[count($priorWords) - 1 - $suffix]
+                === $currentWords[count($currentWords) - 1 - $suffix]
+        ) {
+            $suffix++;
+        }
+        $priorLength = count($priorWords) - $prefix - $suffix;
+        $currentLength = count($currentWords) - $prefix - $suffix;
+        $priorChange = implode(' ', array_slice($priorWords, $prefix, $priorLength));
+        $currentChange = implode(' ', array_slice($currentWords, $prefix, $currentLength));
+        if ($priorChange === '' && $currentChange !== '') {
+            return 'Added “' . $this->truncateText($currentChange) . '”';
+        }
+        if ($priorChange !== '' && $currentChange === '') {
+            return 'Removed “' . $this->truncateText($priorChange) . '”';
+        }
+        if ($priorChange === '' || $currentChange === '') {
+            return 'Updated the content wording';
+        }
+        return 'Changed “' . $this->truncateText($priorChange)
+            . '” to “' . $this->truncateText($currentChange) . '”';
     }
 
     private function revisionDisplayLabel(int $versionId): string
