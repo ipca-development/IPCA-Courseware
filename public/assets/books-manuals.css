@@ -16,7 +16,7 @@
 .bm-book-card {
   position: relative;
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 110px minmax(0, 1fr);
   gap: 18px;
   min-height: 252px;
   cursor: pointer;
@@ -68,7 +68,7 @@
 
 .bm-cover--thumbnail {
   display: block;
-  width: 88px;
+  width: 110px;
   height: auto;
   aspect-ratio: 17 / 22;
   border: 0;
@@ -115,9 +115,12 @@
 
 .bm-book-card__title {
   margin: 2px 0 8px;
+  min-height: 2.5em;
+  max-height: 2.5em;
   color: #102a4d;
   font-size: 18px;
   line-height: 1.25;
+  overflow: hidden;
 }
 
 .bm-book-card__title a {
@@ -501,7 +504,7 @@
 
 @media (max-width: 560px) {
   .bm-book-card {
-    grid-template-columns: 68px minmax(0, 1fr);
+    grid-template-columns: 85px minmax(0, 1fr);
   }
 
   .bm-cover {
@@ -510,7 +513,7 @@
   }
 
   .bm-cover--thumbnail {
-    width: 68px;
+    width: 85px;
     height: auto;
     aspect-ratio: 17 / 22;
   }
