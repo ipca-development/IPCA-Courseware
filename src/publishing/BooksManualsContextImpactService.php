@@ -22,7 +22,11 @@ final class BooksManualsContextImpactService
         'personnel', 'training', 'responsibility', 'applicable', 'ensure', 'shall',
         'must', 'should', 'update', 'change', 'new', 'current', 'the', 'all', 'any',
         'each', 'use', 'using', 'used', 'relevant', 'part', 'chapter', 'book',
-        'omm', 'om', 'general', 'safety',
+        'omm', 'om', 'general', 'safety', 'and', 'or', 'that', 'this', 'these',
+        'those', 'has', 'have', 'had', 'been', 'being', 'is', 'are', 'was',
+        'were', 'be', 'to', 'of', 'in', 'on', 'for', 'from', 'by', 'with',
+        'as', 'at', 'it', 'its', 'they', 'their', 'we', 'our', 'when',
+        'where', 'which', 'who', 'whether', 'than', 'then',
     );
 
     private ?int $activeProjectId = null;

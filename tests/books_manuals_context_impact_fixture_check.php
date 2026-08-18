@@ -59,6 +59,18 @@ context_fixture_assert(
     $match->invoke($service, $aircraftSection, $legacyTerms)['distinctive'] === 0,
     'Aircraft description must not match an SMS platform replacement.'
 );
+$ecairsRequirementTerms = $expand->invoke($service, $reflection->getMethod('distinctiveTerms')->invoke(
+    $service,
+    'The Safety Manager shall verify that the ECCAIRS update has been accepted and retain the corresponding evidence.'
+));
+$aerodromeText = $normalize->invoke(
+    $service,
+    'Aerodromes and Operating Sites. We refer to Part 3, Chapter 5, Training Area and the applicable training course.'
+);
+context_fixture_assert(
+    $match->invoke($service, $aerodromeText, $ecairsRequirementTerms)['distinctive'] === 0,
+    'Common grammar words must not make aerodrome content relevant to an ECCAIRS evidence requirement.'
+);
 context_fixture_assert(
     $match->invoke($service, $instructorSection, $legacyTerms)['distinctive'] === 0,
     'Instructor hiring must not match an SMS platform replacement.'
