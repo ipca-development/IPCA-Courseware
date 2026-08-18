@@ -55,6 +55,13 @@ $contracts = array(
         'assertEditableVersion',
         'invalidatePageMap',
     ),
+    'public/assets/controlled_book_editor.js' => array(
+        'authoritative_editor_page_starts_enabled',
+        'check_freshness=1',
+        'authoritativeEditorPageStartsFromResult',
+        'data-authoritative-page-break',
+        'state.authoritativeEditorPageStarts = []',
+    ),
     'public/admin/api/controlled_book_page_map_api.php' => array(
         "'returned_page_count' => count(\$pages)",
         "\$sectionId > 0 ? \$sectionId : null",

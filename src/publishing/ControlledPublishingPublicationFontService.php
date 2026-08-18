@@ -8,8 +8,8 @@ final class ControlledPublishingPublicationFontService
 {
     public const FAMILY = 'IPCA TM GEN Noto Sans';
     public const MANUAL_CODE = 'TM_GEN';
-    // Reversible TM_GEN-only editor trial. Set false to restore local section geometry.
-    public const EDITOR_AUTHORITATIVE_GEOMETRY_ENABLED = true;
+    // Reversible TM_GEN-only editor trial. Set false to restore local page starts.
+    public const EDITOR_AUTHORITATIVE_PAGE_STARTS_ENABLED = true;
     private const FONT_BASE64_FILE = 'tm_gen_noto_sans_latin_wght_normal.woff2.b64';
 
     /**
@@ -38,9 +38,9 @@ final class ControlledPublishingPublicationFontService
     /**
      * @param array<string,mixed> $version
      */
-    public static function editorAuthoritativeGeometryEnabledForVersion(array $version): bool
+    public static function editorAuthoritativePageStartsEnabledForVersion(array $version): bool
     {
-        return self::EDITOR_AUTHORITATIVE_GEOMETRY_ENABLED && self::enabledForVersion($version);
+        return self::EDITOR_AUTHORITATIVE_PAGE_STARTS_ENABLED && self::enabledForVersion($version);
     }
 
     public static function css(string $root): string

@@ -109,12 +109,12 @@ $tmMetadata['paragraph_styles']['body']['font_family'] = 'sans';
 $tmVersion['metadata_json'] = json_encode($tmMetadata, JSON_THROW_ON_ERROR);
 $tmPackage = $service->buildPublicationPackage($tmVersion, $source);
 $assert(
-    ControlledPublishingPublicationFontService::editorAuthoritativeGeometryEnabledForVersion($tmVersion),
-    'TM_GEN authoritative editor geometry trial is not enabled.'
+    ControlledPublishingPublicationFontService::editorAuthoritativePageStartsEnabledForVersion($tmVersion),
+    'TM_GEN authoritative editor page-start trial is not enabled.'
 );
 $assert(
-    !ControlledPublishingPublicationFontService::editorAuthoritativeGeometryEnabledForVersion($version),
-    'TM_GEN authoritative editor geometry trial leaked into OM.'
+    !ControlledPublishingPublicationFontService::editorAuthoritativePageStartsEnabledForVersion($version),
+    'TM_GEN authoritative editor page-start trial leaked into OM.'
 );
 $tmAssetsByDescriptor = array();
 foreach ($tmPackage['assets'] as $asset) {

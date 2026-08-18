@@ -137,9 +137,10 @@
     pageHeaderScope: 'main',
     versionInfo: {},
     publicationFontCSS: '',
-    authoritativeEditorGeometryEnabled: false,
-    authoritativeEditorGeometry: null,
-    authoritativeEditorGeometryVersionId: 0,
+    authoritativeEditorPageStartsEnabled: false,
+    authoritativeEditorPageStarts: [],
+    authoritativeEditorPageStartsVersionId: 0,
+    authoritativeEditorPageStartsSectionId: 0,
     sectionTitle: '',
     calloutPresets: [],
     bookStyles: null,
@@ -1040,6 +1041,11 @@
     return false;
   }
 
+  function hasPrecedingAutomaticPrintBreak(block) {
+    var sibling = block ? block.previousElementSibling : null;
+    return !!(sibling && sibling.getAttribute('data-auto-page-break') === '1');
+  }
+
   function automaticBreakBefore(body, block, sheet, pageIndex, manualBreak) {
     var pageStart = pageIndex * (PRINT_PAGE.height + PRINT_PAGE.gap);
     var target = pageStart + PRINT_PAGE.height + PRINT_PAGE.gap + PRINT_PAGE.contentTop;
@@ -1354,73 +1360,90 @@
     }
   }
 
-  function tmGenAuthoritativeEditorGeometry() {
-    if (!state.authoritativeEditorGeometryEnabled) return null;
+  function tmGenAuthoritativeEditorPageStartsEnabled() {
+    if (!state.authoritativeEditorPageStartsEnabled) return false;
     var version = state.versionInfo || {};
     var manualCode = String(version.manual_code || version.book_key || '').trim().toUpperCase();
-    if (manualCode !== 'TM_GEN') return null;
-    return state.authoritativeEditorGeometry;
+    return manualCode === 'TM_GEN';
   }
 
-  function authoritativeEditorGeometryFromResult(result) {
+  function authoritativeEditorPageStartsFromResult(result, sectionId) {
+    if (!result || !result.freshness || result.freshness.is_current !== true) return [];
     var pages = result && Array.isArray(result.pages) ? result.pages : [];
+    var seenSectionPage = false;
+    var starts = [];
     for (var index = 0; index < pages.length; index++) {
       if (pages[index].is_cover) continue;
       var metadata = pages[index].metadata && typeof pages[index].metadata === 'object'
         ? pages[index].metadata
         : {};
-      var metrics = metadata.metrics && typeof metadata.metrics === 'object'
-        ? metadata.metrics
-        : {};
-      var header = metrics.header_frame || {};
-      var content = metrics.content_frame || {};
-      var footer = metrics.footer_frame || {};
-      var geometry = {
-        headerTop: Number(header.y),
-        headerHeight: Number(header.height),
-        contentTop: Number(content.y),
-        contentHeight: Number(content.height),
-        footerTop: Number(footer.y),
-        footerHeight: Number(footer.height),
-      };
+      var coverage = Array.isArray(metadata.coverage) ? metadata.coverage : [];
+      var sectionCoverage = coverage.filter(function (entry) {
+        return !entry.presentation_copy && parseInt(entry.section_id || '0', 10) === sectionId;
+      });
+      if (!sectionCoverage.length) continue;
+      if (!seenSectionPage) {
+        seenSectionPage = true;
+        continue;
+      }
+      var first = sectionCoverage[0];
+      var fragmentId = String(first.source_fragment_id || '');
       if (
-        Number.isFinite(geometry.headerTop)
-        && Number.isFinite(geometry.headerHeight)
-        && Number.isFinite(geometry.contentTop)
-        && Number.isFinite(geometry.contentHeight)
-        && Number.isFinite(geometry.footerTop)
-        && Number.isFinite(geometry.footerHeight)
-        && geometry.headerHeight > 0
-        && geometry.contentHeight > 0
-        && geometry.footerHeight > 0
-        && geometry.footerTop >= geometry.contentTop + geometry.contentHeight
+        parseInt(first.range_start || '0', 10) === 0
+        && /\/root$/.test(fragmentId)
       ) {
-        return geometry;
+        starts.push({
+          pageNumber: parseInt(pages[index].page_number || '0', 10) || 0,
+          sourceFragmentId: fragmentId,
+        });
       }
     }
-    return null;
+    return starts;
   }
 
-  function loadTMGenAuthoritativeEditorGeometry() {
-    if (!state.authoritativeEditorGeometryEnabled) {
-      state.authoritativeEditorGeometry = null;
-      state.authoritativeEditorGeometryVersionId = 0;
+  function loadTMGenAuthoritativeEditorPageStarts() {
+    if (!tmGenAuthoritativeEditorPageStartsEnabled()) {
+      state.authoritativeEditorPageStarts = [];
+      state.authoritativeEditorPageStartsVersionId = 0;
+      state.authoritativeEditorPageStartsSectionId = 0;
       return Promise.resolve(true);
     }
-    if (tmGenAuthoritativeEditorGeometry() && state.authoritativeEditorGeometryVersionId === state.versionId) {
+    if (
+      state.authoritativeEditorPageStartsVersionId === state.versionId
+      && state.authoritativeEditorPageStartsSectionId === state.sectionId
+    ) {
       return Promise.resolve(true);
     }
     var url = '/admin/api/controlled_book_page_map_api.php?action=stored_preview'
       + '&book_version_id=' + state.versionId
       + '&section_id=' + state.sectionId
-      + '&include_style=0&check_freshness=0';
+      + '&include_style=0&check_freshness=1';
     return paginationRequest(url).then(function (response) {
-      var geometry = authoritativeEditorGeometryFromResult(response.result || {});
-      if (!geometry) return false;
-      state.authoritativeEditorGeometry = geometry;
-      state.authoritativeEditorGeometryVersionId = state.versionId;
+      state.authoritativeEditorPageStarts = authoritativeEditorPageStartsFromResult(
+        response.result || {},
+        state.sectionId
+      );
+      state.authoritativeEditorPageStartsVersionId = state.versionId;
+      state.authoritativeEditorPageStartsSectionId = state.sectionId;
       return true;
     });
+  }
+
+  function authoritativeEditorPageStartAnchors(body) {
+    if (!tmGenAuthoritativeEditorPageStartsEnabled() || !body) return {};
+    var starts = state.authoritativeEditorPageStarts || [];
+    var anchors = {};
+    body.querySelectorAll(':scope > .cpb-block[data-stable-anchor]').forEach(function (block) {
+      var anchor = String(block.getAttribute('data-stable-anchor') || '');
+      if (!anchor) return;
+      var marker = '/' + anchor + '/';
+      if (starts.some(function (start) {
+        return String(start.sourceFragmentId || '').indexOf(marker) !== -1;
+      })) {
+        anchors[anchor] = true;
+      }
+    });
+    return anchors;
   }
 
   function measurePrintFurnitureGeometry(sheet) {
@@ -1478,16 +1501,6 @@
       PRINT_PAGE.footerTop = 920;
       PRINT_PAGE.footerHeight = 72;
     }
-    var authoritativeGeometry = tmGenAuthoritativeEditorGeometry();
-    if (authoritativeGeometry) {
-      PRINT_PAGE.headerTop = authoritativeGeometry.headerTop;
-      PRINT_PAGE.headerHeight = authoritativeGeometry.headerHeight;
-      PRINT_PAGE.contentTop = authoritativeGeometry.contentTop;
-      PRINT_PAGE.contentHeight = authoritativeGeometry.contentHeight;
-      PRINT_PAGE.footerTop = authoritativeGeometry.footerTop;
-      PRINT_PAGE.footerHeight = authoritativeGeometry.footerHeight;
-    }
-
     sheet.style.setProperty('--cpb-print-content-top', PRINT_PAGE.contentTop + 'px');
     sheet.style.setProperty('--cpb-print-header-height', PRINT_PAGE.headerHeight + 'px');
     sheet.style.setProperty('--cpb-print-footer-top', PRINT_PAGE.footerTop + 'px');
@@ -1509,6 +1522,7 @@
         manualAnchors[row.before_block_anchor] = true;
       }
     });
+    var authoritativePageStartAnchors = authoritativeEditorPageStartAnchors(body);
     var inserted = true;
     var attempts = 0;
     while (inserted && attempts < 200) {
@@ -1524,8 +1538,20 @@
         var contentBottom = contentTop + PRINT_PAGE.contentHeight;
         var anchor = block.getAttribute('data-stable-anchor') || '';
         var hasManualSpacer = hasPrecedingManualPrintBreak(block);
+        var hasAutomaticSpacer = hasPrecedingAutomaticPrintBreak(block);
         if (manualAnchors[anchor] && top > contentTop + 1 && !hasManualSpacer) {
           automaticBreakBefore(body, block, sheet, pageIndex, true);
+          inserted = true;
+          break;
+        }
+        if (
+          authoritativePageStartAnchors[anchor]
+          && top > contentTop + 1
+          && !hasAutomaticSpacer
+        ) {
+          automaticBreakBefore(body, block, sheet, pageIndex, false);
+          var projectedSpacer = block.previousElementSibling;
+          if (projectedSpacer) projectedSpacer.setAttribute('data-authoritative-page-break', '1');
           inserted = true;
           break;
         }
@@ -2415,6 +2441,9 @@
 
   function markPaginationChanged() {
     state.paginationStale = true;
+    state.authoritativeEditorPageStarts = [];
+    state.authoritativeEditorPageStartsVersionId = 0;
+    state.authoritativeEditorPageStartsSectionId = 0;
     scheduleUnifiedPrintLayout(450);
     clearTimeout(state.paginationRegenerateTimer);
     state.paginationRegenerateTimer = null;
@@ -3422,10 +3451,11 @@
       state.pageHeaderScope = res.page_header_scope || 'main';
       state.versionInfo = res.version || {};
       state.publicationFontCSS = res.publication_font_css || '';
-      state.authoritativeEditorGeometryEnabled = !!res.authoritative_editor_geometry_enabled;
-      if (!state.authoritativeEditorGeometryEnabled) {
-        state.authoritativeEditorGeometry = null;
-        state.authoritativeEditorGeometryVersionId = 0;
+      state.authoritativeEditorPageStartsEnabled = !!res.authoritative_editor_page_starts_enabled;
+      if (!state.authoritativeEditorPageStartsEnabled) {
+        state.authoritativeEditorPageStarts = [];
+        state.authoritativeEditorPageStartsVersionId = 0;
+        state.authoritativeEditorPageStartsSectionId = 0;
       }
       if (publicationCssEl) publicationCssEl.textContent = state.publicationFontCSS;
       state.sectionTitle = (res.section && res.section.title) ? res.section.title : '';
@@ -3494,15 +3524,15 @@
         loadUnifiedManualBreaks(false).then(function () { return true; }),
         6000
       );
-      var authoritativeGeometryReady = settleWithin(
-        loadTMGenAuthoritativeEditorGeometry(),
+      var authoritativePageStartsReady = settleWithin(
+        loadTMGenAuthoritativeEditorPageStarts(),
         6000
       );
       return Promise.all([
         fontReady,
         imagesReady,
         rulesReady,
-        authoritativeGeometryReady,
+        authoritativePageStartsReady,
       ]).then(function (readiness) {
         if (loadSequence !== state.sectionLoadSequence) return false;
         var incomplete = readiness.some(function (ready) { return ready !== true; });
