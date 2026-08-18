@@ -244,11 +244,27 @@ struct TrainingView: View {
         }
     }
 
+    @ViewBuilder
     private func trainingActionCard(_ action: TrainingActionDTO) -> some View {
+        if action.remoteSessionCodeID != nil {
+            Button {
+                if let codeID = action.remoteSessionCodeID {
+                    session.openRemoteSessionCode(codeID)
+                }
+            } label: {
+                trainingActionCardBody(action, tappable: true)
+            }
+            .buttonStyle(.plain)
+        } else {
+            trainingActionCardBody(action, tappable: false)
+        }
+    }
+
+    private func trainingActionCardBody(_ action: TrainingActionDTO, tappable: Bool) -> some View {
         let urgent = action.status.lowercased().contains("required") || action.status.lowercased().contains("urgent")
         return HStack(alignment: .top, spacing: IPCATheme.Spacing.sm) {
             IPCAIconTile(
-                systemImage: urgent ? "doc.text.fill" : "bell.fill",
+                systemImage: tappable ? "key.fill" : (urgent ? "doc.text.fill" : "bell.fill"),
                 foreground: urgent ? IPCATheme.Colors.destructive : IPCATheme.Colors.ipcaBlue
             )
             VStack(alignment: .leading, spacing: 4) {
@@ -270,6 +286,12 @@ struct TrainingView: View {
                 }
             }
             Spacer()
+            if tappable {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(IPCATheme.Colors.textTertiary)
+                    .padding(.top, 8)
+            }
         }
         .padding(IPCATheme.Spacing.sm)
         .background(IPCATheme.Colors.navySurface, in: RoundedRectangle(cornerRadius: IPCATheme.Radius.card, style: .continuous))

@@ -21,5 +21,9 @@ struct RootView: View {
             PasswordResetView()
                 .environmentObject(session)
         }
+        .sheet(isPresented: $session.showingRemoteSessionCode) {
+            RemoteSessionCodeView()
+                .environmentObject(session)
+        }
     }
 }

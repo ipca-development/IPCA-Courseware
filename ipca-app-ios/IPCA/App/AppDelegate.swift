@@ -10,6 +10,7 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     private var pendingConversationUUID: String?
     private var pendingCommunityPostUUID: String?
     private var pendingSafetyReportUUID: String?
+    private var pendingRemoteSessionCodeID: String?
 
     func application(
         _ application: UIApplication,
@@ -17,9 +18,13 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         if let info = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
-            pendingConversationUUID = Self.conversationUUID(from: info)
-            pendingCommunityPostUUID = Self.communityPostUUID(from: info)
-            pendingSafetyReportUUID = Self.safetyReportUUID(from: info)
+            if let codeID = Self.remoteSessionCodeID(from: info) {
+                pendingRemoteSessionCodeID = codeID
+            } else {
+                pendingConversationUUID = Self.conversationUUID(from: info)
+                pendingCommunityPostUUID = Self.communityPostUUID(from: info)
+                pendingSafetyReportUUID = Self.safetyReportUUID(from: info)
+            }
         }
         return true
     }
@@ -41,7 +46,15 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        let uuid = Self.conversationUUID(from: notification.request.content.userInfo)
+        let info = notification.request.content.userInfo
+        if let codeID = Self.remoteSessionCodeID(from: info) {
+            Task { @MainActor in
+                session?.openRemoteSessionCode(codeID)
+            }
+            completionHandler([.sound, .badge])
+            return
+        }
+        let uuid = Self.conversationUUID(from: info)
         Task { @MainActor in
             await session?.syncNow()
             await session?.refreshBadge()
@@ -58,7 +71,11 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if let uuid = Self.safetyReportUUID(from: response.notification.request.content.userInfo) {
+        let info = response.notification.request.content.userInfo
+        if let codeID = Self.remoteSessionCodeID(from: info) {
+            pendingRemoteSessionCodeID = codeID
+            flushPending()
+        } else if let uuid = Self.safetyReportUUID(from: info) {
             pendingSafetyReportUUID = uuid
             flushPending()
         } else if let uuid = Self.communityPostUUID(from: response.notification.request.content.userInfo) {
@@ -101,6 +118,12 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
                 session.openSafetyReport(uuid)
             }
         }
+        if let codeID = pendingRemoteSessionCodeID {
+            pendingRemoteSessionCodeID = nil
+            Task { @MainActor in
+                session.openRemoteSessionCode(codeID)
+            }
+        }
     }
 
     static func conversationUUID(from userInfo: [AnyHashable: Any]) -> String? {
@@ -124,6 +147,15 @@ final class IPCAAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         if let value = userInfo["report_uuid"] as? String,
            (userInfo["type"] as? String)?.hasPrefix("safety") == true,
            !value.isEmpty {
+            return value
+        }
+        return nil
+    }
+
+    static func remoteSessionCodeID(from userInfo: [AnyHashable: Any]) -> String? {
+        let type = (userInfo["type"] as? String) ?? ""
+        guard type == "remote_session_code" else { return nil }
+        if let value = userInfo["code_id"] as? String, !value.isEmpty {
             return value
         }
         return nil

@@ -764,10 +764,63 @@ struct TrainingActionDTO: Decodable, Hashable, Identifiable {
     var subtitle: String
     var status: String
     var dueAt: String
+    var codeId: String
 
     enum CodingKeys: String, CodingKey {
         case id, source, title, subtitle, status
         case dueAt = "due_at"
+        case codeId = "code_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? ""
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        subtitle = try container.decodeIfPresent(String.self, forKey: .subtitle) ?? ""
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+        dueAt = try container.decodeIfPresent(String.self, forKey: .dueAt) ?? ""
+        let decodedID = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+        let decodedCodeID = try container.decodeIfPresent(String.self, forKey: .codeId) ?? ""
+        codeId = decodedCodeID
+        if !decodedID.isEmpty {
+            id = decodedID
+        } else if !decodedCodeID.isEmpty {
+            id = decodedCodeID
+        } else {
+            id = [source, title, subtitle].joined(separator: "|")
+        }
+    }
+
+    var remoteSessionCodeID: String? {
+        guard source == "remote_session_code" else { return nil }
+        let value = codeId.isEmpty ? id : codeId
+        return value.isEmpty ? nil : value
+    }
+}
+
+struct RemoteSessionCodeEnvelope: Decodable {
+    var ok: Bool
+    var kind: String
+    var title: String
+    var subtitle: String
+    var code: String
+    var expiresAt: String?
+    var viewed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case ok, kind, title, subtitle, code, viewed
+        case expiresAt = "expires_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decodeIfPresent(Bool.self, forKey: .ok) ?? true
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        subtitle = try container.decodeIfPresent(String.self, forKey: .subtitle) ?? ""
+        code = try container.decodeIfPresent(String.self, forKey: .code) ?? ""
+        expiresAt = try container.decodeIfPresent(String.self, forKey: .expiresAt)
+        viewed = try container.decodeIfPresent(Bool.self, forKey: .viewed) ?? false
     }
 }
 

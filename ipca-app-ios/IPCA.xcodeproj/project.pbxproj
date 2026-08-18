@@ -40,6 +40,7 @@
 		B10000000000000000000024 /* SafetyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000024 /* SafetyModels.swift */; };
 		B10000000000000000000025 /* AnonymousSafetyReceiptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000025 /* AnonymousSafetyReceiptStore.swift */; };
 		B10000000000000000000026 /* SafetyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000026 /* SafetyView.swift */; };
+		B10000000000000000000027 /* RemoteSessionCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000027 /* RemoteSessionCodeView.swift */; };
 		B10000000000000000000013 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000013 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -79,6 +80,7 @@
 		B20000000000000000000024 /* SafetyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyModels.swift; sourceTree = "<group>"; };
 		B20000000000000000000025 /* AnonymousSafetyReceiptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnonymousSafetyReceiptStore.swift; sourceTree = "<group>"; };
 		B20000000000000000000026 /* SafetyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyView.swift; sourceTree = "<group>"; };
+		B20000000000000000000027 /* RemoteSessionCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionCodeView.swift; sourceTree = "<group>"; };
 		B20000000000000000000013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B20000000000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000000000000000000015 /* IPCA.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IPCA.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -197,6 +199,7 @@
 				B20000000000000000000023 /* PasswordResetView.swift */,
 				B2000000000000000000001A /* ActionsView.swift */,
 				B2000000000000000000001B /* TrainingView.swift */,
+				B20000000000000000000027 /* RemoteSessionCodeView.swift */,
 				B2000000000000000000001C /* CommunityView.swift */,
 				B2000000000000000000001E /* TrainingVideosView.swift */,
 			);
@@ -313,6 +316,7 @@
 				B10000000000000000000024 /* SafetyModels.swift in Sources */,
 				B10000000000000000000025 /* AnonymousSafetyReceiptStore.swift in Sources */,
 				B10000000000000000000026 /* SafetyView.swift in Sources */,
+				B10000000000000000000027 /* RemoteSessionCodeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

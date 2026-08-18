@@ -71,6 +71,17 @@ actor APIClient {
         ], authorized: false)
     }
 
+    func remoteSessionCode(codeID: String) async throws -> RemoteSessionCodeEnvelope {
+        try await get("api/communication/remote_session_code.php", query: ["code_id": codeID])
+    }
+
+    func markRemoteSessionCodeViewed(codeID: String) async throws {
+        let _: OKEnvelope = try await post("api/communication/remote_session_code.php", body: [
+            "code_id": codeID,
+            "viewed": 1
+        ])
+    }
+
     func profile() async throws -> ProfileEnvelope {
         try await get("api/communication/profile.php")
     }

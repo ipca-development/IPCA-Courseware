@@ -31,6 +31,8 @@ final class AppSession: ObservableObject {
     @Published var showingForgotPassword = false
     @Published var showingPasswordReset = false
     @Published var pendingResetToken = ""
+    @Published var showingRemoteSessionCode = false
+    @Published var pendingRemoteSessionCodeID = ""
 
     let persistence: PersistenceController
     let store: StoreWriter
@@ -96,6 +98,7 @@ final class AppSession: ObservableObject {
                 self.isAuthenticated = true
                 await preparePush()
                 await startLoops()
+                presentPendingRemoteSessionCodeIfNeeded()
             }
         }
     }
@@ -799,6 +802,15 @@ final class AppSession: ObservableObject {
             showingForgotPassword = false
             return
         }
+        if url.host == "code" {
+            let codeID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "code_id" })?
+                .value ?? ""
+            guard !codeID.isEmpty else { return }
+            openRemoteSessionCode(codeID)
+            return
+        }
         if url.host == "actions" {
             selectedTab = .messages
             openActions()
@@ -837,6 +849,31 @@ final class AppSession: ObservableObject {
     func openSafetyReport(_ reportUUID: String) {
         selectedTab = .safety
         pendingSafetyReportUUID = reportUUID
+    }
+
+    func openRemoteSessionCode(_ codeID: String) {
+        let trimmed = codeID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pendingRemoteSessionCodeID = trimmed
+        presentPendingRemoteSessionCodeIfNeeded()
+    }
+
+    func closeRemoteSessionCode() {
+        pendingRemoteSessionCodeID = ""
+        showingRemoteSessionCode = false
+    }
+
+    private func presentPendingRemoteSessionCodeIfNeeded() {
+        guard isAuthenticated, !pendingRemoteSessionCodeID.isEmpty else { return }
+        showingRemoteSessionCode = true
+    }
+
+    func loadRemoteSessionCode(codeID: String) async throws -> RemoteSessionCodeEnvelope {
+        try await api.remoteSessionCode(codeID: codeID)
+    }
+
+    func markRemoteSessionCodeViewed(codeID: String) async throws {
+        try await api.markRemoteSessionCodeViewed(codeID: codeID)
     }
 
     func refreshBadge() async {
@@ -916,6 +953,7 @@ final class AppSession: ObservableObject {
         isAuthenticated = true
         persistUser(response.user)
         await api.setToken(response.token)
+        presentPendingRemoteSessionCodeIfNeeded()
     }
 
     private func applyBootstrap(_ response: BootstrapResponse, token: String) async {
@@ -926,6 +964,7 @@ final class AppSession: ObservableObject {
         needsActionCount = response.needsActionCount
         persistUser(response.user)
         await api.setToken(token)
+        presentPendingRemoteSessionCodeIfNeeded()
     }
 
     private func persistUser(_ user: PublicUser) {
@@ -947,6 +986,8 @@ final class AppSession: ObservableObject {
         showingForgotPassword = false
         showingPasswordReset = false
         pendingResetToken = ""
+        showingRemoteSessionCode = false
+        pendingRemoteSessionCodeID = ""
         needsActionCount = 0
         actionError = nil
         people = []
