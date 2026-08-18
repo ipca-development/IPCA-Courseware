@@ -26,10 +26,12 @@ cw_header('Safety Management');
 ?>
 <style>
 .sms{--navy:#102d53;--blue:#245d9f;--ink:#17263a;--muted:#64758b;--line:#dce5ef;display:grid;gap:18px}
-.sms-hero{padding:25px 27px;border-radius:20px;color:#fff;background:linear-gradient(135deg,#102d53,#245d9f 70%,#3978b7);box-shadow:0 18px 42px rgba(16,45,83,.2)}
+.sms-hero{padding:26px 30px}
 .sms-hero-row,.sms-toolbar,.sms-head,.sms-actions{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
-.sms-overline{font-size:11px;font-weight:800;letter-spacing:.15em;text-transform:uppercase;opacity:.72}.sms-hero h2{font-size:30px;margin:7px 0 5px;letter-spacing:-.03em}.sms-hero p{max-width:800px;margin:0;color:#dceafb;line-height:1.55}
-.sms-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.sms-tab{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.09);color:#fff;padding:9px 13px;border-radius:999px;font-weight:750;text-decoration:none;cursor:pointer}.sms-tab.is-active,.sms-tab:hover{background:#fff;color:var(--navy)}
+.sms-overline{font-size:11px;font-weight:670;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.7);margin-bottom:12px}.sms-hero h2{font-size:34px;line-height:1.02;margin:0;letter-spacing:-.04em;color:#fff;font-weight:760}.sms-hero p{max-width:820px;margin:14px 0 0;color:rgba(255,255,255,.82);font-size:15px;line-height:1.65}
+.sms-hero-action{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 16px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#fff;text-decoration:none;font-size:13px;font-weight:680}.sms-hero-action:hover{background:rgba(255,255,255,.14);color:#fff}
+.sms-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.sms-tab{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:rgba(255,255,255,.92);padding:9px 14px;border-radius:999px;font-weight:680;text-decoration:none;cursor:pointer}.sms-tab.is-active,.sms-tab:hover{background:#fff;color:var(--navy);border-color:#fff}
+.sms-hero-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;margin-top:22px}.sms-hero-stat{min-height:88px;padding:16px 18px;border-radius:18px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.09);box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}.sms-hero-stat-label{color:rgba(255,255,255,.68);font-size:11px;line-height:1.15;letter-spacing:.12em;text-transform:uppercase;font-weight:680}.sms-hero-stat-value{margin-top:10px;color:#fff;font-size:31px;line-height:1;font-weight:760;letter-spacing:-.04em}
 .sms-grid{display:grid;grid-template-columns:repeat(4,minmax(155px,1fr));gap:13px}.sms-kpi,.sms-panel{background:#fff;border:1px solid var(--line);border-radius:17px;box-shadow:0 8px 24px rgba(15,35,60,.06)}
 .sms-kpi{padding:18px}.sms-kpi-label{color:var(--muted);font-size:12px;font-weight:750;text-transform:uppercase;letter-spacing:.08em}.sms-kpi-value{font-size:32px;font-weight:850;color:var(--ink);margin-top:8px}.sms-panel{padding:20px}.sms-panel h3{margin:0;color:var(--ink);font-size:19px}.sms-sub{color:var(--muted);font-size:13px;line-height:1.5;margin-top:4px}
 .sms-btn{appearance:none;border:0;border-radius:10px;padding:10px 13px;font-weight:750;cursor:pointer;background:var(--navy);color:#fff;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}.sms-btn.secondary{background:#edf3f9;color:var(--navy)}.sms-btn.danger{background:#9b2c2c}.sms-btn.small{font-size:12px;padding:7px 10px}
@@ -38,18 +40,18 @@ cw_header('Safety Management');
 .sms-pill{display:inline-block;border-radius:999px;padding:5px 8px;background:#eaf1f8;color:#27496e;font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.04em}.sms-pill.closed,.sms-pill.effective,.sms-pill.not_reportable{background:#dcf4e8;color:#17633b}.sms-pill.overdue,.sms-pill.ineffective,.sms-pill.reportable{background:#fee6e2;color:#8d2a22}.sms-pill.submitted,.sms-pill.triaged,.sms-pill.monitoring{background:#e4edff;color:#234e99}
 .sms-detail-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(300px,.6fr);gap:16px}.sms-stack{display:grid;gap:14px}.sms-card{border:1px solid var(--line);border-radius:13px;padding:14px}.sms-card h4{margin:0 0 8px;color:var(--ink)}.sms-narrative{white-space:pre-wrap;line-height:1.6;color:#33465d}.sms-empty{padding:20px;text-align:center;color:var(--muted);border:1px dashed #cbd8e6;border-radius:13px}.sms-message{padding:10px 12px;border-radius:11px;background:#f1f6fb;margin:7px 0}.sms-message.from_reporter{background:#fff7e8}.sms-alert{display:none;padding:11px 13px;border-radius:11px}.sms-alert.show{display:block}.sms-alert.ok{background:#dff5e9;color:#195b38}.sms-alert.error{background:#fee9e6;color:#8c2c25}
 .sms-modal{position:fixed;inset:0;background:rgba(10,25,43,.62);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px}.sms-modal.open{display:flex}.sms-modal-box{background:#fff;border-radius:18px;max-width:680px;width:100%;max-height:90vh;overflow:auto;padding:22px}
-@media(max-width:1000px){.sms-grid{grid-template-columns:repeat(2,1fr)}.sms-detail-grid{grid-template-columns:1fr}}@media(max-width:620px){.sms-grid,.sms-form{grid-template-columns:1fr}.sms-form .wide{grid-column:auto}}
+@media(max-width:1250px){.sms-hero-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:1000px){.sms-grid{grid-template-columns:repeat(2,1fr)}.sms-detail-grid{grid-template-columns:1fr}}@media(max-width:700px){.sms-hero{padding:20px 18px}.sms-hero-row{align-items:flex-start}.sms-hero-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.sms-grid,.sms-form{grid-template-columns:1fr}.sms-form .wide{grid-column:auto}}@media(max-width:430px){.sms-hero-stats{grid-template-columns:1fr}}
 </style>
 
 <div class="sms">
-  <section class="sms-hero">
+  <section class="app-section-hero sms-hero">
     <div class="sms-hero-row">
       <div>
         <div class="sms-overline">Organization Safety Operations</div>
         <h2>Safety Management System</h2>
         <p>Confidential, traceable management of reports, occurrence decisions, hazards, investigations, actions and the reporter feedback loop.</p>
       </div>
-      <a class="sms-btn secondary" href="/admin/compliance/safety_monitoring.php">Compliance monitoring →</a>
+      <a class="sms-hero-action" href="/admin/compliance/safety_monitoring.php">Compliance monitoring →</a>
     </div>
     <nav class="sms-tabs" aria-label="Safety workspace">
       <button class="sms-tab is-active" data-view="dashboard">Dashboard</button>
@@ -57,6 +59,14 @@ cw_header('Safety Management');
       <button class="sms-tab" data-view="registers">Registers</button>
       <button class="sms-tab" data-view="bulletins">Bulletins</button>
     </nav>
+    <div class="sms-hero-stats" id="smsHeroStats" aria-label="Safety overview">
+      <div class="sms-hero-stat"><div class="sms-hero-stat-label">Open reports</div><div class="sms-hero-stat-value">—</div></div>
+      <div class="sms-hero-stat"><div class="sms-hero-stat-label">Pending decisions</div><div class="sms-hero-stat-value">—</div></div>
+      <div class="sms-hero-stat"><div class="sms-hero-stat-label">Open hazards</div><div class="sms-hero-stat-value">—</div></div>
+      <div class="sms-hero-stat"><div class="sms-hero-stat-label">Active investigations</div><div class="sms-hero-stat-value">—</div></div>
+      <div class="sms-hero-stat"><div class="sms-hero-stat-label">Open actions</div><div class="sms-hero-stat-value">—</div></div>
+      <div class="sms-hero-stat"><div class="sms-hero-stat-label">Overdue actions</div><div class="sms-hero-stat-value">—</div></div>
+    </div>
   </section>
   <div id="smsAlert" class="sms-alert"></div>
   <main id="smsContent" aria-live="polite"><div class="sms-panel">Loading safety workspace…</div></main>
@@ -74,6 +84,7 @@ cw_header('Safety Management');
   const apiUrl = '/admin/api/safety.php';
   const csrf = <?= json_encode($csrf, JSON_UNESCAPED_SLASHES) ?>;
   const content = document.getElementById('smsContent');
+  const heroStats = document.getElementById('smsHeroStats');
   const alertBox = document.getElementById('smsAlert');
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   const label = v => String(v || 'not set').replaceAll('_',' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -100,9 +111,8 @@ cw_header('Safety Management');
     setActive('dashboard'); const d = await get('dashboard');
     const statusTotal = Object.fromEntries(d.reports_by_status.map(x=>[x.status,Number(x.total)]));
     const open = Object.entries(statusTotal).filter(([k])=>!['draft','closed','screened_out'].includes(k)).reduce((n,[,v])=>n+v,0);
-    content.innerHTML = `<div class="sms-grid">
-      ${[['Open reports',open],['Pending decisions',d.pending_reportability],['Open hazards',d.open_hazards],['Active investigations',d.active_investigations],['Open actions',d.open_actions],['Overdue actions',d.overdue_actions]].map(([l,v])=>`<div class="sms-kpi"><div class="sms-kpi-label">${l}</div><div class="sms-kpi-value">${v}</div></div>`).join('')}
-    </div><section class="sms-panel"><div class="sms-head"><div><h3>Recent reports</h3><div class="sms-sub">Latest activity across authenticated and anonymous reporting channels.</div></div><button class="sms-btn secondary" data-go="reports">Open queue</button></div>
+    heroStats.innerHTML = [['Open reports',open],['Pending decisions',d.pending_reportability],['Open hazards',d.open_hazards],['Active investigations',d.active_investigations],['Open actions',d.open_actions],['Overdue actions',d.overdue_actions]].map(([l,v])=>`<div class="sms-hero-stat"><div class="sms-hero-stat-label">${esc(l)}</div><div class="sms-hero-stat-value">${esc(v)}</div></div>`).join('');
+    content.innerHTML = `<section class="sms-panel"><div class="sms-head"><div><h3>Recent reports</h3><div class="sms-sub">Latest activity across authenticated and anonymous reporting channels.</div></div><button class="sms-btn secondary" data-go="reports">Open queue</button></div>
     ${reportTable(d.recent_reports)}</section>`;
     bindReportRows(); content.querySelector('[data-go]').onclick=reports;
   }
