@@ -41,6 +41,13 @@ try {
             'report' => array('report' => $kernel->staff->reportDetail($session, (string)($_GET['report_uuid'] ?? ''))),
             'registers' => $kernel->staff->registers($session),
             'risk_matrix' => array('cells' => $kernel->staff->riskMatrix($session)),
+            'eccairs_config' => $kernel->staff->eccairsConfiguration($session),
+            'eccairs_historical_correlations' => array(
+                'correlations' => $kernel->eccairs->historicalCorrelations(
+                    $session,
+                    (string)($_GET['status'] ?? 'pending')
+                ),
+            ),
             'bulletins' => array('bulletins' => $kernel->staff->listBulletins($session)),
             default => throw new SafetyException('validation_error', 'Unknown staff safety action.', 400),
         };
@@ -71,6 +78,38 @@ try {
             (string)($input['decision'] ?? ''), (string)($input['rationale'] ?? ''),
             trim((string)($input['deadline_at_utc'] ?? '')) ?: null
         )),
+        'prepare_eccairs' => $kernel->eccairs->prepare(
+            $session,
+            (int)($input['occurrence_id'] ?? 0),
+            (string)($input['environment'] ?? 'sandbox'),
+            (string)($input['mapping_version'] ?? '')
+        ),
+        'approve_eccairs' => $kernel->eccairs->approve(
+            $session,
+            (string)($input['submission_uuid'] ?? ''),
+            (string)($input['rationale'] ?? '')
+        ),
+        'retry_eccairs' => (function () use ($kernel, $session, $input): array {
+            $kernel->eccairs->retry(
+                $session,
+                (string)($input['submission_uuid'] ?? ''),
+                (string)($input['verification_reference'] ?? '')
+            );
+            return array('status' => 'queued');
+        })(),
+        'propose_eccairs_historical_correlation' => $kernel->eccairs->proposeHistoricalCorrelation(
+            $session,
+            $input
+        ),
+        'review_eccairs_historical_correlation' => (function () use ($kernel, $session, $input): array {
+            $kernel->eccairs->reviewHistoricalCorrelation(
+                $session,
+                (string)($input['correlation_uuid'] ?? ''),
+                (string)($input['decision'] ?? ''),
+                (string)($input['rationale'] ?? '')
+            );
+            return array('status' => (string)($input['decision'] ?? ''));
+        })(),
         'create_hazard' => $kernel->risk->createHazard(
             $session, (string)($input['title'] ?? ''), (string)($input['description'] ?? ''),
             (int)($input['source_report_id'] ?? 0) ?: null

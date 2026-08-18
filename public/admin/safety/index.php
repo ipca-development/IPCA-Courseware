@@ -57,6 +57,7 @@ cw_header('Safety Management');
       <button class="sms-tab is-active" data-view="dashboard">Dashboard</button>
       <button class="sms-tab" data-view="reports">Report queue</button>
       <button class="sms-tab" data-view="registers">Registers</button>
+      <button class="sms-tab" data-view="eccairs">ECCAIRS 2</button>
       <button class="sms-tab" data-view="bulletins">Bulletins</button>
     </nav>
     <div class="sms-hero-stats" id="smsHeroStats" aria-label="Safety overview">
@@ -138,6 +139,7 @@ cw_header('Safety Management');
     <div class="sms-detail-grid" style="margin-top:16px"><div class="sms-stack">
       <div class="sms-card"><h4>Report narrative</h4><div class="sms-narrative">${esc(r.narrative)}</div><div class="sms-sub" style="margin-top:12px">${esc(r.location_text||'Location not supplied')} · ${esc(r.aircraft_registration||'No aircraft')} · Confidentiality: ${esc(label(r.confidentiality))}</div></div>
       ${cards('Occurrence & reportability',r.occurrences,o=>`<div class="sms-message"><strong>${esc(label(o.occurrence_type))}</strong> ${o.decision?pill(o.decision):pill('pending')}<div class="sms-sub">${esc(o.framework_code||'Not assessed')} · ${esc(o.rationale||'')}</div></div>`)}
+      ${cards('ECCAIRS 2 transmission',r.occurrences.flatMap(o=>(o.eccairs_submissions||[]).map(s=>({...s,occurrence_id:o.id}))),s=>`<div class="sms-message"><strong>${esc(s.environment)} · canonical v${esc(s.payload_version)}</strong> ${pill(s.status)}<div class="sms-sub">Taxonomy ${esc(s.taxonomy_version)} · ${esc(s.attempt_count)} attempt(s)${s.remote_e2_id?` · E2 ${esc(s.remote_e2_id)}`:''}</div>${s.last_error_summary?`<div class="sms-sub">${esc(s.last_error_summary)}</div>`:''}${s.validation?.errors?.length?`<div class="sms-sub">${s.validation.errors.map(e=>esc(e.message)).join('<br>')}</div>`:''}<div class="sms-actions" style="margin-top:8px">${s.status==='awaiting_approval'?`<button class="sms-btn small" data-e2-approve="${esc(s.submission_uuid)}">Approve & queue</button>`:''}${['rejected','retry_pending','delivery_uncertain'].includes(s.status)?`<button class="sms-btn secondary small" data-e2-retry="${esc(s.submission_uuid)}">${s.status==='delivery_uncertain'?'Verified absent — retry':'Queue retry'}</button>`:''}</div></div>`)}
       ${cards('Hazards & risk',r.hazards,h=>`<div class="sms-message"><strong>${esc(h.title)}</strong> ${pill(h.hazard_status)} ${h.band_code?pill(h.band_code):''}<div class="sms-sub">${esc(h.description)} · Latest risk: ${esc(h.score||'—')} ${h.accepted_at_utc?'· accepted':''}</div></div>`)}
       ${cards('Investigations',r.investigations,i=>`<div class="sms-message"><strong>${esc(i.investigation_uuid)}</strong> ${pill(i.status)}<div class="sms-sub">${esc(i.scope_text)} · ${i.factor_count} factor(s)</div></div>`)}
       ${cards('Actions & effectiveness',r.actions,a=>`<div class="sms-message"><strong>${esc(a.title)}</strong> ${pill(a.status)}<div class="sms-sub">Owner #${esc(a.owner_user_id)} · Due ${fmt(a.due_at_utc)} · ${a.evidence_count} evidence item(s)</div></div>`)}
@@ -145,6 +147,7 @@ cw_header('Safety Management');
     </div><aside class="sms-stack">
       <div class="sms-card"><h4>Workflow operations</h4><div class="sms-actions">
         <button class="sms-btn secondary small" data-op="occurrence">Add occurrence</button><button class="sms-btn secondary small" data-op="reportability">Reportability</button>
+        <button class="sms-btn secondary small" data-op="eccairs">Prepare ECCAIRS 2</button>
         <button class="sms-btn secondary small" data-op="hazard">Add hazard</button><button class="sms-btn secondary small" data-op="risk">Assess risk</button><button class="sms-btn secondary small" data-op="accept-risk">Accept residual risk</button>
         <button class="sms-btn secondary small" data-op="investigation">Open investigation</button><button class="sms-btn secondary small" data-op="factor">Add factor</button>
         <button class="sms-btn secondary small" data-op="complete-investigation">Complete investigation</button><button class="sms-btn secondary small" data-op="action">Add action</button>
@@ -154,6 +157,8 @@ cw_header('Safety Management');
     </aside></div></section>`;
     document.getElementById('backQueue').onclick=reports;
     content.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>openOperation(b.dataset.op,r));
+    content.querySelectorAll('[data-e2-approve]').forEach(b=>b.onclick=()=>{r._eccairsSubmissionUuid=b.dataset.e2Approve;openOperation('approve-eccairs',r)});
+    content.querySelectorAll('[data-e2-retry]').forEach(b=>b.onclick=()=>{r._eccairsSubmissionUuid=b.dataset.e2Retry;openOperation('retry-eccairs',r)});
   }
   const field=(name,labelText,type='text',options=[],wide=false)=>`<label class="${wide?'wide':''}">${esc(labelText)}${type==='textarea'?`<textarea class="sms-textarea" name="${name}" required></textarea>`:type==='select'?`<select class="sms-select" name="${name}" required>${options.map(x=>`<option value="${esc(x)}">${esc(label(x))}</option>`).join('')}</select>`:`<input class="sms-input" name="${name}" type="${type}" ${type==='number'?'min="1"':''} required>`}</label>`;
   function openOperation(op,r) {
@@ -162,6 +167,9 @@ cw_header('Safety Management');
     if(op==='transition'){action='transition';html=field('target','Target status','select',['triaged','returned','screened_out','under_investigation','actioning','monitoring','closed','reopened'])+field('rationale','Decision rationale','textarea',[],true)}
     if(op==='occurrence'){action='create_occurrence';html=field('occurrence_type','Occurrence type')+field('occurred_at_utc','Occurred at UTC','datetime-local')}
     if(op==='reportability'){action='assess_reportability';html=field('occurrence_id','Occurrence ID','number')+field('framework','Framework code')+field('decision','Decision','select',['reportable','not_reportable','pending_information'])+field('deadline_at_utc','Authority deadline','datetime-local')+field('rationale','Rationale','textarea',[],true)}
+    if(op==='eccairs'){action='prepare_eccairs';html=field('occurrence_id','Occurrence ID','number')+field('environment','ECCAIRS environment','select',['sandbox','uat','production'])+field('mapping_version','Approved mapping version')}
+    if(op==='approve-eccairs'){action='approve_eccairs';html=field('submission_uuid','Submission UUID')+field('rationale','Approval rationale','textarea',[],true)}
+    if(op==='retry-eccairs'){action='retry_eccairs';html=field('submission_uuid','Submission UUID')+field('verification_reference','E2 verification / retry rationale','textarea',[],true)}
     if(op==='hazard'){action='create_hazard';html=field('title','Hazard title')+field('description','Hazard description','textarea',[],true)}
     if(op==='risk'){action='assess_risk';html=field('hazard_id','Hazard ID','number')+field('matrix_version_id','Matrix version ID','number')+field('phase','Phase','select',['initial','current','residual'])+field('likelihood','Likelihood code')+field('severity','Severity code')+field('rationale','Assessment rationale','textarea',[],true)}
     if(op==='accept-risk'){action='accept_risk';html=field('snapshot_id','Residual risk snapshot ID','number')+field('rationale','Acceptance rationale','textarea',[],true)}
@@ -174,7 +182,7 @@ cw_header('Safety Management');
     if(op==='close-action'){action='close_action';html=field('action_id','Action ID','number')+field('review_id','Effectiveness review ID','number')+field('rationale','Closure rationale','textarea',[],true)}
     if(op==='feedback'){action='send_feedback';html=field('body','Message visible to reporter','textarea',[],true)}
     title.textContent=name; form.innerHTML=html+`<div class="wide sms-actions"><button class="sms-btn" type="submit">Complete operation</button></div>`;
-    const defaults={occurrence_id:first(r.occurrences).id,hazard_id:first(r.hazards).id,snapshot_id:first(r.hazards).risk_snapshot_id,investigation_id:first(r.investigations).id,action_id:first(r.actions).id,review_id:first(r.actions).latest_review_id};
+    const defaults={occurrence_id:first(r.occurrences).id,submission_uuid:r._eccairsSubmissionUuid,hazard_id:first(r.hazards).id,snapshot_id:first(r.hazards).risk_snapshot_id,investigation_id:first(r.investigations).id,action_id:first(r.actions).id,review_id:first(r.actions).latest_review_id};
     Object.entries(defaults).forEach(([k,v])=>{if(v&&form.elements[k])form.elements[k].value=v});
     form.onsubmit=async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(form));data.action=action;data.report_uuid=r.report_uuid;data.report_id=r.id;data.source_report_id=r.id;data.source_id=r.id;data.source_type='report';try{await post(data);modal.classList.remove('open');show('Safety operation recorded.',true);await reportDetail(r.report_uuid)}catch(x){show(x.message)}};
     modal.classList.add('open');
@@ -188,6 +196,42 @@ cw_header('Safety Management');
       <section class="sms-panel"><h3>Investigation register</h3>${table(['Investigation','Report','Status','Completed'],d.investigations.map(x=>[`<td>${esc(x.investigation_uuid)}</td>`,`<td>${esc(x.report_number||x.report_title)}</td>`,`<td>${pill(x.status)}</td>`,`<td>${fmt(x.completed_at_utc)}</td>`]))}</section>
       <section class="sms-panel"><h3>Action & effectiveness register</h3>${table(['Action','Owner','Due','Status'],d.actions.map(x=>[`<td><strong>${esc(x.title)}</strong></td>`,`<td>#${esc(x.owner_user_id)}</td>`,`<td>${fmt(x.due_at_utc)}</td>`,`<td>${pill(x.status)}</td>`]))}</section></div>`;
   }
+  async function eccairs() {
+    setActive('eccairs'); const [d,h]=await Promise.all([get('eccairs_config'),get('eccairs_historical_correlations',{status:'pending'})]);
+    content.innerHTML=`<div class="sms-stack">
+      <section class="sms-panel"><div class="sms-head"><div><h3>ECCAIRS 2 connections</h3><div class="sms-sub">Machine-to-machine transmission remains fail-closed until onboarding, taxonomy mapping and environment approval are complete.</div></div></div>
+      ${table(['Environment','Endpoint','Entity','Taxonomy','State'],d.connections.map(x=>[
+        `<td><strong>${esc(label(x.environment))}</strong></td>`,
+        `<td>${esc(x.base_url)}</td>`,
+        `<td>${esc(x.reporting_entity_id||'Not assigned')}</td>`,
+        `<td>${esc(x.taxonomy_version||'Not assigned')}</td>`,
+        `<td>${Number(x.enabled)?pill(x.environment==='production'&& !Number(x.production_transmission_enabled)?'transmission_disabled':'enabled'):pill('disabled')}</td>`
+      ]))}</section>
+      <section class="sms-panel"><h3>Approved taxonomy mappings</h3><div class="sms-sub">A versioned mapping matching the active ECCAIRS taxonomy is mandatory before a payload can be approved.</div>
+      ${table(['Mapping version','Taxonomy','Fields','Required'],d.mapping_versions.map(x=>[
+        `<td><strong>${esc(x.mapping_version)}</strong></td>`,`<td>${esc(x.taxonomy_version)}</td>`,
+        `<td>${esc(x.mapping_count)}</td>`,`<td>${esc(x.required_count)}</td>`
+      ]))}</section>
+      <section class="sms-panel"><h3>Imported taxonomy packages</h3><div class="sms-sub">Immutable package provenance used by mappings, REST serialization and E5X validation.</div>
+      ${table(['Package','Schema','Source fingerprint','State'],(d.taxonomy_packages||[]).map(x=>[
+        `<td><strong>${esc(x.taxonomy_name)} ${esc(x.taxonomy_version)}</strong><div class="sms-sub">${esc(x.package_uuid)}</div></td>`,
+        `<td>${esc(x.schema_version)}</td>`,`<td><code>${esc(String(x.source_sha256).slice(0,16))}…</code></td>`,`<td>${pill(x.status)}</td>`
+      ]))}</section>
+      <section class="sms-panel"><h3>Historical taxonomy review queue</h3><div class="sms-sub">These correlations classify migrated history only. Approval never queues or transmits an ECCAIRS occurrence.</div>
+      ${table(['Legacy source','Taxonomy target','Method','Confidence','Review'],(h.correlations||[]).map(x=>[
+        `<td><strong>${esc(x.source_system)}</strong><div class="sms-sub">${esc(x.source_entity_type)} · ${esc(x.source_key)}</div></td>`,
+        `<td>${esc(x.entity_code)}${x.attribute_code?` / ${esc(x.attribute_code)}`:''}${x.value_code?` = ${esc(x.value_code)}`:''}</td>`,
+        `<td>${esc(label(x.mapping_method))}</td>`,`<td>${esc(Math.round(Number(x.confidence)*100))}%</td>`,
+        `<td><button class="sms-btn small" data-correlation-approve="${esc(x.correlation_uuid)}">Approve</button> <button class="sms-btn secondary small" data-correlation-reject="${esc(x.correlation_uuid)}">Reject</button></td>`
+      ]))}</section></div>`;
+    content.querySelectorAll('[data-correlation-approve]').forEach(b=>b.onclick=()=>openCorrelationReview(b.dataset.correlationApprove,'approved'));
+    content.querySelectorAll('[data-correlation-reject]').forEach(b=>b.onclick=()=>openCorrelationReview(b.dataset.correlationReject,'rejected'));
+  }
+  function openCorrelationReview(uuid,decision){
+    const m=document.getElementById('smsModal'),f=document.getElementById('smsModalForm');document.getElementById('smsModalTitle').textContent=`${label(decision)} historical taxonomy correlation`;
+    f.innerHTML=field('rationale','Review rationale','textarea',[],true)+`<div class="wide sms-actions"><button class="sms-btn" type="submit">${esc(label(decision))}</button></div>`;
+    f.onsubmit=async e=>{e.preventDefault();try{await post({action:'review_eccairs_historical_correlation',correlation_uuid:uuid,decision,...Object.fromEntries(new FormData(f))});m.classList.remove('open');show(`Correlation ${decision}.`,true);eccairs()}catch(x){show(x.message)}};m.classList.add('open');
+  }
   async function bulletins() {
     setActive('bulletins'); const d=await get('bulletins');
     content.innerHTML=`<section class="sms-panel"><div class="sms-head"><div><h3>Safety bulletins</h3><div class="sms-sub">Controlled safety communication with publication and acknowledgement evidence.</div></div><button class="sms-btn" id="newBulletin">New bulletin</button></div>
@@ -200,7 +244,7 @@ cw_header('Safety Management');
     f.innerHTML=field('title','Title')+field('expires_at_utc','Expires at UTC','datetime-local')+field('body','Bulletin body','textarea',[],true)+`<label class="wide"><span><input type="checkbox" name="requires_acknowledgement" value="1"> Require acknowledgement</span></label><div class="wide"><button class="sms-btn">Save draft</button></div>`;
     f.onsubmit=async e=>{e.preventDefault();try{await post({action:'create_bulletin',audience:{roles:['student','instructor']},...Object.fromEntries(new FormData(f))});m.classList.remove('open');show('Bulletin draft created.',true);bulletins()}catch(x){show(x.message)}};m.classList.add('open');
   }
-  document.querySelectorAll('.sms-tab').forEach(b=>b.onclick=()=>({dashboard,reports,registers,bulletins}[b.dataset.view]().catch(x=>show(x.message))));
+  document.querySelectorAll('.sms-tab').forEach(b=>b.onclick=()=>({dashboard,reports,registers,eccairs,bulletins}[b.dataset.view]().catch(x=>show(x.message))));
   document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>document.getElementById('smsModal').classList.remove('open'));
   document.getElementById('smsModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.classList.remove('open')};
   dashboard().catch(e=>show(e.message));

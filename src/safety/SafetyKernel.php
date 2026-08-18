@@ -14,6 +14,7 @@ require_once __DIR__ . '/SafetyAiGovernanceService.php';
 require_once __DIR__ . '/SafetyAttachmentService.php';
 require_once __DIR__ . '/SafetyStaffService.php';
 require_once __DIR__ . '/SafetyReporterVaultService.php';
+require_once __DIR__ . '/SafetyEccairsService.php';
 
 final class SafetyKernel
 {
@@ -34,6 +35,11 @@ final class SafetyKernel
     public SafetyAttachmentService $attachments;
     public SafetyStaffService $staff;
     public SafetyReporterVaultService $reporterVault;
+    public SafetyEccairsConfig $eccairsConfig;
+    public SafetyEccairsMapper $eccairsMapper;
+    public SafetyEccairsRestSerializer $eccairsRestSerializer;
+    public SafetyEccairsApiClient $eccairsClient;
+    public SafetyEccairsService $eccairs;
 
     public function __construct(
         PDO $pdo,
@@ -62,5 +68,18 @@ final class SafetyKernel
         $this->attachments = new SafetyAttachmentService($pdo, $this->access, $this->config, $store);
         $this->staff = new SafetyStaffService($pdo, $this->access, $this->events);
         $this->reporterVault = new SafetyReporterVaultService($pdo, $this->access, $this->events);
+        $this->eccairsConfig = new SafetyEccairsConfig($pdo);
+        $this->eccairsMapper = new SafetyEccairsMapper($pdo);
+        $this->eccairsRestSerializer = new SafetyEccairsRestSerializer();
+        $this->eccairsClient = new SafetyEccairsApiClient($this->eccairsConfig);
+        $this->eccairs = new SafetyEccairsService(
+            $pdo,
+            $this->access,
+            $this->events,
+            $this->eccairsConfig,
+            $this->eccairsMapper,
+            $this->eccairsRestSerializer,
+            $this->eccairsClient
+        );
     }
 }

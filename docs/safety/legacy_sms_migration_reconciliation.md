@@ -119,7 +119,55 @@ Before an import can be approved:
 
 The canonical foundation migration now includes restricted
 `ipca_safety_legacy_staging` and `ipca_safety_import_provenance` tables. Loading
-or promoting source rows remains blocked until every gate above is approved.
+and promotion tooling is implemented in
+`scripts/safety/legacy_sms_import.php`, but production promotion remains blocked
+until every gate above is approved.
 The source dump must never be executed directly against the application
 database; an approved importer must parse it as data, stage rows with hashes and
 validation state, and record immutable source-to-target provenance.
+
+Run the importer in three explicit phases:
+
+1. Read-only parser preflight:
+   `php scripts/safety/legacy_sms_import.php --mode=preflight --dump=/restricted/legacy.sql --pretty`
+2. Restricted staging:
+   `php scripts/safety/legacy_sms_import.php --mode=stage --dump=/restricted/legacy.sql`
+3. Human review manifest followed by selective promotion:
+   `php scripts/safety/legacy_sms_import.php --mode=review --manifest=/restricted/review.json --user-id=<id>`
+   and
+   `php scripts/safety/legacy_sms_import.php --mode=promote --batch=<uuid> --user-id=<id>`.
+
+For the supplied dump, the importer parses all 717 rows. Its narrow structural
+promotion check marks 716 rows validated and quarantines one blank report row. This
+does not waive the broader reconciliation gates above: ID-zero relationships,
+duplicates, the missing relationship, mojibake, default hazards, PDF matching,
+and retention approval remain human decisions. Promotion currently creates only
+approved archived reports, corresponding unassessed historical occurrence
+rows, and hazards; records source-to-target provenance,
+marks imported reports restricted, and records that zero ECCAIRS transmissions
+were queued.
+
+## Recovered candidate PDF set
+
+A later restricted source set contains 34 sequentially named occurrence PDFs.
+Aggregate-only local extraction found:
+
+- 22 text-based documents and 12 requiring local OCR;
+- no documents blank after extraction;
+- one eight-page bundle requiring page segmentation during human review;
+- 31 documents with a candidate title and 29 with a candidate narrative;
+- 32 documents containing potential personal-data indicators.
+
+The SQL dump still contains 30 attachment references that do not resolve by
+their stored names, even when this source directory is supplied to the
+preflight verifier. Therefore, the 34 files are recovered candidates, not
+automatically proven matches for those 30 references.
+No extractable internal report number corroborates the sequential filename, so
+the text-based files have medium mapping confidence and OCR files have low
+mapping confidence until matched against an authoritative register.
+
+Use `scripts/safety/legacy_pdf_extract.php` to stage structured data with source
+and payload hashes. A human reviewer must establish each source-to-report match
+and approve the extraction before canonical promotion. These documents are
+historical migration sources only and cannot enter the ECCAIRS submission
+queue.

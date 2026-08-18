@@ -683,6 +683,9 @@ CREATE TABLE IF NOT EXISTS ipca_safety_legacy_staging (
   payload_sha256 CHAR(64) NOT NULL,
   validation_status VARCHAR(24) NOT NULL DEFAULT 'pending',
   validation_errors_json JSON NULL,
+  reviewed_by_user_id BIGINT UNSIGNED NULL,
+  reviewed_at_utc DATETIME(3) NULL,
+  review_rationale TEXT NULL,
   staged_at_utc DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   UNIQUE KEY uk_safety_legacy_source (organization_id, source_system, source_entity_type, source_key),
   KEY idx_safety_legacy_batch (organization_id, import_batch_uuid, validation_status)

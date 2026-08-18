@@ -84,3 +84,32 @@ and `ipca_communication_app_config.anonymous_reporting_enabled` to true/`1`.
 If any gate fails, leave `safety_reporting_enabled` and
 `anonymous_reporting_enabled` disabled and roll back the application release;
 the additive database records may remain for forensic review.
+
+## ECCAIRS 2 rollout
+
+ECCAIRS transmission is a separate fail-closed capability. Apply
+`scripts/sql/2026_08_18_safety_eccairs2_integration.sql` and follow
+`docs/safety/eccairs2_integration.md`.
+
+Do not enable an ECCAIRS connection until EASA onboarding provides:
+
+- environment-specific credentials and IP allowlisting;
+- reporting/responsible entity identifiers;
+- the current taxonomy and general version identifiers;
+- confirmation of the current API paths and payload contract.
+- the official, fingerprinted taxonomy package matching the configured version.
+
+Import and activate the taxonomy package before importing a mapping version.
+Install the XSD 1.1 validation dependency and configure
+`CW_ECCAIRS_TAXONOMY_ARCHIVE_PATH` plus
+`CW_ECCAIRS_XSD11_PYTHON_PATH`. Sandbox and UAT evidence must demonstrate human
+approval bound to the canonical digest, separate REST/E5X artifact hashes,
+XSD 1.1 validation, rejection handling, status reconciliation, and uncertain-delivery
+recovery. Production additionally requires written Safety Manager and
+privacy/security acceptance. Legacy PDFs are migration evidence only and must
+never be queued as new ECCAIRS notifications.
+
+Do not enable E5X export merely from the taxonomy ZIP. It defines XML schemas
+but no E5X container. Obtain an authority-confirmed packaging profile and
+configure its adapter and profile identifier before setting
+`CW_ECCAIRS_E5X_PACKAGER_COMMAND` and `CW_ECCAIRS_E5X_PACKAGER_PROFILE`.

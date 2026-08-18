@@ -108,7 +108,8 @@ final class SafetyStaffService
         $id = (int)$report['id'];
         $report['occurrences'] = $this->rows(
             'SELECT o.id, o.occurrence_uuid, o.occurrence_type, o.occurred_at_utc, o.state,
-                    a.framework_code, a.decision, a.rationale, a.deadline_at_utc, a.assessed_at_utc
+                    a.id AS assessment_id, a.framework_code, a.decision, a.rationale,
+                    a.deadline_at_utc, a.assessed_at_utc
              FROM ipca_safety_occurrences o
              LEFT JOIN ipca_safety_reportability_assessments a ON a.id = (
                SELECT a2.id FROM ipca_safety_reportability_assessments a2
@@ -118,6 +119,32 @@ final class SafetyStaffService
              WHERE o.organization_id = ? AND o.report_id = ? ORDER BY o.id',
             array($org, $id)
         );
+        foreach ($report['occurrences'] as &$occurrence) {
+            $occurrence['eccairs_submissions'] = $this->rows(
+                'SELECT submission_uuid, environment, payload_version, mapping_version,
+                        taxonomy_version, canonical_sha256, envelope_sha256,
+                        validation_json, status,
+                        approved_by_user_id, approved_at_utc, queued_at_utc, remote_e2_id,
+                        remote_version, remote_status, accepted_at_utc, last_error_code,
+                        last_error_summary, created_at_utc, updated_at_utc,
+                        (SELECT COUNT(*) FROM ipca_safety_eccairs_attempts ea
+                         WHERE ea.organization_id = s.organization_id
+                           AND ea.submission_id = s.id) AS attempt_count
+                 FROM ipca_safety_eccairs_submissions s
+                 WHERE s.organization_id = ? AND s.occurrence_id = ?
+                 ORDER BY s.payload_version DESC',
+                array($org, (int)$occurrence['id'])
+            );
+            foreach ($occurrence['eccairs_submissions'] as &$submission) {
+                $submission['validation'] = json_decode(
+                    (string)$submission['validation_json'],
+                    true
+                ) ?: array();
+                unset($submission['validation_json']);
+            }
+            unset($submission);
+        }
+        unset($occurrence);
         $report['hazards'] = $this->rows(
             'SELECT h.id, h.hazard_uuid, h.title, h.description, h.hazard_status,
                     r.id AS risk_snapshot_id, r.phase, r.likelihood_code, r.severity_code,
@@ -231,6 +258,42 @@ final class SafetyStaffService
              WHERE v.organization_id = ? AND v.status = 'active'
              ORDER BY c.severity_code, c.likelihood_code",
             array($org)
+        );
+    }
+
+    /** @param array<string,mixed> $session */
+    public function eccairsConfiguration(array $session): array
+    {
+        $this->access->requirePermission($session, 'eccairs.prepare');
+        $org = SafetySupport::organizationId($session);
+        return array(
+            'connections' => $this->rows(
+                'SELECT environment, base_url, token_path, create_path, get_path_template,
+                        reporting_entity_id, responsible_entity_id,
+                        taxonomy_version, general_version, enabled, production_transmission_enabled,
+                        updated_at_utc
+                 FROM ipca_safety_eccairs_connections
+                 WHERE organization_id = ? ORDER BY FIELD(environment, \'sandbox\', \'uat\', \'production\')',
+                array($org)
+            ),
+            'mapping_versions' => $this->rows(
+                'SELECT mapping_version, taxonomy_version, COUNT(*) AS mapping_count,
+                        SUM(required_state = \'required\') AS required_count
+                 FROM ipca_safety_eccairs_mappings
+                 WHERE organization_id = ? AND active = 1
+                 GROUP BY mapping_version, taxonomy_version
+                 ORDER BY mapping_version DESC',
+                array($org)
+            ),
+            'taxonomy_packages' => $this->rows(
+                'SELECT package_uuid, taxonomy_name, taxonomy_version, schema_version,
+                        source_sha256, source_byte_size, manifest_json, status,
+                        imported_at_utc, activated_at_utc
+                 FROM ipca_safety_eccairs_taxonomy_packages
+                 WHERE organization_id = ?
+                 ORDER BY FIELD(status, \'active\', \'imported\', \'retired\'), imported_at_utc DESC',
+                array($org)
+            ),
         );
     }
 

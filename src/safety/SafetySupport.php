@@ -26,7 +26,8 @@ final class SafetySupport
 
     public static function nowUtc(): string
     {
-        return gmdate('Y-m-d H:i:s') . sprintf('.%03d', (int)((microtime(true) * 1000) % 1000));
+        $milliseconds = ((int)floor(microtime(true) * 1000)) % 1000;
+        return gmdate('Y-m-d H:i:s') . sprintf('.%03d', $milliseconds);
     }
 
     public static function token(int $bytes = 32): string
