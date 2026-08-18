@@ -26,6 +26,22 @@ try {
         CommunicationHttp::json(200, array('ok' => true));
     }
 
+    if ($action === 'forgot_password') {
+        CommunicationHttp::json(200, $kernel->profile->requestPasswordReset((string)($in['email'] ?? '')));
+    }
+
+    if ($action === 'validate_reset_token') {
+        CommunicationHttp::json(200, $kernel->profile->validateResetToken((string)($in['token'] ?? '')));
+    }
+
+    if ($action === 'reset_password') {
+        CommunicationHttp::json(200, $kernel->profile->completePasswordReset(
+            (string)($in['token'] ?? ''),
+            (string)($in['password'] ?? $in['new_password'] ?? ''),
+            (string)($in['password_confirm'] ?? $in['new_password_confirm'] ?? '')
+        ));
+    }
+
     throw new CommunicationException('validation_error', 'Unknown action.', 400);
 } catch (CommunicationException $e) {
     CommunicationHttp::fail($e);

@@ -27,6 +27,9 @@ final class AppSession: ObservableObject {
     @Published var lastSyncAt: Date?
     @Published var notificationsAuthorized = false
     @Published var hidesTabBar = false
+    @Published var showingForgotPassword = false
+    @Published var showingPasswordReset = false
+    @Published var pendingResetToken = ""
 
     let persistence: PersistenceController
     let store: StoreWriter
@@ -133,6 +136,49 @@ final class AppSession: ObservableObject {
         clearSession()
     }
 
+    func loadProfile() async throws -> ProfileEnvelope {
+        try await api.profile()
+    }
+
+    func savePersonalProfile(_ profile: ProfileDetails) async throws {
+        let envelope = try await api.savePersonalProfile(profile)
+        applyProfileUser(envelope.user)
+    }
+
+    func saveEmergencyContacts(_ contacts: [EmergencyContact]) async throws {
+        let envelope = try await api.saveEmergencyContacts(contacts)
+        applyProfileUser(envelope.user)
+    }
+
+    func changeAccountPassword(current: String, new: String, confirm: String) async throws {
+        try await api.changePassword(current: current, new: new, confirm: confirm)
+    }
+
+    func uploadProfilePhoto(data: Data, mimeType: String) async throws {
+        let envelope = try await api.uploadProfilePhoto(data: data, mimeType: mimeType)
+        applyProfileUser(envelope.user)
+    }
+
+    func requestPasswordReset(email: String) async throws -> String {
+        let response = try await api.forgotPassword(email: email)
+        return response.message ?? "If an account with that email exists, a password reset link has been sent."
+    }
+
+    func validateResetToken(_ token: String) async throws -> PasswordResetEnvelope {
+        try await api.validateResetToken(token)
+    }
+
+    func completePasswordReset(token: String, password: String, confirm: String) async throws -> String {
+        let response = try await api.resetPassword(token: token, password: password, confirm: confirm)
+        pendingResetToken = ""
+        return response.message ?? "Your password has been reset successfully. You can now sign in with your new password."
+    }
+
+    private func applyProfileUser(_ user: PublicUser) {
+        self.user = user
+        persistUser(user)
+    }
+
     func send(conversationUUID: String, body: String, attachments: [PendingAttachment] = [], replyTo: ReplyToDTO? = nil) async {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!trimmed.isEmpty || !attachments.isEmpty), let user else { return }
@@ -211,6 +257,34 @@ final class AppSession: ObservableObject {
             return false
         } catch {
             actionError = "Couldn't create that group."
+            return false
+        }
+    }
+
+    func updateGroupMembers(conversationUUID: String, add: [PublicUser] = [], removeUUIDs: [String] = []) async -> Bool {
+        actionError = nil
+        do {
+            let conversation = try await api.updateGroupMembers(
+                conversationUUID: conversationUUID,
+                addUserUUIDs: add.map(\.uuid),
+                removeUserUUIDs: removeUUIDs
+            )
+            _ = await store.applySync(
+                SyncResponse(ok: true, cursor: 0, hasMore: false, conversations: [conversation], messages: [], reads: []),
+                currentUserUUID: user?.uuid ?? "",
+                generation: syncGate.begin(),
+                gate: syncGate,
+                advancesCursor: false
+            )
+            if !conversation.members.contains(where: { $0.user.uuid == user?.uuid }) {
+                selectedConversationUUID = nil
+            }
+            return true
+        } catch let error as APIClientError {
+            actionError = error.errorDescription ?? "Couldn't update the group."
+            return false
+        } catch {
+            actionError = "Couldn't update the group."
             return false
         }
     }
@@ -560,6 +634,16 @@ final class AppSession: ObservableObject {
 
     func handleOpenURL(_ url: URL) {
         guard url.scheme == "ipca" else { return }
+        if url.host == "reset" { // ipca://reset?token=
+            let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "token" })?
+                .value ?? ""
+            pendingResetToken = token
+            showingPasswordReset = true
+            showingForgotPassword = false
+            return
+        }
         if url.host == "actions" {
             selectedTab = .messages
             openActions()
@@ -694,6 +778,9 @@ final class AppSession: ObservableObject {
         pendingConversationUUID = nil
         pendingActions = false
         showingActions = false
+        showingForgotPassword = false
+        showingPasswordReset = false
+        pendingResetToken = ""
         needsActionCount = 0
         actionError = nil
         people = []

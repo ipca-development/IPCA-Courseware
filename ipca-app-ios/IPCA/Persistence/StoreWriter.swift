@@ -267,6 +267,10 @@ final class StoreWriter: @unchecked Sendable {
     }
 
     func upsertConversation(_ dto: ConversationDTO, currentUserUUID: String) {
+        if !currentUserUUID.isEmpty && !dto.members.contains(where: { $0.user.uuid == currentUserUUID }) {
+            dropConversation(dto.conversationUUID)
+            return
+        }
         let entity = conversation(dto.conversationUUID) ?? ConversationEntity(context: context)
         entity.conversationUUID = dto.conversationUUID
         entity.conversationType = dto.conversationType
@@ -430,6 +434,20 @@ final class StoreWriter: @unchecked Sendable {
         person.name = user.name
         person.email = user.email
         person.role = user.role
+    }
+
+    private func dropConversation(_ uuid: String) {
+        if let entity = conversation(uuid) {
+            context.delete(entity)
+        }
+        for member in members(uuid) {
+            context.delete(member)
+        }
+        let request = MessageEntity.fetchRequest()
+        request.predicate = NSPredicate(format: "conversationUUID == %@", uuid)
+        for message in (try? context.fetch(request)) ?? [] {
+            context.delete(message)
+        }
     }
 
     private func conversation(_ uuid: String) -> ConversationEntity? {

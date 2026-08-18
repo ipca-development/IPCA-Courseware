@@ -93,9 +93,20 @@ enum IPCATheme {
     }
 
     static func formattedRole(_ role: String) -> String {
-        let trimmed = role.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return "" }
-        return trimmed.replacingOccurrences(of: "_", with: " ").localizedCapitalized
+        switch trimmed {
+        case "admin":
+            return "Admin"
+        case "student":
+            return "Student"
+        case "supervisor", "instructor":
+            return "Instructor"
+        case "chief_instructor":
+            return "Chief Instructor"
+        default:
+            return trimmed.replacingOccurrences(of: "_", with: " ").localizedCapitalized
+        }
     }
 
     static func initials(from name: String) -> String {
@@ -423,6 +434,17 @@ struct IPCAStatusBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(tone.foreground.opacity(0.16), in: Capsule())
+    }
+}
+
+struct IPCARolePill: View {
+    var role: String
+
+    var body: some View {
+        let label = IPCATheme.formattedRole(role)
+        if !label.isEmpty {
+            IPCAStatusBadge(text: label, tone: .info)
+        }
     }
 }
 

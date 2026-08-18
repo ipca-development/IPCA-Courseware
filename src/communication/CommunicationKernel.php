@@ -17,6 +17,7 @@ require_once __DIR__ . '/CommunicationEnrollmentService.php';
 require_once __DIR__ . '/CommunicationTrainingVideoService.php';
 require_once __DIR__ . '/CommunicationTrainingMediaLibraryService.php';
 require_once __DIR__ . '/CommunicationTrainingThumbnailRenderer.php';
+require_once __DIR__ . '/CommunicationProfileService.php';
 
 final class CommunicationKernel
 {
@@ -34,6 +35,7 @@ final class CommunicationKernel
     public CommunicationEnrollmentService $enrollment;
     public CommunicationTrainingVideoService $trainingVideos;
     public CommunicationTrainingMediaLibraryService $mediaLibrary;
+    public CommunicationProfileService $profile;
 
     public function __construct(PDO $pdo, ?CommunicationObjectStore $objectStore = null)
     {
@@ -50,6 +52,7 @@ final class CommunicationKernel
         $this->enrollment = new CommunicationEnrollmentService($pdo);
         $this->mediaLibrary = new CommunicationTrainingMediaLibraryService($pdo, $this->objectStore);
         $this->trainingVideos = new CommunicationTrainingVideoService($pdo, $this->config, $this->objectStore, $this->mediaLibrary);
+        $this->profile = new CommunicationProfileService($pdo);
         $this->sync = new CommunicationSyncService($pdo, $this->conversations, $this->messages, $this->config, $this->push, $this->systemMessages);
     }
 }

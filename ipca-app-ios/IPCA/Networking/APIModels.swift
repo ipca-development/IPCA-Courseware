@@ -408,6 +408,110 @@ struct OKEnvelope: Decodable {
     var ok: Bool
 }
 
+struct ProfileOption: Codable, Hashable, Identifiable {
+    var value: String
+    var label: String
+    var id: String { value.isEmpty ? label : value }
+}
+
+struct ProfileOptions: Codable, Hashable {
+    var country: [ProfileOption] = []
+    var gender: [ProfileOption] = []
+    var maritalStatus: [ProfileOption] = []
+    var hairColor: [ProfileOption] = []
+    var eyeColor: [ProfileOption] = []
+    var relationship: [ProfileOption] = []
+
+    enum CodingKeys: String, CodingKey {
+        case country, gender, relationship
+        case maritalStatus = "marital_status"
+        case hairColor = "hair_color"
+        case eyeColor = "eye_color"
+    }
+}
+
+struct EmergencyContact: Codable, Hashable, Identifiable {
+    var sortOrder: Int
+    var contactName: String
+    var relationship: String
+    var phone: String
+
+    var id: Int { sortOrder }
+
+    enum CodingKeys: String, CodingKey {
+        case phone, relationship
+        case sortOrder = "sort_order"
+        case contactName = "contact_name"
+    }
+}
+
+struct ProfileDetails: Codable, Hashable {
+    var firstName: String
+    var lastName: String
+    var email: String
+    var photoPath: String
+    var streetAddress: String
+    var streetNumber: String
+    var zipCode: String
+    var city: String
+    var stateRegion: String
+    var countryCode: String
+    var cellphone: String
+    var secondaryEmail: String
+    var dateOfBirth: String
+    var placeOfBirth: String
+    var nationality: String
+    var idPassportNumber: String
+    var gender: String
+    var maritalStatus: String
+    var hairColor: String
+    var eyeColor: String
+    var weightKg: String
+    var heightCm: String
+
+    enum CodingKeys: String, CodingKey {
+        case email, gender, city, nationality, cellphone
+        case firstName = "first_name"
+        case lastName = "last_name"
+        case photoPath = "photo_path"
+        case streetAddress = "street_address"
+        case streetNumber = "street_number"
+        case zipCode = "zip_code"
+        case stateRegion = "state_region"
+        case countryCode = "country_code"
+        case secondaryEmail = "secondary_email"
+        case dateOfBirth = "date_of_birth"
+        case placeOfBirth = "place_of_birth"
+        case idPassportNumber = "id_passport_number"
+        case maritalStatus = "marital_status"
+        case hairColor = "hair_color"
+        case eyeColor = "eye_color"
+        case weightKg = "weight_kg"
+        case heightCm = "height_cm"
+    }
+}
+
+struct ProfileEnvelope: Decodable {
+    var ok: Bool
+    var user: PublicUser
+    var profile: ProfileDetails
+    var emergencyContacts: [EmergencyContact]
+    var options: ProfileOptions
+
+    enum CodingKeys: String, CodingKey {
+        case ok, user, profile, options
+        case emergencyContacts = "emergency_contacts"
+    }
+}
+
+struct PasswordResetEnvelope: Decodable {
+    var ok: Bool
+    var message: String?
+    var valid: Bool?
+    var email: String?
+    var name: String?
+}
+
 struct AttachmentPresignEnvelope: Decodable {
     var ok: Bool
     var attachmentUUID: String

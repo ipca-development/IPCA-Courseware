@@ -43,6 +43,23 @@ try {
         );
         CommunicationHttp::json(200, array('ok' => true, 'conversation' => $conversation));
     }
+    if ($type === 'group_members') {
+        $add = $in['add_user_uuids'] ?? array();
+        $remove = $in['remove_user_uuids'] ?? array();
+        if (!is_array($add)) {
+            $add = array();
+        }
+        if (!is_array($remove)) {
+            $remove = array();
+        }
+        $conversation = $kernel->conversations->updateGroupMembers(
+            $session,
+            (string)($in['conversation_uuid'] ?? ''),
+            array_map('strval', $add),
+            array_map('strval', $remove)
+        );
+        CommunicationHttp::json(200, array('ok' => true, 'conversation' => $conversation));
+    }
     throw new CommunicationException('validation_error', 'Unsupported conversation type.', 400);
 } catch (CommunicationException $e) {
     CommunicationHttp::fail($e);

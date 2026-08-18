@@ -47,9 +47,7 @@ struct NewMessageView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(person.name)
                                     .foregroundStyle(IPCATheme.Colors.textPrimary)
-                                Text(IPCATheme.formattedRole(person.role))
-                                    .font(.caption)
-                                    .foregroundStyle(IPCATheme.Colors.textSecondary)
+                                IPCARolePill(role: person.role)
                             }
                             Spacer()
                             if isGroup && selected.contains(person.uuid) {

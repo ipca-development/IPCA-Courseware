@@ -37,8 +37,11 @@ final class CommunicationSyncService
             INNER JOIN ipca_communication_conversation_members mem
               ON mem.conversation_id = cl.conversation_id
              AND mem.user_id = ?
-             AND mem.left_at_utc IS NULL
             WHERE cl.id > ?
+              AND (
+                    mem.left_at_utc IS NULL
+                    OR (cl.change_type = 'membership' AND cl.created_at_utc >= mem.left_at_utc)
+                  )
             ORDER BY cl.id ASC
             LIMIT " . $limit . "
         ");

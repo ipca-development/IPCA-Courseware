@@ -30,6 +30,94 @@ actor APIClient {
         let _: OKEnvelope = try await post("api/communication/auth.php", body: ["action": "logout"])
     }
 
+    func forgotPassword(email: String) async throws -> PasswordResetEnvelope {
+        try await post("api/communication/auth.php", body: [
+            "action": "forgot_password",
+            "email": email
+        ], authorized: false)
+    }
+
+    func validateResetToken(_ token: String) async throws -> PasswordResetEnvelope {
+        try await post("api/communication/auth.php", body: [
+            "action": "validate_reset_token",
+            "token": token
+        ], authorized: false)
+    }
+
+    func resetPassword(token: String, password: String, confirm: String) async throws -> PasswordResetEnvelope {
+        try await post("api/communication/auth.php", body: [
+            "action": "reset_password",
+            "token": token,
+            "password": password,
+            "password_confirm": confirm
+        ], authorized: false)
+    }
+
+    func profile() async throws -> ProfileEnvelope {
+        try await get("api/communication/profile.php")
+    }
+
+    func savePersonalProfile(_ profile: ProfileDetails) async throws -> ProfileEnvelope {
+        try await post("api/communication/profile.php", body: [
+            "action": "save_personal",
+            "first_name": profile.firstName,
+            "last_name": profile.lastName,
+            "street_address": profile.streetAddress,
+            "street_number": profile.streetNumber,
+            "zip_code": profile.zipCode,
+            "city": profile.city,
+            "state_region": profile.stateRegion,
+            "country_code": profile.countryCode,
+            "cellphone": profile.cellphone,
+            "secondary_email": profile.secondaryEmail,
+            "date_of_birth": profile.dateOfBirth,
+            "place_of_birth": profile.placeOfBirth,
+            "nationality": profile.nationality,
+            "id_passport_number": profile.idPassportNumber,
+            "gender": profile.gender,
+            "marital_status": profile.maritalStatus,
+            "hair_color": profile.hairColor,
+            "eye_color": profile.eyeColor,
+            "weight_kg": profile.weightKg,
+            "height_cm": profile.heightCm
+        ])
+    }
+
+    func saveEmergencyContacts(_ contacts: [EmergencyContact]) async throws -> ProfileEnvelope {
+        try await post("api/communication/profile.php", body: [
+            "action": "save_emergency",
+            "emergency_contacts": contacts.map {
+                [
+                    "sort_order": $0.sortOrder,
+                    "contact_name": $0.contactName,
+                    "relationship": $0.relationship,
+                    "phone": $0.phone
+                ] as [String: Any]
+            }
+        ])
+    }
+
+    func changePassword(current: String, new: String, confirm: String) async throws {
+        let _: OKEnvelope = try await post("api/communication/profile.php", body: [
+            "action": "change_password",
+            "current_password": current,
+            "new_password": new,
+            "new_password_confirm": confirm
+        ])
+    }
+
+    func uploadProfilePhoto(data: Data, mimeType: String) async throws -> ProfileEnvelope {
+        try await send(
+            "api/communication/profile.php",
+            method: "POST",
+            query: ["action": "photo"],
+            body: nil,
+            authorized: true,
+            rawBody: data,
+            contentType: mimeType
+        )
+    }
+
     func bootstrap() async throws -> BootstrapResponse {
         try await get("api/communication/bootstrap.php")
     }
@@ -51,6 +139,16 @@ actor APIClient {
             "type": "group",
             "title": title,
             "member_user_uuids": memberUUIDs
+        ])
+        return envelope.conversation
+    }
+
+    func updateGroupMembers(conversationUUID: String, addUserUUIDs: [String] = [], removeUserUUIDs: [String] = []) async throws -> ConversationDTO {
+        let envelope: ConversationEnvelope = try await post("api/communication/conversations.php", body: [
+            "type": "group_members",
+            "conversation_uuid": conversationUUID,
+            "add_user_uuids": addUserUUIDs,
+            "remove_user_uuids": removeUserUUIDs
         ])
         return envelope.conversation
     }
@@ -371,7 +469,9 @@ actor APIClient {
         method: String,
         query: [String: String],
         body: [String: Any]?,
-        authorized: Bool
+        authorized: Bool,
+        rawBody: Data? = nil,
+        contentType: String? = nil
     ) async throws -> T {
         guard var components = URLComponents(url: baseURL.appendingAPIPath(path), resolvingAgainstBaseURL: false) else {
             throw APIClientError.invalidURL
@@ -387,7 +487,10 @@ actor APIClient {
         if authorized, let token, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        if let body {
+        if let rawBody {
+            request.setValue(contentType ?? "application/octet-stream", forHTTPHeaderField: "Content-Type")
+            request.httpBody = rawBody
+        } else if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }

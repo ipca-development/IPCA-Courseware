@@ -13,5 +13,13 @@ struct RootView: View {
         }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: session.isAuthenticated)
+        .sheet(isPresented: $session.showingForgotPassword) {
+            ForgotPasswordView()
+                .environmentObject(session)
+        }
+        .sheet(isPresented: $session.showingPasswordReset) {
+            PasswordResetView()
+                .environmentObject(session)
+        }
     }
 }

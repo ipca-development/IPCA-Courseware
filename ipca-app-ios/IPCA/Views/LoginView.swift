@@ -69,6 +69,12 @@ struct LoginView: View {
                             in: RoundedRectangle(cornerRadius: IPCATheme.Radius.medium, style: .continuous)
                         )
                         .disabled(session.isLoggingIn || email.isEmpty || password.isEmpty)
+                        Button("Forgot password?") {
+                            session.showingForgotPassword = true
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+                        .frame(maxWidth: .infinity)
                     }
                     if let error = session.loginError {
                         Text(error)

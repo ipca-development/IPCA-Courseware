@@ -198,6 +198,122 @@ final class ConversationService
 
     /**
      * @param array<string,mixed> $session
+     * @param array<int,string> $addUuids
+     * @param array<int,string> $removeUuids
+     * @return array<string,mixed>
+     */
+    public function updateGroupMembers(array $session, string $conversationUuid, array $addUuids, array $removeUuids): array
+    {
+        $this->config->requireGroups();
+        $conversation = $this->requireMembership($session, $conversationUuid);
+        if ((string)$conversation['conversation_type'] !== 'group') {
+            throw new CommunicationException('validation_error', 'Only group chats have members you can edit.', 400);
+        }
+
+        $addUuids = $this->uniqueUuids($addUuids);
+        $removeUuids = $this->uniqueUuids($removeUuids);
+        $conversationId = (int)$conversation['id'];
+        $selfId = (int)$session['user']['id'];
+        if ($addUuids === array() && $removeUuids === array()) {
+            return $this->conversationPayload($conversationId, $selfId);
+        }
+
+        $activeStmt = $this->pdo->prepare(
+            'SELECT user_id FROM ipca_communication_conversation_members WHERE conversation_id = ? AND left_at_utc IS NULL'
+        );
+        $activeStmt->execute(array($conversationId));
+        $activeIds = array();
+        foreach ($activeStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $activeIds[(int)$row['user_id']] = true;
+        }
+
+        $addIds = array();
+        foreach ($addUuids as $uuid) {
+            $user = $this->auth->userByUuid($uuid);
+            if ($user === null || !CommunicationSupport::userIsEligible($user)) {
+                throw new CommunicationException('not_found', 'A selected person is not available.', 404);
+            }
+            $userId = (int)$user['id'];
+            if (!isset($activeIds[$userId])) {
+                $addIds[$userId] = true;
+            }
+        }
+        $removeIds = array();
+        foreach ($removeUuids as $uuid) {
+            $user = $this->auth->userByUuid($uuid);
+            if ($user === null) {
+                throw new CommunicationException('not_found', 'A selected person is not available.', 404);
+            }
+            $userId = (int)$user['id'];
+            if (isset($activeIds[$userId])) {
+                $removeIds[$userId] = true;
+            }
+        }
+        unset($addIds[$selfId]);
+        foreach (array_keys($removeIds) as $userId) {
+            unset($activeIds[$userId]);
+        }
+        $projected = count($activeIds) + count($addIds);
+        if ($projected < 1) {
+            throw new CommunicationException('validation_error', 'A group needs at least one person.', 400);
+        }
+        if ($projected > 40) {
+            throw new CommunicationException('validation_error', 'This group is too large.', 400);
+        }
+        if ($addIds === array() && $removeIds === array()) {
+            return $this->conversationPayload($conversationId, $selfId);
+        }
+
+        $now = CommunicationSupport::nowUtc();
+        $this->pdo->beginTransaction();
+        try {
+            foreach (array_keys($addIds) as $userId) {
+                $this->ensureMember($conversationId, $userId);
+            }
+            foreach (array_keys($removeIds) as $userId) {
+                $this->pdo->prepare(
+                    'UPDATE ipca_communication_conversation_members
+                     SET left_at_utc = ?
+                     WHERE conversation_id = ? AND user_id = ? AND left_at_utc IS NULL'
+                )->execute(array($now, $conversationId, $userId));
+            }
+            $this->pdo->prepare(
+                'UPDATE ipca_communication_conversations SET updated_at_utc = ? WHERE id = ?'
+            )->execute(array($now, $conversationId));
+            $this->appendChange($conversationId, 'membership', (string)$conversation['conversation_uuid'], $now);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        CommunicationSupport::log('communication.conversation.members_updated', array(
+            'conversation_uuid' => (string)$conversation['conversation_uuid'],
+            'user_id' => $selfId,
+            'added' => count($addIds),
+            'removed' => count($removeIds),
+        ));
+        return $this->conversationPayload($conversationId, $selfId);
+    }
+
+    /**
+     * @param array<int,mixed> $uuids
+     * @return list<string>
+     */
+    private function uniqueUuids(array $uuids): array
+    {
+        $out = array();
+        foreach ($uuids as $uuid) {
+            $uuid = CommunicationSupport::requireUuid((string)$uuid, 'member_user_uuid');
+            $out[$uuid] = $uuid;
+        }
+        return array_values($out);
+    }
+
+    /**
+     * @param array<string,mixed> $session
      * @return array<int,array<string,mixed>>
      */
     public function directory(array $session, string $query): array

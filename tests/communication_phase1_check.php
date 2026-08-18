@@ -61,7 +61,10 @@ function comm_sqlite(): PDO
       status TEXT NOT NULL,
       account_valid_until TEXT NULL,
       photo_path TEXT NULL,
-      password_hash TEXT NOT NULL
+      password_hash TEXT NOT NULL,
+      must_change_password INTEGER NOT NULL DEFAULT 0,
+      password_changed_at TEXT NULL,
+      updated_at TEXT NULL
     )");
     $pdo->exec("CREATE TABLE ipca_communication_app_config (
       config_key TEXT PRIMARY KEY,
@@ -442,6 +445,50 @@ function comm_sqlite(): PDO
         ('a1000000-0000-4000-8000-000000000002', 'ipca_scheduling', 'IPCA Scheduling', 1),
         ('a1000000-0000-4000-8000-000000000003', 'ipca_administration', 'IPCA Administration', 1)
     ");
+    $pdo->exec("CREATE TABLE user_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL UNIQUE,
+      street_address TEXT NULL,
+      street_number TEXT NULL,
+      zip_code TEXT NULL,
+      city TEXT NULL,
+      state_region TEXT NULL,
+      country_code TEXT NULL,
+      cellphone TEXT NULL,
+      secondary_email TEXT NULL,
+      date_of_birth TEXT NULL,
+      place_of_birth TEXT NULL,
+      nationality TEXT NULL,
+      id_passport_number TEXT NULL,
+      gender TEXT NULL,
+      weight TEXT NULL,
+      height_cm TEXT NULL,
+      hair_color TEXT NULL,
+      eye_color TEXT NULL,
+      marital_status TEXT NULL,
+      created_at TEXT NULL,
+      updated_at TEXT NULL
+    )");
+    $pdo->exec("CREATE TABLE user_emergency_contacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      contact_name TEXT NULL,
+      relationship TEXT NULL,
+      phone TEXT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NULL,
+      updated_at TEXT NULL
+    )");
+    $pdo->exec("CREATE TABLE password_reset_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT NULL,
+      requested_ip TEXT NULL,
+      requested_user_agent TEXT NULL,
+      created_at TEXT NOT NULL
+    )");
     return $pdo;
 }
 
@@ -767,6 +814,59 @@ foreach ($syncC['messages'] as $message) {
     }
 }
 comm_assert('group message reaches members via sync', $groupHit && $group['conversation_type'] === 'group');
+$userD = comm_add_user($pdo, 'd@ipca.training', 'Dana Admin', 'admin');
+$loginD = comm_login($kernel, 'd@ipca.training', 'iphone');
+$sessionD = comm_session($kernel, $loginD);
+$groupUuid = (string)$group['conversation_uuid'];
+$groupAfterAdd = $kernel->conversations->updateGroupMembers(
+    $sessionA,
+    $groupUuid,
+    array((string)$loginD['user']['uuid']),
+    array()
+);
+$groupMemberUuids = array_map(static fn(array $member): string => (string)$member['user']['uuid'], $groupAfterAdd['members'] ?? array());
+$syncD = $kernel->sync->pull($sessionD, 0);
+$dSawGroup = false;
+foreach ($syncD['conversations'] as $row) {
+    if ((string)$row['conversation_uuid'] === $groupUuid) {
+        $dSawGroup = true;
+    }
+}
+comm_assert(
+    'group members can add a person and that person syncs the group',
+    in_array((string)$loginD['user']['uuid'], $groupMemberUuids, true)
+    && $dSawGroup
+);
+$groupAfterRemove = $kernel->conversations->updateGroupMembers(
+    $sessionA,
+    $groupUuid,
+    array(),
+    array((string)$loginB['user']['uuid'])
+);
+$groupMemberUuids = array_map(static fn(array $member): string => (string)$member['user']['uuid'], $groupAfterRemove['members'] ?? array());
+$bLostGroup = false;
+try {
+    $kernel->conversations->getForUser($sessionB, $groupUuid);
+} catch (CommunicationException $e) {
+    $bLostGroup = $e->errorCode === 'not_a_member';
+}
+comm_assert(
+    'group members can remove a person and that person loses access',
+    !in_array((string)$loginB['user']['uuid'], $groupMemberUuids, true)
+    && $bLostGroup
+);
+$directMembersBlocked = false;
+try {
+    $kernel->conversations->updateGroupMembers(
+        $sessionA,
+        $conversationUuid,
+        array((string)$loginD['user']['uuid']),
+        array()
+    );
+} catch (CommunicationException $e) {
+    $directMembersBlocked = $e->errorCode === 'validation_error';
+}
+comm_assert('direct chats cannot be edited as group members', $directMembersBlocked);
 
 $photoBytes = 'fake-jpeg-bytes';
 $photoUuid = comm_uuid();
@@ -2058,6 +2158,119 @@ comm_assert(
     str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/NewMessageView.swift'), 'revealOpenedConversation')
     && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/MessagesRootView.swift'), 'compactPath')
 );
+comm_assert(
+    'iOS opens group members from the chat header and labels Supervisor as Instructor',
+    is_file($root . '/ipca-app-ios/IPCA/Views/GroupMembersView.swift')
+    && str_contains($conversationView = (string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/ConversationView.swift'), 'showingMembers')
+    && str_contains($conversationView, 'GroupMembersView')
+    && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/GroupMembersView.swift'), 'IPCARolePill')
+    && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/GroupMembersView.swift'), 'person.badge.plus')
+    && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Theme/IPCATheme.swift'), 'case "supervisor", "instructor"')
+    && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Theme/IPCATheme.swift'), 'return "Instructor"')
+    && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Theme/IPCATheme.swift'), 'return "Student"')
+    && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Theme/IPCATheme.swift'), 'return "Admin"')
+    && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIClient.swift'), 'group_members')
+    && str_contains((string)file_get_contents($root . '/src/communication/ConversationService.php'), 'function updateGroupMembers')
+    && str_contains((string)file_get_contents($root . '/public/api/communication/conversations.php'), 'group_members')
+);
+
+$loginProfileStudent = comm_login($kernel, 'a@ipca.training');
+$loginProfileInstructor = comm_login($kernel, 'b@ipca.training');
+$loginProfileAdmin = comm_login($kernel, 'admin@ipca.training');
+$sessionProfileStudent = comm_session($kernel, $loginProfileStudent);
+$sessionProfileInstructor = comm_session($kernel, $loginProfileInstructor);
+$sessionProfileAdmin = comm_session($kernel, $loginProfileAdmin);
+$savedStudent = $kernel->profile->savePersonal($sessionProfileStudent, array(
+    'first_name' => 'Alice',
+    'last_name' => 'Updated',
+    'city' => 'Antwerp',
+    'country_code' => 'BE',
+    'cellphone' => '+32470000000',
+    'weight_kg' => '62.5',
+    'height_cm' => '168',
+    'email' => 'attacker@example.com',
+));
+$savedInstructor = $kernel->profile->savePersonal($sessionProfileInstructor, array(
+    'first_name' => 'Bob',
+    'last_name' => 'Instructor',
+    'city' => 'Brussels',
+));
+$savedAdmin = $kernel->profile->savePersonal($sessionProfileAdmin, array(
+    'first_name' => 'Dana',
+    'last_name' => 'Admin',
+    'city' => 'Leuven',
+));
+$kernel->profile->saveEmergency($sessionProfileStudent, array(
+    array('sort_order' => 1, 'contact_name' => 'Pat Parent', 'relationship' => 'Mother', 'phone' => '+32471111111'),
+    array('sort_order' => 2, 'contact_name' => '', 'relationship' => '', 'phone' => ''),
+));
+$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+$photoSaved = $kernel->profile->putPhoto($sessionProfileStudent, $png, 'image/png');
+$photoFs = $root . '/public' . (string)$photoSaved['profile']['photo_path'];
+$kernel->profile->changePassword($sessionProfileStudent, 'secret', 'secret123', 'secret123');
+$changedHash = (string)$pdo->query('SELECT password_hash FROM users WHERE email = ' . $pdo->quote('a@ipca.training'))->fetchColumn();
+$unknownReset = $kernel->profile->requestPasswordReset('nobody@example.com');
+$knownReset = $kernel->profile->requestPasswordReset('c@ipca.training');
+$unknownCount = (int)$pdo->query("SELECT COUNT(*) FROM password_reset_tokens prt INNER JOIN users u ON u.id = prt.user_id WHERE u.email = 'nobody@example.com'")->fetchColumn();
+$knownCount = (int)$pdo->query("SELECT COUNT(*) FROM password_reset_tokens prt INNER JOIN users u ON u.id = prt.user_id WHERE u.email = 'c@ipca.training'")->fetchColumn();
+$resetUserId = (int)$pdo->query("SELECT id FROM users WHERE email = 'c@ipca.training'")->fetchColumn();
+$rawResetToken = bin2hex(random_bytes(32));
+$pdo->prepare(
+    'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, used_at, requested_ip, requested_user_agent, created_at) VALUES (?, ?, ?, NULL, NULL, NULL, ?)'
+)->execute(array(
+    $resetUserId,
+    hash('sha256', $rawResetToken),
+    gmdate('Y-m-d H:i:s', time() + 3600),
+    gmdate('Y-m-d H:i:s'),
+));
+$completedReset = $kernel->profile->completePasswordReset($rawResetToken, 'resetpass1', 'resetpass1');
+$resetLogin = $kernel->auth->login('c@ipca.training', 'resetpass1', array(
+    'device_uuid' => comm_uuid(),
+    'platform' => 'iphone',
+    'model' => 'iPhone',
+    'os_version' => '17.0',
+    'app_version' => '1.0.0',
+));
+$reloaded = $kernel->profile->get($sessionProfileStudent);
+comm_assert(
+    'self-service profile saves personal details and photo_path for every role',
+    (string)$savedStudent['profile']['last_name'] === 'Updated'
+    && (string)$savedStudent['profile']['city'] === 'Antwerp'
+    && (string)$savedStudent['profile']['email'] === 'a@ipca.training'
+    && (string)$savedInstructor['profile']['city'] === 'Brussels'
+    && (string)$savedAdmin['profile']['city'] === 'Leuven'
+    && str_starts_with((string)$photoSaved['profile']['photo_path'], '/uploads/user_photos/')
+    && is_file($photoFs)
+    && (string)$reloaded['emergency_contacts'][0]['contact_name'] === 'Pat Parent'
+    && (string)$reloaded['user']['photo_path'] === (string)$photoSaved['profile']['photo_path']
+);
+if (is_file($photoFs)) {
+    @unlink($photoFs);
+}
+comm_assert(
+    'signed-in users can change their password',
+    password_verify('secret123', $changedHash)
+);
+comm_assert(
+    'forgot password does not reveal whether an email exists',
+    (string)($unknownReset['message'] ?? '') === (string)($knownReset['message'] ?? '')
+    && $unknownCount === 0
+    && $knownCount === 1
+);
+comm_assert(
+    'a valid reset token can set a new password',
+    !empty($completedReset['ok'])
+    && is_array($resetLogin['user'] ?? null)
+    && (string)$resetLogin['user']['email'] === 'c@ipca.training'
+);
+comm_assert(
+    'profile and password reset APIs are wired for the app',
+    is_file($root . '/public/api/communication/profile.php')
+    && str_contains((string)file_get_contents($root . '/public/api/communication/profile.php'), 'change_password')
+    && str_contains((string)file_get_contents($root . '/public/api/communication/auth.php'), 'forgot_password')
+    && str_contains((string)file_get_contents($root . '/public/reset_password.php'), 'ipca://reset')
+    && str_contains((string)file_get_contents($root . '/src/communication/CommunicationProfileService.php'), 'app_reset_link')
+);
 
 foreach (glob($root . '/public/api/communication/*.php') ?: array() as $apiFile) {
     $src = (string)file_get_contents($apiFile);
@@ -2177,6 +2390,18 @@ if ($iosApp === '') {
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/LoginView.swift'), 'IPCA.training')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/ConversationListView.swift'), 'Waiting for network')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/App/AppSession.swift'), 'guard isAuthenticated, isOnline')
+    );
+    comm_assert(
+        'iOS Me edits Courseware profile, password, and in-app token reset',
+        is_file($root . '/ipca-app-ios/IPCA/Views/ProfileEditView.swift')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/MeView.swift'), 'Edit Profile')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/MeView.swift'), 'ProfileEditView')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/LoginView.swift'), 'Forgot password')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/App/AppSession.swift'), 'ipca://reset')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIClient.swift'), 'profile.php')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIClient.swift'), 'change_password')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/PasswordResetView.swift'), 'Paste token')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Info.plist'), 'profile photo')
     );
 }
 

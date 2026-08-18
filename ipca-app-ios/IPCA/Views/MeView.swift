@@ -1,7 +1,14 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 struct MeView: View {
     @EnvironmentObject private var session: AppSession
+    @State private var showingPhotoOptions = false
+    @State private var pickingPhotos = false
+    @State private var capturingCamera = false
+    @State private var photoItem: PhotosPickerItem?
+    @State private var photoError: String?
 
     var body: some View {
         NavigationStack {
@@ -15,12 +22,25 @@ struct MeView: View {
 
                     if let user = session.user {
                         HStack(alignment: .center, spacing: IPCATheme.Spacing.md) {
-                            IPCAAvatar(
-                                name: user.name,
-                                photoPath: user.photoPath,
-                                serverURL: session.serverURLString,
-                                size: 84
-                            )
+                            Button {
+                                showingPhotoOptions = true
+                            } label: {
+                                ZStack(alignment: .bottomTrailing) {
+                                    IPCAAvatar(
+                                        name: user.name,
+                                        photoPath: user.photoPath,
+                                        serverURL: session.serverURLString,
+                                        size: 84
+                                    )
+                                    Image(systemName: "camera.fill")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(6)
+                                        .background(IPCATheme.interactiveGradient, in: Circle())
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Update profile photo")
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(user.name)
                                     .font(.title3.weight(.bold))
@@ -49,6 +69,36 @@ struct MeView: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, IPCATheme.Spacing.screen)
+                    }
+
+                    if let photoError {
+                        Text(photoError)
+                            .font(.footnote)
+                            .foregroundStyle(IPCATheme.Colors.destructive)
+                            .padding(.horizontal, IPCATheme.Spacing.screen)
+                    }
+
+                    settingsGroup("PROFILE") {
+                        NavigationLink {
+                            ProfileEditView()
+                        } label: {
+                            IPCASettingsRow(icon: "person.fill", title: "Edit Profile", subtitle: "Personal details", showsChevron: true)
+                        }
+                        .buttonStyle(.plain)
+                        divider
+                        NavigationLink {
+                            EmergencyContactsView()
+                        } label: {
+                            IPCASettingsRow(icon: "cross.case.fill", title: "Emergency Contacts", subtitle: "Who to call", showsChevron: true)
+                        }
+                        .buttonStyle(.plain)
+                        divider
+                        NavigationLink {
+                            PasswordChangeView()
+                        } label: {
+                            IPCASettingsRow(icon: "lock.fill", title: "Password", subtitle: "Change your password", showsChevron: true)
+                        }
+                        .buttonStyle(.plain)
                     }
 
                     settingsGroup("ACCOUNT") {
@@ -122,6 +172,26 @@ struct MeView: View {
             .background(IPCABackground())
             .toolbar(.hidden, for: .navigationBar)
             .task { await session.preparePush() }
+            .confirmationDialog("Update profile photo", isPresented: $showingPhotoOptions, titleVisibility: .visible) {
+                Button("Camera") { capturingCamera = true }
+                Button("Photo Library") { pickingPhotos = true }
+                Button("Cancel", role: .cancel) {}
+            }
+            .photosPicker(isPresented: $pickingPhotos, selection: $photoItem, matching: .images)
+            .onChange(of: photoItem) { _, item in
+                guard let item else { return }
+                Task { await importPhoto(item) }
+            }
+            .fullScreenCover(isPresented: $capturingCamera) {
+                CameraCaptureView(
+                    onCapture: { data, mime in
+                        capturingCamera = false
+                        Task { await uploadPhoto(data, mimeType: mime) }
+                    },
+                    onCancel: { capturingCamera = false }
+                )
+                .ignoresSafeArea()
+            }
         }
     }
 
@@ -148,6 +218,27 @@ struct MeView: View {
                     .stroke(IPCATheme.Colors.separator, lineWidth: 1)
             )
             .padding(.horizontal, IPCATheme.Spacing.screen)
+        }
+    }
+
+    private func importPhoto(_ item: PhotosPickerItem) async {
+        photoItem = nil
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else { return }
+            await uploadPhoto(data, mimeType: "image/jpeg")
+        } catch {
+            photoError = "Couldn't read that photo."
+        }
+    }
+
+    private func uploadPhoto(_ data: Data, mimeType: String) async {
+        photoError = nil
+        do {
+            try await session.uploadProfilePhoto(data: data, mimeType: mimeType)
+        } catch let error as APIClientError {
+            photoError = error.errorDescription
+        } catch {
+            photoError = "Couldn't update your photo."
         }
     }
 }

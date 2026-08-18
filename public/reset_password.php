@@ -786,6 +786,7 @@ body.access-page::after{
 
                             <div class="access-actions">
                                 <button class="access-btn access-btn--primary" type="submit">Save New Password</button>
+                                <a class="access-btn access-btn--secondary" href="<?php echo rp_h('ipca://reset?token=' . rawurlencode($token)); ?>">Open in the IPCA app</a>
                                 <a class="access-btn access-btn--secondary" href="/login.php">Back to Login</a>
                             </div>
                         </form>

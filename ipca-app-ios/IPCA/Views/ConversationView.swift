@@ -17,6 +17,7 @@ struct ConversationView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var replyTarget: ReplyToDTO?
     @FocusState private var composerFocused: Bool
+    @State private var showingMembers = false
 
     @FetchRequest private var messages: FetchedResults<MessageEntity>
     @FetchRequest private var conversations: FetchedResults<ConversationEntity>
@@ -143,21 +144,36 @@ struct ConversationView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 10) {
-                    conversationAvatar
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(.headline)
-                            .foregroundStyle(IPCATheme.Colors.textPrimary)
-                            .lineLimit(1)
-                        if let subtitle = headerSubtitle {
-                            Text(subtitle)
-                                .font(.caption)
-                                .foregroundStyle(IPCATheme.Colors.textSecondary)
+                Button {
+                    if conversationType == "group" {
+                        showingMembers = true
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        conversationAvatar
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(title)
+                                .font(.headline)
+                                .foregroundStyle(IPCATheme.Colors.textPrimary)
                                 .lineLimit(1)
+                            if let subtitle = headerSubtitle {
+                                Text(subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(IPCATheme.Colors.textSecondary)
+                                    .lineLimit(1)
+                            }
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                .disabled(conversationType != "group")
+                .accessibilityLabel(conversationType == "group" ? "Group members" : title)
+            }
+        }
+        .sheet(isPresented: $showingMembers) {
+            NavigationStack {
+                GroupMembersView(conversationUUID: conversationUUID, title: title)
+                    .environmentObject(session)
             }
         }
         .background(IPCABackground())
@@ -180,7 +196,8 @@ struct ConversationView: View {
 
     private var headerSubtitle: String? {
         if conversationType == "group" {
-            return "Group"
+            let count = members.count
+            return count == 1 ? "1 member" : "\(count) members"
         }
         if conversationType == "announcement" || conversationType == "system" {
             return "Official"
@@ -345,9 +362,14 @@ struct MessageBubble: View {
                     if message.isFromMe { Spacer(minLength: 48) }
                     VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 4) {
                         if !message.isFromMe, !message.senderDisplayName.isEmpty, conversationShowsSender {
-                            Text(message.senderDisplayName)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+                            HStack(spacing: 6) {
+                                Text(message.senderDisplayName)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+                                if let role = senderRole, !role.isEmpty {
+                                    IPCARolePill(role: role)
+                                }
+                            }
                         }
                         if let reply = parsedReply {
                             replyPreview(reply)
@@ -425,6 +447,10 @@ struct MessageBubble: View {
 
     private var conversationShowsSender: Bool {
         members.filter { !$0.userUUID.isEmpty }.count > 2
+    }
+
+    private var senderRole: String? {
+        members.first { $0.userUUID == message.senderUserUUID }?.role
     }
 
     private var replyTarget: ReplyToDTO {
