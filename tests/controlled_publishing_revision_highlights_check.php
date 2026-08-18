@@ -48,6 +48,19 @@ if ((string)($annotated[0]['change_status'] ?? '') !== 'unchanged') {
     throw new RuntimeException('Version-independent block identity did not preserve unchanged status.');
 }
 
+$formatOnlyPayload = json_encode(
+    array('html' => '<p>Unchanged medication text.</p><p><br></p>'),
+    JSON_THROW_ON_ERROR
+);
+$formatOnly = $service->annotateChangeStatus(11, array(array(
+    'block_key' => 'part_2_medication_body',
+    'payload_json' => $formatOnlyPayload,
+    'content_hash' => hash('sha256', 'paragraph|' . $formatOnlyPayload),
+)));
+if ((string)($formatOnly[0]['change_status'] ?? '') !== 'unchanged') {
+    throw new RuntimeException('Empty-paragraph formatting noise was reported as a content change.');
+}
+
 $summariesMethod = new ReflectionMethod($service, 'humanChangeSummaries');
 $changes = array(
     array(

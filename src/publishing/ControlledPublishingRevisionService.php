@@ -62,7 +62,9 @@ final class ControlledPublishingRevisionService
     public function annotateChangeStatus(int $versionId, array $blocks): array
     {
         $prior = $this->priorVersion($versionId);
-        $priorHashes = $prior !== null ? $this->blockHashesByKey((int)$prior['id']) : array();
+        $priorBlocks = $prior !== null
+            ? $this->blockComparisonsByKey((int)$prior['id'])
+            : array();
 
         foreach ($blocks as $idx => $block) {
             if (!empty($block['is_system_managed'])) {
@@ -75,9 +77,15 @@ final class ControlledPublishingRevisionService
                 $blocks[$idx]['change_status'] = 'unchanged';
                 continue;
             }
-            if (!isset($priorHashes[$blockKey])) {
+            if (!isset($priorBlocks[$blockKey])) {
                 $blocks[$idx]['change_status'] = 'new';
-            } elseif ($priorHashes[$blockKey] !== $hash) {
+            } elseif ((string)$priorBlocks[$blockKey]['content_hash'] !== $hash) {
+                $currentText = $this->payloadText($this->decodePayload($block['payload_json'] ?? null));
+                $priorText = (string)$priorBlocks[$blockKey]['content_text'];
+                if ($currentText !== '' && hash_equals($priorText, $currentText)) {
+                    $blocks[$idx]['change_status'] = 'unchanged';
+                    continue;
+                }
                 $blocks[$idx]['change_status'] = 'modified';
             } else {
                 $blocks[$idx]['change_status'] = 'unchanged';
@@ -87,12 +95,12 @@ final class ControlledPublishingRevisionService
     }
 
     /**
-     * @return array<string,string> block_key => content_hash
+     * @return array<string,array{content_hash:string,content_text:string}>
      */
-    private function blockHashesByKey(int $versionId): array
+    private function blockComparisonsByKey(int $versionId): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT block_key, content_hash
+            SELECT block_key, content_hash, payload_json
             FROM ipca_publishing_book_blocks
             WHERE book_version_id = :version_id
         ");
@@ -101,7 +109,12 @@ final class ControlledPublishingRevisionService
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $key = trim((string)($row['block_key'] ?? ''));
             if ($key !== '') {
-                $map[$key] = (string)$row['content_hash'];
+                $map[$key] = array(
+                    'content_hash' => (string)$row['content_hash'],
+                    'content_text' => $this->payloadText(
+                        $this->decodePayload($row['payload_json'] ?? null)
+                    ),
+                );
             }
         }
         return $map;
