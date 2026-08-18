@@ -378,6 +378,75 @@
   color: #72869d;
 }
 
+.bmca-version-picker {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid #cbd8e5;
+  border-radius: 10px;
+  background: #f7fafd;
+}
+
+.bmca-version-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid #d8e3ed;
+  border-radius: 9px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.bmca-version-option:hover {
+  border-color: #82b5dd;
+}
+
+.bmca-field .bmca-version-option input {
+  position: absolute;
+  width: 1px;
+  min-height: 1px;
+  opacity: 0;
+}
+
+.bmca-version-option__check {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid #aebdcb;
+  border-radius: 6px;
+  color: transparent;
+  background: #fff;
+}
+
+.bmca-version-option:has(input:checked),
+.bmca-version-option.is-selected {
+  border-color: #4b94cf;
+  background: #f0f8ff;
+  box-shadow: 0 0 0 2px rgba(42, 126, 194, .1);
+}
+
+.bmca-version-option input:checked + .bmca-version-option__check {
+  color: #fff;
+  border-color: #1772ba;
+  background: #1772ba;
+}
+
+.bmca-version-option > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.bmca-version-option strong {
+  color: var(--bmca-navy);
+  font-size: 12px;
+}
+
 .bmca-form-error {
   padding: 10px 12px;
   border: 1px solid #efc3c6;

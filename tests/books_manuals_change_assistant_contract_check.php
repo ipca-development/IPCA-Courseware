@@ -51,6 +51,11 @@ $js = bmca_source($jsPath);
 
 bmca_assert(str_contains($index, 'AI Change Assistant'), 'Library hero entry is missing.');
 bmca_assert(str_contains($nav, 'Change Projects'), 'Books & Manuals navigation entry is missing.');
+bmca_assert(
+    str_contains(bmca_source($listPath), 'name="version_ids[]"')
+        && str_contains($js, "querySelectorAll('[name=\"version_ids[]\"]:checked')"),
+    'Project creation must provide explicit selectable manual-version checkboxes.'
+);
 bmca_assert(str_contains($detail, 'Impact Finder') && str_contains($detail, 'Consistency &amp; Conflicts'), 'Full review stages are missing.');
 bmca_assert(str_contains($detail, 'data-bmca-create-revision'), 'Released-scope draft revision action is missing.');
 

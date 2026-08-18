@@ -100,6 +100,12 @@
 
     var form = root.querySelector('[data-bmca-create-form]');
     if (!form) return;
+    form.addEventListener('change', function (event) {
+      var version = event.target.closest('input[name="version_ids[]"]');
+      if (version) {
+        version.closest('.bmca-version-option').classList.toggle('is-selected', version.checked);
+      }
+    });
     form.addEventListener('submit', async function (event) {
       event.preventDefault();
       var button = form.querySelector('[data-bmca-submit]');
@@ -122,7 +128,7 @@
         else upload.set('source_text', requestText);
         await request('upload_source', upload, { formData: true });
 
-        var selected = Array.prototype.map.call(form.querySelectorAll('select[name="version_ids[]"] option:checked'), function (option) {
+        var selected = Array.prototype.map.call(form.querySelectorAll('[name="version_ids[]"]:checked'), function (option) {
           return Number(option.value);
         }).filter(Boolean);
         if (selected.length) {

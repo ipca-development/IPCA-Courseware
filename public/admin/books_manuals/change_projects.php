@@ -200,22 +200,25 @@ books_manuals_page_open(array(
           <span class="bmca-upload__icon" aria-hidden="true">↑</span>
           <span><strong>Attach optional source file</strong><small data-bmca-file-name>PDF, DOCX, TXT and related documents</small></span>
         </label>
-        <label class="bmca-field">
+        <div class="bmca-field">
           <span>Initial manual scope <small>optional</small></span>
-          <select name="version_ids[]" multiple size="<?= min(6, max(3, count($versions))) ?>">
+          <span class="bmca-version-picker" data-bmca-version-picker>
             <?php foreach ($versions as $version): ?>
               <?php $versionId = (int)($version['version_id'] ?? $version['id'] ?? 0); ?>
               <?php if ($versionId > 0): ?>
-                <option value="<?= $versionId ?>">
-                  <?= h((string)($version['book_key'] ?? $version['manual_code'] ?? 'Manual')) ?>
-                  · <?= h((string)($version['title'] ?? $version['book_title'] ?? '')) ?>
-                  · <?= h((string)($version['version_label'] ?? $version['revision'] ?? '')) ?>
-                </option>
+                <label class="bmca-version-option">
+                  <input type="checkbox" name="version_ids[]" value="<?= $versionId ?>">
+                  <span class="bmca-version-option__check" aria-hidden="true">✓</span>
+                  <span>
+                    <strong><?= h((string)($version['book_key'] ?? $version['manual_code'] ?? 'Manual')) ?> · <?= h((string)($version['title'] ?? $version['book_title'] ?? '')) ?></strong>
+                    <small>Revision <?= h((string)($version['version_label'] ?? $version['revision'] ?? '—')) ?> · <?= h(ucwords(str_replace('_', ' ', (string)($version['lifecycle_status'] ?? $version['status'] ?? '')))) ?></small>
+                  </span>
+                </label>
               <?php endif; ?>
             <?php endforeach; ?>
-          </select>
-          <small>Hold Command/Ctrl to select more than one manual.</small>
-        </label>
+          </span>
+          <small>Select one or more exact revisions. Approved versions can be analysed read-only; applying changes later requires a Draft.</small>
+        </div>
         <div class="bmca-form-error" data-bmca-form-error hidden></div>
         <div class="bmca-actions">
           <button class="app-btn app-btn--primary" type="submit" data-bmca-submit>Create project</button>
