@@ -58,6 +58,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             redirect('/admin/books_manuals/index.php?open=' . (int)$created['version_id']);
         }
+        if ($action === 'create_revision_override') {
+            $created = $workflow->createRevisionWithBulkOverride(
+                (int)($_POST['version_id'] ?? 0),
+                $actorId,
+                (string)($_POST['override_rationale'] ?? '')
+            );
+            bm_library_flash(
+                'success',
+                'All legacy approval blockers were overridden and Revision '
+                    . (string)$created['version_label'] . ' was created as a new Draft.'
+            );
+            redirect('/admin/books_manuals/index.php?open=' . (int)$created['version_id']);
+        }
         if ($action === 'lifecycle_transition') {
             $versionId = (int)($_POST['version_id'] ?? 0);
             $workflow->transition(
@@ -212,6 +225,7 @@ books_manuals_page_open(array(
       $coverUrl = '/student/api/manual_reader_cover_thumbnail.php?book='
           . rawurlencode((string)$row['book_key']) . '&version_id=' . $versionId . '&admin_preview=1';
       $settingsModalId = 'bm-manual-settings-' . $versionId;
+      $overrideModalId = 'bm-compliance-override-' . $versionId;
     ?>
     <article class="cmp-card bm-book-card" data-bm-reader-url="<?= h($previewUrl) ?>">
       <a class="bm-cover bm-cover--thumbnail" href="<?= h($previewUrl) ?>" data-bm-reader-open aria-label="Open <?= h((string)$row['book_title']) ?> page viewer">
@@ -249,7 +263,9 @@ books_manuals_page_open(array(
                   <button type="submit">Create NEW Revision Draft</button>
                 </form>
               <?php else: ?>
-                <span>New revision is available after approval.</span>
+                <button type="button" data-compliance-modal-open="<?= h($overrideModalId) ?>">
+                  Override blockers &amp; create NEW Revision
+                </button>
               <?php endif; ?>
             </div>
           </details>
@@ -396,6 +412,63 @@ books_manuals_page_open(array(
         </div>
       </div>
     </dialog>
+
+    <?php if ((string)$row['lifecycle_status'] !== 'released'): ?>
+      <dialog class="compliance-modal bm-override-modal" id="<?= h($overrideModalId) ?>">
+        <div class="compliance-modal__panel bm-override-modal__panel">
+          <header class="bm-modal-hero">
+            <div>
+              <div class="hero-overline">Controlled legacy approval override</div>
+              <h2>Override all blockers</h2>
+              <p>
+                <?= h((string)$row['book_key']) ?> <?= h((string)$row['version_label']) ?>
+                will be recorded as the approved source for a new revision.
+              </p>
+            </div>
+            <button type="button" class="bm-modal-close" data-compliance-modal-close aria-label="Close">&times;</button>
+          </header>
+          <div class="compliance-modal__body">
+            <div class="cmp-alert cmp-alert--error">
+              This one action overrides every current lifecycle, MCCF coverage,
+              source-baseline and authoritative-pagination blocker. The actor,
+              rationale, source fingerprint and complete blocker snapshot are
+              retained permanently.
+            </div>
+            <form method="post" class="bm-override-form">
+              <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+              <input type="hidden" name="action" value="create_revision_override">
+              <input type="hidden" name="version_id" value="<?= $versionId ?>">
+              <label class="bm-form-field">
+                <span>Rationale for overriding all blockers</span>
+                <textarea
+                  name="override_rationale"
+                  required
+                  minlength="20"
+                  maxlength="4000"
+                  rows="6"
+                  placeholder="Explain when and by whom this revision was previously approved, and why the current automated blockers do not invalidate that approval."
+                ></textarea>
+              </label>
+              <label class="bm-override-confirm">
+                <input type="checkbox" required>
+                <span>
+                  I confirm this version was already approved and authorize it
+                  as the controlled source of the new revision.
+                </span>
+              </label>
+              <div class="bm-actions">
+                <button class="app-btn app-btn--primary" type="submit">
+                  Override All Blockers &amp; Create Draft
+                </button>
+                <button class="app-btn app-btn--secondary" type="button" data-compliance-modal-close>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </dialog>
+    <?php endif; ?>
   <?php endforeach; ?>
   <?php if ($tablesReady && $rows === array()): ?>
     <div class="cmp-card bm-empty">No manuals are registered yet.</div>

@@ -638,6 +638,35 @@
   font-size: 12px;
 }
 
+.bm-override-modal__panel {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.bm-override-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.bm-override-form textarea {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+}
+
+.bm-override-confirm {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: #4d6076;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bm-override-confirm input {
+  margin-top: 2px;
+}
+
 .bm-audit-gaps__head h2 {
   margin: 0 0 5px;
   color: #17345d;
@@ -778,6 +807,76 @@
   text-align: center;
 }
 
+.bm-audit-overrides h2 {
+  margin: 4px 0 5px;
+  color: #17345d;
+}
+
+.bm-audit-overrides__intro {
+  margin: 0 0 15px;
+  color: #66798e;
+  font-size: 13px;
+}
+
+.bm-audit-override-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bm-audit-override {
+  padding: 15px 16px;
+  border: 1px solid #e8c690;
+  border-left: 4px solid #bc7613;
+  border-radius: 10px;
+  background: #fffaf1;
+}
+
+.bm-audit-override__head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bm-audit-override__head strong {
+  color: #8b5810;
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+
+.bm-audit-override__head span {
+  color: #8c7a61;
+  font-size: 11px;
+}
+
+.bm-audit-override blockquote {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-left: 2px solid #dbb06c;
+  color: #5d4b32;
+  background: rgba(255, 255, 255, .72);
+  font-size: 13px;
+}
+
+.bm-audit-override dl {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.bm-audit-override dt {
+  color: #8a785f;
+}
+
+.bm-audit-override dd {
+  min-width: 0;
+  margin: 0;
+  color: #594a38;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 560px) {
   .bm-book-card {
     grid-template-columns: 85px minmax(0, 1fr);
@@ -830,5 +929,13 @@
 
   .bm-audit-gap__action {
     justify-self: start;
+  }
+
+  .bm-audit-override__head {
+    display: grid;
+  }
+
+  .bm-audit-override dl {
+    grid-template-columns: 1fr;
   }
 }

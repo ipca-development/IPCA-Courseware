@@ -176,6 +176,39 @@ final class BooksManualsAuditService
     /**
      * @return list<array<string,mixed>>
      */
+    public function listComplianceOverrides(int $versionId): array
+    {
+        $present = (int)$this->pdo->query(
+            "SELECT COUNT(*) FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'ipca_publishing_compliance_overrides'"
+        )->fetchColumn() === 1;
+        if (!$present) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT o.id, o.override_uuid, o.override_scope, o.rationale,
+                    o.blockers_json, o.source_fingerprint, o.created_at,
+                    u.name AS actor_name, u.email AS actor_email
+             FROM ipca_publishing_compliance_overrides o
+             LEFT JOIN users u ON u.id = o.actor_user_id
+             WHERE o.book_version_id = ?
+             ORDER BY o.id DESC'
+        );
+        $stmt->execute(array($versionId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        foreach ($rows as &$row) {
+            $blockers = json_decode((string)($row['blockers_json'] ?? '{}'), true);
+            $row['blockers'] = is_array($blockers) ? $blockers : array();
+            unset($row['blockers_json']);
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
     private function requirementsForSourceSet(int $sourceSetId): array
     {
         $stmt = $this->pdo->prepare(

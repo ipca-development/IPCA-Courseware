@@ -5,10 +5,11 @@
 1. Back up the database.
 2. Apply `scripts/sql/2026_08_18_books_manuals_workflow.sql`.
 3. Apply `scripts/sql/2026_08_18_books_manuals_library_ux.sql`.
-4. Run:
+4. Apply `scripts/sql/2026_08_18_books_manuals_compliance_overrides.sql`.
+5. Run:
    - `php tests/books_manuals_protected_boundary_check.php`
    - `php tests/books_manuals_workflow_contract_check.php`
-4. Open `/admin/books_manuals/index.php` as an administrator.
+6. Open `/admin/books_manuals/index.php` as an administrator.
 
 The migration is additive. Existing controlled-publishing tables, editor routes and
 released content remain authoritative. Existing released versions receive the same
@@ -19,6 +20,9 @@ reader-role visibility they had before the migration.
 - Revert Draft Review to Draft from the manual settings page.
 - Revert Awaiting Approval to Draft Review from the same page.
 - Approved versions are immutable; create a new revision instead of changing them.
+- A legacy approval override is one-time and immutable. It requires an administrator
+  rationale and preserves the source fingerprint plus all release blockers as they
+  existed when the new revision was created.
 - To disable the new navigation without altering data, revert the Books & Manuals
   entry in `src/nav/admin.php`. Legacy Compliance routes remain operational.
 

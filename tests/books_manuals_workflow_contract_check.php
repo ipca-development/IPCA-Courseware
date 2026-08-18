@@ -30,6 +30,9 @@ $migration = (string)file_get_contents(
 $libraryMigration = (string)file_get_contents(
     $root . '/scripts/sql/2026_08_18_books_manuals_library_ux.sql'
 );
+$overrideMigration = (string)file_get_contents(
+    $root . '/scripts/sql/2026_08_18_books_manuals_compliance_overrides.sql'
+);
 $readerApi = (string)file_get_contents($root . '/public/student/api/manual_reader_api.php');
 $nav = (string)file_get_contents($root . '/src/nav/admin.php');
 $libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
@@ -156,6 +159,33 @@ bm_contract_assert(
         && str_contains($auditPage, 'BCAA MCCF version')
         && str_contains($auditPage, 'View BCAA Submission MCCF')
         && str_contains($auditPage, "'layout' => 'bcaa'")
+);
+bm_contract_assert(
+    'bulk override requires rationale and creates a new revision',
+    str_contains($workflow, 'createRevisionWithBulkOverride')
+        && str_contains($workflow, 'strlen($rationale) < 20')
+        && str_contains($workflow, "'bulk_override_legacy_approval'")
+        && str_contains($workflow, 'createRevision($sourceVersionId, $actorUserId)')
+);
+bm_contract_assert(
+    'bulk override captures all blockers immutably',
+    str_contains($overrideMigration, 'ipca_publishing_compliance_overrides')
+        && str_contains($overrideMigration, 'blockers_json JSON NOT NULL')
+        && str_contains($workflow, "'all_release_blockers'")
+        && str_contains($workflow, "'gap_items' => \$gapItems")
+);
+bm_contract_assert(
+    'library exposes one confirmed override-all action',
+    str_contains($libraryPage, 'Override All Blockers &amp; Create Draft')
+        && str_contains($libraryPage, 'name="override_rationale"')
+        && str_contains($libraryPage, 'minlength="20"')
+);
+bm_contract_assert(
+    'compliance audit displays override rationale and identity',
+    str_contains($audit, 'listComplianceOverrides')
+        && str_contains($auditPage, 'Compliance overrides')
+        && str_contains($auditPage, "override['rationale']")
+        && str_contains($auditPage, "override['override_uuid']")
 );
 foreach (array(
     "LIKE 'annexes_annex_%'" => 'embedded annex inventory',

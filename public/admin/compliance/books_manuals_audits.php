@@ -62,6 +62,9 @@ if ($detail !== null) {
     }
 }
 $snapshots = $detail !== null ? $auditService->listSnapshots($versionId) : array();
+$complianceOverrides = $detail !== null
+    ? $auditService->listComplianceOverrides($versionId)
+    : array();
 $library = $workflow->tablesPresent() ? $workflow->listLibrary(false) : array();
 $gapFilter = strtolower(trim((string)($_GET['gap'] ?? 'all')));
 if (!in_array($gapFilter, array('all', 'missing', 'insufficient'), true)) {
@@ -287,6 +290,49 @@ compliance_page_open(array(
           <?php endforeach; ?>
         </div>
       <?php endif; ?>
+    </section>
+  <?php endif; ?>
+
+  <?php if ($complianceOverrides !== array()): ?>
+    <section class="cmp-card bm-audit-overrides" style="margin-bottom:16px;">
+      <div class="bm-audit-gap__eyebrow">Immutable governance record</div>
+      <h2>Compliance overrides</h2>
+      <p class="bm-audit-overrides__intro">
+        These records preserve who overrode the release blockers, why they did
+        so, and the exact blocker state at that moment.
+      </p>
+      <div class="bm-audit-override-list">
+        <?php foreach ($complianceOverrides as $override): ?>
+          <?php $blockers = (array)($override['blockers'] ?? array()); ?>
+          <article class="bm-audit-override">
+            <div class="bm-audit-override__head">
+              <strong>ALL RELEASE BLOCKERS OVERRIDDEN</strong>
+              <span><?= h((string)$override['created_at']) ?></span>
+            </div>
+            <blockquote><?= nl2br(h((string)$override['rationale'])) ?></blockquote>
+            <dl>
+              <dt>Recorded by</dt>
+              <dd><?= h((string)($override['actor_name'] ?: $override['actor_email'] ?: 'Unknown administrator')) ?></dd>
+              <dt>Previous stage</dt>
+              <dd><?= h(strtoupper((string)($blockers['previous_lifecycle_status'] ?? 'unknown'))) ?></dd>
+              <dt>MCCF blockers</dt>
+              <dd>
+                <?= (int)($blockers['missing_count'] ?? 0) ?> missing ·
+                <?= (int)($blockers['insufficient_count'] ?? 0) ?> insufficient
+              </dd>
+              <dt>Foundation blockers</dt>
+              <dd>
+                Source baseline <?= !empty($blockers['source_baseline_ok']) ? 'ready' : 'overridden' ?> ·
+                Pagination <?= !empty($blockers['authoritative_pagination_ok']) ? 'ready' : 'overridden' ?>
+              </dd>
+              <dt>Source fingerprint</dt>
+              <dd><code><?= h((string)$override['source_fingerprint']) ?></code></dd>
+              <dt>Override ID</dt>
+              <dd><code><?= h((string)$override['override_uuid']) ?></code></dd>
+            </dl>
+          </article>
+        <?php endforeach; ?>
+      </div>
     </section>
   <?php endif; ?>
 

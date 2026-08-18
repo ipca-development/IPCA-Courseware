@@ -250,6 +250,130 @@ final class BooksManualsWorkflowService
         return $created;
     }
 
+    /**
+     * Record a one-time, immutable legacy-approval override and create the next
+     * draft from the governed source version.
+     *
+     * @return array{version_id:int,version_label:string,override_uuid:string}
+     */
+    public function createRevisionWithBulkOverride(
+        int $sourceVersionId,
+        int $actorUserId,
+        string $rationale
+    ): array {
+        $rationale = trim($rationale);
+        if (strlen($rationale) < 20) {
+            throw new InvalidArgumentException(
+                'Provide a rationale of at least 20 characters explaining the legacy approval.'
+            );
+        }
+        if (strlen($rationale) > 4000) {
+            throw new InvalidArgumentException('The override rationale must not exceed 4,000 characters.');
+        }
+        $source = $this->foundation->getVersion($sourceVersionId);
+        if ($source === null) {
+            throw new RuntimeException('Manual version not found.');
+        }
+        if ((string)$source['lifecycle_status'] === 'released') {
+            $created = $this->createRevision($sourceVersionId, $actorUserId);
+            $created['override_uuid'] = '';
+            return $created;
+        }
+        $tablePresent = (int)$this->pdo->query(
+            "SELECT COUNT(*) FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'ipca_publishing_compliance_overrides'"
+        )->fetchColumn() === 1;
+        if (!$tablePresent) {
+            throw new RuntimeException('Install the compliance override migration first.');
+        }
+
+        require_once __DIR__ . '/BooksManualsAuditService.php';
+        $coverage = (new BooksManualsAuditService($this->pdo, $this->foundation))
+            ->liveCoverage($sourceVersionId);
+        $identity = $this->syncUpdateIdentity($sourceVersionId);
+        $gapItems = array();
+        foreach ((array)($coverage['requirements'] ?? array()) as $requirement) {
+            if (($requirement['coverage_state'] ?? '') === 'covered') {
+                continue;
+            }
+            $gapItems[] = array(
+                'requirement_id' => (int)($requirement['id'] ?? 0),
+                'requirement_key' => (string)($requirement['requirement_key'] ?? ''),
+                'coverage_state' => (string)($requirement['coverage_state'] ?? 'missing'),
+                'score' => isset($requirement['score']) ? (int)$requirement['score'] : null,
+                'reasons' => (array)($requirement['reasons'] ?? array()),
+            );
+        }
+        $blockers = array(
+            'schema_version' => 1,
+            'captured_at' => gmdate('c'),
+            'previous_lifecycle_status' => (string)$source['lifecycle_status'],
+            'override_scope' => 'all_release_blockers',
+            'coverage_percent' => (float)($coverage['coverage_percent'] ?? 0),
+            'insufficient_count' => (int)($coverage['insufficient_count'] ?? 0),
+            'missing_count' => (int)($coverage['missing_count'] ?? 0),
+            'source_baseline_ok' => !empty($coverage['source_baseline_ok']),
+            'authoritative_pagination_ok' => !empty($coverage['authoritative_pagination_ok']),
+            'foundation_errors' => (array)($coverage['foundation_errors'] ?? array()),
+            'gap_items' => $gapItems,
+        );
+        $overrideUuid = $this->uuidV4();
+        $from = (string)$source['lifecycle_status'];
+
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO ipca_publishing_compliance_overrides
+                  (override_uuid, book_version_id, override_scope, rationale,
+                   blockers_json, source_fingerprint, actor_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute(array(
+                $overrideUuid,
+                $sourceVersionId,
+                'all_release_blockers',
+                $rationale,
+                json_encode(
+                    $blockers,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+                ),
+                (string)$identity['source_fingerprint'],
+                $actorUserId,
+            ));
+            $release = $this->pdo->prepare(
+                "UPDATE ipca_publishing_book_versions
+                 SET lifecycle_status = 'released',
+                     released_at = CURRENT_TIMESTAMP,
+                     released_by = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ? AND lifecycle_status = ?"
+            );
+            $release->execute(array($actorUserId, $sourceVersionId, $from));
+            if ($release->rowCount() !== 1) {
+                throw new RuntimeException('The manual phase changed before the override completed.');
+            }
+            $this->recordEvent(
+                $sourceVersionId,
+                $from,
+                'released',
+                'bulk_override_legacy_approval',
+                $rationale,
+                $actorUserId
+            );
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $created = $this->createRevision($sourceVersionId, $actorUserId);
+        $created['override_uuid'] = $overrideUuid;
+        return $created;
+    }
+
     public function transition(int $versionId, string $action, int $actorUserId, ?string $note = null): string
     {
         $version = $this->foundation->getVersion($versionId);
@@ -689,5 +813,21 @@ final class BooksManualsWorkflowService
              SET last_transition_at = CURRENT_TIMESTAMP(3), last_transition_by = ?
              WHERE book_version_id = ?'
         )->execute(array($actorUserId, $versionId));
+    }
+
+    private function uuidV4(): string
+    {
+        $bytes = random_bytes(16);
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+        $hex = bin2hex($bytes);
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 4),
+            substr($hex, 16, 4),
+            substr($hex, 20)
+        );
     }
 }
