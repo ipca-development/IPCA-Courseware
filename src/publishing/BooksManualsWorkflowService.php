@@ -135,6 +135,51 @@ final class BooksManualsWorkflowService
     }
 
     /**
+     * @return list<array<string,mixed>>
+     */
+    public function listPreviousVersions(int $bookId, int $currentVersionId): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT
+               bv.id AS version_id,
+               bv.version_label,
+               bv.title,
+               bv.lifecycle_status,
+               bv.effective_date,
+               bv.released_at,
+               bv.created_at,
+               bv.updated_at,
+               vw.update_code,
+               releaser.name AS approved_by_name,
+               releaser.email AS approved_by_email,
+               audit.status AS audit_status,
+               audit.coverage_percent
+             FROM ipca_publishing_book_versions bv
+             LEFT JOIN ipca_publishing_version_workflow vw
+               ON vw.book_version_id = bv.id
+             LEFT JOIN users releaser ON releaser.id = bv.released_by
+             LEFT JOIN ipca_publishing_audit_snapshots audit
+               ON audit.id = (
+                 SELECT MAX(a2.id)
+                 FROM ipca_publishing_audit_snapshots a2
+                 WHERE a2.book_version_id = bv.id
+               )
+             WHERE bv.book_id = ?
+               AND bv.id <> ?
+             ORDER BY bv.id DESC"
+        );
+        $stmt->execute(array($bookId, $currentVersionId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        foreach ($rows as &$row) {
+            $row['version_id'] = (int)$row['version_id'];
+            $row['phase_label'] = self::phaseLabel((string)$row['lifecycle_status']);
+            $row['phase_tone'] = self::phaseTone((string)$row['lifecycle_status']);
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /**
      * @return array{book_id:int,version_id:int,book_key:string,version_label:string,copy_content:bool}
      */
     public function createBlankManual(

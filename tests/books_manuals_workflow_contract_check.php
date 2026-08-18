@@ -115,9 +115,20 @@ foreach (array(
     'bm-lifecycle-track' => 'four-stage lifecycle progress',
     'data-bm-settings-toggle' => 'manual settings modal',
     '+ Add person as reviewer' => 'book reviewer assignment',
+    'Previous Versions (' => 'previous versions card action',
+    'bm-version-history__cover' => 'previous version thumbnail list',
+    'Open Read-Only Version' => 'previous version read-only viewer action',
 ) as $needle => $label) {
     bm_contract_assert($label, str_contains($libraryPage, $needle));
 }
+bm_contract_assert(
+    'previous version history excludes the current version and includes approval evidence',
+    str_contains($workflow, 'listPreviousVersions')
+        && str_contains($workflow, 'AND bv.id <> ?')
+        && str_contains($workflow, 'bv.released_at')
+        && str_contains($workflow, 'approved_by_name')
+        && str_contains($workflow, 'audit.coverage_percent')
+);
 bm_contract_assert(
     'modal book reader exposes pages without publishing controls',
     str_contains($bookReader, "action=stored_preview")

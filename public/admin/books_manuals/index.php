@@ -127,6 +127,10 @@ foreach ($rows as $row) {
 }
 foreach ($rows as &$row) {
     $row['reviewers'] = $workflow->bookReviewers((int)$row['book_id']);
+    $row['previous_versions'] = $workflow->listPreviousVersions(
+        (int)$row['book_id'],
+        (int)$row['version_id']
+    );
 }
 unset($row);
 
@@ -221,11 +225,15 @@ books_manuals_page_open(array(
       $stageIndex = array_search((string)$row['lifecycle_status'], $stageKeys, true);
       $stageIndex = $stageIndex === false ? 0 : (int)$stageIndex;
       $reviewers = is_array($row['reviewers'] ?? null) ? $row['reviewers'] : array();
+      $previousVersions = is_array($row['previous_versions'] ?? null)
+          ? $row['previous_versions']
+          : array();
       $previewUrl = '/admin/books_manuals/reader.php?version_id=' . $versionId;
       $coverUrl = '/student/api/manual_reader_cover_thumbnail.php?book='
           . rawurlencode((string)$row['book_key']) . '&version_id=' . $versionId . '&admin_preview=1';
       $settingsModalId = 'bm-manual-settings-' . $versionId;
       $overrideModalId = 'bm-compliance-override-' . $versionId;
+      $versionsModalId = 'bm-previous-versions-' . $versionId;
     ?>
     <article class="cmp-card bm-book-card" data-bm-reader-url="<?= h($previewUrl) ?>">
       <a class="bm-cover bm-cover--thumbnail" href="<?= h($previewUrl) ?>" data-bm-reader-open aria-label="Open <?= h((string)$row['book_title']) ?> page viewer">
@@ -249,6 +257,11 @@ books_manuals_page_open(array(
         </div>
         <div class="bm-actions" style="margin-top:14px;">
           <button class="app-btn app-btn--primary" type="button" data-compliance-modal-open="<?= h($settingsModalId) ?>">Open Settings</button>
+          <?php if ($previousVersions !== array()): ?>
+            <button class="app-btn app-btn--secondary" type="button" data-compliance-modal-open="<?= h($versionsModalId) ?>">
+              Previous Versions (<?= count($previousVersions) ?>)
+            </button>
+          <?php endif; ?>
           <?php if (in_array((string)$row['lifecycle_status'], array('draft', 'in_review'), true)): ?>
             <a class="app-btn app-btn--secondary" href="/admin/compliance/controlled_book_editor.php?version_id=<?= $versionId ?>">Edit</a>
           <?php endif; ?>
@@ -420,6 +433,88 @@ books_manuals_page_open(array(
         </div>
       </div>
     </dialog>
+
+    <?php if ($previousVersions !== array()): ?>
+      <dialog class="compliance-modal bm-versions-modal" id="<?= h($versionsModalId) ?>">
+        <div class="compliance-modal__panel bm-versions-modal__panel">
+          <header class="bm-modal-hero">
+            <div>
+              <div class="hero-overline">Books &amp; Manuals · Version history</div>
+              <h2><?= h((string)$row['book_title']) ?></h2>
+              <p>
+                <?= count($previousVersions) ?> previous
+                <?= count($previousVersions) === 1 ? 'version' : 'versions' ?>
+              </p>
+            </div>
+            <button type="button" class="bm-modal-close" data-compliance-modal-close aria-label="Close">&times;</button>
+          </header>
+          <div class="compliance-modal__body bm-versions-modal__body">
+            <div class="bm-version-history">
+              <?php foreach ($previousVersions as $previousVersion): ?>
+                <?php
+                  $previousVersionId = (int)$previousVersion['version_id'];
+                  $previousReaderUrl = '/admin/books_manuals/reader.php?version_id='
+                      . $previousVersionId;
+                  $previousCoverUrl = '/student/api/manual_reader_cover_thumbnail.php?book='
+                      . rawurlencode((string)$row['book_key'])
+                      . '&version_id=' . $previousVersionId
+                      . '&admin_preview=1';
+                  $approvedBy = trim((string)($previousVersion['approved_by_name'] ?? ''));
+                  if ($approvedBy === '') {
+                      $approvedBy = trim((string)($previousVersion['approved_by_email'] ?? ''));
+                  }
+                ?>
+                <article class="bm-version-history__item">
+                  <a
+                    class="bm-version-history__cover"
+                    href="<?= h($previousReaderUrl) ?>"
+                    data-bm-reader-open
+                    aria-label="Open Revision <?= h((string)$previousVersion['version_label']) ?> read-only"
+                  >
+                    <img
+                      src="<?= h($previousCoverUrl) ?>"
+                      alt="Revision <?= h((string)$previousVersion['version_label']) ?> front page"
+                    >
+                  </a>
+                  <div class="bm-version-history__details">
+                    <div class="bm-version-history__heading">
+                      <div>
+                        <span>Previous version</span>
+                        <h3>Revision <?= h((string)$previousVersion['version_label']) ?></h3>
+                      </div>
+                      <?= books_manuals_phase_pill(
+                          (string)$previousVersion['phase_label'],
+                          (string)$previousVersion['phase_tone']
+                      ) ?>
+                    </div>
+                    <dl class="bm-version-history__meta">
+                      <dt>Approval date</dt>
+                      <dd><?= h((string)($previousVersion['released_at'] ?: 'Not recorded')) ?></dd>
+                      <dt>Approved by</dt>
+                      <dd><?= h($approvedBy !== '' ? $approvedBy : 'Not recorded') ?></dd>
+                      <dt>Effective date</dt>
+                      <dd><?= h((string)($previousVersion['effective_date'] ?: 'Not recorded')) ?></dd>
+                      <dt>Update</dt>
+                      <dd><?= h(books_manuals_update_label($previousVersion['update_code'] ?? null)) ?></dd>
+                      <dt>Audit</dt>
+                      <dd>
+                        <?= h(strtoupper((string)($previousVersion['audit_status'] ?? 'not run'))) ?>
+                        <?php if ($previousVersion['coverage_percent'] !== null): ?>
+                          · <?= h(number_format((float)$previousVersion['coverage_percent'], 1)) ?>%
+                        <?php endif; ?>
+                      </dd>
+                    </dl>
+                    <a class="app-btn app-btn--secondary" href="<?= h($previousReaderUrl) ?>" data-bm-reader-open>
+                      Open Read-Only Version
+                    </a>
+                  </div>
+                </article>
+              <?php endforeach; ?>
+            </div>
+          </div>
+        </div>
+      </dialog>
+    <?php endif; ?>
 
     <?php if ((string)$row['lifecycle_status'] !== 'released'): ?>
       <dialog class="compliance-modal bm-override-modal" id="<?= h($overrideModalId) ?>">

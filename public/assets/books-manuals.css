@@ -736,6 +736,107 @@
   margin-top: 2px;
 }
 
+.bm-versions-modal__panel {
+  width: min(880px, calc(100vw - 32px));
+  max-width: none;
+}
+
+.bm-versions-modal__body {
+  max-height: min(72vh, 720px);
+  overflow-y: auto;
+}
+
+.bm-version-history {
+  display: grid;
+  gap: 14px;
+}
+
+.bm-version-history__item {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 20px;
+  padding: 18px;
+  border: 1px solid #dce5ef;
+  border-radius: 13px;
+  background: #f9fbfd;
+}
+
+.bm-version-history__cover {
+  display: block;
+  width: 118px;
+  aspect-ratio: 17 / 22;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(9, 27, 49, .28);
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+
+.bm-version-history__cover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px rgba(9, 27, 49, .34);
+}
+
+.bm-version-history__cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+.bm-version-history__details {
+  display: grid;
+  align-content: start;
+  gap: 13px;
+  min-width: 0;
+}
+
+.bm-version-history__heading {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.bm-version-history__heading span {
+  color: #7c8da0;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.bm-version-history__heading h3 {
+  margin: 3px 0 0;
+  color: #17345d;
+  font-size: 18px;
+}
+
+.bm-version-history__meta {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 5px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.bm-version-history__meta dt {
+  color: #7b8999;
+}
+
+.bm-version-history__meta dd {
+  min-width: 0;
+  margin: 0;
+  color: #334b66;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.bm-version-history__details .app-btn {
+  justify-self: start;
+}
+
 .bm-audit-gaps__head h2 {
   margin: 0 0 5px;
   color: #17345d;
@@ -1005,6 +1106,24 @@
   }
 
   .bm-audit-override dl {
+    grid-template-columns: 1fr;
+  }
+
+  .bm-version-history__item {
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .bm-version-history__cover {
+    width: 82px;
+  }
+
+  .bm-version-history__heading {
+    display: grid;
+  }
+
+  .bm-version-history__meta {
     grid-template-columns: 1fr;
   }
 }
