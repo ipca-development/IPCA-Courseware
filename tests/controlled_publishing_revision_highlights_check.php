@@ -244,6 +244,7 @@ if (
     (string)($generatedPayloads[0]['text'] ?? '') !== 'Revision 6.1 Changes'
     || !in_array('list', array_column($generatedRows, 'block_type'), true)
     || str_contains(json_encode($generatedPayloads), 'Auto-detected changes')
+    || str_contains(json_encode($generatedPayloads), 'governed section change(s)')
 ) {
     throw new RuntimeException('Highlight regeneration did not create the revision title and bullet list.');
 }
