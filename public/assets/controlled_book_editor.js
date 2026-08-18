@@ -1360,11 +1360,8 @@
     }
   }
 
-  function tmGenAuthoritativeEditorPageStartsEnabled() {
-    if (!state.authoritativeEditorPageStartsEnabled) return false;
-    var version = state.versionInfo || {};
-    var manualCode = String(version.manual_code || version.book_key || '').trim().toUpperCase();
-    return manualCode === 'TM_GEN';
+  function authoritativeEditorPageStartsEnabled() {
+    return !!state.authoritativeEditorPageStartsEnabled;
   }
 
   function authoritativeEditorPageStartsFromResult(result, sectionId) {
@@ -1401,8 +1398,8 @@
     return starts;
   }
 
-  function loadTMGenAuthoritativeEditorPageStarts() {
-    if (!tmGenAuthoritativeEditorPageStartsEnabled()) {
+  function loadAuthoritativeEditorPageStarts() {
+    if (!authoritativeEditorPageStartsEnabled()) {
       state.authoritativeEditorPageStarts = [];
       state.authoritativeEditorPageStartsVersionId = 0;
       state.authoritativeEditorPageStartsSectionId = 0;
@@ -1430,7 +1427,7 @@
   }
 
   function authoritativeEditorPageStartAnchors(body) {
-    if (!tmGenAuthoritativeEditorPageStartsEnabled() || !body) return {};
+    if (!authoritativeEditorPageStartsEnabled() || !body) return {};
     var starts = state.authoritativeEditorPageStarts || [];
     var anchors = {};
     body.querySelectorAll(':scope > .cpb-block[data-stable-anchor]').forEach(function (block) {
@@ -3551,7 +3548,7 @@
         6000
       );
       var authoritativePageStartsReady = settleWithin(
-        loadTMGenAuthoritativeEditorPageStarts(),
+        loadAuthoritativeEditorPageStarts(),
         6000
       );
       return Promise.all([

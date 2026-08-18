@@ -2,13 +2,13 @@
 declare(strict_types=1);
 
 /**
- * Reversible deterministic publication-font trial for TM_GEN only.
+ * Reversible deterministic typography and editor page-start projection defaults.
  */
 final class ControlledPublishingPublicationFontService
 {
     public const FAMILY = 'IPCA TM GEN Noto Sans';
-    public const MANUAL_CODE = 'TM_GEN';
-    // Reversible TM_GEN-only editor trial. Set false to restore local page starts.
+    // Independent rollback switches for every current and future publication.
+    public const DETERMINISTIC_FONT_ENABLED = true;
     public const EDITOR_AUTHORITATIVE_PAGE_STARTS_ENABLED = true;
     private const FONT_BASE64_FILE = 'tm_gen_noto_sans_latin_wght_normal.woff2.b64';
 
@@ -17,12 +17,7 @@ final class ControlledPublishingPublicationFontService
      */
     public static function enabledForVersion(array $version): bool
     {
-        $code = strtoupper(trim((string)($version['manual_code'] ?? '')));
-        if ($code === '') {
-            $code = strtoupper(trim((string)($version['book_key'] ?? '')));
-        }
-
-        return $code === self::MANUAL_CODE;
+        return self::DETERMINISTIC_FONT_ENABLED;
     }
 
     /**

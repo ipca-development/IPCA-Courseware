@@ -10,7 +10,7 @@ const editor = fs.readFileSync(
   path.join(root, "public/assets/controlled_book_editor.js"),
   "utf8"
 );
-const start = editor.indexOf("function tmGenAuthoritativeEditorPageStartsEnabled(");
+const start = editor.indexOf("function authoritativeEditorPageStartsEnabled(");
 const end = editor.indexOf("function measurePrintFurnitureGeometry(", start);
 assert(start >= 0 && end > start, "Unable to extract authoritative page-start helpers.");
 
@@ -114,8 +114,41 @@ assert.deepStrictEqual(
       return blocks;
     },
   }))),
+  { "comment-form": true },
+  "The authoritative projection must apply to OM manuals."
+);
+
+context.state.versionInfo.manual_code = "OMM";
+assert.deepStrictEqual(
+  JSON.parse(JSON.stringify(context.authoritativeEditorPageStartAnchors({
+    querySelectorAll() {
+      return blocks;
+    },
+  }))),
+  { "comment-form": true },
+  "The authoritative projection must apply to OMM manuals."
+);
+
+context.state.versionInfo.manual_code = "FUTURE_MANUAL";
+assert.deepStrictEqual(
+  JSON.parse(JSON.stringify(context.authoritativeEditorPageStartAnchors({
+    querySelectorAll() {
+      return blocks;
+    },
+  }))),
+  { "comment-form": true },
+  "The authoritative projection must apply to future manuals."
+);
+
+context.state.authoritativeEditorPageStartsEnabled = false;
+assert.deepStrictEqual(
+  JSON.parse(JSON.stringify(context.authoritativeEditorPageStartAnchors({
+    querySelectorAll() {
+      return blocks;
+    },
+  }))),
   {},
-  "The projection must not leak outside TM_GEN."
+  "The global rollback switch must disable editor page-start projection."
 );
 
 process.stdout.write("Controlled book editor authoritative page starts check: PASS\n");

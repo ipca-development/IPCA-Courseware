@@ -58,6 +58,7 @@ $contracts = array(
     'public/assets/controlled_book_editor.js' => array(
         'authoritative_editor_page_starts_enabled',
         'check_freshness=1',
+        'authoritativeEditorPageStartsEnabled',
         'authoritativeEditorPageStartsFromResult',
         'data-authoritative-page-break',
         'state.authoritativeEditorPageStarts = []',
