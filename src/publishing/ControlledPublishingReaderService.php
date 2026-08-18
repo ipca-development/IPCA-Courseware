@@ -17,6 +17,7 @@ require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 require_once __DIR__ . '/ControlledPublishingEditorNavService.php';
 require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/BooksManualsAnnexBookService.php';
 require_once __DIR__ . '/ControlledPublishingReaderTokenResolver.php';
 require_once __DIR__ . '/ControlledPublishingReaderCoverService.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleManifestService.php';
@@ -957,7 +958,17 @@ final class ControlledPublishingReaderService
      */
     private function isAnnexCoverSection(array $section): bool
     {
-        return (string)($section['section_key'] ?? '') === ControlledPublishingAnnexService::PARENT_SECTION_KEY;
+        if ((string)($section['section_key'] ?? '') !== ControlledPublishingAnnexService::PARENT_SECTION_KEY) {
+            return false;
+        }
+        $versionId = (int)($section['book_version_id'] ?? 0);
+        if ($versionId > 0) {
+            $version = $this->foundation()->getVersion($versionId);
+            if (is_array($version) && BooksManualsAnnexBookService::isAnnexBookVersion($version)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

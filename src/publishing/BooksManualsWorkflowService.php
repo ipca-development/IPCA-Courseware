@@ -33,11 +33,33 @@ final class BooksManualsWorkflowService
         }
     }
 
+    public function annexMapPresent(): bool
+    {
+        try {
+            $stmt = $this->pdo->query("SHOW TABLES LIKE 'ipca_publishing_annex_book_map'");
+            return (bool)$stmt->fetchColumn();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
     /**
      * @return list<array<string,mixed>>
      */
     public function listLibrary(bool $annexesOnly = false): array
     {
+        $annexMapPresent = $this->annexMapPresent();
+        $annexFilter = $annexesOnly
+            ? ($annexMapPresent
+                ? "(b.book_type = 'annex_book' OR m.id IS NOT NULL)"
+                : 'al.id IS NOT NULL')
+            : ($annexMapPresent
+                ? "(b.book_type NOT IN ('annex', 'annex_book') AND m.id IS NULL AND al.id IS NULL)"
+                : 'al.id IS NULL');
+        $mapJoin = $annexMapPresent
+            ? "LEFT JOIN ipca_publishing_annex_book_map m
+              ON m.annex_book_id = b.id AND m.status = 'active'"
+            : 'LEFT JOIN (SELECT NULL AS id, NULL AS annex_book_id) m ON 1 = 0';
         $sql = "
             SELECT
               b.id AS book_id,
@@ -66,9 +88,9 @@ final class BooksManualsWorkflowService
               COALESCE(reviewers.reviewer_count, 0) AS reviewer_count,
               audit.status AS audit_status,
               audit.coverage_percent,
-              al.parent_book_id,
+              COALESCE(m.parent_book_id, al.parent_book_id) AS parent_book_id,
               al.legacy_section_id,
-              al.migration_status
+              COALESCE(m.status, al.migration_status) AS migration_status
             FROM ipca_publishing_books b
             LEFT JOIN ipca_publishing_book_versions bv
               ON bv.id = (
@@ -95,9 +117,10 @@ final class BooksManualsWorkflowService
                 FROM ipca_publishing_audit_snapshots a2
                 WHERE a2.book_version_id = bv.id
               )
+            {$mapJoin}
             LEFT JOIN ipca_publishing_annex_book_links al ON al.annex_book_id = b.id
             WHERE b.status = 'active'
-              AND " . ($annexesOnly ? 'al.id IS NOT NULL' : 'al.id IS NULL') . "
+              AND {$annexFilter}
             ORDER BY b.title, bv.id DESC
         ";
         $rows = $this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: array();
@@ -225,51 +248,10 @@ final class BooksManualsWorkflowService
         string $revisionDate,
         int $actorUserId
     ): array {
-        $annexKey = strtoupper(trim($annexKey));
-        if (!preg_match('/^[A-Z0-9][A-Z0-9_.-]{0,63}$/', $annexKey)) {
-            throw new InvalidArgumentException('Annex identifier is invalid.');
-        }
-        $parent = $this->pdo->prepare(
-            "SELECT id FROM ipca_publishing_books
-             WHERE id = ? AND status = 'active' LIMIT 1"
-        );
-        $parent->execute(array($parentBookId));
-        if (!$parent->fetchColumn()) {
-            throw new RuntimeException('Parent manual not found.');
-        }
-        $created = $this->createBlankManual(
-            $sourceVersionId,
-            $bookKey,
-            $title,
-            $versionLabel,
-            'handbook',
-            'internal',
-            null,
-            $actorUserId
-        );
-        $this->pdo->prepare(
-            "UPDATE ipca_publishing_books SET book_type = 'annex' WHERE id = ?"
-        )->execute(array((int)$created['book_id']));
-        $this->pdo->prepare(
-            'UPDATE ipca_publishing_book_versions
-             SET effective_date = NULLIF(?, ?) WHERE id = ?'
-        )->execute(array($revisionDate, '', (int)$created['version_id']));
-        $this->pdo->prepare(
-            "INSERT INTO ipca_publishing_annex_book_links
-              (parent_book_id, annex_book_id, annex_key, migration_status,
-               migration_json, created_by)
-             VALUES (?, ?, ?, 'validated', ?, ?)"
-        )->execute(array(
-            $parentBookId,
-            (int)$created['book_id'],
-            $annexKey,
-            json_encode(array(
-                'created_as_standalone' => true,
-                'legacy_section_preserved' => true,
-            ), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-            $actorUserId,
-        ));
-        return $created;
+        unset($sourceVersionId, $annexKey, $bookKey, $title, $versionLabel, $revisionDate);
+        require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+        return (new BooksManualsAnnexBookService($this->pdo, $this->foundation))
+            ->ensureAnnexBookForParent($parentBookId, $actorUserId);
     }
 
     /**

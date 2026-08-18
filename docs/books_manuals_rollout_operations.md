@@ -6,10 +6,12 @@
 2. Apply `scripts/sql/2026_08_18_books_manuals_workflow.sql`.
 3. Apply `scripts/sql/2026_08_18_books_manuals_library_ux.sql`.
 4. Apply `scripts/sql/2026_08_18_books_manuals_compliance_overrides.sql`.
-5. Run:
+5. Apply `scripts/sql/2026_08_18_annex_book_structure.sql` (`php scripts/apply_annex_book_structure.php`).
+6. Run:
    - `php tests/books_manuals_protected_boundary_check.php`
    - `php tests/books_manuals_workflow_contract_check.php`
-6. Open `/admin/books_manuals/index.php` as an administrator.
+   - `php tests/books_manuals_annex_book_contract_check.php`
+7. Open `/admin/books_manuals/index.php` as an administrator.
 
 The migration is additive. Existing controlled-publishing tables, editor routes and
 released content remain authoritative. Existing released versions receive the same
@@ -31,9 +33,20 @@ Database rollback is intentionally non-destructive: archive or export the six
 `ipca_publishing_books`, versions, sections, blocks, release snapshots, page maps,
 or any canonical/MCCF source table.
 
+## Annex Books
+
+Each parent manual (OM, OMM, TM_GEN, …) has one Annex Book with a locked outline:
+
+1. Cover Page — cloned from the parent manual (`Annexes Manual {CODE}`).
+2. Annex Register — generated automatically (Nr, Title, Rev., Rev. Date, Updated by).
+3. The annexes — edited in the existing online editor, including landscape and multi-page annexes.
+
+Per-annex revision, date and actor are written to `ipca_publishing_annex_revisions` on
+create, reimport, identity change, and content update.
+
 ## Annex migration gate
 
-Generate a dry-run report:
+Generate a dry-run report of embedded annexes to copy into the parent Annex Book:
 
 `php scripts/migrate_books_manuals_annexes.php --dry-run --output=tmp/books-manuals-annexes.json`
 
@@ -44,10 +57,10 @@ Only after explicit approval, apply that exact manifest:
 
 `php scripts/migrate_books_manuals_annexes.php --apply --approved-manifest=tmp/books-manuals-annexes.json --actor-user-id=<admin-id> --output=tmp/books-manuals-annexes-applied.json`
 
-Apply mode rejects modified or stale manifests. It does not delete embedded annex
-sections. To roll back a migrated annex, set the standalone annex book to
-`inactive` and set its link to `rolled_back`; the preserved embedded section
-remains available. Keep the apply report as the rollback record.
+Apply mode rejects modified or stale manifests. It copies annexes into the 1:1 Annex
+Book (`ANNEXES_{PARENT}`) and does not delete embedded annex sections. To roll back,
+set the Annex Book map row to `rolled_back`; the preserved embedded section remains
+available. Keep the apply report as the rollback record.
 
 ## Release checks
 

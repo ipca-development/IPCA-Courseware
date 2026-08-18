@@ -338,6 +338,11 @@ final class ControlledPublishingManualStructureService
         return $this->foundation->getVersion($versionId);
     }
 
+    public function parentHasAnnexBook(int $parentBookId): bool
+    {
+        return $this->foundation->annexBookIdForParent($parentBookId) > 0;
+    }
+
     public function resolveManualSourceSetIdPublic(int $versionId): int
     {
         return $this->resolveManualSourceSetId($versionId);

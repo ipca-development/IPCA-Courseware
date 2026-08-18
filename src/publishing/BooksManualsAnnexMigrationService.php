@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/ControlledPublishingBookRenderer.php';
+require_once __DIR__ . '/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/ControlledPublishingBlockService.php';
+require_once __DIR__ . '/ControlledPublishingSectionService.php';
+require_once __DIR__ . '/BooksManualsAnnexBookService.php';
 require_once __DIR__ . '/BooksManualsWorkflowService.php';
 
 final class BooksManualsAnnexMigrationService
@@ -75,16 +79,22 @@ final class BooksManualsAnnexMigrationService
             $row['updated_by_user_id'] = (int)($annexMeta['updated_by_user_id'] ?? $row['updated_by'] ?? 0);
             $row['updated_by_name'] = (string)($annexMeta['updated_by_name'] ?? '');
             $row['section_metadata'] = $meta;
-            $row['target_book_key'] = $this->targetBookKey(
-                (string)$row['parent_book_key'],
-                (string)$row['annex_key']
+            $row['target_book_key'] = BooksManualsAnnexBookService::annexBookKey(
+                (string)$row['parent_book_key']
             );
             $row['source_content_hash'] = $this->sectionContentHash(
                 (int)$row['source_section_id']
             );
-            $row['status'] = (int)($row['existing_link_id'] ?? 0) > 0
-                ? 'already_migrated'
-                : 'planned';
+            $annexBook = (new BooksManualsAnnexBookService($this->pdo, $this->foundation))
+                ->mapForParent((int)$row['parent_book_id']);
+            $row['annex_book_map_id'] = $annexBook !== null ? (int)$annexBook['id'] : 0;
+            $row['mapped_annex_book_id'] = $annexBook !== null ? (int)$annexBook['annex_book_id'] : 0;
+            $alreadyInAnnexBook = $annexBook !== null
+                && $this->targetHasSectionKey(
+                    (int)$annexBook['annex_book_id'],
+                    (string)$row['section_key']
+                );
+            $row['status'] = $alreadyInAnnexBook ? 'already_migrated' : 'planned';
             unset($row['metadata_json']);
         }
         unset($row);
@@ -190,121 +200,67 @@ final class BooksManualsAnnexMigrationService
      */
     private function migrateOne(array $item, int $actorUserId): array
     {
-        $existing = $this->existingLink(
-            (int)$item['source_version_id'],
-            (int)$item['source_section_id']
+        $annexBookSvc = new BooksManualsAnnexBookService($this->pdo, $this->foundation);
+        $ensured = $annexBookSvc->ensureAnnexBookForParent(
+            (int)$item['parent_book_id'],
+            $actorUserId
         );
-        if ($existing !== null) {
+        $targetVersionId = (int)$ensured['version_id'];
+        $targetBookId = (int)$ensured['book_id'];
+        $existingTarget = $this->targetSection($targetVersionId, (string)$item['section_key']);
+        if ($existingTarget !== null) {
             return array(
                 'status' => 'already_migrated',
-                'annex_book_id' => (int)$existing['annex_book_id'],
-                'validation_hash' => (string)($existing['validation_hash'] ?? ''),
-                'rollback' => $this->rollbackMapping($existing, $item),
+                'annex_book_id' => $targetBookId,
+                'annex_version_id' => $targetVersionId,
+                'annex_book_key' => (string)$ensured['book_key'],
+                'validation_hash' => '',
+                'rollback' => array(
+                    'deactivate_annex_book_id' => $targetBookId,
+                    'restore_embedded_section_id' => (int)$item['source_section_id'],
+                    'legacy_section_preserved' => true,
+                ),
             );
         }
 
-        $target = $this->resolveOrCreateTarget($item, $actorUserId);
-        $targetSection = $this->targetSection(
-            (int)$target['version_id'],
-            (string)$item['section_key']
-        );
-        if ($targetSection === null) {
-            throw new RuntimeException('Cloned annex section could not be resolved.');
+        $sourceSection = $this->sourceSectionRow((int)$item['source_section_id']);
+        if ($sourceSection === null) {
+            throw new RuntimeException('Embedded annex section could not be resolved.');
         }
 
-        $sourceBlocks = $this->blocks((int)$item['source_section_id']);
         $this->pdo->beginTransaction();
         try {
-            $this->pdo->prepare(
-                'DELETE FROM ipca_publishing_book_blocks
-                 WHERE book_version_id = ? AND section_id = ?'
-            )->execute(array((int)$target['version_id'], (int)$targetSection['id']));
-            $targetMetadata = is_array($item['section_metadata'] ?? null)
-                ? $item['section_metadata']
-                : array();
-            if (!is_array($targetMetadata['annex'] ?? null)) {
-                $targetMetadata['annex'] = array();
-            }
-            $targetMetadata['annex']['canonical_excerpt_id'] = null;
-            $targetMetadata['standalone_origin'] = array(
-                'parent_book_id' => (int)$item['parent_book_id'],
-                'legacy_book_version_id' => (int)$item['source_version_id'],
-                'legacy_section_id' => (int)$item['source_section_id'],
-                'migrated_at' => gmdate('c'),
-            );
-            $this->pdo->prepare(
-                'UPDATE ipca_publishing_book_sections
-                 SET title = ?, metadata_json = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
-                 WHERE id = ? AND book_version_id = ?'
-            )->execute(array(
-                (string)$item['title'],
-                json_encode(
-                    $targetMetadata,
-                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
-                ),
+            $targetSectionId = $this->copySectionShell(
+                $sourceSection,
+                $targetVersionId,
+                (string)$ensured['book_key'],
+                (string)$ensured['version_label'],
                 $actorUserId,
-                (int)$targetSection['id'],
-                (int)$target['version_id'],
-            ));
+                $item
+            );
+            $sourceBlocks = $this->blocks((int)$item['source_section_id']);
             $this->copyBlocks(
                 $sourceBlocks,
-                (int)$target['version_id'],
-                (int)$targetSection['id'],
+                $targetVersionId,
+                $targetSectionId,
                 (string)$item['parent_book_key'],
                 (string)$item['source_version_label'],
-                (string)$target['book_key'],
-                (string)$target['version_label'],
+                (string)$ensured['book_key'],
+                (string)$ensured['version_label'],
                 $actorUserId
             );
-            $this->pdo->prepare(
-                'UPDATE ipca_publishing_books SET book_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-            )->execute(array('annex', (int)$target['book_id']));
-            $this->pdo->prepare(
-                'UPDATE ipca_publishing_book_versions
-                 SET effective_date = NULLIF(?, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-            )->execute(array(
-                (string)($item['revision_date'] ?? ''),
-                '',
-                (int)$target['version_id'],
-            ));
 
             $validation = $this->validateRenderedParity(
                 $sourceBlocks,
-                $this->blocks((int)$targetSection['id']),
+                $this->blocks($targetSectionId),
                 (string)$item['parent_book_key'],
                 (string)$item['source_version_label'],
-                (string)$target['book_key'],
-                (string)$target['version_label']
+                (string)$ensured['book_key'],
+                (string)$ensured['version_label']
             );
             if (!$validation['ok']) {
-                throw new RuntimeException('Standalone annex rendered-content validation failed.');
+                throw new RuntimeException('Annex Book rendered-content validation failed.');
             }
-            $migrationJson = array(
-                'source_content_hash' => (string)$item['source_content_hash'],
-                'render_validation' => $validation,
-                'legacy_section_preserved' => true,
-                'rollback' => array(
-                    'deactivate_annex_book_id' => (int)$target['book_id'],
-                    'restore_embedded_section_id' => (int)$item['source_section_id'],
-                ),
-            );
-            $stmt = $this->pdo->prepare(
-                "INSERT INTO ipca_publishing_annex_book_links
-                  (parent_book_id, annex_book_id, legacy_book_version_id, legacy_section_id,
-                   annex_key, migration_status, validation_hash, migration_json, created_by)
-                 VALUES (?, ?, ?, ?, ?, 'validated', ?, ?, ?)"
-            );
-            $stmt->execute(array(
-                (int)$item['parent_book_id'],
-                (int)$target['book_id'],
-                (int)$item['source_version_id'],
-                (int)$item['source_section_id'],
-                (string)$item['annex_key'],
-                (string)$validation['target_render_hash'],
-                json_encode($migrationJson, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-                $actorUserId,
-            ));
-            $linkId = (int)$this->pdo->lastInsertId();
             $this->pdo->commit();
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
@@ -313,35 +269,30 @@ final class BooksManualsAnnexMigrationService
             throw $e;
         }
 
-        (new BooksManualsWorkflowService($this->pdo))->saveProfile(
-            (int)$target['book_id'],
-            'handbook',
-            'internal',
-            null,
-            $actorUserId
+        $annexSvc = new ControlledPublishingAnnexService(
+            $this->pdo,
+            $this->foundation,
+            new ControlledPublishingSectionService($this->pdo),
+            new ControlledPublishingBlockService($this->pdo)
         );
-        (new BooksManualsWorkflowService($this->pdo))
-            ->syncUpdateIdentity((int)$target['version_id']);
-        $this->pdo->prepare(
-            'UPDATE ipca_publishing_version_workflow
-             SET last_transition_by = ?, last_transition_at = CURRENT_TIMESTAMP(3)
-             WHERE book_version_id = ?'
-        )->execute(array(
-            (int)($item['updated_by_user_id'] ?? 0) > 0
-                ? (int)$item['updated_by_user_id']
-                : $actorUserId,
-            (int)$target['version_id'],
-        ));
+        $annexSvc->recordAnnexRevision(
+            $targetVersionId,
+            $targetSectionId,
+            'migrate',
+            $actorUserId,
+            false,
+            'Imported from embedded annex'
+        );
+        $annexSvc->regenerateRegister($targetVersionId, $actorUserId);
 
         return array(
             'status' => 'validated',
-            'link_id' => $linkId,
-            'annex_book_id' => (int)$target['book_id'],
-            'annex_version_id' => (int)$target['version_id'],
-            'annex_book_key' => (string)$target['book_key'],
+            'annex_book_id' => $targetBookId,
+            'annex_version_id' => $targetVersionId,
+            'annex_book_key' => (string)$ensured['book_key'],
             'validation' => $validation,
             'rollback' => array(
-                'deactivate_annex_book_id' => (int)$target['book_id'],
+                'deactivate_annex_book_id' => $targetBookId,
                 'restore_embedded_section_id' => (int)$item['source_section_id'],
                 'legacy_section_preserved' => true,
             ),
@@ -526,6 +477,97 @@ final class BooksManualsAnnexMigrationService
         return is_array($row) ? $row : null;
     }
 
+    private function targetHasSectionKey(int $annexBookId, string $sectionKey): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT s.id
+             FROM ipca_publishing_book_versions bv
+             INNER JOIN ipca_publishing_book_sections s
+               ON s.book_version_id = bv.id AND s.section_key = ?
+             WHERE bv.book_id = ?
+             ORDER BY bv.id DESC LIMIT 1'
+        );
+        $stmt->execute(array($sectionKey, $annexBookId));
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    private function sourceSectionRow(int $sectionId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ipca_publishing_book_sections WHERE id = ? LIMIT 1'
+        );
+        $stmt->execute(array($sectionId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @param array<string,mixed> $sourceSection
+     * @param array<string,mixed> $item
+     */
+    private function copySectionShell(
+        array $sourceSection,
+        int $targetVersionId,
+        string $targetBookKey,
+        string $targetVersionLabel,
+        int $actorUserId,
+        array $item
+    ): int {
+        $parent = $this->targetSection(
+            $targetVersionId,
+            ControlledPublishingAnnexService::PARENT_SECTION_KEY
+        );
+        if ($parent === null) {
+            throw new RuntimeException('Annex Book is missing the Annexes parent section.');
+        }
+
+        $targetMetadata = is_array($item['section_metadata'] ?? null)
+            ? $item['section_metadata']
+            : $this->decodeJson($sourceSection['metadata_json'] ?? null);
+        if (!is_array($targetMetadata['annex'] ?? null)) {
+            $targetMetadata['annex'] = array();
+        }
+        $targetMetadata['annex']['canonical_excerpt_id'] = null;
+        $targetMetadata['annex_book_origin'] = array(
+            'parent_book_id' => (int)$item['parent_book_id'],
+            'legacy_book_version_id' => (int)$item['source_version_id'],
+            'legacy_section_id' => (int)$item['source_section_id'],
+            'migrated_at' => gmdate('c'),
+        );
+
+        $sectionKey = (string)$sourceSection['section_key'];
+        $anchor = strtoupper($targetBookKey) . '-'
+            . str_replace('.', '_', $targetVersionLabel) . '-'
+            . strtoupper(str_replace('_', '-', $sectionKey));
+        $this->pdo->prepare(
+            'INSERT INTO ipca_publishing_book_sections
+              (book_version_id, parent_section_id, section_key, stable_anchor, title,
+               section_type, metadata_json, is_system_managed, is_generated, sort_order,
+               created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute(array(
+            $targetVersionId,
+            (int)$parent['id'],
+            $sectionKey,
+            $anchor,
+            (string)$item['title'],
+            (string)($sourceSection['section_type'] ?? 'annex_content'),
+            json_encode(
+                $targetMetadata,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            ),
+            (int)($sourceSection['is_system_managed'] ?? 0),
+            (int)($sourceSection['is_generated'] ?? 0),
+            (int)($sourceSection['sort_order'] ?? 100),
+            $actorUserId,
+            $actorUserId,
+        ));
+        return (int)$this->pdo->lastInsertId();
+    }
+
     /**
      * @return array<string,mixed>|null
      */
@@ -563,11 +605,10 @@ final class BooksManualsAnnexMigrationService
             . (int)($item['source_section_id'] ?? 0);
     }
 
-    private function targetBookKey(string $parentBookKey, string $annexKey): string
+    private function targetBookKey(string $parentBookKey, string $annexKey = ''): string
     {
-        $key = 'ANNEX_' . strtoupper($parentBookKey) . '_' . strtoupper($annexKey);
-        $key = preg_replace('/[^A-Z0-9_-]+/', '_', $key) ?: 'ANNEX_BOOK';
-        return substr(trim($key, '_'), 0, 32);
+        unset($annexKey);
+        return BooksManualsAnnexBookService::annexBookKey($parentBookKey);
     }
 
     private function cleanAnnexTitle(string $title): string

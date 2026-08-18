@@ -22,6 +22,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualStruc
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingOutlineService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRichTextService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsAnnexBookService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualPageBreakService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
@@ -34,6 +35,37 @@ function cp_editor_json(int $code, array $payload): void
     http_response_code($code);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
+}
+
+function cp_editor_sync_annex_cover_from_parent(
+    PDO $pdo,
+    ControlledPublishingFoundationService $foundation,
+    array $version,
+    int $uid
+): void {
+    if (BooksManualsAnnexBookService::isAnnexBookVersion($version)) {
+        return;
+    }
+    (new BooksManualsAnnexBookService($pdo, $foundation))
+        ->syncCoverForParentBook((int)($version['book_id'] ?? 0), $uid);
+}
+
+function cp_editor_touch_annex_revision(
+    ControlledPublishingAnnexService $annexSvc,
+    ControlledPublishingSectionService $sections,
+    int $versionId,
+    int $sectionId,
+    int $uid
+): void {
+    if ($versionId <= 0 || $sectionId <= 0) {
+        return;
+    }
+    $section = $sections->getSection($versionId, $sectionId);
+    if ($section === null || !$annexSvc->isAnnexContentSection($section)) {
+        return;
+    }
+    $annexSvc->touchAnnexContentRevision($versionId, $sectionId, $uid);
+    $annexSvc->regenerateRegister($versionId, $uid);
 }
 
 $user = compliance_require_access($pdo);
@@ -173,13 +205,13 @@ try {
             cp_editor_handle_upload_header_logo($foundation, $pageHeaderSvc, $uid);
             break;
         case 'save_cover_page':
-            cp_editor_handle_save_cover_page($foundation, $coverPageSvc, $uid);
+            cp_editor_handle_save_cover_page($pdo, $foundation, $coverPageSvc, $uid);
             break;
         case 'upload_cover_logo':
-            cp_editor_handle_upload_cover_asset($foundation, $coverPageSvc, $uid, 'logo');
+            cp_editor_handle_upload_cover_asset($pdo, $foundation, $coverPageSvc, $uid, 'logo');
             break;
         case 'upload_cover_image':
-            cp_editor_handle_upload_cover_asset($foundation, $coverPageSvc, $uid, 'cover_image');
+            cp_editor_handle_upload_cover_asset($pdo, $foundation, $coverPageSvc, $uid, 'cover_image');
             break;
         case 'save_lep_page':
             cp_editor_handle_save_lep_page($foundation, $lepPageSvc, $uid);
@@ -236,7 +268,7 @@ try {
             cp_editor_handle_detect_rich_text($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid, 'annex_refs');
             break;
         case 'create_block':
-            cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
+            cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $annexSvc, $sections, $uid);
             break;
         case 'update_block':
             cp_editor_handle_update_block(
@@ -246,15 +278,16 @@ try {
                 $foundation,
                 $numberSvc,
                 $annexSvc,
+                $sections,
                 $revision,
                 $uid
             );
             break;
         case 'split_block_page_break':
-            cp_editor_handle_split_block_page_break($pdo, $blocks, $manualPageBreakSvc, $uid);
+            cp_editor_handle_split_block_page_break($pdo, $blocks, $manualPageBreakSvc, $annexSvc, $sections, $uid);
             break;
         case 'delete_block':
-            cp_editor_handle_delete_block($blocks, $uid);
+            cp_editor_handle_delete_block($blocks, $annexSvc, $sections, $uid);
             break;
         case 'move_block':
             cp_editor_handle_move_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
@@ -1366,6 +1399,7 @@ function cp_editor_handle_upload_header_logo(
 }
 
 function cp_editor_handle_save_cover_page(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingCoverPageService $coverPageSvc,
     int $uid
@@ -1398,6 +1432,7 @@ function cp_editor_handle_save_cover_page(
     }
 
     $saved = $coverPageSvc->saveForVersion($versionId, $payload, $uid);
+    cp_editor_sync_annex_cover_from_parent($pdo, $foundation, $version, $uid);
     cp_editor_json(200, array(
         'ok' => true,
         'cover_page' => $saved,
@@ -1443,6 +1478,7 @@ function cp_editor_require_image_upload(): array
 }
 
 function cp_editor_handle_upload_cover_asset(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingCoverPageService $coverPageSvc,
     int $uid,
@@ -1489,6 +1525,7 @@ function cp_editor_handle_upload_cover_asset(
     }
 
     $saved = $coverPageSvc->saveForVersion($versionId, array_merge($existing, $payload), $uid);
+    cp_editor_sync_annex_cover_from_parent($pdo, $foundation, $version, $uid);
     cp_editor_json(200, array(
         'ok' => true,
         'url' => $url,
@@ -2567,6 +2604,8 @@ function cp_editor_handle_create_block(
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingBookStyleService $styleSvc,
     ControlledPublishingSectionNumberService $numberSvc,
+    ControlledPublishingAnnexService $annexSvc,
+    ControlledPublishingSectionService $sections,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -2604,6 +2643,7 @@ function cp_editor_handle_create_block(
     if ($block === null) {
         cp_editor_json(500, array('ok' => false, 'error' => 'Block create failed'));
     }
+    cp_editor_touch_annex_revision($annexSvc, $sections, $versionId, $sectionId, $uid);
 
     cp_editor_json(200, array_merge(array(
         'ok' => true,
@@ -2620,6 +2660,7 @@ function cp_editor_handle_update_block(
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionNumberService $numberSvc,
     ControlledPublishingAnnexService $annexSvc,
+    ControlledPublishingSectionService $sections,
     ControlledPublishingRevisionService $revision,
     int $uid
 ): void {
@@ -2658,6 +2699,7 @@ function cp_editor_handle_update_block(
 
     $versionId = (int)($block['book_version_id'] ?? 0);
     $sectionId = (int)($block['section_id'] ?? 0);
+    cp_editor_touch_annex_revision($annexSvc, $sections, $versionId, $sectionId, $uid);
     if ($versionId > 0 && $annexSvc->crossRefSectionId($versionId) === $sectionId) {
         $response['cross_ref_annex'] = $annexSvc->resolveCrossRefCatalog($versionId, $uid);
     }
@@ -2669,6 +2711,8 @@ function cp_editor_handle_split_block_page_break(
     PDO $pdo,
     ControlledPublishingBlockService $blocks,
     ControlledPublishingManualPageBreakService $manualPageBreaks,
+    ControlledPublishingAnnexService $annexSvc,
+    ControlledPublishingSectionService $sections,
     int $uid
 ): void {
     $in = cp_editor_input();
@@ -2721,6 +2765,14 @@ function cp_editor_handle_split_block_page_break(
         throw $e;
     }
 
+    cp_editor_touch_annex_revision(
+        $annexSvc,
+        $sections,
+        $versionId,
+        (int)$block['section_id'],
+        $uid
+    );
+
     cp_editor_json(200, array(
         'ok' => true,
         'left_block' => $blocks->getBlock($blockId),
@@ -2745,14 +2797,29 @@ function cp_editor_numbering_payload(array $numbering): array
     );
 }
 
-function cp_editor_handle_delete_block(ControlledPublishingBlockService $blocks, int $uid): void
+function cp_editor_handle_delete_block(
+    ControlledPublishingBlockService $blocks,
+    ControlledPublishingAnnexService $annexSvc,
+    ControlledPublishingSectionService $sections,
+    int $uid
+): void
 {
     $in = cp_editor_input();
     $blockId = (int)($in['block_id'] ?? 0);
     if ($blockId <= 0) {
         cp_editor_json(400, array('ok' => false, 'error' => 'block_id required'));
     }
+    $existing = $blocks->getBlock($blockId);
     $blocks->deleteBlock($blockId, $uid);
+    if (is_array($existing)) {
+        cp_editor_touch_annex_revision(
+            $annexSvc,
+            $sections,
+            (int)($existing['book_version_id'] ?? 0),
+            (int)($existing['section_id'] ?? 0),
+            $uid
+        );
+    }
     cp_editor_json(200, array('ok' => true));
 }
 

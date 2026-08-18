@@ -33,6 +33,12 @@ $annexMigration = (string)file_get_contents(
 $annexCommand = (string)file_get_contents(
     $root . '/scripts/migrate_books_manuals_annexes.php'
 );
+$annexBook = (string)file_get_contents(
+    $root . '/src/publishing/BooksManualsAnnexBookService.php'
+);
+$annexBookSql = (string)file_get_contents(
+    $root . '/scripts/sql/2026_08_18_annex_book_structure.sql'
+);
 $migration = (string)file_get_contents(
     $root . '/scripts/sql/2026_08_18_books_manuals_workflow.sql'
 );
@@ -332,6 +338,12 @@ bm_contract_assert(
     str_contains($annexCommand, '--apply')
         && str_contains($annexCommand, '--approved-manifest')
         && str_contains($annexCommand, '--actor-user-id')
+);
+bm_contract_assert(
+    'one Annex Book per parent with revision log',
+    str_contains($annexBook, "BOOK_TYPE = 'annex_book'")
+        && str_contains($annexBookSql, 'ipca_publishing_annex_book_map')
+        && str_contains($annexBookSql, 'ipca_publishing_annex_revisions')
 );
 
 echo "Books & Manuals workflow contracts: PASS\n";

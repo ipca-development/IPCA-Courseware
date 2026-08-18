@@ -197,6 +197,7 @@ final class ControlledPublishingFoundationService
               bv.*,
               b.book_key,
               b.title AS book_title,
+              b.book_type,
               b.manual_code,
               sb.baseline_key,
               sb.baseline_status,
@@ -213,6 +214,23 @@ final class ControlledPublishingFoundationService
         $stmt->execute(array(':id' => $versionId));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return is_array($row) ? $row : null;
+    }
+
+    public function annexBookIdForParent(int $parentBookId): int
+    {
+        if ($parentBookId <= 0) {
+            return 0;
+        }
+        try {
+            $stmt = $this->pdo->prepare(
+                "SELECT annex_book_id FROM ipca_publishing_annex_book_map
+                 WHERE parent_book_id = ? AND status = 'active' LIMIT 1"
+            );
+            $stmt->execute(array($parentBookId));
+            return (int)$stmt->fetchColumn();
+        } catch (Throwable) {
+            return 0;
+        }
     }
 
     /**

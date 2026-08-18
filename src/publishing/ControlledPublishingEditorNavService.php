@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/BooksManualsAnnexBookService.php';
 require_once __DIR__ . '/ControlledPublishingManualStructureService.php';
 require_once __DIR__ . '/ControlledPublishingOutlineService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
@@ -70,6 +71,7 @@ final class ControlledPublishingEditorNavService
         $version = $this->manualStructure->resolveVersion($versionId);
         $manualCode = strtoupper(trim((string)(($version['manual_code'] ?? '') !== '' ? $version['manual_code'] : $bookKey)));
         $sectionNumberDisplay = $this->manualStructure->computeSectionNumberDisplay($versionId, $manualCode);
+        $isAnnexBook = is_array($version) && BooksManualsAnnexBookService::isAnnexBookVersion($version);
 
         $tree = array();
 
@@ -77,6 +79,25 @@ final class ControlledPublishingEditorNavService
             $tree[] = $this->leafNode($byKey['cover'], 'Cover Page', array(
                 'outline_kind' => 'locked',
             ));
+        }
+
+        if ($isAnnexBook) {
+            $tree[] = $this->separatorNode('after_cover');
+            if (isset($byKey['annexes'])) {
+                $annexRow = $byKey['annexes'];
+                $annexId = (int)($annexRow['id'] ?? 0);
+                $annexChildren = $this->formatAnnexSubsections(
+                    $childrenByParent[$annexId] ?? array(),
+                    true
+                );
+                if ($annexChildren !== array()) {
+                    $tree[] = $this->groupNode('group_annexes', 'ANNEXES', $annexChildren, array(
+                        'label_style' => 'chapter_upper',
+                        'outline_kind' => 'locked',
+                    ));
+                }
+            }
+            return $tree;
         }
 
         $tree[] = $this->separatorNode('after_cover');
@@ -116,7 +137,9 @@ final class ControlledPublishingEditorNavService
 
         $tree[] = $this->separatorNode('before_annexes');
 
-        if (isset($byKey['annexes'])) {
+        $hideParentAnnexes = is_array($version)
+            && $this->parentHasAnnexBook((int)($version['book_id'] ?? 0));
+        if (isset($byKey['annexes']) && !$hideParentAnnexes) {
             $annexRow = $byKey['annexes'];
             $annexId = (int)($annexRow['id'] ?? 0);
             $annexChildren = $this->formatAnnexSubsections($childrenByParent[$annexId] ?? array());
@@ -284,7 +307,7 @@ final class ControlledPublishingEditorNavService
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
-    private function formatAnnexSubsections(array $rows): array
+    private function formatAnnexSubsections(array $rows, bool $annexBookOnly = false): array
     {
         $register = null;
         $crossRef = null;
@@ -298,11 +321,11 @@ final class ControlledPublishingEditorNavService
                 continue;
             }
             if ($key === ControlledPublishingAnnexService::CROSS_REF_SECTION_KEY) {
-                $crossRef = $row;
+                $crossRef = $annexBookOnly ? null : $row;
                 continue;
             }
             if ($key === ControlledPublishingAnnexService::HIGHLIGHTS_SECTION_KEY) {
-                $highlights = $row;
+                $highlights = $annexBookOnly ? null : $row;
                 continue;
             }
             if (str_starts_with($key, ControlledPublishingAnnexService::ANNEX_SECTION_PREFIX)) {
@@ -502,6 +525,11 @@ final class ControlledPublishingEditorNavService
             'is_navigable' => false,
             'children' => array(),
         );
+    }
+
+    private function parentHasAnnexBook(int $parentBookId): bool
+    {
+        return $this->manualStructure->parentHasAnnexBook($parentBookId);
     }
 
     /**

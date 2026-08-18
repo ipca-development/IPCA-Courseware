@@ -34,8 +34,41 @@ final class ControlledPublishingAnnexService
     ) {
     }
 
+    public function revisionTablePresent(): bool
+    {
+        try {
+            $stmt = $this->pdo->query("SHOW TABLES LIKE 'ipca_publishing_annex_revisions'");
+            return (bool)$stmt->fetchColumn();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
     /**
-     * Ensure annex register, cross-reference annex, and highlights child sections exist under the annexes parent.
+     * @param array<string,mixed> $version
+     */
+    public static function isAnnexBookVersion(array $version): bool
+    {
+        return (string)($version['book_type'] ?? '') === 'annex_book';
+    }
+
+    public static function nextAnnexRevisionLabel(string $currentLabel): string
+    {
+        $currentLabel = trim($currentLabel);
+        if ($currentLabel === '') {
+            return '1.0';
+        }
+        if (preg_match('/^(\d+)\.(\d+)$/', $currentLabel, $match) === 1) {
+            return $match[1] . '.' . ((int)$match[2] + 1);
+        }
+        if (preg_match('/^(\d+)$/', $currentLabel) === 1) {
+            return $currentLabel . '.1';
+        }
+        return $currentLabel . '.1';
+    }
+
+    /**
+     * Ensure annex register (and, on parent manuals only, cross-ref / highlights) exist.
      *
      * @return array{register_id:int,cross_ref_id:int,highlights_id:int,created:int}
      */
@@ -47,7 +80,9 @@ final class ControlledPublishingAnnexService
         }
 
         $this->foundation->ensureTemplates($actorUserId);
-        $this->foundation->scaffoldVersionSections($versionId, $actorUserId);
+        if (!self::isAnnexBookVersion($version)) {
+            $this->foundation->scaffoldVersionSections($versionId, $actorUserId);
+        }
 
         $parentId = $this->sectionIdByKey($versionId, self::PARENT_SECTION_KEY);
         if ($parentId <= 0) {
@@ -81,34 +116,38 @@ final class ControlledPublishingAnnexService
             $actorUserId,
             $created
         );
-        $crossRefId = $this->ensureChildSystemSection(
-            $versionId,
-            $parentId,
-            $parentAnchor,
-            self::CROSS_REF_SECTION_KEY,
-            'Cross Reference Annex',
-            'cross_ref_annex',
-            15,
-            $bookKey,
-            $versionLabel,
-            $actorUserId,
-            $created
-        );
-        $highlightsId = $this->ensureChildSystemSection(
-            $versionId,
-            $parentId,
-            $parentAnchor,
-            self::HIGHLIGHTS_SECTION_KEY,
-            'Annex Highlight of Changes',
-            'annex_highlights',
-            20,
-            $bookKey,
-            $versionLabel,
-            $actorUserId,
-            $created
-        );
 
-        $this->seedCrossRefAnnexIfEmpty($versionId, $crossRefId, $actorUserId);
+        $crossRefId = 0;
+        $highlightsId = 0;
+        if (!self::isAnnexBookVersion($version)) {
+            $crossRefId = $this->ensureChildSystemSection(
+                $versionId,
+                $parentId,
+                $parentAnchor,
+                self::CROSS_REF_SECTION_KEY,
+                'Cross Reference Annex',
+                'cross_ref_annex',
+                15,
+                $bookKey,
+                $versionLabel,
+                $actorUserId,
+                $created
+            );
+            $highlightsId = $this->ensureChildSystemSection(
+                $versionId,
+                $parentId,
+                $parentAnchor,
+                self::HIGHLIGHTS_SECTION_KEY,
+                'Annex Highlight of Changes',
+                'annex_highlights',
+                20,
+                $bookKey,
+                $versionLabel,
+                $actorUserId,
+                $created
+            );
+            $this->seedCrossRefAnnexIfEmpty($versionId, $crossRefId, $actorUserId);
+        }
 
         return array(
             'register_id' => $registerId,
@@ -328,7 +367,8 @@ final class ControlledPublishingAnnexService
                 $sectionId,
                 (string)$input['image_path'],
                 true,
-                $actorUserId
+                $actorUserId,
+                false
             );
         } elseif ($contentMode === 'docx' && !empty($input['docx_path']) && is_readable((string)$input['docx_path'])) {
             $importStats = $this->importAnnexDocx(
@@ -336,10 +376,19 @@ final class ControlledPublishingAnnexService
                 $sectionId,
                 (string)$input['docx_path'],
                 true,
-                $actorUserId
+                $actorUserId,
+                false
             );
         }
 
+        $this->recordAnnexRevision(
+            $versionId,
+            $sectionId,
+            'create',
+            $actorUserId,
+            false,
+            'Annex created'
+        );
         $this->regenerateRegister($versionId, $actorUserId);
 
         return array(
@@ -361,7 +410,8 @@ final class ControlledPublishingAnnexService
         int $sectionId,
         string $imagePath,
         bool $force,
-        ?int $actorUserId = null
+        ?int $actorUserId = null,
+        bool $recordRevision = true
     ): array {
         $version = $this->requireDraftVersion($versionId);
         $section = $this->sections->getSection($versionId, $sectionId);
@@ -438,6 +488,16 @@ final class ControlledPublishingAnnexService
             'canonical_excerpt_id' => $excerptId > 0 ? $excerptId : null,
         ), $actorUserId);
 
+        if ($recordRevision) {
+            $this->recordAnnexRevision(
+                $versionId,
+                $sectionId,
+                'reimport',
+                $actorUserId,
+                true,
+                'Annex image imported'
+            );
+        }
         $this->regenerateRegister($versionId, $actorUserId);
 
         return array(
@@ -456,7 +516,8 @@ final class ControlledPublishingAnnexService
         int $sectionId,
         string $docxPath,
         bool $force,
-        ?int $actorUserId = null
+        ?int $actorUserId = null,
+        bool $recordRevision = true
     ): array {
         $version = $this->requireDraftVersion($versionId);
         $section = $this->sections->getSection($versionId, $sectionId);
@@ -481,6 +542,16 @@ final class ControlledPublishingAnnexService
 
         $result = $importSvc->importAnnexSectionContent($versionId, $sectionId, $docxPath, $actorUserId);
         $this->updateAnnexMeta($sectionId, array('content_mode' => 'docx'), $actorUserId);
+        if ($recordRevision) {
+            $this->recordAnnexRevision(
+                $versionId,
+                $sectionId,
+                'reimport',
+                $actorUserId,
+                true,
+                'Annex DOCX imported'
+            );
+        }
         $this->regenerateRegister($versionId, $actorUserId);
 
         return $result;
@@ -876,6 +947,14 @@ final class ControlledPublishingAnnexService
             ':book_version_id' => $versionId,
         ));
 
+        $this->recordAnnexRevision(
+            $versionId,
+            $sectionId,
+            'identity',
+            $actorUserId,
+            true,
+            'Annex identity updated'
+        );
         $this->regenerateRegister($versionId, $actorUserId);
 
         return array(
@@ -969,6 +1048,117 @@ final class ControlledPublishingAnnexService
             'canonical_excerpt_id' => $excerptId,
             'text_length' => strlen($ocrText),
         );
+    }
+
+    /**
+     * Auto-log revision / date / whom for an annex content change in the editor.
+     * Same-day content saves by the same actor keep the current revision number.
+     *
+     * @return array{revision:string,revision_date:string,updated_by:string,bumped:bool}|null
+     */
+    public function touchAnnexContentRevision(
+        int $versionId,
+        int $sectionId,
+        ?int $actorUserId = null,
+        string $source = 'content_update'
+    ): ?array {
+        $section = $this->sections->getSection($versionId, $sectionId);
+        if ($section === null || !$this->isAnnexContentSection($section)) {
+            return null;
+        }
+        $bump = true;
+        if ($source === 'content_update' && $this->sameDayContentRevisionExists($sectionId, $actorUserId)) {
+            $bump = false;
+        }
+        return $this->recordAnnexRevision(
+            $versionId,
+            $sectionId,
+            $source,
+            $actorUserId,
+            $bump,
+            $source === 'content_update' ? 'Annex content updated' : null
+        );
+    }
+
+    /**
+     * @return array{revision:string,revision_date:string,updated_by:string,bumped:bool}|null
+     */
+    public function recordAnnexRevision(
+        int $versionId,
+        int $sectionId,
+        string $source,
+        ?int $actorUserId = null,
+        bool $bumpRevision = true,
+        ?string $note = null
+    ): ?array {
+        $section = $this->sections->getSection($versionId, $sectionId);
+        if ($section === null || !$this->isAnnexContentSection($section)) {
+            return null;
+        }
+
+        $allowed = array('create', 'content_update', 'reimport', 'identity', 'migrate');
+        if (!in_array($source, $allowed, true)) {
+            $source = 'content_update';
+        }
+
+        $meta = $this->decodeAnnexMeta($section);
+        $current = trim((string)($meta['revision'] ?? '1.0')) ?: '1.0';
+        $next = $bumpRevision && $source !== 'create'
+            ? self::nextAnnexRevisionLabel($current)
+            : $current;
+        $revisionDate = date('Y-m-d');
+        $actorName = $this->resolveUserDisplayName($actorUserId);
+
+        $this->updateAnnexMeta($sectionId, array(
+            'revision' => $next,
+            'revision_date' => $revisionDate,
+        ), $actorUserId);
+
+        $shouldInsert = $this->revisionTablePresent()
+            && ($bumpRevision || $source !== 'content_update');
+        if ($shouldInsert) {
+            $this->pdo->prepare(
+                'INSERT INTO ipca_publishing_annex_revisions
+                  (book_version_id, section_id, annex_key, revision_from, revision_to,
+                   revision_date, actor_user_id, actor_name, source, note)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            )->execute(array(
+                $versionId,
+                $sectionId,
+                (string)($section['section_key'] ?? ''),
+                $source === 'create' ? null : $current,
+                $next,
+                $revisionDate,
+                $actorUserId !== null && $actorUserId > 0 ? $actorUserId : null,
+                $actorName,
+                $source,
+                $note,
+            ));
+        }
+
+        return array(
+            'revision' => $next,
+            'revision_date' => $revisionDate,
+            'updated_by' => $actorName,
+            'bumped' => $next !== $current,
+        );
+    }
+
+    private function sameDayContentRevisionExists(int $sectionId, ?int $actorUserId): bool
+    {
+        if (!$this->revisionTablePresent() || $actorUserId === null || $actorUserId <= 0) {
+            return false;
+        }
+        $stmt = $this->pdo->prepare(
+            "SELECT id FROM ipca_publishing_annex_revisions
+             WHERE section_id = ?
+               AND source = 'content_update'
+               AND actor_user_id = ?
+               AND revision_date = ?
+             ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute(array($sectionId, $actorUserId, date('Y-m-d')));
+        return (int)$stmt->fetchColumn() > 0;
     }
 
     private function nextAnnexNumber(int $versionId): int
