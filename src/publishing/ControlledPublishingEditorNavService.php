@@ -329,6 +329,11 @@ final class ControlledPublishingEditorNavService
                 continue;
             }
             if (str_starts_with($key, ControlledPublishingAnnexService::ANNEX_SECTION_PREFIX)) {
+                $meta = $this->decodeMeta($row);
+                $annex = is_array($meta['annex'] ?? null) ? $meta['annex'] : array();
+                if (trim((string)($annex['deleted_at'] ?? '')) !== '') {
+                    continue;
+                }
                 $content[] = $row;
             }
         }

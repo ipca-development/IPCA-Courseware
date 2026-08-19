@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS ipca_publishing_annex_revisions (
   revision_date DATE NOT NULL,
   actor_user_id INT NULL,
   actor_name VARCHAR(255) NOT NULL DEFAULT '',
-  source ENUM('create','content_update','reimport','identity','migrate') NOT NULL DEFAULT 'content_update',
+  source ENUM('create','content_update','reimport','identity','migrate','delete','restore') NOT NULL DEFAULT 'content_update',
   note VARCHAR(512) NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),

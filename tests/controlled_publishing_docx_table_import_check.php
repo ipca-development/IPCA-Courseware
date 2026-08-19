@@ -81,6 +81,23 @@ $assert(
     'Word gridSpan=2 must be imported as colspan metadata.'
 );
 
+$assert(
+    ControlledPublishingDocxReader::sanitizeImportedText('18-08-2026') === '18-08-2026',
+    'dd-mm-yyyy dates must not lose the year during import sanitization.'
+);
+$assert(
+    ControlledPublishingDocxReader::sanitizeImportedText('18/08/2026') === '18/08/2026',
+    'dd/mm/yyyy dates must be preserved during import sanitization.'
+);
+$assert(
+    ControlledPublishingDocxReader::sanitizeImportedText('2026-08-18') === '2026-08-18',
+    'yyyy-mm-dd dates must be preserved during import sanitization.'
+);
+$assert(
+    ControlledPublishingDocxReader::sanitizeImportedText('Electronic Mass & Balance-92178') === 'Electronic Mass & Balance',
+    '5-digit Word bookmark suffixes must still be stripped.'
+);
+
 $manualPath = $makeDocx(
     '<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr><w:r><w:t>Contents</w:t></w:r></w:p>'
     . $tableXml

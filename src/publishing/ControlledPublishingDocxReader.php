@@ -451,8 +451,9 @@ final class ControlledPublishingDocxReader
         }
 
         // Word bookmark / cross-ref suffixes such as "Electronic Mass & Balance-92178-".
-        $title = preg_replace('/-\d{4,}-?\s*$/u', '', $title) ?? $title;
-        $title = preg_replace('/-\d{4,}-(?=\s|$)/u', ' ', $title) ?? $title;
+        // 5+ digits so calendar years (dd-mm-yyyy) stay intact.
+        $title = preg_replace('/-\d{5,}-?\s*$/u', '', $title) ?? $title;
+        $title = preg_replace('/-\d{5,}-(?=\s|$)/u', ' ', $title) ?? $title;
 
         // Trailing page numbers separated by whitespace (e.g. "INTRODUCTION 12"), not model codes like G1000.
         $title = preg_replace('/\s+\d{1,3}$/u', '', $title) ?? $title;
@@ -512,8 +513,9 @@ final class ControlledPublishingDocxReader
         }
 
         // Word bookmark / cross-ref suffixes such as "Electronic Mass & Balance-92178".
-        $text = preg_replace('/-\d{4,}-?\s*$/u', '', $text) ?? $text;
-        $text = preg_replace('/-\d{4,}-(?=\s|$)/u', ' ', $text) ?? $text;
+        // 5+ digits so calendar years (dd-mm-yyyy / yyyy-mm-dd) stay intact.
+        $text = preg_replace('/-\d{5,}-?\s*$/u', '', $text) ?? $text;
+        $text = preg_replace('/-\d{5,}-(?=\s|$)/u', ' ', $text) ?? $text;
 
         // Trailing cross-ref suffixes such as "**-116740251973" or "-116740251973".
         $text = preg_replace('/\*\*-?\d{8,}\s*$/u', '**', $text) ?? $text;

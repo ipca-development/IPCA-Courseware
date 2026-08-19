@@ -1567,6 +1567,7 @@
     removeAutomaticPrintBreaks(sheet);
     sheet.classList.add('cpb-print-layout');
     syncPrintPageGeometry(sheet);
+    applyStoredTableWidths();
     measurePrintFurnitureGeometry(sheet);
     var blocks = Array.prototype.slice.call(body.querySelectorAll(':scope > .cpb-block'));
     var manualAnchors = {};
@@ -8181,34 +8182,58 @@
     return { row: row, col: cell.cellIndex, ref: colLetter(cell.cellIndex) + String(row + 1) };
   }
 
-  function buildCopyText(blockEl, anchorCell) {
-    var coords = getTableCellCoords(blockEl, anchorCell);
-    if (!coords) {
-      return anchorCell.textContent.trim();
-    }
+  function selectedTableCellsInBlock(blockEl) {
+    return state.selectedTableCells.filter(function (cell) {
+      return blockEl && cell && blockEl.contains(cell);
+    });
+  }
+
+  function tableCellPlainText(cell) {
+    return (cell && cell.textContent ? cell.textContent : '').replace(/\s+/g, ' ').trim();
+  }
+
+  function selectedTextInTableCell(cell) {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    if (!cell || !(cell.contains(sel.anchorNode) || cell.contains(sel.focusNode))) return null;
+    return String(sel.toString() || '').trim();
+  }
+
+  function buildSelectedCellsCopy(blockEl, cells) {
+    var grouped = {};
+    cells.forEach(function (cell) {
+      var coords = getTableCellCoords(blockEl, cell);
+      if (!coords) return;
+      var rowKey = String(coords.row);
+      if (!grouped[rowKey]) grouped[rowKey] = [];
+      grouped[rowKey].push({ col: coords.col, cell: cell });
+    });
+    var rowKeys = Object.keys(grouped).sort(function (a, b) {
+      return parseInt(a, 10) - parseInt(b, 10);
+    });
     var lines = [];
-    var table = blockEl.querySelector('table');
-    var tbody = tableBody(blockEl);
-    if (coords.row < 0) {
-      var head = tableHeaderRow(blockEl);
-      if (head) lines.push(head.cells[coords.col].textContent.trim());
-      if (tbody) {
-        tableSourceRows(tbody).forEach(function (tr) {
-          if (tr.cells[coords.col]) lines.push(tr.cells[coords.col].textContent.trim());
-        });
-      }
-      return lines.join('\n');
+    var styles = [];
+    rowKeys.forEach(function (rowKey) {
+      grouped[rowKey].sort(function (a, b) { return a.col - b.col; });
+      lines.push(grouped[rowKey].map(function (item) {
+        return tableCellPlainText(item.cell);
+      }).join('\t'));
+      styles.push(grouped[rowKey].map(function (item) {
+        return cellStyleSnapshot(item.cell);
+      }));
+    });
+    return { text: lines.join('\n'), styles: styles };
+  }
+
+  function buildCopyText(blockEl, anchorCell) {
+    var selected = selectedTableCellsInBlock(blockEl);
+    if (selected.length > 1) {
+      return buildSelectedCellsCopy(blockEl, selected).text;
     }
-    if (tbody) {
-      var tr = tableSourceRows(tbody)[coords.row];
-      if (tr) {
-        tr.querySelectorAll('td').forEach(function (td) {
-          lines.push(td.textContent.trim());
-        });
-        return lines.join('\t');
-      }
-    }
-    return anchorCell.textContent.trim();
+    var cell = selected[0] || anchorCell;
+    var highlighted = selectedTextInTableCell(cell);
+    if (highlighted) return highlighted;
+    return tableCellPlainText(cell);
   }
 
   function cellStyleSnapshot(cell) {
@@ -8224,31 +8249,13 @@
   }
 
   function buildCopyStyles(blockEl, anchorCell) {
-    var coords = getTableCellCoords(blockEl, anchorCell);
-    if (!coords) return [[cellStyleSnapshot(anchorCell)]];
-    var styles = [];
-    var tbody = tableBody(blockEl);
-    if (coords.row < 0) {
-      var head = tableHeaderRow(blockEl);
-      if (head && head.cells[coords.col]) styles.push([cellStyleSnapshot(head.cells[coords.col])]);
-      if (tbody) {
-        tableSourceRows(tbody).forEach(function (tr) {
-          if (tr.cells[coords.col]) styles.push([cellStyleSnapshot(tr.cells[coords.col])]);
-        });
-      }
-      return styles;
+    var selected = selectedTableCellsInBlock(blockEl);
+    if (selected.length > 1) {
+      return buildSelectedCellsCopy(blockEl, selected).styles;
     }
-    if (tbody) {
-      var tr = tableSourceRows(tbody)[coords.row];
-      if (tr) {
-        var line = [];
-        tr.querySelectorAll('td').forEach(function (td) {
-          line.push(cellStyleSnapshot(td));
-        });
-        styles.push(line);
-      }
-    }
-    return styles;
+    var cell = selected[0] || anchorCell;
+    if (!cell) return [];
+    return [[cellStyleSnapshot(cell)]];
   }
 
   function applyCellStyleSnapshot(cell, style) {
@@ -8266,13 +8273,17 @@
   }
 
   function copyTableCells(blockEl) {
-    if (!state.focusedTableCell || !blockEl.contains(state.focusedTableCell)) {
+    var cell = resolveSelectedTableCell(blockEl) || state.focusedTableCell;
+    if (!cell || !blockEl.contains(cell)) {
       setStatus('Click a table cell first', 'error');
       return;
     }
-    var text = buildCopyText(blockEl, state.focusedTableCell);
+    var highlighted = selectedTableCellsInBlock(blockEl).length <= 1
+      ? selectedTextInTableCell(cell)
+      : null;
+    var text = highlighted || buildCopyText(blockEl, cell);
     state.tableClipboard = text;
-    state.tableClipboardStyles = buildCopyStyles(blockEl, state.focusedTableCell);
+    state.tableClipboardStyles = highlighted ? [[cellStyleSnapshot(cell)]] : buildCopyStyles(blockEl, cell);
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function () {
         setStatus('Copied', 'saved');
@@ -8829,9 +8840,16 @@
     return isNaN(w) ? 140 : w;
   }
 
+  function tablePageContentMaxWidth() {
+    var landscape = !!(state.pageLayout && state.pageLayout.orientation === 'landscape');
+    var side = PRINT_PAGE.side || 56;
+    return Math.max(200, (landscape ? 1056 : 816) - (side * 2));
+  }
+
   function tableContentMaxWidth(blockEl) {
+    var expected = tablePageContentMaxWidth();
     var sheetBody = blockEl.closest('.cpb-sheet-body');
-    if (sheetBody && sheetBody.clientWidth > 0) {
+    if (sheetBody && sheetBody.clientWidth >= expected - 8) {
       return sheetBody.clientWidth;
     }
     var sheet = blockEl.closest('.cpb-sheet');
@@ -8839,9 +8857,10 @@
       var style = window.getComputedStyle(sheet);
       var padL = parseFloat(style.paddingLeft) || 0;
       var padR = parseFloat(style.paddingRight) || 0;
-      return Math.max(200, sheet.clientWidth - padL - padR);
+      var inner = sheet.clientWidth - padL - padR;
+      if (inner >= expected - 8) return Math.max(200, inner);
     }
-    return 704;
+    return expected;
   }
 
   function tableOtherColsWidth(blockEl, skipIndex) {
@@ -8856,11 +8875,10 @@
 
   function clampColWidth(blockEl, colIndex, desired) {
     var min = 60;
-    var max = 600;
     var maxTable = tableContentMaxWidth(blockEl);
     var others = tableOtherColsWidth(blockEl, colIndex);
     var maxForCol = Math.max(min, maxTable - others);
-    return Math.max(min, Math.min(max, maxForCol, desired));
+    return Math.max(min, Math.min(maxTable, maxForCol, desired));
   }
 
   function tableTotalWidth(blockEl) {
@@ -8878,15 +8896,23 @@
     if (!table) return;
     var total = tableTotalWidth(blockEl);
     var maxTable = tableContentMaxWidth(blockEl);
+    var landscape = !!(state.pageLayout && state.pageLayout.orientation === 'landscape');
     var renderedWidth = Math.min(total, maxTable);
     table.style.width = renderedWidth + 'px';
-    table.style.maxWidth = '100%';
+    table.style.maxWidth = landscape ? 'none' : '100%';
     table.style.minWidth = '0';
     var wrap = tableWrap(blockEl);
     if (wrap && blockEl.getAttribute('data-structured-table-editor') !== '1') {
       wrap.style.width = renderedWidth + 'px';
-      wrap.style.maxWidth = '100%';
+      wrap.style.maxWidth = landscape ? 'none' : '100%';
     }
+  }
+
+  function applyStoredTableWidths() {
+    canvasEl.querySelectorAll('.cpb-block--table').forEach(function (blockEl) {
+      if (blockEl.getAttribute('data-structured-table-editor') === '1') return;
+      syncTableWidth(blockEl);
+    });
   }
 
   function fitTableToPage(blockEl) {
@@ -8936,7 +8962,7 @@
         });
       }
     }
-    fitTableToPage(blockEl);
+    syncTableWidth(blockEl);
   }
 
   function getActiveTableCell() {

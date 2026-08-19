@@ -64,7 +64,11 @@ compliance_page_open(array(
 ?>
 <section class="cmp-card" id="cp-annex-manager">
   <h2 style="margin:0 0 8px;">Annex list</h2>
-  <p style="margin:0 0 16px;font-size:13px;color:#64748b;">The Annex Register and Highlight of Changes pages in the editor are updated automatically.</p>
+  <p style="margin:0 0 16px;font-size:13px;color:#64748b;">The Annex Register and Highlight of Changes pages in the editor are updated automatically. Delete an annex here to hide it from the register and editor without removing its content.</p>
+  <label style="display:flex;gap:8px;align-items:center;margin:0 0 12px;font-size:13px;">
+    <input type="checkbox" id="cp-annex-show-deleted">
+    <span>Show deleted annexes</span>
+  </label>
   <div id="cp-annex-list" style="margin-bottom:20px;font-size:13px;color:#334155;">Loading annexes…</div>
 
   <?php if ($isReleased): ?>
@@ -149,6 +153,10 @@ compliance_page_open(array(
           </label>
         </div>
         <p style="margin:0;font-size:12px;color:#64748b;">Example: number <strong>2</strong> + suffix <strong>a</strong> → displayed as <strong>02a</strong>. Use suffix letters when several annexes share one base number.</p>
+        <label style="display:grid;gap:6px;">
+          <span style="font-size:13px;font-weight:600;">Revision date</span>
+          <input type="date" name="revision_date" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+        </label>
         <div style="display:flex;gap:10px;">
           <button type="submit">Save</button>
           <button type="button" id="cp-annex-edit-cancel" class="cmp-btn cmp-btn--secondary">Cancel</button>
@@ -161,6 +169,7 @@ compliance_page_open(array(
 <script>
 (function () {
   var versionId = <?= (int)$versionId ?>;
+  var isReleased = <?= $isReleased ? 'true' : 'false' ?>;
   var apiUrl = '/admin/api/controlled_book_annex_api.php';
   var listEl = document.getElementById('cp-annex-list');
   var statusEl = document.getElementById('cp-annex-status');
@@ -170,6 +179,7 @@ compliance_page_open(array(
   var editCancelBtn = document.getElementById('cp-annex-edit-cancel');
   var imageWrap = document.getElementById('cp-annex-upload-image');
   var docxWrap = document.getElementById('cp-annex-upload-docx');
+  var showDeletedEl = document.getElementById('cp-annex-show-deleted');
 
   function setStatus(msg, tone) {
     if (!statusEl) return;
@@ -196,18 +206,32 @@ compliance_page_open(array(
       var num = a.annex_display_number || String(a.annex_number || 0).padStart(2, '0');
       var editUrl = '/admin/compliance/controlled_book_editor.php?version_id=' + versionId + '&section_id=' + a.section_id;
       var shortTitle = a.annex_short_title || '';
-      html += '<tr style="border-bottom:1px solid #f1f5f9;">'
+      var deleted = !!a.deleted;
+      html += '<tr style="border-bottom:1px solid #f1f5f9;' + (deleted ? 'opacity:0.65;' : '') + '">'
         + '<td style="padding:8px 6px;vertical-align:top;">' + num + '</td>'
-        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.title || '') + '</td>'
+        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.title || '')
+        + (deleted ? ' <span style="color:#b45309;">(deleted)</span>' : '') + '</td>'
         + '<td style="padding:8px 6px;vertical-align:top;">' + (a.revision || '') + '</td>'
         + '<td style="padding:8px 6px;vertical-align:top;">' + (a.revision_date || '') + '</td>'
         + '<td style="padding:8px 6px;vertical-align:top;">' + (a.content_mode || '') + ' / ' + (a.orientation || 'portrait') + '</td>'
-        + '<td style="padding:8px 6px;vertical-align:top;white-space:nowrap;">'
-        + '<a href="' + editUrl + '">Open</a> · '
-        + '<button type="button" class="cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
-        + 'data-annex-number="' + (a.annex_number || 0) + '" data-annex-suffix="' + (a.annex_suffix || '') + '" '
-        + 'data-short-title="' + escAttr(shortTitle) + '" style="background:none;border:none;padding:0;color:#2563eb;cursor:pointer;font:inherit;">Edit</button>'
-        + '</td></tr>';
+        + '<td style="padding:8px 6px;vertical-align:top;white-space:nowrap;">';
+      if (!deleted) {
+        html += '<a href="' + editUrl + '">Open</a>';
+        if (!isReleased) {
+          html += ' · <button type="button" class="cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
+            + 'data-annex-number="' + (a.annex_number || 0) + '" data-annex-suffix="' + (a.annex_suffix || '') + '" '
+            + 'data-revision-date="' + escAttr(a.revision_date || '') + '" '
+            + 'data-short-title="' + escAttr(shortTitle) + '" style="background:none;border:none;padding:0;color:#2563eb;cursor:pointer;font:inherit;">Edit</button>'
+            + ' · <button type="button" class="cp-annex-delete-btn" data-section-id="' + a.section_id + '" '
+            + 'data-title="' + escAttr(a.title || '') + '" style="background:none;border:none;padding:0;color:#b91c1c;cursor:pointer;font:inherit;">Delete</button>';
+        }
+      } else if (!isReleased) {
+        html += '<button type="button" class="cp-annex-restore-btn" data-section-id="' + a.section_id + '" '
+          + 'style="background:none;border:none;padding:0;color:#2563eb;cursor:pointer;font:inherit;">Restore</button>';
+      } else {
+        html += '<span style="color:#94a3b8;">Deleted</span>';
+      }
+      html += '</td></tr>';
     });
     html += '</tbody></table>';
     listEl.innerHTML = html;
@@ -219,7 +243,25 @@ compliance_page_open(array(
           annex_number: parseInt(btn.getAttribute('data-annex-number') || '0', 10),
           annex_suffix: btn.getAttribute('data-annex-suffix') || '',
           annex_short_title: btn.getAttribute('data-short-title') || '',
+          revision_date: btn.getAttribute('data-revision-date') || '',
         });
+      });
+    });
+    listEl.querySelectorAll('.cp-annex-delete-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var sectionId = parseInt(btn.getAttribute('data-section-id') || '0', 10);
+        var title = btn.getAttribute('data-title') || 'this annex';
+        if (!sectionId || !window.confirm('Delete ' + title + '? It will be hidden from the register and editor. You can restore it later from this page.')) {
+          return;
+        }
+        postAnnexAction('soft_delete', sectionId, 'Deleting annex…', 'Annex deleted.');
+      });
+    });
+    listEl.querySelectorAll('.cp-annex-restore-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var sectionId = parseInt(btn.getAttribute('data-section-id') || '0', 10);
+        if (!sectionId) return;
+        postAnnexAction('restore', sectionId, 'Restoring annex…', 'Annex restored.');
       });
     });
   }
@@ -237,6 +279,8 @@ compliance_page_open(array(
     editForm.querySelector('input[name="title"]').value = annex.annex_short_title || '';
     editForm.querySelector('input[name="annex_number"]').value = String(annex.annex_number || '');
     editForm.querySelector('input[name="annex_suffix"]').value = annex.annex_suffix || '';
+    var dateInput = editForm.querySelector('input[name="revision_date"]');
+    if (dateInput) dateInput.value = annex.revision_date || '';
     editPanel.hidden = false;
     editPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -245,10 +289,29 @@ compliance_page_open(array(
     if (editPanel) editPanel.hidden = true;
   }
 
+  function postAnnexAction(action, sectionId, pendingMsg, successMsg) {
+    var fd = new FormData();
+    fd.set('action', action);
+    fd.set('version_id', String(versionId));
+    fd.set('section_id', String(sectionId));
+    setStatus(pendingMsg);
+    fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Request failed');
+        setStatus(successMsg);
+        loadList();
+      })
+      .catch(function (e) {
+        setStatus(e.message || 'Request failed', 'error');
+      });
+  }
+
   function loadList() {
     if (!listEl) return;
     listEl.textContent = 'Loading…';
-    fetch(apiUrl + '?action=list&version_id=' + versionId, { credentials: 'same-origin' })
+    var includeDeleted = showDeletedEl && showDeletedEl.checked ? '1' : '0';
+    fetch(apiUrl + '?action=list&version_id=' + versionId + '&include_deleted=' + includeDeleted, { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Load failed');
@@ -308,6 +371,8 @@ compliance_page_open(array(
       fd.set('title', title);
       fd.set('annex_number', String(number));
       fd.set('annex_suffix', suffix);
+      var revisionDate = (editForm.querySelector('input[name="revision_date"]') || {}).value || '';
+      if (revisionDate) fd.set('revision_date', revisionDate);
       setStatus('Saving annex…');
       fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
@@ -323,6 +388,7 @@ compliance_page_open(array(
     });
   }
   if (editCancelBtn) editCancelBtn.addEventListener('click', closeEditDialog);
+  if (showDeletedEl) showDeletedEl.addEventListener('change', loadList);
 
   var refreshBtn = document.getElementById('cp-annex-refresh-btn');
   if (refreshBtn) refreshBtn.addEventListener('click', loadList);

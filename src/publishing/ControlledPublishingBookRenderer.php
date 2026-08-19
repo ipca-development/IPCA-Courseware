@@ -1787,7 +1787,8 @@ final class ControlledPublishingBookRenderer
             . ' data-border-width="' . h($borderWidth) . '"'
             . ' data-border-color="' . h($borderColor) . '"'
             . ' style="--cpb-table-border-color:' . h($borderColor) . ';'
-            . 'width:' . $totalWidth . 'px;max-width:100%">';
+            . 'width:' . $totalWidth . 'px'
+            . ($totalWidth > 704 ? '' : ';max-width:100%') . '">';
         if ($edit) {
             $html .= '<table class="cpb-table" data-field="table" style="width:' . $totalWidth . 'px">';
             $html .= '<colgroup>';
@@ -2088,7 +2089,7 @@ final class ControlledPublishingBookRenderer
         $rowRowspans = $normalizedRowRowspans;
         if (is_array($payload['col_widths'] ?? null)) {
             foreach ($payload['col_widths'] as $width) {
-                $colWidths[] = max(60, min(600, (int)$width));
+                $colWidths[] = max(60, min(944, (int)$width));
             }
         }
         $colWidths = array_pad(array_slice($colWidths, 0, $colCount), $colCount, 140);

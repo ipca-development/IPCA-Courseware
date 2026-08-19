@@ -628,7 +628,7 @@ final class ControlledPublishingBlockService
 
         if (is_array($payload['col_widths'] ?? null)) {
             foreach ($payload['col_widths'] as $width) {
-                $colWidths[] = max(60, min(600, (int)$width));
+                $colWidths[] = max(60, min(944, (int)$width));
             }
         }
         $colWidths = array_pad(array_slice($colWidths, 0, $colCount), $colCount, 140);

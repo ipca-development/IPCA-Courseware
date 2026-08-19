@@ -5017,9 +5017,14 @@ ol.cpb-list > li[data-indent-level="8"] {
   min-height: 816px;
 }
 
-.cpb-sheet--landscape .cpb-page-header-table,
-.cpb-sheet--landscape .cpb-page-footer-table {
-  width: 100%;
+.cpb-sheet--landscape .cpb-table-wrap {
+  width: auto;
+  max-width: none;
+}
+
+.cpb-sheet--landscape .cpb-table-wrap > .cpb-table,
+.cpb-sheet--landscape .cpb-table-wrap .cpb-table {
+  max-width: none;
 }
 
 .cpb-orientation-toggle {

@@ -53,26 +53,10 @@ try {
             cp_annex_json(400, array('ok' => false, 'error' => 'version_id required'));
         }
         $annexSvc->ensureAnnexInfrastructure($versionId, $uid);
+        $includeDeleted = filter_var($_GET['include_deleted'] ?? '0', FILTER_VALIDATE_BOOLEAN);
         $annexes = array();
-        foreach ($annexSvc->listAnnexSections($versionId) as $row) {
-            $meta = $annexSvc->decodeAnnexMeta($row);
-            $suffix = $annexSvc->annexSuffixFromSection($row);
-            $number = (int)($meta['number'] ?? 0);
-            $annexes[] = array(
-                'section_id' => (int)($row['id'] ?? 0),
-                'section_key' => (string)($row['section_key'] ?? ''),
-                'title' => (string)($row['title'] ?? ''),
-                'annex_short_title' => $annexSvc->annexShortTitleFromSection($row),
-                'annex_number' => $number,
-                'annex_suffix' => $suffix,
-                'annex_display_number' => ControlledPublishingAnnexService::formatAnnexDisplayNumber($number, $suffix),
-                'revision' => (string)($meta['revision'] ?? ''),
-                'revision_date' => (string)($meta['revision_date'] ?? ''),
-                'updated_by' => (string)($meta['updated_by_name'] ?? ''),
-                'content_mode' => (string)($meta['content_mode'] ?? ''),
-                'orientation' => (string)($meta['page_orientation'] ?? 'portrait'),
-                'ocr_status' => (string)($meta['ocr_status'] ?? ''),
-            );
+        foreach ($annexSvc->listAnnexSections($versionId, $includeDeleted) as $row) {
+            $annexes[] = $annexSvc->describeAnnex($row);
         }
         cp_annex_json(200, array(
             'ok' => true,
@@ -150,6 +134,7 @@ try {
             'annex_number' => (int)($_POST['annex_number'] ?? 0),
             'annex_suffix' => trim((string)($_POST['annex_suffix'] ?? '')),
             'title' => $shortTitle,
+            'revision_date' => trim((string)($_POST['revision_date'] ?? '')),
         );
 
         $result = $annexSvc->updateAnnexIdentity($versionId, $sectionId, $input, $uid);
@@ -158,6 +143,26 @@ try {
             'annex' => $result,
             'editor_url' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId . '&section_id=' . $sectionId,
         ));
+    }
+
+    if ($action === 'soft_delete') {
+        $versionId = (int)($_POST['version_id'] ?? 0);
+        $sectionId = (int)($_POST['section_id'] ?? 0);
+        if ($versionId <= 0 || $sectionId <= 0) {
+            cp_annex_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
+        }
+        $result = $annexSvc->softDeleteAnnex($versionId, $sectionId, $uid);
+        cp_annex_json(200, array('ok' => true, 'annex' => $result));
+    }
+
+    if ($action === 'restore') {
+        $versionId = (int)($_POST['version_id'] ?? 0);
+        $sectionId = (int)($_POST['section_id'] ?? 0);
+        if ($versionId <= 0 || $sectionId <= 0) {
+            cp_annex_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
+        }
+        $result = $annexSvc->restoreAnnex($versionId, $sectionId, $uid);
+        cp_annex_json(200, array('ok' => true, 'annex' => $result));
     }
 
     if ($action === 'reimport') {

@@ -212,7 +212,7 @@ final class ControlledPublishingAnnexService
     /**
      * @return list<array<string,mixed>>
      */
-    public function listAnnexSections(int $versionId): array
+    public function listAnnexSections(int $versionId, bool $includeDeleted = false): array
     {
         $parentId = $this->sectionIdByKey($versionId, self::PARENT_SECTION_KEY);
         if ($parentId <= 0) {
@@ -222,6 +222,9 @@ final class ControlledPublishingAnnexService
         $rows = array();
         foreach ($this->listChildSections($versionId, $parentId) as $row) {
             if (!$this->isAnnexContentSection($row)) {
+                continue;
+            }
+            if (!$includeDeleted && $this->isAnnexDeleted($row)) {
                 continue;
             }
             $rows[] = $row;
@@ -290,7 +293,7 @@ final class ControlledPublishingAnnexService
         if ($revision === '') {
             $revision = '1.0';
         }
-        $revisionDate = trim((string)($input['revision_date'] ?? ''));
+        $revisionDate = $this->normalizeAnnexRevisionDate(trim((string)($input['revision_date'] ?? '')));
         if ($revisionDate === '') {
             $revisionDate = date('Y-m-d');
         }
@@ -708,6 +711,44 @@ final class ControlledPublishingAnnexService
         return str_starts_with($key, self::ANNEX_SECTION_PREFIX);
     }
 
+    /**
+     * @param array<string,mixed> $section
+     */
+    public function isAnnexDeleted(array $section): bool
+    {
+        $meta = $this->decodeAnnexMeta($section);
+        return trim((string)($meta['deleted_at'] ?? '')) !== '';
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     * @return array<string,mixed>
+     */
+    public function describeAnnex(array $section): array
+    {
+        $meta = $this->decodeAnnexMeta($section);
+        $suffix = $this->annexSuffixFromSection($section);
+        $number = (int)($meta['number'] ?? 0);
+        return array(
+            'section_id' => (int)($section['id'] ?? 0),
+            'section_key' => (string)($section['section_key'] ?? ''),
+            'title' => (string)($section['title'] ?? ''),
+            'annex_short_title' => $this->annexShortTitleFromSection($section),
+            'annex_number' => $number,
+            'annex_suffix' => $suffix,
+            'annex_display_number' => self::formatAnnexDisplayNumber($number, $suffix),
+            'revision' => (string)($meta['revision'] ?? ''),
+            'revision_date' => (string)($meta['revision_date'] ?? ''),
+            'updated_by' => (string)($meta['updated_by_name'] ?? ''),
+            'content_mode' => (string)($meta['content_mode'] ?? ''),
+            'orientation' => (string)($meta['page_orientation'] ?? 'portrait'),
+            'ocr_status' => (string)($meta['ocr_status'] ?? ''),
+            'deleted' => $this->isAnnexDeleted($section),
+            'deleted_at' => (string)($meta['deleted_at'] ?? ''),
+            'deleted_by' => (string)($meta['deleted_by_name'] ?? ''),
+        );
+    }
+
     public function isAnnexRegisterSection(array $section): bool
     {
         return (string)($section['section_key'] ?? '') === self::REGISTER_SECTION_KEY;
@@ -880,6 +921,9 @@ final class ControlledPublishingAnnexService
         if ($section === null || !$this->isAnnexContentSection($section)) {
             throw new RuntimeException('Annex section not found.');
         }
+        if ($this->isAnnexDeleted($section)) {
+            throw new RuntimeException('Restore this annex before editing it.');
+        }
 
         $number = array_key_exists('annex_number', $input)
             ? (int)$input['annex_number']
@@ -925,6 +969,12 @@ final class ControlledPublishingAnnexService
         $annex = is_array($meta['annex'] ?? null) ? $meta['annex'] : array();
         $annex['number'] = $number;
         $annex['suffix'] = $suffix;
+        $submittedDate = array_key_exists('revision_date', $input)
+            ? $this->normalizeAnnexRevisionDate((string)$input['revision_date'])
+            : '';
+        if ($submittedDate !== '') {
+            $annex['revision_date'] = $submittedDate;
+        }
         if ($actorUserId !== null && $actorUserId > 0) {
             $annex['updated_by_user_id'] = $actorUserId;
             $annex['updated_by_name'] = $this->resolveUserDisplayName($actorUserId);
@@ -957,7 +1007,8 @@ final class ControlledPublishingAnnexService
             'identity',
             $actorUserId,
             true,
-            'Annex identity updated'
+            'Annex identity updated',
+            $submittedDate !== '' ? $submittedDate : null
         );
         $this->regenerateRegister($versionId, $actorUserId);
 
@@ -1093,14 +1144,15 @@ final class ControlledPublishingAnnexService
         string $source,
         ?int $actorUserId = null,
         bool $bumpRevision = true,
-        ?string $note = null
+        ?string $note = null,
+        ?string $revisionDate = null
     ): ?array {
         $section = $this->sections->getSection($versionId, $sectionId);
         if ($section === null || !$this->isAnnexContentSection($section)) {
             return null;
         }
 
-        $allowed = array('create', 'content_update', 'reimport', 'identity', 'migrate');
+        $allowed = array('create', 'content_update', 'reimport', 'identity', 'migrate', 'delete', 'restore');
         if (!in_array($source, $allowed, true)) {
             $source = 'content_update';
         }
@@ -1110,12 +1162,18 @@ final class ControlledPublishingAnnexService
         $next = $bumpRevision && $source !== 'create'
             ? self::nextAnnexRevisionLabel($current)
             : $current;
-        $revisionDate = date('Y-m-d');
+        $authoredDate = $this->normalizeAnnexRevisionDate((string)($revisionDate ?? ''));
+        if ($authoredDate === '') {
+            $authoredDate = $this->normalizeAnnexRevisionDate((string)($meta['revision_date'] ?? ''));
+        }
+        if ($authoredDate === '') {
+            $authoredDate = date('Y-m-d');
+        }
         $actorName = $this->resolveUserDisplayName($actorUserId);
 
         $this->updateAnnexMeta($sectionId, array(
             'revision' => $next,
-            'revision_date' => $revisionDate,
+            'revision_date' => $authoredDate,
         ), $actorUserId);
 
         $shouldInsert = $this->revisionTablePresent()
@@ -1132,7 +1190,7 @@ final class ControlledPublishingAnnexService
                 (string)($section['section_key'] ?? ''),
                 $source === 'create' ? null : $current,
                 $next,
-                $revisionDate,
+                $authoredDate,
                 $actorUserId !== null && $actorUserId > 0 ? $actorUserId : null,
                 $actorName,
                 $source,
@@ -1142,10 +1200,82 @@ final class ControlledPublishingAnnexService
 
         return array(
             'revision' => $next,
-            'revision_date' => $revisionDate,
+            'revision_date' => $authoredDate,
             'updated_by' => $actorName,
             'bumped' => $next !== $current,
         );
+    }
+
+    /**
+     * Soft-delete an annex. Content blocks stay in place; the annex is hidden from
+     * the register, editor nav, and default manager list.
+     *
+     * @return array<string,mixed>
+     */
+    public function softDeleteAnnex(int $versionId, int $sectionId, ?int $actorUserId = null): array
+    {
+        $this->requireDraftVersion($versionId);
+        $section = $this->sections->getSection($versionId, $sectionId);
+        if ($section === null || !$this->isAnnexContentSection($section)) {
+            throw new RuntimeException('Annex section not found.');
+        }
+        if ($this->isAnnexDeleted($section)) {
+            throw new RuntimeException('Annex is already deleted.');
+        }
+
+        $actorName = $this->resolveUserDisplayName($actorUserId);
+        $this->updateAnnexMeta($sectionId, array(
+            'deleted_at' => date('c'),
+            'deleted_by_user_id' => $actorUserId,
+            'deleted_by_name' => $actorName,
+        ), $actorUserId);
+        $this->recordAnnexRevision(
+            $versionId,
+            $sectionId,
+            'delete',
+            $actorUserId,
+            false,
+            'Annex deleted'
+        );
+        $this->regenerateRegister($versionId, $actorUserId);
+
+        $fresh = $this->sections->getSection($versionId, $sectionId);
+        return $this->describeAnnex(is_array($fresh) ? $fresh : $section);
+    }
+
+    /**
+     * Restore a soft-deleted annex (drafts only).
+     *
+     * @return array<string,mixed>
+     */
+    public function restoreAnnex(int $versionId, int $sectionId, ?int $actorUserId = null): array
+    {
+        $this->requireDraftVersion($versionId);
+        $section = $this->sections->getSection($versionId, $sectionId);
+        if ($section === null || !$this->isAnnexContentSection($section)) {
+            throw new RuntimeException('Annex section not found.');
+        }
+        if (!$this->isAnnexDeleted($section)) {
+            throw new RuntimeException('Annex is not deleted.');
+        }
+
+        $this->updateAnnexMeta($sectionId, array(
+            'deleted_at' => null,
+            'deleted_by_user_id' => null,
+            'deleted_by_name' => '',
+        ), $actorUserId);
+        $this->recordAnnexRevision(
+            $versionId,
+            $sectionId,
+            'restore',
+            $actorUserId,
+            false,
+            'Annex restored'
+        );
+        $this->regenerateRegister($versionId, $actorUserId);
+
+        $fresh = $this->sections->getSection($versionId, $sectionId);
+        return $this->describeAnnex(is_array($fresh) ? $fresh : $section);
     }
 
     private function sameDayContentRevisionExists(int $sectionId, ?int $actorUserId): bool
@@ -1158,17 +1288,17 @@ final class ControlledPublishingAnnexService
              WHERE section_id = ?
                AND source = 'content_update'
                AND actor_user_id = ?
-               AND revision_date = ?
+               AND DATE(created_at) = CURRENT_DATE
              ORDER BY id DESC LIMIT 1"
         );
-        $stmt->execute(array($sectionId, $actorUserId, date('Y-m-d')));
+        $stmt->execute(array($sectionId, $actorUserId));
         return (int)$stmt->fetchColumn() > 0;
     }
 
     private function nextAnnexNumber(int $versionId): int
     {
         $max = 0;
-        foreach ($this->listAnnexSections($versionId) as $section) {
+        foreach ($this->listAnnexSections($versionId, true) as $section) {
             $max = max($max, $this->annexNumberFromSection($section));
         }
         return $max + 1;
@@ -1196,7 +1326,7 @@ final class ControlledPublishingAnnexService
     private function nextAvailableSuffix(int $versionId, int $number): string
     {
         $used = array('');
-        foreach ($this->listAnnexSections($versionId) as $section) {
+        foreach ($this->listAnnexSections($versionId, true) as $section) {
             if ($this->annexNumberFromSection($section) !== $number) {
                 continue;
             }
@@ -1502,6 +1632,19 @@ final class ControlledPublishingAnnexService
             $suffix = strtoupper(substr(md5($sectionKey), 0, 12));
         }
         return $parentAnchor . '-' . $suffix;
+    }
+
+    private function normalizeAnnexRevisionDate(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        $parsed = DateTime::createFromFormat('Y-m-d', $value);
+        if ($parsed instanceof DateTime && $parsed->format('Y-m-d') === $value) {
+            return $value;
+        }
+        return '';
     }
 
     /**
