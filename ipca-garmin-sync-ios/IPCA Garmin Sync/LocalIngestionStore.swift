@@ -262,6 +262,48 @@ actor LocalIngestionStore {
         )
     }
 
+    func updateLocalPath(id: UUID, path: String) throws {
+        try run(
+            "UPDATE files SET local_path = ?, updated_at = ? WHERE id = ?",
+            [.text(path), .double(Date().timeIntervalSince1970), .text(id.uuidString)]
+        )
+    }
+
+    /// iOS may assign a new absolute sandbox container path after an app update while
+    /// preserving Application Support. Rebase only stale paths to the verified file's
+    /// UUID name in the current Files directory; never change evidence state or bytes.
+    func reconcileLocalFilePaths(privateDirectory: URL) throws {
+        let fileManager = FileManager.default
+        for file in try allFiles() {
+            guard let storedPath = file.localPath, !fileManager.fileExists(atPath: storedPath) else {
+                continue
+            }
+            let storedName = URL(fileURLWithPath: storedPath).lastPathComponent
+            let candidates = [
+                privateDirectory.appendingPathComponent(storedName),
+                privateDirectory.appendingPathComponent("\(file.id.uuidString).csv")
+            ]
+            guard let currentURL = candidates.first(where: { candidate in
+                guard fileManager.fileExists(atPath: candidate.path),
+                      let attributes = try? fileManager.attributesOfItem(atPath: candidate.path),
+                      let size = attributes[.size] as? NSNumber else {
+                    return false
+                }
+                return size.int64Value == file.sourceSize
+            }) else {
+                continue
+            }
+            try run(
+                "UPDATE files SET local_path = ?, updated_at = ? WHERE id = ?",
+                [
+                    .text(currentURL.path),
+                    .double(Date().timeIntervalSince1970),
+                    .text(file.id.uuidString)
+                ]
+            )
+        }
+    }
+
     func createCompletedSnapshot(
         id: UUID = UUID(),
         startedAt: Date,

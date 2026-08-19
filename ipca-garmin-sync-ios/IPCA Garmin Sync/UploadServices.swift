@@ -39,10 +39,43 @@ protocol GarminUploadServing: Sendable {
     func finalize(uploadID: UUID) async throws -> ServerReceipt
 }
 
+struct GarminUploadRetryPolicy: Sendable {
+    let maximumAttempts: Int
+    let delaysNanoseconds: [UInt64]
+
+    static let production = GarminUploadRetryPolicy(
+        maximumAttempts: 5,
+        delaysNanoseconds: [1, 2, 4, 8].map { UInt64($0) * 1_000_000_000 }
+    )
+
+    static func immediate(maximumAttempts: Int) -> GarminUploadRetryPolicy {
+        GarminUploadRetryPolicy(maximumAttempts: maximumAttempts, delaysNanoseconds: [])
+    }
+
+    func delay(afterFailedAttempt attempt: Int) -> UInt64 {
+        guard !delaysNanoseconds.isEmpty else { return 0 }
+        return delaysNanoseconds[min(max(0, attempt - 1), delaysNanoseconds.count - 1)]
+    }
+}
+
 struct GarminUploadService: GarminUploadServing {
     let baseURL: URL
     let bearerCredential: String
-    var session: URLSession = .shared
+    let session: URLSession
+    let retryPolicy: GarminUploadRetryPolicy
+    private let logger = Logger(subsystem: "com.ipca.garmin-sync", category: "network")
+
+    init(
+        baseURL: URL,
+        bearerCredential: String,
+        session: URLSession? = nil,
+        retryPolicy: GarminUploadRetryPolicy = .production
+    ) {
+        self.baseURL = baseURL
+        self.bearerCredential = bearerCredential
+        self.session = session ?? Self.resilientSession()
+        self.retryPolicy = retryPolicy
+    }
 
     func resume(uploadID: UUID) async throws -> UploadResumeStatus {
         var components = URLComponents(
@@ -52,8 +85,7 @@ struct GarminUploadService: GarminUploadServing {
         components.queryItems = [.init(name: "upload_uuid", value: uploadID.uuidString)]
         var request = authorizedRequest(url: components.url!, method: "GET")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw GarminSyncError.invalidServerResponse }
+        let (data, http) = try await send(request)
         if http.statusCode == 404 {
             let error = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data)
             if error?.errorCode == "UPLOAD_NOT_FOUND" { return .empty }
@@ -129,15 +161,77 @@ struct GarminUploadService: GarminUploadServing {
     private func authorizedRequest(url: URL, method: String) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
+        request.timeoutInterval = 120
         request.setValue("Bearer \(bearerCredential)", forHTTPHeaderField: "Authorization")
         return request
     }
 
     private func perform<T: Decodable>(_ request: URLRequest) async throws -> T {
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw GarminSyncError.invalidServerResponse }
+        let (data, http) = try await send(request)
         try validateHTTP(http, data: data)
         return try decode(T.self, data)
+    }
+
+    private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let maximumAttempts = max(1, retryPolicy.maximumAttempts)
+        for attempt in 1...maximumAttempts {
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw GarminSyncError.invalidServerResponse
+                }
+                if isRetryableHTTP(http, data: data), attempt < maximumAttempts {
+                    try await waitBeforeRetry(attempt: attempt, request: request)
+                    continue
+                }
+                return (data, http)
+            } catch {
+                guard isRetryableNetworkError(error), attempt < maximumAttempts else {
+                    throw error
+                }
+                try await waitBeforeRetry(attempt: attempt, request: request)
+            }
+        }
+        throw GarminSyncError.invalidServerResponse
+    }
+
+    private func waitBeforeRetry(attempt: Int, request: URLRequest) async throws {
+        let delay = retryPolicy.delay(afterFailedAttempt: attempt)
+        logger.warning(
+            "Retrying \(request.httpMethod ?? "request", privacy: .public) \(request.url?.path ?? "", privacy: .public) after attempt \(attempt, privacy: .public)"
+        )
+        if delay > 0 {
+            try await Task.sleep(nanoseconds: delay)
+        }
+    }
+
+    private func isRetryableHTTP(_ response: HTTPURLResponse, data: Data) -> Bool {
+        if [408, 425, 429, 500, 502, 503, 504].contains(response.statusCode) {
+            return true
+        }
+        return (try? JSONDecoder().decode(APIErrorEnvelope.self, from: data).retryable) == true
+    }
+
+    private func isRetryableNetworkError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [
+            .timedOut,
+            .cannotFindHost,
+            .cannotConnectToHost,
+            .dnsLookupFailed,
+            .networkConnectionLost,
+            .notConnectedToInternet,
+            .resourceUnavailable,
+            .backgroundSessionWasDisconnected
+        ].contains(urlError.code)
+    }
+
+    private static func resilientSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 3600
+        return URLSession(configuration: configuration)
     }
 
     private func validateHTTP(_ response: HTTPURLResponse, data: Data) throws {
@@ -158,10 +252,12 @@ struct GarminUploadService: GarminUploadServing {
 private struct APIErrorEnvelope: Decodable {
     let error: String?
     let errorCode: String?
+    let retryable: Bool?
 
     enum CodingKeys: String, CodingKey {
         case error
         case errorCode = "error_code"
+        case retryable
     }
 }
 
@@ -217,11 +313,20 @@ struct UploadQueue {
 
     private let store: LocalIngestionStore
     private let service: any GarminUploadServing
+    private let localDirectory: URL?
+    private let hashService: FileHashService
     private let logger = Logger(subsystem: "com.ipca.garmin-sync", category: "upload")
 
-    init(store: LocalIngestionStore, service: any GarminUploadServing) {
+    init(
+        store: LocalIngestionStore,
+        service: any GarminUploadServing,
+        localDirectory: URL? = nil,
+        hashService: FileHashService = FileHashService()
+    ) {
         self.store = store
         self.service = service
+        self.localDirectory = localDirectory
+        self.hashService = hashService
     }
 
     func enqueueVerifiedFiles() async throws {
@@ -258,14 +363,24 @@ struct UploadQueue {
         totalFiles: Int,
         progress: @escaping @Sendable (UploadProgress) -> Void
     ) async throws {
-        guard let localPath = file.localPath else {
+        guard file.localPath != nil else {
             throw GarminSyncError.verificationFailed(file.relativePath)
         }
         try await transition(file, to: .uploading)
         do {
+            let localURL = try resolvedLocalURL(for: file)
+            let attributes = try FileManager.default.attributesOfItem(atPath: localURL.path)
+            let localSize = (attributes[.size] as? NSNumber)?.int64Value ?? -1
+            let localHash = try hashService.sha256(url: localURL)
+            guard localSize == file.sourceSize, localHash == file.sourceHash else {
+                throw GarminSyncError.verificationFailed(file.relativePath)
+            }
+            if localURL.path != file.localPath {
+                try await store.updateLocalPath(id: file.id, path: localURL.path)
+            }
             var remote = try await service.resume(uploadID: file.uploadID)
             let chunkCount = totalChunks(for: file)
-            let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: localPath))
+            let handle = try FileHandle(forReadingFrom: localURL)
             defer { try? handle.close() }
 
             for index in 0..<chunkCount where !remote.receivedChunks.contains(index) {
@@ -313,6 +428,27 @@ struct UploadQueue {
 
     private func totalChunks(for file: IngestionFile) -> Int {
         max(1, Int((file.sourceSize + Int64(Self.chunkSize) - 1) / Int64(Self.chunkSize)))
+    }
+
+    private func resolvedLocalURL(for file: IngestionFile) throws -> URL {
+        guard let localPath = file.localPath else {
+            throw GarminSyncError.verificationFailed(file.relativePath)
+        }
+        let fileManager = FileManager.default
+        let storedURL = URL(fileURLWithPath: localPath)
+        if fileManager.fileExists(atPath: storedURL.path) {
+            return storedURL
+        }
+        if let localDirectory {
+            let candidates = [
+                localDirectory.appendingPathComponent(storedURL.lastPathComponent),
+                localDirectory.appendingPathComponent("\(file.id.uuidString).csv")
+            ]
+            if let existing = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }) {
+                return existing
+            }
+        }
+        throw GarminSyncError.verificationFailed(file.relativePath)
     }
 
     private func verifyAndComplete(_ receipt: ServerReceipt, file: IngestionFile) async throws {

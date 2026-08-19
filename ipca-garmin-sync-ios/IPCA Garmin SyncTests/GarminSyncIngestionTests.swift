@@ -177,6 +177,11 @@ final class GarminSyncIngestionTests: XCTestCase {
         let capturedURL = URL(fileURLWithPath: localPath)
         let capturedBytes = try Data(contentsOf: capturedURL)
         try await h.store.updateState(id: original.id, state: .waitingForUpload)
+        let staleContainerPath = h.root
+            .appendingPathComponent("Previous-App-Container/Files")
+            .appendingPathComponent(capturedURL.lastPathComponent)
+            .path
+        try await h.store.updateLocalPath(id: original.id, path: staleContainerPath)
         let pendingFiles = try await h.store.allFiles()
         let pending = try XCTUnwrap(pendingFiles.first)
         let snapshotsBefore = try await h.store.snapshots()
@@ -185,6 +190,7 @@ final class GarminSyncIngestionTests: XCTestCase {
             databaseURL: h.root.appendingPathComponent("ledger.sqlite")
         )
         try await reopened.recoverInterruptedWork(partialDirectory: h.local)
+        try await reopened.reconcileLocalFilePaths(privateDirectory: h.local)
 
         let recoveredFiles = try await reopened.allFiles()
         let recovered = try XCTUnwrap(recoveredFiles.first)

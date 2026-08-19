@@ -132,6 +132,30 @@ final class GarminSyncUploadTests: XCTestCase {
         XCTAssertEqual(idempotent?.state, .serverVerified)
     }
 
+    func testUploadRebasesStaleSandboxPathAndVerifiesExistingBytes() async throws {
+        let (root, store, original) = try await localVerifiedFixture(size: 128)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let currentPath = try XCTUnwrap(original.localPath)
+        let currentURL = URL(fileURLWithPath: currentPath)
+        let stalePath = root
+            .appendingPathComponent("Old-Container")
+            .appendingPathComponent(currentURL.lastPathComponent)
+            .path
+        try await store.updateLocalPath(id: original.id, path: stalePath)
+
+        try await UploadQueue(
+            store: store,
+            service: FixtureUploadServer(mode: .success),
+            localDirectory: root
+        ).run { _ in }
+
+        let files = try await store.allFiles()
+        let completed = try XCTUnwrap(files.first)
+        XCTAssertEqual(completed.state, .serverVerified)
+        XCTAssertEqual(completed.localPath, currentURL.path)
+        XCTAssertEqual(try Data(contentsOf: currentURL), Data(repeating: 0x5A, count: 128))
+    }
+
     func testNoncontiguousChunkResumeUploadsOnlyMissingIndex() async throws {
         let (root, store, _) = try await localVerifiedFixture()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -241,6 +265,78 @@ final class GarminSyncUploadTests: XCTestCase {
         let receipt = try await service.finalize(uploadID: uploadID)
         XCTAssertEqual(receipt.objectID, "object-http")
         XCTAssertEqual(receipt.receiptUUID, "receipt-http")
+    }
+
+    func testResumeAutomaticallyRetriesTransientTimeout() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [GarminURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let uploadID = UUID()
+        var requestCount = 0
+
+        GarminURLProtocol.handler = { request in
+            requestCount += 1
+            if requestCount == 1 {
+                throw URLError(.timedOut)
+            }
+            return Self.response(
+                url: try XCTUnwrap(request.url),
+                status: 404,
+                json: #"{"ok":false,"error":"No upload.","error_code":"UPLOAD_NOT_FOUND","retryable":false}"#
+            )
+        }
+
+        let service = GarminUploadService(
+            baseURL: URL(string: "https://example.test/")!,
+            bearerCredential: "secret-token",
+            session: session,
+            retryPolicy: .immediate(maximumAttempts: 3)
+        )
+
+        let status = try await service.resume(uploadID: uploadID)
+        XCTAssertEqual(status, .empty)
+        XCTAssertEqual(requestCount, 2)
+    }
+
+    func testFinalizeAutomaticallyRetriesRetryableServerFailure() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [GarminURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let uploadID = UUID()
+        var requestCount = 0
+
+        GarminURLProtocol.handler = { request in
+            requestCount += 1
+            let url = try XCTUnwrap(request.url)
+            if requestCount == 1 {
+                return Self.response(
+                    url: url,
+                    status: 503,
+                    json: #"{"ok":false,"error":"Temporarily unavailable.","error_code":"TEMPORARY_FAILURE","retryable":true}"#
+                )
+            }
+            return Self.response(
+                url: url,
+                json: """
+                {"ok":true,"status":"verified","receipt":{
+                  "receipt_uuid":"receipt-retried","object_id":"object-retried",
+                  "sha256":"\(String(repeating: "a", count: 64))","byte_count":32,
+                  "verified":true,"duplicate":false
+                }}
+                """
+            )
+        }
+
+        let service = GarminUploadService(
+            baseURL: URL(string: "https://example.test/")!,
+            bearerCredential: "secret-token",
+            session: session,
+            retryPolicy: .immediate(maximumAttempts: 3)
+        )
+
+        let receipt = try await service.finalize(uploadID: uploadID)
+        XCTAssertEqual(receipt.objectID, "object-retried")
+        XCTAssertEqual(requestCount, 2)
     }
 
     func testStateMachineRejectsUnsafeTransitions() {

@@ -82,6 +82,7 @@ final class SyncViewModel: ObservableObject {
         do {
             recoverEnrollmentStatus()
             try await store.recoverInterruptedWork(partialDirectory: privateDirectory)
+            try await store.reconcileLocalFilePaths(privateDirectory: privateDirectory)
             selectedFolder = try? access.restoreFolder()
             await refreshDebugData()
             if files.contains(where: { [.localVerified, .waitingForUpload, .uploading].contains($0.state) }) {
@@ -171,7 +172,8 @@ final class SyncViewModel: ObservableObject {
         step = .uploading
         let queue = UploadQueue(
             store: store,
-            service: GarminUploadService(baseURL: baseURL, bearerCredential: credential)
+            service: GarminUploadService(baseURL: baseURL, bearerCredential: credential),
+            localDirectory: privateDirectory
         )
         Task {
             do {
