@@ -271,8 +271,11 @@ final class BooksManualsWorkflowService
     /**
      * @return array{version_id:int,version_label:string}
      */
-    public function createRevision(int $releasedVersionId, int $actorUserId): array
-    {
+    public function createRevision(
+        int $releasedVersionId,
+        int $actorUserId,
+        ?string $requestedVersionLabel = null
+    ): array {
         $source = $this->foundation->getVersion($releasedVersionId);
         if ($source === null || (string)$source['lifecycle_status'] !== 'released') {
             throw new RuntimeException('Only an approved manual can create a revision.');
@@ -280,8 +283,21 @@ final class BooksManualsWorkflowService
         if (BooksManualsAnnexBookService::isAnnexBookVersion($source)) {
             throw new RuntimeException('Annex Books are published or unpublished. They do not use the manual revision cycle.');
         }
-        $label = $this->foundation->suggestNextVersionLabel((string)$source['version_label']);
-        $created = $this->foundation->createNextDraftVersion($releasedVersionId, $label, $actorUserId);
+        $label = trim((string)$requestedVersionLabel);
+        if ($label === '') {
+            $label = $this->foundation->suggestNextVersionLabel((string)$source['version_label']);
+        }
+        $authorization = $this->foundation->authorizeNextDraftVersionCreation(
+            $releasedVersionId,
+            $label,
+            $actorUserId
+        );
+        $created = $this->foundation->createNextDraftVersion(
+            $releasedVersionId,
+            $label,
+            $actorUserId,
+            $authorization
+        );
         $this->syncUpdateIdentity((int)$created['version_id']);
         $this->recordEvent(
             (int)$created['version_id'],

@@ -9,6 +9,14 @@ require_once __DIR__ . '/ControlledPublishingReaderService.php';
  */
 final class ControlledPublishingFoundationService
 {
+    /**
+     * Short-lived, single-use clone authorizations issued only by the governed
+     * web workflow. They deliberately never cross a request boundary.
+     *
+     * @var array<string,array{source_version_id:int,new_version_label:string,actor_user_id:int,expires_at:float}>
+     */
+    private static array $revisionCloneAuthorizations = array();
+
     /** @var array<string,array<string,array{source_set_key:string,selection_role:string}>> */
     private const REQUIRED_SOURCE_SETS = array(
         'OM' => array(
@@ -658,13 +666,48 @@ final class ControlledPublishingFoundationService
         return $currentLabel . '.1';
     }
 
+    public function authorizeNextDraftVersionCreation(
+        int $sourceVersionId,
+        string $newVersionLabel,
+        int $actorUserId
+    ): string {
+        if (PHP_SAPI === 'cli') {
+            throw new RuntimeException(
+                'Controlled manual revisions cannot be authorized from CLI or automation.'
+            );
+        }
+        $newVersionLabel = trim($newVersionLabel);
+        if ($sourceVersionId <= 0 || $newVersionLabel === '' || $actorUserId <= 0) {
+            throw new RuntimeException('A valid revision creation authorization is required.');
+        }
+
+        $token = bin2hex(random_bytes(32));
+        self::$revisionCloneAuthorizations[$token] = array(
+            'source_version_id' => $sourceVersionId,
+            'new_version_label' => $newVersionLabel,
+            'actor_user_id' => $actorUserId,
+            'expires_at' => microtime(true) + 30.0,
+        );
+        return $token;
+    }
+
     /**
      * Copy a released (or draft) version into a new draft and prepare Part 0 admin pages.
      *
      * @return array{version_id:int,version_label:string}
      */
-    public function createNextDraftVersion(int $sourceVersionId, string $newVersionLabel, ?int $actorUserId = null): array
-    {
+    public function createNextDraftVersion(
+        int $sourceVersionId,
+        string $newVersionLabel,
+        ?int $actorUserId = null,
+        ?string $authorizationToken = null
+    ): array {
+        $this->consumeRevisionCloneAuthorization(
+            $authorizationToken,
+            $sourceVersionId,
+            $newVersionLabel,
+            (int)$actorUserId
+        );
         require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 
         $source = $this->getVersion($sourceVersionId);
@@ -772,6 +815,40 @@ final class ControlledPublishingFoundationService
             'version_id' => $newVersionId,
             'version_label' => $newVersionLabel,
         );
+    }
+
+    private function consumeRevisionCloneAuthorization(
+        ?string $token,
+        int $sourceVersionId,
+        string $newVersionLabel,
+        int $actorUserId
+    ): void {
+        if (PHP_SAPI === 'cli') {
+            throw new RuntimeException(
+                'Controlled manual revisions cannot be created from CLI or automation.'
+            );
+        }
+        $token = trim((string)$token);
+        $authorization = $token !== ''
+            ? (self::$revisionCloneAuthorizations[$token] ?? null)
+            : null;
+        if ($token !== '') {
+            unset(self::$revisionCloneAuthorizations[$token]);
+        }
+        if (
+            !is_array($authorization)
+            || (int)$authorization['source_version_id'] !== $sourceVersionId
+            || !hash_equals(
+                (string)$authorization['new_version_label'],
+                trim($newVersionLabel)
+            )
+            || (int)$authorization['actor_user_id'] !== $actorUserId
+            || (float)$authorization['expires_at'] < microtime(true)
+        ) {
+            throw new RuntimeException(
+                'Revision creation was blocked because no valid governed web authorization was present.'
+            );
+        }
     }
 
     private function repairClonedNestedMainChapters(

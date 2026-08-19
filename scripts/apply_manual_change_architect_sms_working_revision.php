@@ -18,6 +18,13 @@ $actorUserId = (int)($options['actor'] ?? 0);
 $approval = trim((string)($options['approve-package'] ?? ''));
 $preflightOnly = array_key_exists('preflight', $options);
 
+if (!$preflightOnly) {
+    throw new RuntimeException(
+        'This Manual Change Architect utility is permanently read-only. '
+        . 'Controlled revisions can only be created through the authenticated Books & Manuals workflow.'
+    );
+}
+
 const APPROVED_PACKAGE_FINGERPRINT = 'da4cef101b5dfb50c5559c05e5cad3f13394993104745854cd0cbeef37174058';
 const EXPECTED_SOURCE_SNAPSHOT = '990d67ca08d08486ac6c0cf6aeca92d7b92d417de3cc0bfa074134fcf4dab664';
 const EXPECTED_SOURCE_TREE = 'a0ed79cf460dc26918a7899ea863846a5c5ed0db3d17c1fa811e04feb2152740';

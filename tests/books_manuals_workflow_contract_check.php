@@ -51,6 +51,12 @@ $overrideMigration = (string)file_get_contents(
 $readerApi = (string)file_get_contents($root . '/public/student/api/manual_reader_api.php');
 $editorApi = (string)file_get_contents($root . '/public/admin/api/controlled_book_editor_api.php');
 $editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
+$legacyVersionPage = (string)file_get_contents(
+    $root . '/public/admin/compliance/controlled_book_version.php'
+);
+$architectApply = (string)file_get_contents(
+    $root . '/scripts/apply_manual_change_architect_sms_working_revision.php'
+);
 $nav = (string)file_get_contents($root . '/src/nav/admin.php');
 $libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
 $manualPage = (string)file_get_contents($root . '/public/admin/books_manuals/manual.php');
@@ -87,6 +93,25 @@ foreach (array(
 ) as $needle => $label) {
     bm_contract_assert($label, str_contains($workflow, $needle));
 }
+
+bm_contract_assert(
+    'successor revision creation requires governed web authorization',
+    str_contains($foundation, 'authorizeNextDraftVersionCreation')
+        && str_contains($foundation, 'consumeRevisionCloneAuthorization')
+        && str_contains($foundation, "PHP_SAPI === 'cli'")
+        && str_contains($workflow, 'authorizeNextDraftVersionCreation')
+        && str_contains($workflow, '$authorization')
+);
+bm_contract_assert(
+    'legacy revision action uses the governed workflow',
+    str_contains($legacyVersionPage, '$workflowSvc->createRevision(')
+        && !str_contains($legacyVersionPage, '$svc->createNextDraftVersion(')
+);
+bm_contract_assert(
+    'Manual Change Architect apply utility is permanently read-only',
+    str_contains($architectApply, 'This Manual Change Architect utility is permanently read-only.')
+        && str_contains($architectApply, 'if (!$preflightOnly)')
+);
 
 foreach (array(
     'ipca_publishing_book_profiles',
