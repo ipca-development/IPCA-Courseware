@@ -193,6 +193,21 @@ compliance_page_open(array(
     text-align: center;
     white-space: nowrap;
   }
+  #cp-annex-manager .cp-annex-action--blue {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+  }
+  #cp-annex-manager .cp-annex-action--amber {
+    background: #d97706;
+    border-color: #d97706;
+    color: #fff;
+  }
+  #cp-annex-manager .cp-annex-action--red {
+    background: #b91c1c;
+    border-color: #b91c1c;
+    color: #fff;
+  }
   #cp-annex-manager .cp-annex-row-actions .cp-annex-restore-btn {
     grid-column: 1 / -1;
   }
@@ -573,15 +588,15 @@ compliance_page_open(array(
         + '<td class="cp-annex-icon-cell">' + orientationSymbol(a.orientation) + '</td>'
         + '<td><div class="cp-annex-row-actions">';
       if (!deleted) {
-        html += '<a class="app-btn app-btn--secondary" href="' + editUrl + '">Edit</a>';
+        html += '<a class="app-btn cp-annex-action--blue" href="' + editUrl + '">Edit</a>';
         if (canEdit) {
-          html += '<button type="button" class="app-btn app-btn--secondary cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
+          html += '<button type="button" class="app-btn cp-annex-action--blue cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
             + 'data-annex-number="' + (a.annex_number || 0) + '" data-annex-suffix="' + (a.annex_suffix || '') + '" '
             + 'data-short-title="' + escAttr(shortTitle) + '" title="Rename Annex">Rename</button>'
-            + '<button type="button" class="app-btn app-btn--secondary cp-annex-revert-btn" data-section-id="' + a.section_id + '" '
+            + '<button type="button" class="app-btn cp-annex-action--amber cp-annex-revert-btn" data-section-id="' + a.section_id + '" '
             + 'data-title="' + escAttr(a.title || '') + '">Revert</button>'
-            + '<button type="button" class="app-btn cp-annex-delete-btn" data-section-id="' + a.section_id + '" '
-            + 'data-title="' + escAttr(a.title || '') + '" style="background:#b91c1c;border-color:#b91c1c;color:#fff;">Delete</button>';
+            + '<button type="button" class="app-btn cp-annex-action--red cp-annex-delete-btn" data-section-id="' + a.section_id + '" '
+            + 'data-title="' + escAttr(a.title || '') + '">Delete</button>';
         }
       } else if (canEdit) {
         html += '<button type="button" class="app-btn app-btn--secondary cp-annex-restore-btn" data-section-id="' + a.section_id + '">Restore</button>';

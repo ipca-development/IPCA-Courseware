@@ -23,6 +23,8 @@ $annexApi = (string)file_get_contents($root . '/public/admin/api/controlled_book
 $pageBreakApi = (string)file_get_contents($root . '/public/admin/api/controlled_book_page_break_api.php');
 $annexManager = (string)file_get_contents($root . '/public/admin/compliance/controlled_book_annexes.php');
 $annexPage = (string)file_get_contents($root . '/public/admin/books_manuals/annexes.php');
+$libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
+$booksManualsCss = (string)file_get_contents($root . '/public/assets/books-manuals.css');
 $editorPage = (string)file_get_contents($root . '/public/admin/compliance/controlled_book_editor.php');
 $editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
 $pageBreaks = (string)file_get_contents($root . '/src/publishing/ControlledPublishingManualPageBreakService.php');
@@ -181,7 +183,25 @@ annex_book_assert(
         && str_contains($annexManager, 'columnWidthStorageKey')
         && str_contains($annexManager, 'ipca.manageAnnexes.user.')
         && str_contains($annexManager, 'grid-template-columns: repeat(4, minmax(0, 1fr))')
+        && substr_count($annexManager, 'cp-annex-action--blue') >= 3
+        && str_contains($annexManager, 'cp-annex-action--amber')
+        && str_contains($annexManager, 'cp-annex-action--red')
         && str_contains($annexManager, 'Reset columns')
+);
+annex_book_assert(
+    'current book miniatures open their editors',
+    str_contains($libraryPage, 'class="bm-cover bm-cover--thumbnail" href="<?= h($editorUrl) ?>"')
+        && !str_contains(
+            $libraryPage,
+            'class="bm-cover bm-cover--thumbnail" href="<?= h($previewUrl) ?>"'
+        )
+        && str_contains(
+            $annexPage,
+            'href="/admin/compliance/controlled_book_editor.php?version_id='
+        )
+        && str_contains($annexPage, 'class="bm-cover bm-cover--link"')
+        && str_contains($booksManualsCss, '.bm-cover--link')
+        && str_contains($annexPage, 'aria-label="Edit <?= h((string)$row[\'book_title\']) ?>"')
 );
 annex_book_assert(
     'Annex Editor keeps editable toolbars and omits outline controls',

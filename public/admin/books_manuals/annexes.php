@@ -127,10 +127,14 @@ books_manuals_page_open(array(
   <section class="bm-library-grid">
     <?php foreach ($rows as $row): ?>
       <article class="cmp-card bm-book-card">
-        <div class="bm-cover" aria-hidden="true">
+        <a
+          class="bm-cover bm-cover--link"
+          href="/admin/compliance/controlled_book_editor.php?version_id=<?= (int)($row['version_id'] ?? 0) ?>"
+          aria-label="Edit <?= h((string)$row['book_title']) ?>"
+        >
           <div class="bm-cover__code"><?= h((string)$row['book_key']) ?></div>
           <div class="bm-cover__type">Annex Book</div>
-        </div>
+        </a>
         <div class="bm-book-card__body">
           <?= books_manuals_phase_pill((string)$row['phase_label'], (string)$row['phase_tone']) ?>
           <h2 class="bm-book-card__title"><?= h((string)$row['book_title']) ?></h2>

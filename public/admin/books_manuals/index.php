@@ -235,6 +235,7 @@ books_manuals_page_open(array(
           ? $row['previous_versions']
           : array();
       $previewUrl = '/admin/books_manuals/reader.php?version_id=' . $versionId;
+      $editorUrl = '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId;
       $coverUrl = '/student/api/manual_reader_cover_thumbnail.php?book='
           . rawurlencode((string)$row['book_key']) . '&version_id=' . $versionId . '&admin_preview=1';
       $settingsModalId = 'bm-manual-settings-' . $versionId;
@@ -242,7 +243,7 @@ books_manuals_page_open(array(
       $versionsModalId = 'bm-previous-versions-' . $versionId;
     ?>
     <article class="cmp-card bm-book-card" data-bm-reader-url="<?= h($previewUrl) ?>">
-      <a class="bm-cover bm-cover--thumbnail" href="<?= h($previewUrl) ?>" data-bm-reader-open aria-label="Open <?= h((string)$row['book_title']) ?> page viewer">
+      <a class="bm-cover bm-cover--thumbnail" href="<?= h($editorUrl) ?>" aria-label="Edit <?= h((string)$row['book_title']) ?>">
         <img src="<?= h($coverUrl) ?>" alt="<?= h((string)$row['book_title']) ?> front page">
         <span class="bm-cover__fallback"><?= h((string)$row['book_key']) ?></span>
       </a>

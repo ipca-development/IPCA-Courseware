@@ -38,6 +38,12 @@
   overflow: hidden;
 }
 
+.bm-cover--link {
+  display: block;
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
 .bm-cover::before {
   content: "";
   position: absolute;
