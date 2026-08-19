@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
 require_once __DIR__ . '/ControlledPublishingReaderPageMapStore.php';
+require_once __DIR__ . '/BooksManualsAnnexBookService.php';
 
 /**
  * Additive manual page-break instructions anchored before stable source blocks.
@@ -244,14 +245,20 @@ final class ControlledPublishingManualPageBreakService
     private function assertEditableVersion(int $bookVersionId): void
     {
         $stmt = $this->pdo->prepare(
-            'SELECT lifecycle_status FROM ipca_publishing_book_versions WHERE id = ? LIMIT 1'
+            'SELECT bv.lifecycle_status, b.book_type
+               FROM ipca_publishing_book_versions bv
+               JOIN ipca_publishing_books b ON b.id = bv.book_id
+              WHERE bv.id = ?
+              LIMIT 1'
         );
         $stmt->execute(array($bookVersionId));
-        $status = $stmt->fetchColumn();
-        if ($status === false) {
+        $version = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($version)) {
             throw new RuntimeException('Manual version not found.');
         }
-        if (!in_array((string)$status, array('draft', 'in_review', 'approved'), true)) {
+        $status = (string)($version['lifecycle_status'] ?? '');
+        if (!in_array($status, array('draft', 'in_review', 'approved'), true)
+            && !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
             throw new RuntimeException('Released pagination is immutable. Create or reopen a draft revision.');
         }
     }

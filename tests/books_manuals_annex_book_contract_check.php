@@ -23,6 +23,7 @@ $annexManager = (string)file_get_contents($root . '/public/admin/compliance/cont
 $annexPage = (string)file_get_contents($root . '/public/admin/books_manuals/annexes.php');
 $editorPage = (string)file_get_contents($root . '/public/admin/compliance/controlled_book_editor.php');
 $editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
+$pageBreaks = (string)file_get_contents($root . '/src/publishing/ControlledPublishingManualPageBreakService.php');
 $migration = (string)file_get_contents($root . '/src/publishing/BooksManualsAnnexMigrationService.php');
 $sql = (string)file_get_contents($root . '/scripts/sql/2026_08_18_annex_book_structure.sql');
 $apply = (string)file_get_contents($root . '/scripts/apply_annex_book_structure.php');
@@ -174,6 +175,12 @@ annex_book_assert(
         && str_contains($editorApi, "'is_annex_book' => BooksManualsAnnexBookService::isAnnexBookVersion(\$version)")
         && str_contains($editorJs, '(isReleased && !isAnnexBook)')
         && str_contains($editorJs, "documentType !== 'form' && !isAnnexBook")
+);
+annex_book_assert(
+    'published Annex Books retain manual page-break controls',
+    str_contains($pageBreaks, 'BooksManualsAnnexBookService::allowsReleasedEdits($version)')
+        && str_contains($pageBreaks, "array('draft', 'in_review', 'approved')")
+        && str_contains($pageBreaks, 'Released pagination is immutable')
 );
 annex_book_assert(
     'Governance action is removed from the controlled editor',
