@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
+
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingAnnexService.php';
 
@@ -268,6 +270,11 @@ final class ControlledPublishingPageHeaderService
     public function saveForVersion(int $versionId, array $pageLayout, ?int $actorUserId = null, string $scope = self::SCOPE_MAIN): array
     {
         $version = $this->requireVersion($versionId);
+        BooksManualsVersionEditPolicy::assertMutationAllowed(
+            $version,
+            BooksManualsVersionEditPolicy::ANNEX_PRESENTATION,
+            'Released versions cannot change page header.'
+        );
         $meta = $this->decodeMeta($version);
         $scope = $scope === self::SCOPE_ANNEX ? self::SCOPE_ANNEX : self::SCOPE_MAIN;
 
@@ -646,7 +653,13 @@ final class ControlledPublishingPageHeaderService
      */
     private function requireVersion(int $versionId): array
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM ipca_publishing_book_versions WHERE id = :id LIMIT 1');
+        $stmt = $this->pdo->prepare(
+            'SELECT bv.*, b.book_type
+               FROM ipca_publishing_book_versions bv
+               JOIN ipca_publishing_books b ON b.id = bv.book_id
+              WHERE bv.id = :id
+              LIMIT 1'
+        );
         $stmt->execute(array(':id' => $versionId));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {

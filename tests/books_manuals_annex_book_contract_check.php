@@ -13,6 +13,7 @@ function annex_book_assert(string $label, bool $condition): void
 }
 
 $annexBook = (string)file_get_contents($root . '/src/publishing/BooksManualsAnnexBookService.php');
+$editPolicy = (string)file_get_contents($root . '/src/publishing/BooksManualsVersionEditPolicy.php');
 $annex = (string)file_get_contents($root . '/src/publishing/ControlledPublishingAnnexService.php');
 $workflow = (string)file_get_contents($root . '/src/publishing/BooksManualsWorkflowService.php');
 $nav = (string)file_get_contents($root . '/src/publishing/ControlledPublishingEditorNavService.php');
@@ -25,6 +26,7 @@ $annexPage = (string)file_get_contents($root . '/public/admin/books_manuals/anne
 $editorPage = (string)file_get_contents($root . '/public/admin/compliance/controlled_book_editor.php');
 $editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
 $pageBreaks = (string)file_get_contents($root . '/src/publishing/ControlledPublishingManualPageBreakService.php');
+$blockService = (string)file_get_contents($root . '/src/publishing/ControlledPublishingBlockService.php');
 $livePageMap = (string)file_get_contents($root . '/src/publishing/ControlledPublishingLivePageMapService.php');
 $migration = (string)file_get_contents($root . '/src/publishing/BooksManualsAnnexMigrationService.php');
 $sql = (string)file_get_contents($root . '/scripts/sql/2026_08_18_annex_book_structure.sql');
@@ -190,10 +192,26 @@ annex_book_assert(
         && str_contains($editorJs, "documentType !== 'form' && !isAnnexBook")
 );
 annex_book_assert(
+    'Annex edits do not invoke Manual Highlight of Changes automation',
+    substr_count($editorJs, 'if (isAnnexBook) return;') >= 2
+        && str_contains($editorJs, "if (isAnnexBook) syncSelect.style.display = 'none';")
+);
+annex_book_assert(
     'published Annex Books retain manual page-break controls',
-    str_contains($pageBreaks, 'BooksManualsAnnexBookService::allowsReleasedEdits($version)')
+    str_contains($pageBreaks, 'BooksManualsVersionEditPolicy::ANNEX_PAGINATION')
         && str_contains($pageBreaks, "array('draft', 'in_review', 'approved')")
         && str_contains($pageBreaks, 'Released pagination is immutable')
+);
+annex_book_assert(
+    'published Annex editor mutations use a scoped policy without relaxing Manuals',
+    str_contains($editPolicy, "self::ANNEX_CONTENT")
+        && str_contains($editPolicy, "self::ANNEX_PRESENTATION")
+        && str_contains($editPolicy, "self::ANNEX_PAGINATION")
+        && !str_contains($editPolicy, "self::MANUAL_STRUCTURE,\n")
+        && str_contains($blockService, 'BooksManualsVersionEditPolicy::ANNEX_CONTENT')
+        && str_contains($editorApi, 'BooksManualsVersionEditPolicy::ANNEX_PRESENTATION')
+        && str_contains($editorApi, 'BooksManualsVersionEditPolicy::ANNEX_CONTENT')
+        && str_contains($editorApi, 'cp_editor_refresh_published_annex')
 );
 annex_book_assert(
     'published Annex edits automatically refresh the approved reader package',

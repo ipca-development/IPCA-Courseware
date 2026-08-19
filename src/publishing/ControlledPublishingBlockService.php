@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
-require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
 
 /**
  * Controlled publishing block CRUD for the document-style editor.
@@ -266,10 +266,10 @@ final class ControlledPublishingBlockService
         $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         $existingIds = array();
         foreach ($existing as $row) {
-            if ((string)$row['lifecycle_status'] === 'released'
-                && !BooksManualsAnnexBookService::allowsReleasedEdits($row)) {
-                throw new RuntimeException('Released versions cannot be edited.');
-            }
+            BooksManualsVersionEditPolicy::assertMutationAllowed(
+                $row,
+                BooksManualsVersionEditPolicy::ANNEX_CONTENT
+            );
             $existingIds[(int)$row['id']] = true;
         }
         foreach ($blockIds as $id) {
@@ -317,10 +317,10 @@ final class ControlledPublishingBlockService
         if ($section === null) {
             throw new RuntimeException('Section not found for this version.');
         }
-        if ((string)$section['lifecycle_status'] === 'released'
-            && !BooksManualsAnnexBookService::allowsReleasedEdits($section)) {
-            throw new RuntimeException('Released versions cannot be edited.');
-        }
+        BooksManualsVersionEditPolicy::assertMutationAllowed(
+            $section,
+            BooksManualsVersionEditPolicy::ANNEX_CONTENT
+        );
         if (empty($section['allow_author_blocks'])) {
             throw new RuntimeException('This section does not allow author blocks.');
         }
@@ -354,10 +354,10 @@ final class ControlledPublishingBlockService
         if (!is_array($block)) {
             throw new RuntimeException('Block not found.');
         }
-        if ((string)$block['lifecycle_status'] === 'released'
-            && !BooksManualsAnnexBookService::allowsReleasedEdits($block)) {
-            throw new RuntimeException('Released versions cannot be edited.');
-        }
+        BooksManualsVersionEditPolicy::assertMutationAllowed(
+            $block,
+            BooksManualsVersionEditPolicy::ANNEX_CONTENT
+        );
         $allow = !empty($block['template_allow_blocks']) || !empty($block['parent_section_id']);
         if (!$allow) {
             throw new RuntimeException('This section does not allow author blocks.');

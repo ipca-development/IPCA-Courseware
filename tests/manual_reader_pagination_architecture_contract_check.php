@@ -6,7 +6,7 @@ $failures = array();
 
 $protected = array(
     'src/publishing/ControlledPublishingBlockService.php'
-        => '9685b9d8bbe5b9b18313585df394bd00e7075d53fcce0ac11b178d7b852fa923',
+        => '7a9967f65479a01edf6e14ac93dec306d6fe20b78beec1e34a1fbeb573f6f7bd',
     'src/document/StructuredDocumentPayload.php'
         => '9b5412d9966d0e7ce162ae652cbd8515b4f8864689852f2807e5f404f356a8ed',
     'src/publishing/ControlledPublishingBookRenderer.php'

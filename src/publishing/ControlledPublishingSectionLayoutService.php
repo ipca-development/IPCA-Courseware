@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
+require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
 
 /**
  * Per-section page header/footer visibility stored in section metadata_json.
@@ -41,6 +42,10 @@ final class ControlledPublishingSectionLayoutService
     public function saveLayout(int $versionId, int $sectionId, array $layout, ?int $actorUserId = null): void
     {
         $section = $this->requireSection($versionId, $sectionId);
+        BooksManualsVersionEditPolicy::assertMutationAllowed(
+            $section,
+            BooksManualsVersionEditPolicy::ANNEX_PRESENTATION
+        );
         $meta = $this->decodeMeta($section);
         $orientation = strtolower(trim((string)($layout['orientation'] ?? '')));
         if ($orientation !== 'landscape' && $orientation !== 'portrait') {
@@ -75,8 +80,11 @@ final class ControlledPublishingSectionLayoutService
     private function requireSection(int $versionId, int $sectionId): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT * FROM ipca_publishing_book_sections
-            WHERE id = :id AND book_version_id = :version_id
+            SELECT s.*, bv.lifecycle_status, b.book_type
+              FROM ipca_publishing_book_sections s
+              JOIN ipca_publishing_book_versions bv ON bv.id = s.book_version_id
+              JOIN ipca_publishing_books b ON b.id = bv.book_id
+             WHERE s.id = :id AND s.book_version_id = :version_id
             LIMIT 1
         ");
         $stmt->execute(array(':id' => $sectionId, ':version_id' => $versionId));

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingPageHeaderService.php';
+require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
 
 /**
  * Book-level paragraph and table style definitions stored in version metadata_json.
@@ -223,6 +224,10 @@ final class ControlledPublishingBookStyleService
     public function saveForVersion(int $versionId, array $styles, ?int $actorUserId = null): array
     {
         $version = $this->requireVersion($versionId);
+        BooksManualsVersionEditPolicy::assertMutationAllowed(
+            $version,
+            BooksManualsVersionEditPolicy::ANNEX_PRESENTATION
+        );
         $meta = $this->decodeMeta($version);
         $previousStyles = $this->resolveFromMetadata($meta);
         $normalized = $this->resolveFromMetadata(array_merge($meta, $styles));
@@ -266,9 +271,11 @@ final class ControlledPublishingBookStyleService
 
         $target = $this->requireVersion($targetVersionId);
         $source = $this->requireVersion($sourceVersionId);
-        if ((string)($target['lifecycle_status'] ?? '') === 'released') {
-            throw new RuntimeException('Released versions cannot receive copied styles.');
-        }
+        BooksManualsVersionEditPolicy::assertMutationAllowed(
+            $target,
+            BooksManualsVersionEditPolicy::ANNEX_PRESENTATION,
+            'Released versions cannot receive copied styles.'
+        );
 
         $targetMeta = $this->decodeMeta($target);
         $sourceMeta = $this->decodeMeta($source);
@@ -780,7 +787,13 @@ final class ControlledPublishingBookStyleService
      */
     private function requireVersion(int $versionId): array
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM ipca_publishing_book_versions WHERE id = :id LIMIT 1');
+        $stmt = $this->pdo->prepare(
+            'SELECT bv.*, b.book_type
+               FROM ipca_publishing_book_versions bv
+               JOIN ipca_publishing_books b ON b.id = bv.book_id
+              WHERE bv.id = :id
+              LIMIT 1'
+        );
         $stmt->execute(array(':id' => $versionId));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {

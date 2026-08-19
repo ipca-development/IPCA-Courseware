@@ -13,6 +13,7 @@ require_once __DIR__ . '/ControlledPublishingLepService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/ControlledPublishingCrossRefAnnex.php';
 require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
 
 /**
  * Annex register, per-annex sections, import (image / DOCX), and revision metadata.
@@ -1854,10 +1855,10 @@ final class ControlledPublishingAnnexService
         if ($version === null) {
             throw new RuntimeException('Book version not found.');
         }
-        if ((string)($version['lifecycle_status'] ?? '') === 'released'
-            && !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
-            throw new RuntimeException('Released versions cannot be edited.');
-        }
+        BooksManualsVersionEditPolicy::assertMutationAllowed(
+            $version,
+            BooksManualsVersionEditPolicy::ANNEX_CONTENT
+        );
         return $version;
     }
 

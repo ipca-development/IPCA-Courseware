@@ -23,6 +23,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingOutlineServ
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingRichTextService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAnnexService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsAnnexBookService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsVersionEditPolicy.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualPageBreakService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
@@ -36,6 +37,19 @@ function cp_editor_json(int $code, array $payload): void
     http_response_code($code);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
+}
+
+/**
+ * @param array<string,mixed> $version
+ */
+function cp_editor_require_mutation_scope(
+    array $version,
+    string $scope,
+    string $message = 'Released versions cannot be edited.'
+): void {
+    if (!BooksManualsVersionEditPolicy::allowsMutation($version, $scope)) {
+        cp_editor_json(403, array('ok' => false, 'error' => $message));
+    }
 }
 
 function cp_editor_sync_annex_cover_from_parent(
@@ -86,6 +100,38 @@ function cp_editor_touch_annex_revision(
         } catch (Throwable $e) {
             error_log('Published Annex reader refresh could not be queued: ' . $e->getMessage());
         }
+    }
+}
+
+function cp_editor_refresh_published_annex(
+    PDO $pdo,
+    int $versionId,
+    int $uid,
+    string $mutationKind,
+    ?int $sectionId = null
+): void {
+    $reader = new ControlledPublishingReaderService($pdo);
+    $version = $reader->resolveVersionById($versionId);
+    if (!is_array($version)
+        || (string)($version['lifecycle_status'] ?? '') !== 'released'
+        || !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
+        return;
+    }
+    try {
+        $impact = array(
+            'mutation_kind' => $mutationKind,
+            'layout_impact' => 'global',
+        );
+        if ($sectionId !== null && $sectionId > 0) {
+            $impact['section_id'] = $sectionId;
+        }
+        $reader->ensureLivePageMap(
+            $versionId,
+            $uid,
+            $impact
+        );
+    } catch (Throwable $e) {
+        error_log('Published Annex reader refresh could not be queued: ' . $e->getMessage());
     }
 }
 
@@ -199,13 +245,13 @@ try {
             cp_editor_handle_get_book_styles($foundation, $styleSvc);
             break;
         case 'save_book_styles':
-            cp_editor_handle_save_book_styles($foundation, $styleSvc, $uid);
+            cp_editor_handle_save_book_styles($pdo, $foundation, $styleSvc, $uid);
             break;
         case 'list_style_copy_sources':
             cp_editor_handle_list_style_copy_sources($foundation);
             break;
         case 'copy_book_styles':
-            cp_editor_handle_copy_book_styles($foundation, $styleSvc, $uid);
+            cp_editor_handle_copy_book_styles($pdo, $foundation, $styleSvc, $uid);
             break;
         case 'regenerate_toc':
             cp_editor_handle_regenerate_toc($foundation, $tocSvc, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $uid);
@@ -214,16 +260,16 @@ try {
             cp_editor_handle_save_toc_settings($foundation, $tocSvc, $uid);
             break;
         case 'save_section_layout':
-            cp_editor_handle_save_section_layout($sections, $layoutSvc, $uid);
+            cp_editor_handle_save_section_layout($pdo, $foundation, $sections, $layoutSvc, $uid);
             break;
         case 'get_page_header':
             cp_editor_handle_get_page_header($foundation, $pageHeaderSvc, $sections);
             break;
         case 'save_page_header':
-            cp_editor_handle_save_page_header($foundation, $pageHeaderSvc, $uid);
+            cp_editor_handle_save_page_header($pdo, $foundation, $pageHeaderSvc, $uid);
             break;
         case 'upload_header_logo':
-            cp_editor_handle_upload_header_logo($foundation, $pageHeaderSvc, $uid);
+            cp_editor_handle_upload_header_logo($pdo, $foundation, $pageHeaderSvc, $uid);
             break;
         case 'save_cover_page':
             cp_editor_handle_save_cover_page($pdo, $foundation, $coverPageSvc, $uid);
@@ -280,13 +326,13 @@ try {
             cp_editor_handle_get_callout_presets($foundation);
             break;
         case 'detect_callouts':
-            cp_editor_handle_detect_callouts($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid);
+            cp_editor_handle_detect_callouts($pdo, $foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid);
             break;
         case 'detect_hyperlinks':
-            cp_editor_handle_detect_rich_text($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid, 'hyperlinks');
+            cp_editor_handle_detect_rich_text($pdo, $foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid, 'hyperlinks');
             break;
         case 'detect_annex_refs':
-            cp_editor_handle_detect_rich_text($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid, 'annex_refs');
+            cp_editor_handle_detect_rich_text($pdo, $foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid, 'annex_refs');
             break;
         case 'create_block':
             cp_editor_handle_create_block($pdo, $foundation, $blocks, $renderer, $styleSvc, $numberSvc, $annexSvc, $sections, $uid);
@@ -545,9 +591,14 @@ function cp_editor_is_part0_structured_section(array $section): bool
 
 function cp_editor_is_section_editable(array $version, array $section): bool
 {
-    if ((string)$version['lifecycle_status'] === 'released'
-        && !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
-        return false;
+    if ((string)$version['lifecycle_status'] === 'released') {
+        if (!BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
+            return false;
+        }
+        return cp_editor_is_annex_register_section($section)
+            || cp_editor_is_annex_highlights_section($section)
+            || cp_editor_is_annex_cross_ref_section($section)
+            || cp_editor_is_annex_content_section($section);
     }
     if (!empty($section['allow_author_blocks'])) {
         return true;
@@ -1063,6 +1114,7 @@ function cp_editor_handle_get_book_styles(
 }
 
 function cp_editor_handle_save_book_styles(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingBookStyleService $styleSvc,
     int $uid
@@ -1077,7 +1129,12 @@ function cp_editor_handle_save_book_styles(
     if ($version === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
     }
+    cp_editor_require_mutation_scope(
+        $version,
+        BooksManualsVersionEditPolicy::ANNEX_PRESENTATION
+    );
     $saved = $styleSvc->saveForVersion($versionId, $styles, $uid);
+    cp_editor_refresh_published_annex($pdo, $versionId, $uid, 'annex_book_styles');
     cp_editor_json(200, array('ok' => true, 'book_styles' => $saved));
 }
 
@@ -1115,6 +1172,7 @@ function cp_editor_handle_list_style_copy_sources(
 }
 
 function cp_editor_handle_copy_book_styles(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingBookStyleService $styleSvc,
     int $uid
@@ -1137,18 +1195,18 @@ function cp_editor_handle_copy_book_styles(
     if ($target === null || $source === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Source or target version not found'));
     }
-    if ((string)($target['lifecycle_status'] ?? '') === 'released') {
-        cp_editor_json(403, array(
-            'ok' => false,
-            'error' => 'Released versions cannot receive copied styles',
-        ));
-    }
+    cp_editor_require_mutation_scope(
+        $target,
+        BooksManualsVersionEditPolicy::ANNEX_PRESENTATION,
+        'Released versions cannot receive copied styles'
+    );
 
     $styles = $styleSvc->copyStylesFromVersion(
         $targetVersionId,
         $sourceVersionId,
         $uid
     );
+    cp_editor_refresh_published_annex($pdo, $targetVersionId, $uid, 'annex_book_styles_copy');
     cp_editor_json(200, array(
         'ok' => true,
         'book_styles' => $styles,
@@ -1258,6 +1316,8 @@ function cp_editor_handle_save_toc_settings(
 }
 
 function cp_editor_handle_save_section_layout(
+    PDO $pdo,
+    ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionService $sections,
     ControlledPublishingSectionLayoutService $layoutSvc,
     int $uid
@@ -1269,7 +1329,16 @@ function cp_editor_handle_save_section_layout(
     if ($versionId <= 0 || $sectionId <= 0) {
         cp_editor_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
     }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    cp_editor_require_mutation_scope(
+        $version,
+        BooksManualsVersionEditPolicy::ANNEX_PRESENTATION
+    );
     $layoutSvc->saveLayout($versionId, $sectionId, $layout, $uid);
+    cp_editor_refresh_published_annex($pdo, $versionId, $uid, 'annex_section_layout', $sectionId);
     $section = $sections->getSection($versionId, $sectionId);
     if ($section === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Section not found'));
@@ -1308,6 +1377,7 @@ function cp_editor_handle_get_page_header(
 }
 
 function cp_editor_handle_save_page_header(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingPageHeaderService $pageHeaderSvc,
     int $uid
@@ -1321,9 +1391,11 @@ function cp_editor_handle_save_page_header(
     if ($version === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
     }
-    if ((string)$version['lifecycle_status'] === 'released') {
-        cp_editor_json(400, array('ok' => false, 'error' => 'Released versions cannot change page header.'));
-    }
+    cp_editor_require_mutation_scope(
+        $version,
+        BooksManualsVersionEditPolicy::ANNEX_PRESENTATION,
+        'Released versions cannot change page header.'
+    );
     $payload = array();
     if (is_array($in['page_header'] ?? null)) {
         $payload['page_header'] = $in['page_header'];
@@ -1337,6 +1409,7 @@ function cp_editor_handle_save_page_header(
         $uid,
         cp_editor_page_header_scope_from_input($in)
     );
+    cp_editor_refresh_published_annex($pdo, $versionId, $uid, 'annex_page_header');
     cp_editor_json(200, array(
         'ok' => true,
         'page_header' => $saved['page_header'],
@@ -1346,6 +1419,7 @@ function cp_editor_handle_save_page_header(
 }
 
 function cp_editor_handle_upload_header_logo(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingPageHeaderService $pageHeaderSvc,
     int $uid
@@ -1382,6 +1456,10 @@ function cp_editor_handle_upload_header_logo(
     if ($version === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
     }
+    cp_editor_require_mutation_scope(
+        $version,
+        BooksManualsVersionEditPolicy::ANNEX_PRESENTATION
+    );
 
     require_once __DIR__ . '/../../../src/spaces.php';
     $bytes = file_get_contents($tmp);
@@ -1412,6 +1490,7 @@ function cp_editor_handle_upload_header_logo(
         'page_header' => $header,
         'page_footer' => $existing['page_footer'],
     ), $uid, $scope);
+    cp_editor_refresh_published_annex($pdo, $versionId, $uid, 'annex_header_logo');
 
     cp_editor_json(200, array(
         'ok' => true,
@@ -1865,6 +1944,10 @@ function cp_editor_handle_save_callout_presets(
     if ($version === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
     }
+    cp_editor_require_mutation_scope(
+        $version,
+        BooksManualsVersionEditPolicy::ANNEX_PRESENTATION
+    );
 
     $normalized = array();
     foreach ($presets as $preset) {
@@ -1897,6 +1980,7 @@ function cp_editor_handle_save_callout_presets(
         ':id' => $versionId,
     ));
 
+    cp_editor_refresh_published_annex($pdo, $versionId, $uid, 'annex_callout_presets');
     cp_editor_json(200, array('ok' => true, 'presets' => $normalized));
 }
 
@@ -2418,6 +2502,7 @@ function cp_editor_handle_get_callout_presets(ControlledPublishingFoundationServ
 }
 
 function cp_editor_handle_detect_callouts(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionService $sections,
     ControlledPublishingBlockService $blocks,
@@ -2445,9 +2530,10 @@ function cp_editor_handle_detect_callouts(
     if ($version === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
     }
-    if ((string)$version['lifecycle_status'] === 'released') {
-        cp_editor_json(403, array('ok' => false, 'error' => 'Released versions cannot be edited'));
-    }
+    cp_editor_require_mutation_scope(
+        $version,
+        BooksManualsVersionEditPolicy::ANNEX_CONTENT
+    );
 
     if ($scope === 'version') {
         $result = $richTextSvc->detectCalloutsInVersion($versionId, $blocks, $sections, $uid);
@@ -2457,6 +2543,7 @@ function cp_editor_handle_detect_callouts(
         }
         $result = $richTextSvc->detectCalloutsInSection($versionId, $sectionId, $blocks, $uid);
     }
+    cp_editor_refresh_published_annex($pdo, $versionId, $uid, 'annex_detect_callouts', $sectionId ?: null);
 
     cp_editor_json(200, cp_editor_build_detection_response(
         $foundation,
@@ -2480,6 +2567,7 @@ function cp_editor_handle_detect_callouts(
 }
 
 function cp_editor_handle_detect_rich_text(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingSectionService $sections,
     ControlledPublishingBlockService $blocks,
@@ -2508,9 +2596,10 @@ function cp_editor_handle_detect_rich_text(
     if ($version === null) {
         cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
     }
-    if ((string)$version['lifecycle_status'] === 'released') {
-        cp_editor_json(403, array('ok' => false, 'error' => 'Released versions cannot be edited'));
-    }
+    cp_editor_require_mutation_scope(
+        $version,
+        BooksManualsVersionEditPolicy::ANNEX_CONTENT
+    );
 
     if ($scope === 'version') {
         $result = $richTextSvc->enrichRichTextInVersion($versionId, $blocks, $sections, $kind, $uid);
@@ -2520,6 +2609,7 @@ function cp_editor_handle_detect_rich_text(
         }
         $result = $richTextSvc->enrichRichTextInSection($versionId, $sectionId, $blocks, $kind, $uid);
     }
+    cp_editor_refresh_published_annex($pdo, $versionId, $uid, 'annex_detect_' . $kind, $sectionId ?: null);
 
     cp_editor_json(200, cp_editor_build_detection_response(
         $foundation,

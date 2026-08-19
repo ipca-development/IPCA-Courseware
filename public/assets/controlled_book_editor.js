@@ -646,6 +646,9 @@
   var autoHighlightsTimer = null;
 
   function scheduleAutomaticHighlights(action) {
+    // Annex Books maintain their per-Annex revision register server-side.
+    // The Highlight of Changes generator belongs only to Books/Manuals.
+    if (isAnnexBook) return;
     if (!AUTO_HIGHLIGHT_ACTIONS[action] || !state.editable || state.versionId <= 0) return;
     if (autoHighlightsTimer) clearTimeout(autoHighlightsTimer);
     autoHighlightsTimer = setTimeout(function () {
@@ -10900,6 +10903,7 @@
   }
 
   function syncHighlights() {
+    if (isAnnexBook) return;
     if (!confirm('Regenerate the Highlight of Changes section from revision markers?')) return;
     setStatus('Syncing highlights…', 'saving');
     apiPost('regenerate_highlights', {
@@ -11311,6 +11315,7 @@
   }
 
   if (syncSelect) {
+    if (isAnnexBook) syncSelect.style.display = 'none';
     syncSelect.addEventListener('change', function () {
       var action = syncSelect.value;
       syncSelect.value = '';

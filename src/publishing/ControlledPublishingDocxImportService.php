@@ -11,6 +11,7 @@ require_once __DIR__ . '/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/ControlledPublishingLepService.php';
 require_once __DIR__ . '/ControlledPublishingRichTextService.php';
 require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
 
 /**
  * Imports Apple Pages / Word DOCX part exports into canonical excerpts and controlled book blocks.
@@ -249,10 +250,11 @@ final class ControlledPublishingDocxImportService
         if ($version === null) {
             throw new RuntimeException('Book version not found.');
         }
-        if ((string)($version['lifecycle_status'] ?? '') === 'released'
-            && !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
-            throw new RuntimeException('Released versions cannot be imported.');
-        }
+        BooksManualsVersionEditPolicy::assertMutationAllowed(
+            $version,
+            BooksManualsVersionEditPolicy::ANNEX_CONTENT,
+            'Released versions cannot be imported.'
+        );
         return $version;
     }
 

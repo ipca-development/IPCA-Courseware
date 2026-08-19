@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
 require_once __DIR__ . '/ControlledPublishingReaderPageMapStore.php';
-require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
 
 /**
  * Additive manual page-break instructions anchored before stable source blocks.
@@ -257,10 +257,17 @@ final class ControlledPublishingManualPageBreakService
             throw new RuntimeException('Manual version not found.');
         }
         $status = (string)($version['lifecycle_status'] ?? '');
-        if (!in_array($status, array('draft', 'in_review', 'approved'), true)
-            && !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
-            throw new RuntimeException('Released pagination is immutable. Create or reopen a draft revision.');
+        if (in_array($status, array('draft', 'in_review', 'approved'), true)) {
+            return;
         }
+        if ($status === 'released'
+            && BooksManualsVersionEditPolicy::allowsMutation(
+                $version,
+                BooksManualsVersionEditPolicy::ANNEX_PAGINATION
+            )) {
+            return;
+        }
+        throw new RuntimeException('Released pagination is immutable. Create or reopen a draft revision.');
     }
 
     private function invalidatePageMap(int $bookVersionId): void
