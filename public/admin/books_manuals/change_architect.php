@@ -79,7 +79,15 @@ try {
         "SELECT v.id,v.version_label,v.lifecycle_status,b.book_key,b.title
          FROM ipca_publishing_book_versions v
          JOIN ipca_publishing_books b ON b.id=v.book_id
-         WHERE v.lifecycle_status IN ('draft','in_review','approved','released')
+         LEFT JOIN ipca_publishing_annex_book_map annex_map
+           ON annex_map.annex_book_id=b.id AND annex_map.status='active'
+         LEFT JOIN ipca_publishing_annex_book_links legacy_annex
+           ON legacy_annex.annex_book_id=b.id
+         WHERE v.lifecycle_status IN ('draft','in_review')
+           AND b.status='active'
+           AND b.book_type NOT IN ('annex','annex_book')
+           AND annex_map.id IS NULL
+           AND legacy_annex.id IS NULL
          ORDER BY b.title,v.id DESC"
     )->fetchAll(PDO::FETCH_ASSOC) ?: array();
 } catch (Throwable $e) {
@@ -210,7 +218,7 @@ books_manuals_page_open(array(
           </section>
           <section class="mcw-intake-section">
             <div><span class="mcw-kicker">Manual(s) to review</span><p>Select one primary controlled revision. Related manuals remain linked review items.</p></div>
-            <label class="mcw-field"><span>Primary manual</span><select name="primary_version_id" required><option value="">Select a controlled revision</option><?php foreach ($versions as $version): ?><option value="<?= (int)$version['id'] ?>"><?= h((string)$version['book_key']) ?> <?= h((string)$version['version_label']) ?> — <?= h((string)$version['title']) ?></option><?php endforeach; ?></select></label>
+            <label class="mcw-field"><span>Primary manual</span><select name="primary_version_id" required><option value="">Select a controlled revision</option><?php foreach ($versions as $version): ?><?php $versionPhase = (string)$version['lifecycle_status'] === 'in_review' ? 'Draft Review' : 'Draft'; ?><option value="<?= (int)$version['id'] ?>"><?= h((string)$version['book_key']) ?> <?= h((string)$version['version_label']) ?> — <?= h((string)$version['title']) ?> · <?= h($versionPhase) ?></option><?php endforeach; ?></select></label>
           </section>
           <div class="mcw-analysis-progress" data-mcw-analysis-progress hidden>
             <strong>Analyzing your change…</strong>

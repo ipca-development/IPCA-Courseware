@@ -40,6 +40,16 @@ architect_ui_assert(str_contains($css, 'max-width: 940px'), 'The wizard must use
 architect_ui_assert(!str_contains($css, '.mca-rail') && !str_contains($css, '.mca-inspector'), 'Permanent dashboard rails or inspectors must not remain.');
 architect_ui_assert(str_contains($page, '$activeStep'), 'Future wizard steps are not progressively gated.');
 architect_ui_assert(str_contains($page, 'mcw-step--complete'), 'Completed-step summaries are missing.');
+architect_ui_assert(
+    str_contains($page, "v.lifecycle_status IN ('draft','in_review')"),
+    'Primary-manual choices must be limited to Draft and Draft Review revisions.'
+);
+architect_ui_assert(
+    str_contains($page, "b.book_type NOT IN ('annex','annex_book')")
+        && str_contains($page, 'annex_map.id IS NULL')
+        && str_contains($page, 'legacy_annex.id IS NULL'),
+    'Annex Books must not appear in the primary-manual selector.'
+);
 architect_ui_assert(str_contains($page, 'data-mcw-accept-impacts'), 'Single impact-analysis continuation action is missing.');
 architect_ui_assert(str_contains($page, 'data-mcw-impact-decision="MODIFY"'), 'Governed Modify control is missing.');
 architect_ui_assert(str_contains($page, 'data-mcw-impact-decision="REJECT"'), 'Governed Reject control is missing.');
