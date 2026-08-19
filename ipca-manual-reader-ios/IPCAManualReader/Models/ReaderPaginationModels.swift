@@ -350,7 +350,8 @@ struct PersonalReaderPage: Codable, Identifiable, Hashable {
             isCover: isCover,
             isSectionStart: isSectionStart,
             isMajorSectionStart: isMajorSectionStart,
-            sectionTitle: sectionTitle
+            sectionTitle: sectionTitle,
+            orientation: metrics.pageWidth > metrics.pageHeight ? "landscape" : "portrait"
         )
     }
 }

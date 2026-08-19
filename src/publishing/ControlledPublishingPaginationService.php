@@ -122,6 +122,7 @@ final class ControlledPublishingPaginationService
                 'header_template' => $headerFooter['header_template'],
                 'footer_template' => $headerFooter['footer_template'],
                 'show_header_footer' => $headerFooter['show_bands'],
+                'orientation' => (string)($layout['orientation'] ?? 'portrait'),
                 'sheet_open' => '',
                 'token_context' => $this->reader->paginationTokenContext($version, $section, array(
                     'part_title' => $partTitle,

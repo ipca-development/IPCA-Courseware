@@ -439,7 +439,8 @@ final class ControlledPublishingFoundationService
     }
 
     /**
-     * Annex Books skip source-set and baseline gates. Page Preview must still be approved.
+     * Annex Books skip source-set and baseline gates. Publish generates and
+     * approves the reader page map so they do not use the manual Page Preview cycle.
      */
     public function releaseAnnexBookVersion(int $versionId, ?int $actorUserId = null): void
     {
@@ -451,8 +452,12 @@ final class ControlledPublishingFoundationService
         if (!BooksManualsAnnexBookService::isAnnexBookVersion($version)) {
             throw new RuntimeException('Only Annex Books can use Annex Book publish.');
         }
+        $previousLimit = (int)ini_get('max_execution_time');
+        if ($previousLimit > 0 && $previousLimit < 300) {
+            set_time_limit(300);
+        }
         (new ControlledPublishingReaderService($this->pdo))
-            ->assertAuthoritativePageMapReadyForRelease($version);
+            ->ensureAnnexBookPageMapApproved($version, $actorUserId);
 
         $stmt = $this->pdo->prepare("
             UPDATE ipca_publishing_book_versions

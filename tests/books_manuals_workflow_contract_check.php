@@ -231,12 +231,26 @@ bm_contract_assert(
         && str_contains($readerService, 'if (!$includeDraftPreview || $isAnnexBook)')
 );
 bm_contract_assert(
+    'iOS landscape annex pages use landscape page geometry',
+    str_contains($iosModels, 'var isLandscapePage: Bool')
+        && str_contains($iosViewModel, 'publicationLayout.landscapeSized')
+        && str_contains(
+            (string)file_get_contents($root . '/ipca-manual-reader-ios/IPCAManualReader/Views/ReaderView.swift'),
+            'pageIsLandscape'
+        )
+        && str_contains(
+            (string)file_get_contents($root . '/ipca-manual-reader-ios/IPCAManualReader/Services/ReaderPaginationCore.js'),
+            'function layoutForSection'
+        )
+);
+bm_contract_assert(
     'Annex Books skip the four-phase review and publish or unpublish',
     str_contains($workflow, 'function transitionAnnexBook')
         && str_contains($workflow, 'publish_annex')
         && str_contains($workflow, 'unpublish_annex')
         && str_contains($workflow, "Annex Books can only be Published or Unpublished.")
         && str_contains($foundation, 'function releaseAnnexBookVersion')
+        && str_contains($foundation, 'ensureAnnexBookPageMapApproved')
         && str_contains($annexBook, 'function allowsReleasedEdits')
         && str_contains($manualPage, 'Annex Books are Published or not Published')
         && str_contains($manualPage, 'if (!$isAnnexBook)')

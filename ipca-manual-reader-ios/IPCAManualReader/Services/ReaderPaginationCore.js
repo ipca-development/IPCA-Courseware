@@ -15,6 +15,46 @@
   const VALIDATION_TOLERANCE = 1.01;
   const source = input.source;
   const layout = input.layout;
+  let landscapeLayoutCache = null;
+
+  function isLandscapeSection(section) {
+    return String(section && section.orientation || "").toLowerCase() === "landscape";
+  }
+
+  function layoutForSection(section) {
+    if (!isLandscapeSection(section)) {
+      return layout;
+    }
+    if (landscapeLayoutCache) {
+      return landscapeLayoutCache;
+    }
+    const pageWidth = Number(layout.pageHeight);
+    const pageHeight = Number(layout.pageWidth);
+    const side = Number(layout.innerMargin);
+    const top = Number(layout.topMargin);
+    const bottom = Number(layout.bottomMargin);
+    const headerHeight = Number(layout.headerFrame && layout.headerFrame.height || 0);
+    const footerHeight = Number(layout.footerFrame && layout.footerFrame.height || 0);
+    const headerGap = Number(layout.headerBodySpacing);
+    const footerGap = Number(layout.bodyFooterSpacing);
+    const contentY = top + headerHeight + headerGap;
+    const footerY = pageHeight - bottom - footerHeight;
+    const contentHeight = footerY - footerGap - contentY;
+    const frameWidth = Math.max(1, pageWidth - side * 2);
+    landscapeLayoutCache = Object.assign({}, layout, {
+      viewportWidth: Math.max(Number(layout.viewportWidth), pageWidth),
+      viewportHeight: Math.max(Number(layout.viewportHeight), pageHeight),
+      pageWidth,
+      pageHeight,
+      canonicalPageWidth: pageWidth,
+      canonicalPageHeight: pageHeight,
+      headerFrame: { x: side, y: top, width: frameWidth, height: headerHeight },
+      contentFrame: { x: side, y: contentY, width: frameWidth, height: Math.max(1, contentHeight) },
+      footerFrame: { x: side, y: footerY, width: frameWidth, height: footerHeight }
+    });
+    return landscapeLayoutCache;
+  }
+
   const officialPageByAnchor = input.officialPageByAnchor || {};
   const officialPageBySection = input.officialPageBySection || {};
   const officialPageTotal = Number(input.officialPageTotal || 0) || null;
@@ -1350,21 +1390,22 @@
     return output.join("");
   }
 
-  function coverMarkup(value) {
+  function coverMarkup(value, pageLayout) {
+    const usedLayout = pageLayout || layout;
     const root = rootFromHTML(value.html);
     const sheet = root.matches(".cpb-sheet") ? root : root.querySelector(".cpb-sheet");
     if (!sheet) return pieceMarkup(value);
     const renderedSheet = sheet.cloneNode(true);
     renderedSheet.style.setProperty("box-sizing", "border-box", "important");
-    renderedSheet.style.setProperty("width", `${layout.canonicalPageWidth}px`, "important");
-    renderedSheet.style.setProperty("height", `${layout.canonicalPageHeight}px`, "important");
-    renderedSheet.style.setProperty("min-height", `${layout.canonicalPageHeight}px`, "important");
+    renderedSheet.style.setProperty("width", `${usedLayout.canonicalPageWidth}px`, "important");
+    renderedSheet.style.setProperty("height", `${usedLayout.canonicalPageHeight}px`, "important");
+    renderedSheet.style.setProperty("min-height", `${usedLayout.canonicalPageHeight}px`, "important");
     renderedSheet.style.setProperty("max-width", "none", "important");
     renderedSheet.style.setProperty("margin", "0", "important");
     renderedSheet.style.setProperty(
       "padding",
-      `${layout.topMargin / pageScale()}px ${layout.innerMargin / pageScale()}px `
-        + `${layout.bottomMargin / pageScale()}px`,
+      `${usedLayout.topMargin / pageScale()}px ${usedLayout.innerMargin / pageScale()}px `
+        + `${usedLayout.bottomMargin / pageScale()}px`,
       "important"
     );
     renderedSheet.style.setProperty("transform", "none", "important");
@@ -1375,12 +1416,14 @@
       + `data-source-range-start="${value.rangeStart}" `
       + `data-source-range-end="${value.rangeEnd}" `
       + `data-presentation-copy="0" data-semantic-type="cover" `
-      + `style="position:absolute;inset:0;width:${layout.canonicalPageWidth}px;`
-      + `height:${layout.canonicalPageHeight}px">${renderedSheet.outerHTML}</div>`;
+      + `style="position:absolute;inset:0;width:${usedLayout.canonicalPageWidth}px;`
+      + `height:${usedLayout.canonicalPageHeight}px">${renderedSheet.outerHTML}</div>`;
   }
 
   function buildPageElement(page, pageNumber, total) {
     const section = page.section || {};
+    const pageLayout = layoutForSection(section);
+    const landscape = isLandscapeSection(section);
     const firstSourcePiece = page.pieces.find((value) => !value.presentationCopy);
     const documentPageNumber = officialPageFor(firstSourcePiece?.fragment) || pageNumber;
     const documentPageTotal = officialPageTotal || total;
@@ -1393,30 +1436,36 @@
     const element = document.createElement("div");
     element.className = "reader-generated-page";
     element.setAttribute("data-reader-page", String(pageNumber));
-    element.style.cssText = `position:relative;box-sizing:border-box;width:${layout.pageWidth}px;`
-      + `height:${layout.pageHeight}px;margin:0;padding:0;overflow:hidden;`;
+    if (landscape) {
+      element.setAttribute("data-page-orientation", "landscape");
+    }
+    element.style.cssText = `position:relative;box-sizing:border-box;width:${pageLayout.pageWidth}px;`
+      + `height:${pageLayout.pageHeight}px;margin:0;padding:0;overflow:hidden;`;
     const canonicalPageStyle = `position:absolute;box-sizing:border-box;left:0;top:0;`
-      + `width:${layout.canonicalPageWidth}px;height:${layout.canonicalPageHeight}px;`
-      + `min-height:${layout.canonicalPageHeight}px;max-width:none;margin:0;padding:0;`
+      + `width:${pageLayout.canonicalPageWidth}px;height:${pageLayout.canonicalPageHeight}px;`
+      + `min-height:${pageLayout.canonicalPageHeight}px;max-width:none;margin:0;padding:0;`
       + `box-shadow:none;border-radius:0;`
       + `transform-origin:top left;transform:scale(var(--reader-page-scale));`;
+    const sheetClass = landscape
+      ? "reader-canonical-page cpb-sheet cpb-sheet--landscape"
+      : "reader-canonical-page cpb-sheet";
     if (page.isCover) {
       element.innerHTML = `
-        <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
+        <div class="${sheetClass}" style="${canonicalPageStyle}">
           <main class="reader-page-body reader-page-cover" data-blocks-root="1"
-            style="position:absolute;box-sizing:border-box;inset:0;width:${layout.canonicalPageWidth}px;height:${layout.canonicalPageHeight}px;overflow:hidden">
-            ${page.pieces.map(coverMarkup).join("")}
+            style="position:absolute;box-sizing:border-box;inset:0;width:${pageLayout.canonicalPageWidth}px;height:${pageLayout.canonicalPageHeight}px;overflow:hidden">
+            ${page.pieces.map((value) => coverMarkup(value, pageLayout)).join("")}
           </main>
         </div>
       `;
       applyReaderScale(element);
       return element;
     }
-    const headerFrame = canonicalRect(layout.headerFrame);
-    const contentFrame = canonicalRect(layout.contentFrame);
-    const footerFrame = canonicalRect(layout.footerFrame);
+    const headerFrame = canonicalRect(pageLayout.headerFrame);
+    const contentFrame = canonicalRect(pageLayout.contentFrame);
+    const footerFrame = canonicalRect(pageLayout.footerFrame);
     element.innerHTML = `
-      <div class="reader-canonical-page cpb-sheet" style="${canonicalPageStyle}">
+      <div class="${sheetClass}" style="${canonicalPageStyle}">
         <div class="reader-page-header-region" style="position:absolute;box-sizing:border-box;overflow:hidden;${frameStyle(headerFrame)}">${header}</div>
         <main class="reader-page-body cpb-sheet-body" data-blocks-root="1" style="position:absolute;box-sizing:border-box;align-content:start;${frameStyle(contentFrame)};overflow:hidden">${pagePiecesMarkup(page.pieces)}</main>
         <div class="reader-page-footer-region" style="position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;${frameStyle(footerFrame)}">${footer}</div>
@@ -1581,9 +1630,10 @@
     const headerRect = relativeRect(header);
     const footerRect = relativeRect(footer);
     const bodyRelativeRect = relativeRect(body);
-    const contentFrame = layout.contentFrame;
-    const headerFrame = layout.headerFrame;
-    const footerFrame = layout.footerFrame;
+    const pageLayout = layoutForSection(page.section);
+    const contentFrame = pageLayout.contentFrame;
+    const headerFrame = pageLayout.headerFrame;
+    const footerFrame = pageLayout.footerFrame;
     const firstBlock = blockBounds[0] || null;
     const lastBlock = blockBounds.length ? blockBounds[blockBounds.length - 1] : null;
     const firstBodyPageY = firstBlock && bodyRelativeRect
@@ -1604,8 +1654,8 @@
     const rectInsidePage = (rect) => Boolean(rect)
       && rect.x >= -tolerance
       && rect.y >= -tolerance
-      && rect.x + rect.width <= layout.pageWidth + tolerance
-      && rect.y + rect.height <= layout.pageHeight + tolerance;
+      && rect.x + rect.width <= pageLayout.pageWidth + tolerance
+      && rect.y + rect.height <= pageLayout.pageHeight + tolerance;
     const requiresHeaderFooter = !page.isCover
       && Boolean(page.section && page.section.show_header_footer);
     const hardFailure = horizontalOverflow > tolerance
@@ -1828,7 +1878,8 @@
   }
 
   function scaledFigurePiece(fragmentValue, maximumImageHeight) {
-    const canonicalContent = canonicalRect(layout.contentFrame);
+    const pageLayout = layoutForSection(fragmentValue && fragmentValue.section);
+    const canonicalContent = canonicalRect(pageLayout.contentFrame);
     const root = rootFromHTML(fragmentValue.html).cloneNode(true);
     root.querySelectorAll("figure").forEach((figure) => {
       figure.style.setProperty("width", "100%", "important");
@@ -1845,7 +1896,8 @@
   }
 
   function bestScaledFigurePiece(fragmentValue, section) {
-    const canonicalContent = canonicalRect(layout.contentFrame);
+    const pageLayout = layoutForSection(section || (fragmentValue && fragmentValue.section));
+    const canonicalContent = canonicalRect(pageLayout.contentFrame);
     let low = 1;
     let high = Math.max(1, Math.floor(canonicalContent.height));
     let best = null;
@@ -2301,6 +2353,7 @@
         return;
       }
       const measurement = measurePage(page);
+      const pageLayout = layoutForSection(page.section);
       const metrics = metricsForPage(
         page,
         pageNumber,
@@ -2356,10 +2409,10 @@
         if (!String(page.section.footer_template || "").trim()) {
           diagnostic("MISSING_FOOTER", "failure", "Required controlled footer template is missing.", null, pageNumber);
         }
-        if (!rectMatches(measurement.headerRect, layout.headerFrame)) {
+        if (!rectMatches(measurement.headerRect, pageLayout.headerFrame)) {
           diagnostic("HEADER_MISALIGNED", "failure", "Header region does not match headerFrame.", null, pageNumber);
         }
-        if (!rectMatches(measurement.footerRect, layout.footerFrame)) {
+        if (!rectMatches(measurement.footerRect, pageLayout.footerFrame)) {
           diagnostic("FOOTER_MISALIGNED", "failure", "Footer region does not match footerFrame.", null, pageNumber);
         }
         if (
@@ -2375,7 +2428,7 @@
           diagnostic("FOOTER_CLIPPED", "failure", "Controlled footer content exceeds its reserved frame.", null, pageNumber);
         }
       }
-      if (!page.isCover && !rectMatches(measurement.bodyRect, layout.contentFrame)) {
+      if (!page.isCover && !rectMatches(measurement.bodyRect, pageLayout.contentFrame)) {
         diagnostic("BODY_FRAME_MISALIGNED", "failure", "Body region does not match contentFrame.", null, pageNumber);
       }
       if (!page.isCover && page.section && page.section.show_header_footer) {
@@ -2632,11 +2685,11 @@
       prior_page_near_capacity: priorPageUtilization != null && priorPageUtilization >= 0.8,
       forced_break_before: ["section_change", "forced_source_break"].includes(page.breakReason),
       break_reason: page.breakReason || null,
-      page_width: layout.pageWidth,
-      page_height: layout.pageHeight,
-      header_frame: layout.headerFrame,
-      content_frame: layout.contentFrame,
-      footer_frame: layout.footerFrame,
+      page_width: layoutForSection(page.section).pageWidth,
+      page_height: layoutForSection(page.section).pageHeight,
+      header_frame: layoutForSection(page.section).headerFrame,
+      content_frame: layoutForSection(page.section).contentFrame,
+      footer_frame: layoutForSection(page.section).footerFrame,
       content_scroll_width: measurement.scrollWidth,
       content_client_width: measurement.clientWidth,
       content_scroll_height: measurement.scrollHeight,
@@ -2751,6 +2804,7 @@
         is_cover: Boolean(page.isCover),
         is_section_start: Boolean(page.isSectionStart),
         is_major_section_start: Boolean(page.isMajorSectionStart),
+        orientation: isLandscapeSection(page.section) ? "landscape" : "portrait",
         start_location: first ? location(first.fragment, first.rangeStart) : null,
         end_location: last ? location(last.fragment, last.rangeEnd) : null,
         official_locations: first ? [location(first.fragment, first.rangeStart).official_location] : [],

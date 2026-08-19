@@ -224,6 +224,9 @@ final class ControlledPublishingReaderPageMapStore
                 'is_section_start' => (bool)$row['is_section_start'],
                 'is_major_section_start' => (bool)$row['is_major_section_start'],
                 'section_title' => is_array($meta) ? (string)($meta['section_title'] ?? '') : '',
+                'orientation' => is_array($meta) && (string)($meta['orientation'] ?? '') === 'landscape'
+                    ? 'landscape'
+                    : 'portrait',
                 'thumbnail_html' => $row['thumbnail_html'],
             );
         }
@@ -716,15 +719,22 @@ final class ControlledPublishingReaderPageMapStore
     private function assertVersionMutable(int $bookVersionId): void
     {
         $stmt = $this->pdo->prepare(
-            'SELECT lifecycle_status FROM ipca_publishing_book_versions WHERE id = ? LIMIT 1'
+            'SELECT bv.lifecycle_status, b.book_type
+             FROM ipca_publishing_book_versions bv
+             INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
+             WHERE bv.id = ?
+             LIMIT 1'
         );
         $stmt->execute(array($bookVersionId));
-        $status = $stmt->fetchColumn();
-        if ($status === false) {
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
             throw new RuntimeException('Manual version not found.');
         }
-        if ((string)$status === 'released') {
-            throw new RuntimeException('Released authoritative pagination is immutable.');
+        if ((string)$row['lifecycle_status'] === 'released') {
+            require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+            if (!BooksManualsAnnexBookService::allowsReleasedEdits($row)) {
+                throw new RuntimeException('Released authoritative pagination is immutable.');
+            }
         }
     }
 

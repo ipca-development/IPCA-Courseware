@@ -156,6 +156,7 @@ final class ControlledPublishingAuthoritativePaginationService
                     'thumbnail_html' => null,
                     'metadata' => array(
                         'section_title' => (string)($page['section_title'] ?? ''),
+                        'orientation' => (string)($page['orientation'] ?? 'portrait'),
                         'coverage' => $page['coverage'] ?? array(),
                         'metrics' => $page['metrics'] ?? array(),
                         'diagnostics' => $page['diagnostics'] ?? array(),

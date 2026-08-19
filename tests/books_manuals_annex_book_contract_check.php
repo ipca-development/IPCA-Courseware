@@ -164,6 +164,8 @@ annex_book_assert(
         && str_contains($workflow, "'action' => 'unpublish_annex'")
         && str_contains($workflow, "return \$status === 'released' ? 'PUBLISHED' : 'NOT PUBLISHED'")
         && str_contains($foundation, 'function releaseAnnexBookVersion')
+        && str_contains($foundation, 'ensureAnnexBookPageMapApproved')
+        && str_contains($reader, 'function ensureAnnexBookPageMapApproved')
         && str_contains($annexBook, 'function allowsReleasedEdits')
         && str_contains($annexPage, 'name="action" value="transition"')
         && str_contains($annexPage, 'lifecycle_action')

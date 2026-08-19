@@ -1042,7 +1042,10 @@ final class ControlledPublishingLivePageMapService
             throw new RuntimeException('Manual version not found.');
         }
         if ((string)($version['lifecycle_status'] ?? '') === 'released') {
-            throw new RuntimeException('Released authoritative pagination is immutable.');
+            require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+            if (!BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
+                throw new RuntimeException('Released authoritative pagination is immutable.');
+            }
         }
         return $version;
     }

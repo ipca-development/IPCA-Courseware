@@ -56,7 +56,8 @@ struct ReaderView: View {
                 )
             )
             let requiredPages = requiredVisiblePageIndexes(
-                isLandscape: safeSize.width > safeSize.height
+                isLandscape: viewModel.currentPage?.isLandscapePage != true
+                    && safeSize.width > safeSize.height
             )
             let readyPages = requiredPages.intersection(renderedPages)
             let failedPages = requiredPages.intersection(pageRenderFailures)
@@ -322,15 +323,27 @@ struct ReaderView: View {
     private var readerColorScheme: ColorScheme { .light }
 
     private func physicalBookReader(size: CGSize) -> AnyView {
-        let landscape = size.width > size.height
+        let pageIsLandscape = viewModel.currentPage?.isLandscapePage == true
+        let landscape = !pageIsLandscape && size.width > size.height
         guard let layout = viewModel.activeLayout else {
             return AnyView(ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity))
         }
-        let pageWidth = CGFloat(layout.pageWidth)
-        let pageHeight = CGFloat(layout.pageHeight)
+        let pageWidth = pageIsLandscape
+            ? max(CGFloat(layout.pageWidth), CGFloat(layout.pageHeight))
+            : CGFloat(layout.pageWidth)
+        let pageHeight = pageIsLandscape
+            ? min(CGFloat(layout.pageWidth), CGFloat(layout.pageHeight))
+            : CGFloat(layout.pageHeight)
+        let fitted: CGSize
+        if pageIsLandscape {
+            let scale = min(size.width / 1056, size.height / 816)
+            fitted = CGSize(width: 1056 * scale, height: 816 * scale)
+        } else {
+            fitted = CGSize(width: pageWidth, height: pageHeight)
+        }
         let readerWidth = landscape
-            ? pageWidth * 2 + CGFloat(layout.gutterWidth)
-            : pageWidth
+            ? fitted.width * 2 + CGFloat(layout.gutterWidth)
+            : fitted.width
         let contentBaseURL = session.baseURL ?? URL(fileURLWithPath: Bundle.main.bundlePath)
 
         return AnyView(ZStack {
@@ -340,7 +353,7 @@ struct ReaderView: View {
                     htmlByIndex: viewModel.pageHTMLByIndex,
                     baseURL: contentBaseURL,
                     isLandscape: landscape,
-                    pageSize: CGSize(width: pageWidth, height: pageHeight),
+                    pageSize: fitted,
                     pageBackground: pageBackgroundColor,
                     bookKey: viewModel.book.bookKey,
                     currentIndex: $viewModel.currentIndex,
@@ -402,7 +415,7 @@ struct ReaderView: View {
                         }
                     }
                 )
-                .id(landscape)
+                .id("\(landscape)-\(pageIsLandscape)-\(viewModel.currentIndex)")
 
                 if landscape {
                     BookGutterView()
@@ -420,7 +433,7 @@ struct ReaderView: View {
                 ProgressView()
             }
         }
-        .frame(width: readerWidth, height: pageHeight)
+        .frame(width: readerWidth, height: pageIsLandscape ? fitted.height : pageHeight)
         .background(readerBackground)
         .shadow(color: .black.opacity(0.045), radius: 5, y: 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity))

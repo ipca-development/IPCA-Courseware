@@ -788,13 +788,20 @@ final class ReaderViewModel: ObservableObject {
               let package = offlinePackage,
               let bookStyleCSS = package.bookStyleCSS,
               let publicationLayout = package.publicationLayout else { return }
+        let landscapePage = pages[index].isLandscapePage
+            || html.contains("data-page-orientation=\"landscape\"")
+            || html.contains("cpb-sheet--landscape")
         pageHTMLByIndex[index] = client.pageHTMLDocument(
             pageHtml: package.rewritePublicationURLs(in: html),
             settings: settings,
             bookStyleCSS: bookStyleCSS,
-            readerCSS: "",
+            readerCSS: landscapePage
+                ? ".cpb-sheet--landscape{max-width:none!important;width:1056px!important;min-height:816px!important}"
+                : "",
             layout: nil,
-            publicationLayout: publicationLayout,
+            publicationLayout: landscapePage
+                ? publicationLayout.landscapeSized
+                : publicationLayout,
             highlights: ManualReaderSessionStore.shared.highlights(
                 for: book.bookKey,
                 pageNumber: pageNumber

@@ -98,7 +98,8 @@ final class ControlledPublishingReaderService
                 $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookType(
                     (string)($book['book_type'] ?? '')
                 ) || (string)($book['book_type'] ?? '') === BooksManualsAnnexBookService::LEGACY_BOOK_TYPE
-                    || isset($annexParents[(int)($book['id'] ?? 0)]);
+                    || isset($annexParents[(int)($book['id'] ?? 0)])
+                    || str_starts_with(strtoupper($bookKey), 'ANNEXES_');
                 if (!$includeDraftPreview || $isAnnexBook) {
                     continue;
                 }
@@ -174,7 +175,8 @@ final class ControlledPublishingReaderService
         $parent = $annexParents[$bookId] ?? null;
         $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookType($bookType)
             || $bookType === BooksManualsAnnexBookService::LEGACY_BOOK_TYPE
-            || is_array($parent);
+            || is_array($parent)
+            || str_starts_with(strtoupper($bookKey), 'ANNEXES_');
         $cover = $this->cover()->resolveCoverForVersion($version);
         $progress = (!$isPreview && $userId !== null && $userId > 0)
             ? $this->getReadingProgress($userId, $bookKey)
@@ -1310,6 +1312,42 @@ final class ControlledPublishingReaderService
     }
 
     /**
+     * Generate, persist, and approve the Annex Book page map, then freeze it for release.
+     *
+     * @param array<string,mixed> $version
+     * @return array<string,mixed>
+     */
+    public function ensureAnnexBookPageMapApproved(array $version, ?int $actorUserId = null): array
+    {
+        require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+        if (!BooksManualsAnnexBookService::isAnnexBookVersion($version)) {
+            throw new RuntimeException('Only Annex Books can auto-approve pagination.');
+        }
+        try {
+            return $this->assertAuthoritativePageMapReadyForRelease($version);
+        } catch (Throwable $e) {
+            $message = $e->getMessage();
+            if (!str_contains($message, 'Release blocked:')) {
+                throw $e;
+            }
+        }
+
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? '')));
+        try {
+            $this->generateFrozenPageMapDraft($bookKey, (int)($actorUserId ?? 0), $version);
+            $this->pageMapStore()->approve(
+                (int)$version['id'],
+                (int)($actorUserId ?? 0),
+                ControlledPublishingReaderLayoutProfile::profileKey()
+            );
+        } catch (ControlledPublishingPaginationValidationException $e) {
+            throw new RuntimeException($e->getMessage(), 0, $e);
+        }
+
+        return $this->assertAuthoritativePageMapReadyForRelease($version);
+    }
+
+    /**
      * @param array<string,mixed> $version
      * @return array{is_current:bool,mismatches:list<string>}
      */
@@ -1611,6 +1649,9 @@ final class ControlledPublishingReaderService
                 'is_section_start' => !empty($page['is_section_start']),
                 'is_major_section_start' => !empty($page['is_major_section_start']),
                 'section_title' => (string)($meta['section_title'] ?? ''),
+                'orientation' => (string)($meta['orientation'] ?? 'portrait') === 'landscape'
+                    ? 'landscape'
+                    : 'portrait',
                 'thumbnail_html' => $page['thumbnail_html'] ?? null,
             );
         }
@@ -1680,7 +1721,10 @@ final class ControlledPublishingReaderService
         require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
 
         $version = $version ?? $this->requireReleasedVersion($bookKey);
-        if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+        if (
+            (string)($version['lifecycle_status'] ?? '') === 'released'
+            && !BooksManualsAnnexBookService::allowsReleasedEdits($version)
+        ) {
             throw new RuntimeException('Released authoritative pagination is immutable.');
         }
         $pagination = new ControlledPublishingPaginationService($this);

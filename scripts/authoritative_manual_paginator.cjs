@@ -84,6 +84,8 @@ async function main() {
   const profile = source.layout || {};
   const pageWidth = Number(profile.page_width_px || 816);
   const pageHeight = Number(profile.page_height_px || 1056);
+  const measureWidth = Math.max(pageWidth, pageHeight);
+  const measureHeight = Math.max(pageWidth, pageHeight);
   const side = Number(profile.sheet_padding_x_px || 56);
   const top = Number(profile.sheet_padding_top_px || 48);
   const bottom = Number(profile.sheet_padding_bottom_px || 64);
@@ -96,8 +98,8 @@ async function main() {
     pageHeight - contentY - footerGap - footerHeight - bottom
   ));
   const layout = {
-    viewportWidth: pageWidth,
-    viewportHeight: pageHeight,
+    viewportWidth: measureWidth,
+    viewportHeight: measureHeight,
     safeAreaInsets: { top: 0, leading: 0, bottom: 0, trailing: 0 },
     pageWidth,
     pageHeight,
@@ -151,7 +153,7 @@ async function main() {
   const browser = await launchChromium(chromium);
   try {
     const page = await browser.newPage({
-      viewport: { width: Math.ceil(pageWidth), height: Math.ceil(pageHeight) }
+      viewport: { width: Math.ceil(measureWidth), height: Math.ceil(measureHeight) }
     });
     await page.route("**/*", async (route) => {
       const url = new URL(route.request().url());
@@ -184,7 +186,7 @@ async function main() {
         <meta charset="utf-8">
         <style>${css.replace(/<\/style/gi, "<\\/style")}</style>
         <style>
-          html,body{margin:0;padding:0;width:${pageWidth}px;min-height:${pageHeight}px}
+          html,body{margin:0;padding:0;width:${measureWidth}px;min-height:${measureHeight}px}
           #pagination-measure-host{position:absolute;inset:0 auto auto 0;visibility:hidden;pointer-events:none}
           .reader-semantic-piece{break-inside:avoid;max-width:100%}
           .reader-semantic-piece table{width:100%;max-width:100%;table-layout:fixed}
@@ -202,6 +204,7 @@ async function main() {
             height:auto!important;min-height:0!important;padding:0!important;
             margin:0!important;box-shadow:none!important;position:static!important
           }
+          .cpb-sheet--landscape{max-width:none!important}
           .reader-page-header-region,
           .reader-page-footer-region,
           .reader-page-body:not(.reader-page-cover){overflow:hidden}

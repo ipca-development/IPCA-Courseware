@@ -108,6 +108,9 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         if type == "annex_book" || type == "annex" {
             return true
         }
+        if bookTitle.localizedCaseInsensitiveContains("Annexes Manual") {
+            return true
+        }
         return bookKey.uppercased().hasPrefix("ANNEXES_")
     }
 
@@ -177,6 +180,7 @@ struct FrozenPageMeta: Codable, Identifiable, Hashable {
     var isSectionStart: Bool
     var isMajorSectionStart: Bool
     var sectionTitle: String?
+    var orientation: String?
 
     var id: Int { pageNumber }
 
@@ -189,6 +193,11 @@ struct FrozenPageMeta: Codable, Identifiable, Hashable {
         case isSectionStart = "is_section_start"
         case isMajorSectionStart = "is_major_section_start"
         case sectionTitle = "section_title"
+        case orientation
+    }
+
+    var isLandscapePage: Bool {
+        orientation?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "landscape"
     }
 }
 
@@ -544,6 +553,29 @@ struct PublicationLayout: Codable, Hashable {
         case lineHeightPX = "line_height_px"
         case charsPerLine = "chars_per_line"
         case splitWordsPerChunk = "split_words_per_chunk"
+    }
+
+    var landscapeSized: PublicationLayout {
+        PublicationLayout(
+            layoutProfile: layoutProfile,
+            paperSize: paperSize,
+            pageWidthPX: max(pageWidthPX, pageHeightPX),
+            pageHeightPX: min(pageWidthPX, pageHeightPX),
+            sheetPaddingTopPX: sheetPaddingTopPX,
+            sheetPaddingBottomPX: sheetPaddingBottomPX,
+            sheetPaddingXPX: sheetPaddingXPX,
+            headerBandPX: headerBandPX,
+            footerBandPX: footerBandPX,
+            headerMarginBottomPX: headerMarginBottomPX,
+            footerMarginTopPX: footerMarginTopPX,
+            bodyCapacityPX: bodyCapacityPX,
+            fontFamily: fontFamily,
+            fontSizePT: fontSizePT,
+            lineHeight: lineHeight,
+            lineHeightPX: lineHeightPX,
+            charsPerLine: charsPerLine,
+            splitWordsPerChunk: splitWordsPerChunk
+        )
     }
 }
 
