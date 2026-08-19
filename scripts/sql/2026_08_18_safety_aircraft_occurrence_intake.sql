@@ -2,7 +2,6 @@
 -- Additive and re-run safe for MySQL 8.
 
 INSERT IGNORE INTO ipca_safety_config (organization_id, config_key, config_value) VALUES
-  (1, 'reporter_occurrence_type_node_type', JSON_OBJECT('value', 'reporter_occurrence_type')),
   (1, 'flight_schedule_timezone_iana', JSON_OBJECT('value', 'America/Los_Angeles'));
 
 SET @table_name := 'ipca_safety_reports';

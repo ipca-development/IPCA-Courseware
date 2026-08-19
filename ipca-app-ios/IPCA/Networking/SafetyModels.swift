@@ -47,21 +47,6 @@ struct SafetyReportInput: Codable, Equatable {
     }
 }
 
-struct SafetyOccurrenceTypeDTO: Decodable, Hashable, Identifiable {
-    var id: Int
-    var code: String
-    var label: String
-    var description: String?
-    var parentID: Int?
-    var parentLabel: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, code, label, description
-        case parentID = "parent_id"
-        case parentLabel = "parent_label"
-    }
-}
-
 struct SafetyFlightCrewDTO: Decodable, Hashable {
     var userID: Int?
     var name: String
@@ -378,16 +363,6 @@ struct SafetyMailboxMessageDTO: Decodable, Hashable, Identifiable {
 struct SafetyReportsEnvelope: Decodable {
     var ok: Bool
     var reports: [SafetyReportDTO]
-}
-
-struct SafetyOccurrenceTypesEnvelope: Decodable {
-    var ok: Bool
-    var occurrenceTypes: [SafetyOccurrenceTypeDTO]
-
-    enum CodingKeys: String, CodingKey {
-        case ok
-        case occurrenceTypes = "occurrence_types"
-    }
 }
 
 struct SafetyFlightCandidatesEnvelope: Decodable {

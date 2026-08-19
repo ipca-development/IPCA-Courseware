@@ -335,8 +335,6 @@ struct SafetyReportFormView: View {
     var onSubmitted: (SafetyReportDTO) -> Void = { _ in }
     var onAnonymousSubmitted: (AnonymousSafetyReceipt) -> Void = { _ in }
 
-    @State private var occurrenceTypes: [SafetyOccurrenceTypeDTO] = []
-    @State private var selectedOccurrenceTypeID: Int?
     @State private var flightCandidates: [SafetyFlightCandidateDTO] = []
     @State private var selectedScheduleSlotID: Int?
     @State private var flightLinkChoice = ""
@@ -418,17 +416,6 @@ struct SafetyReportFormView: View {
                         }
                     }
                     Section(mode == .identified ? "2. What happened?" : "1. What happened?") {
-                        Picker("Occurrence type", selection: $selectedOccurrenceTypeID) {
-                            Text("Select type").tag(Int?.none)
-                            ForEach(occurrenceTypes) { type in
-                                Text(type.label).tag(Optional(type.id))
-                            }
-                        }
-                        if occurrenceTypes.isEmpty && !loadingContext {
-                            Text("No active occurrence types are configured. Contact the Safety Manager.")
-                                .font(.footnote)
-                                .foregroundStyle(IPCATheme.Colors.destructive)
-                        }
                         TextField("Describe what happened or could happen", text: $description, axis: .vertical)
                             .lineLimit(5...10)
                     }
@@ -563,7 +550,6 @@ struct SafetyReportFormView: View {
     }
 
     private var canSubmit: Bool {
-        selectedOccurrenceTypeID != nil &&
         !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !injuryState.isEmpty &&
         !damageState.isEmpty &&
@@ -572,16 +558,15 @@ struct SafetyReportFormView: View {
     }
 
     private var input: SafetyReportInput {
-        let selectedType = occurrenceTypes.first { $0.id == selectedOccurrenceTypeID }
         return SafetyReportInput(
-            category: selectedType?.code ?? "",
+            category: "",
             title: "",
             description: description.trimmingCharacters(in: .whitespacesAndNewlines),
             occurredAtUTC: ISO8601DateFormatter().string(from: occurredAt),
             location: location.trimmingCharacters(in: .whitespacesAndNewlines),
             aircraftRegistration: aircraftRegistration.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
             immediateAction: immediateAction.trimmingCharacters(in: .whitespacesAndNewlines),
-            occurrenceTypeID: selectedOccurrenceTypeID,
+            occurrenceTypeID: nil,
             flightLinkChoice: mode == .identified ? flightLinkChoice : nil,
             scheduleSlotID: selectedScheduleSlotID,
             phaseOfFlight: optional(phaseOfFlight),
@@ -599,12 +584,6 @@ struct SafetyReportFormView: View {
         loadingContext = true
         defer { loadingContext = false }
         do {
-            occurrenceTypes = try await session.loadSafetyOccurrenceTypes(anonymous: mode == .anonymous)
-            if selectedOccurrenceTypeID == nil,
-               let savedCode = currentDraftInput?.category,
-               !savedCode.isEmpty {
-                selectedOccurrenceTypeID = occurrenceTypes.first { $0.code == savedCode }?.id
-            }
             if mode == .identified {
                 flightCandidates = try await session.loadSafetyFlightCandidates(eventAt: occurredAt)
             }
@@ -620,15 +599,6 @@ struct SafetyReportFormView: View {
             showAllFlights = true
         } catch {
             errorMessage = error.localizedDescription
-        }
-    }
-
-    private var currentDraftInput: SafetyReportInput? {
-        switch mode {
-        case .identified:
-            return IdentifiedSafetyDraftStore.loadSubmission(userUUID: session.user?.uuid ?? "")?.input
-        case .anonymous:
-            return AnonymousSafetyDraftStore.load()?.input
         }
     }
 
@@ -701,7 +671,6 @@ struct SafetyReportFormView: View {
         }
         guard let submission else { return }
         let draft = submission.input
-        selectedOccurrenceTypeID = draft.occurrenceTypeID
         flightLinkChoice = draft.flightLinkChoice ?? ""
         selectedScheduleSlotID = draft.scheduleSlotID
         description = draft.description

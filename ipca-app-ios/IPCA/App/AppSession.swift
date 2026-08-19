@@ -536,10 +536,6 @@ final class AppSession: ObservableObject {
         try await api.safetyReports()
     }
 
-    func loadSafetyOccurrenceTypes(anonymous: Bool = false) async throws -> [SafetyOccurrenceTypeDTO] {
-        try await api.safetyOccurrenceTypes(anonymous: anonymous)
-    }
-
     func loadSafetyFlightCandidates(eventAt: Date) async throws -> [SafetyFlightCandidateDTO] {
         try await api.safetyFlightCandidates(
             eventAtUTC: ISO8601DateFormatter().string(from: eventAt)

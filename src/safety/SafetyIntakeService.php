@@ -24,13 +24,12 @@ final class SafetyIntakeService
         $this->config->requireEnabled($organizationId);
         $userId = (int)$session['user']['id'];
         $subjectHash = SafetySupport::reporterSubjectHash($organizationId, $userId);
-        $occurrenceType = $this->occurrenceContext->requireOccurrenceType($organizationId, $input);
         $selectedFlight = $this->occurrenceContext->selectedFlight($organizationId, $userId, $input);
         $titleInput = trim((string)($input['title'] ?? ''));
         $title = SafetySupport::cleanText(
             $titleInput !== ''
                 ? $titleInput
-                : $this->generatedTitle($occurrenceType, $selectedFlight, $input),
+                : $this->generatedTitle($selectedFlight, $input),
             240,
             'title'
         );
@@ -50,7 +49,7 @@ final class SafetyIntakeService
         $confidentiality = in_array(($input['confidentiality'] ?? ''), array('standard', 'restricted'), true)
             ? (string)$input['confidentiality'] : 'standard';
         $requestHash = SafetySupport::digest(SafetySupport::json(array(
-            $occurrenceType['id'], $title, $narrative, $eventAt, $location, $aircraftRegistration,
+            $title, $narrative, $eventAt, $location, $aircraftRegistration,
             $injuryState, $damageState, $weatherRelevance, $selectedFlight, $confidentiality,
         )));
         $cached = $this->idempotency(
@@ -79,8 +78,8 @@ final class SafetyIntakeService
                 'authenticated',
                 $confidentiality === 'restricted' ? null : $userId,
                 $subjectHash,
-                (string)$occurrenceType['taxonomy_code'],
-                (int)$occurrenceType['id'],
+                null,
+                null,
                 $title,
                 $narrative,
                 $eventAt,
@@ -99,17 +98,11 @@ final class SafetyIntakeService
                     'location_source' => trim((string)($input['location_source'] ?? '')) !== ''
                         ? (string)$input['location_source']
                         : ($selectedFlight !== null ? 'selected_reservation' : 'reporter'),
-                    'occurrence_type_code' => (string)$occurrenceType['taxonomy_code'],
                 )),
                 'draft',
                 $confidentiality,
             ));
             $id = (int)$this->pdo->lastInsertId();
-            $this->pdo->prepare(
-                'INSERT IGNORE INTO ipca_safety_report_taxonomy
-                 (organization_id, report_id, taxonomy_node_id, assigned_by_user_id)
-                 VALUES (?, ?, ?, ?)'
-            )->execute(array($organizationId, $id, (int)$occurrenceType['id'], $userId));
             if ($selectedFlight !== null) {
                 $this->occurrenceContext->persistFlightLink(
                     $organizationId,
@@ -175,14 +168,6 @@ final class SafetyIntakeService
     public function updateOwn(array $session, string $reportUuid, array $input): array
     {
         $row = $this->access->requireOwnReport($session, $reportUuid, true);
-        $occurrenceType = null;
-        if (array_key_exists('occurrence_type_id', $input)
-            || array_key_exists('occurrence_type_node_id', $input)
-            || array_key_exists('occurrence_type_code', $input)
-            || array_key_exists('category', $input)
-        ) {
-            $occurrenceType = $this->occurrenceContext->requireOccurrenceType((int)$row['organization_id'], $input);
-        }
         $title = SafetySupport::cleanText((string)($input['title'] ?? $row['title']), 240, 'title');
         $narrative = SafetySupport::cleanText(
             (string)($input['narrative'] ?? $input['description'] ?? $row['narrative']),
@@ -197,8 +182,8 @@ final class SafetyIntakeService
              weather_relevance = ?, weather_details = ?
              WHERE id = ? AND organization_id = ?'
         )->execute(array(
-            $occurrenceType === null ? $row['category_code'] : (string)$occurrenceType['taxonomy_code'],
-            $occurrenceType === null ? $row['occurrence_type_node_id'] : (int)$occurrenceType['id'],
+            $row['category_code'],
+            $row['occurrence_type_node_id'],
             $title,
             $narrative,
             array_key_exists('event_at_utc', $input) || array_key_exists('occurred_at_utc', $input)
@@ -226,22 +211,6 @@ final class SafetyIntakeService
             (int)$row['id'],
             (int)$row['organization_id'],
         ));
-        if ($occurrenceType !== null) {
-            $this->pdo->prepare(
-                'DELETE FROM ipca_safety_report_taxonomy
-                 WHERE report_id = ? AND taxonomy_node_id = ?'
-            )->execute(array((int)$row['id'], (int)$row['occurrence_type_node_id']));
-            $this->pdo->prepare(
-                'INSERT IGNORE INTO ipca_safety_report_taxonomy
-                 (organization_id, report_id, taxonomy_node_id, assigned_by_user_id)
-                 VALUES (?, ?, ?, ?)'
-            )->execute(array(
-                (int)$row['organization_id'],
-                (int)$row['id'],
-                (int)$occurrenceType['id'],
-                (int)$session['user']['id'],
-            ));
-        }
         $this->appendReporterEvent($session, $row, 'report.updated');
         return $this->publicReport($this->reportById((int)$row['organization_id'], (int)$row['id']));
     }
@@ -422,10 +391,10 @@ final class SafetyIntakeService
         return $value;
     }
 
-    /** @param array<string,mixed> $type @param array<string,mixed>|null $flight @param array<string,mixed> $input */
-    private function generatedTitle(array $type, ?array $flight, array $input): string
+    /** @param array<string,mixed>|null $flight @param array<string,mixed> $input */
+    private function generatedTitle(?array $flight, array $input): string
     {
-        $parts = array((string)$type['label']);
+        $parts = array('Aircraft safety occurrence');
         $registration = trim((string)(
             $input['aircraft_registration'] ?? $flight['aircraft_registration'] ?? ''
         ));

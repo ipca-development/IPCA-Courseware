@@ -27,10 +27,9 @@ final class SafetyAnonymousService
         $this->config->requireEnabled($organizationId);
         $this->config->requireEnabled($organizationId, 'anonymous_reporting_enabled');
         $this->rateLimits->consume($organizationId, 'anonymous_submit', $fingerprintHmac, 8, 3600);
-        $occurrenceType = $this->occurrenceContext->requireOccurrenceType($organizationId, $input);
         $titleInput = trim((string)($input['title'] ?? ''));
         $title = SafetySupport::cleanText(
-            $titleInput !== '' ? $titleInput : (string)$occurrenceType['label'],
+            $titleInput !== '' ? $titleInput : 'Aircraft safety occurrence',
             240,
             'title'
         );
@@ -45,7 +44,7 @@ final class SafetyAnonymousService
         $damageState = $this->triState($input['damage_state'] ?? 'unknown', 'damage_state');
         $weatherRelevance = $this->weatherState($input['weather_relevance'] ?? 'unknown');
         $requestHash = SafetySupport::digest(SafetySupport::json(array(
-            $occurrenceType['id'], $title, $narrative, $eventAt, $location,
+            $title, $narrative, $eventAt, $location,
             $injuryState, $damageState, $weatherRelevance,
         )));
         $cached = $this->idempotentResponse($organizationId, $fingerprintHmac, $idempotencyKey, $requestHash);
@@ -84,8 +83,8 @@ final class SafetyAnonymousService
                 $organizationId,
                 $reportUuid,
                 $mailboxId,
-                (string)$occurrenceType['taxonomy_code'],
-                (int)$occurrenceType['id'],
+                null,
+                null,
                 $title,
                 $narrative,
                 $eventAt,
@@ -102,15 +101,9 @@ final class SafetyAnonymousService
                 SafetySupport::json(array(
                     'event_time_source' => (string)($input['event_time_source'] ?? 'device'),
                     'location_source' => (string)($input['location_source'] ?? 'reporter'),
-                    'occurrence_type_code' => (string)$occurrenceType['taxonomy_code'],
                 )),
             ));
             $reportId = (int)$this->pdo->lastInsertId();
-            $this->pdo->prepare(
-                'INSERT IGNORE INTO ipca_safety_report_taxonomy
-                 (organization_id, report_id, taxonomy_node_id, assigned_by_user_id)
-                 VALUES (?, ?, ?, NULL)'
-            )->execute(array($organizationId, $reportId, (int)$occurrenceType['id']));
             $number = 'SMS-' . gmdate('Y') . '-' . str_pad((string)$reportId, 7, '0', STR_PAD_LEFT);
             $this->pdo->prepare('UPDATE ipca_safety_reports SET report_number = ? WHERE id = ?')
                 ->execute(array($number, $reportId));

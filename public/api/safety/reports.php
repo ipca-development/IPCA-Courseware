@@ -8,14 +8,6 @@ try {
     $method = SafetyHttp::requireMethod('GET', 'POST', 'PATCH');
     if ($method === 'GET') {
         $action = strtolower(trim((string)($_GET['action'] ?? 'list')));
-        if ($action === 'occurrence_types') {
-            SafetyHttp::json(200, array(
-                'ok' => true,
-                'occurrence_types' => $safetyKernel->occurrenceIntakeContext->occurrenceTypes(
-                    SafetySupport::organizationId($session)
-                ),
-            ));
-        }
         if ($action === 'flight_candidates') {
             SafetyHttp::json(200, array(
                 'ok' => true,

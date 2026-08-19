@@ -57,10 +57,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $reports = array();
 $selected = null;
-$occurrenceTypes = array();
 $flightCandidates = array();
 try {
-    $occurrenceTypes = $kernel->occurrenceIntakeContext->occurrenceTypes(1);
     $flightCandidates = $kernel->occurrenceIntakeContext->flightCandidates($session);
     $reports = $kernel->intake->listOwn($session);
     $selectedUuid = trim((string)($_GET['report_uuid'] ?? ''));
@@ -114,8 +112,6 @@ cw_header('Safety Reporting');
             </label>
           <?php endforeach; ?>
           <label class="ss-flight"><input type="radio" name="flight_selection" value="no_reservation" required><span>Not related to a scheduled flight</span></label>
-          <label>Occurrence type<select class="ss-select" name="occurrence_type_id" required><option value="">Select type</option><?php foreach ($occurrenceTypes as $type): ?><option value="<?= (int)$type['id'] ?>"><?= h((string)$type['label']) ?></option><?php endforeach; ?></select></label>
-          <?php if (!$occurrenceTypes): ?><div class="ss-flash error">No active occurrence types are configured. Contact the Safety Manager.</div><?php endif; ?>
           <label>What happened?<textarea class="ss-textarea" name="narrative" maxlength="50000" required></textarea></label>
           <label>Injury<select class="ss-select" name="injury_state" required><option value="">Select</option><option value="no">No</option><option value="yes">Yes</option><option value="unknown">Unknown</option></select></label>
           <label data-detail-for="injury_state" hidden>Injury details<textarea class="ss-textarea" name="injury_details" maxlength="12000"></textarea></label>
