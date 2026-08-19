@@ -104,6 +104,15 @@ struct OfflineManualPackage: Codable {
     }
 
     func matchesPublication(_ book: LibraryBook) -> Bool {
+        if book.isAnnexBook {
+            guard book.hasPageMap,
+                  let expectedPageMapHash = book.pageMapHash,
+                  !expectedPageMapHash.isEmpty,
+                  let expectedManifestHash = book.manifestHash,
+                  !expectedManifestHash.isEmpty else {
+                return false
+            }
+        }
         if let expected = book.pageMapHash,
            !expected.isEmpty,
            pageMap.pageMapHash != expected {
@@ -307,6 +316,24 @@ private actor ManualPackageDiskStore {
             try fileManager.removeItem(at: url)
         }
     }
+
+    func removeAll(bookKey: String) throws {
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: nil
+        ) else {
+            return
+        }
+        let prefix = bookKey.uppercased() + "-"
+        for url in urls {
+            guard let data = try? Data(contentsOf: url),
+                  let package = try? JSONDecoder().decode(OfflineManualPackage.self, from: data),
+                  package.bookID.uppercased().hasPrefix(prefix) else {
+                continue
+            }
+            try fileManager.removeItem(at: url)
+        }
+    }
 }
 
 @MainActor
@@ -333,9 +360,13 @@ final class ManualDownloadManager: ObservableObject {
             return nil
         }
         packages[book.id] = package
-        statuses[book.id] = package.isFullyDownloaded
-            ? .availableOffline(package.downloadedAt)
-            : .notDownloaded
+        if package.isFullyDownloaded && package.matchesPublication(book) {
+            statuses[book.id] = .availableOffline(package.downloadedAt)
+        } else if package.isFullyDownloaded {
+            statuses[book.id] = .updateAvailable("earlier draft")
+        } else {
+            statuses[book.id] = .notDownloaded
+        }
         return package
     }
 
@@ -448,6 +479,7 @@ final class ManualDownloadManager: ObservableObject {
                 tocTask,
                 publicationPackageTask
             )
+            try Task.checkCancellation()
             guard publicationResponse.ok,
                   publicationResponse.versionID == book.versionId else {
                 throw ManualReaderAPIError.badResponse(
@@ -513,6 +545,7 @@ final class ManualDownloadManager: ObservableObject {
                 publicationManifestJSON: manifestJSON,
                 publicationAssets: []
             )
+            try Task.checkCancellation()
             try await diskStore.save(starterPackage)
             packages[book.id] = starterPackage
             statuses[book.id] = .downloading(
@@ -524,6 +557,12 @@ final class ManualDownloadManager: ObservableObject {
                 starterPackage: starterPackage,
                 pageNumbers: pageNumbers
             )
+        } catch is CancellationError {
+            statuses[book.id] = .notDownloaded
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            statuses[book.id] = .notDownloaded
+            throw CancellationError()
         } catch ManualReaderAPIError.unauthorized {
             ManualReaderSessionStore.shared.clearSession()
             statuses[book.id] = .failed(ManualReaderAPIError.unauthorized.localizedDescription)
@@ -628,6 +667,7 @@ final class ManualDownloadManager: ObservableObject {
                 publicationManifestJSON: starterPackage.publicationManifestJSON,
                 publicationAssets: publicationAssets
             )
+            try Task.checkCancellation()
             try await diskStore.save(completedPackage)
             packages[book.id] = completedPackage
             statuses[book.id] = .availableOffline(completedPackage.downloadedAt)
@@ -635,10 +675,16 @@ final class ManualDownloadManager: ObservableObject {
     }
 
     func removeDownload(for book: LibraryBook) async {
-        try? await diskStore.remove(bookID: book.id)
-        packages.removeValue(forKey: book.id)
+        if let task = downloadTasks.removeValue(forKey: book.id) {
+            task.cancel()
+            _ = try? await task.value
+        }
+        try? await diskStore.removeAll(bookKey: book.bookKey)
+        packages = packages.filter {
+            !$0.value.bookID.uppercased().hasPrefix(book.bookKey.uppercased() + "-")
+        }
         statuses[book.id] = .notDownloaded
-        await PageCache.shared.clear(bookKey: book.id)
+        await PageCache.shared.clear(bookKey: book.bookKey)
     }
 
     func readingProgress(for book: LibraryBook) -> Double? {

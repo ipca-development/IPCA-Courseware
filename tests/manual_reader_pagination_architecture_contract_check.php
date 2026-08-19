@@ -6,11 +6,11 @@ $failures = array();
 
 $protected = array(
     'src/publishing/ControlledPublishingBlockService.php'
-        => '7657371be4bd2a7a2821af68130e76403e3e02bb167478087681ee9f146e169d',
+        => '9685b9d8bbe5b9b18313585df394bd00e7075d53fcce0ac11b178d7b852fa923',
     'src/document/StructuredDocumentPayload.php'
         => '9b5412d9966d0e7ce162ae652cbd8515b4f8864689852f2807e5f404f356a8ed',
     'src/publishing/ControlledPublishingBookRenderer.php'
-        => '1c2b71ec9d6bb1724026c5c484e992ddb5b18776106cd27248d6bdc456c2b87d',
+        => 'c4f1d66d9cf1a2e5e06cb4a3d305ff5b484ea3f8db47ef5ace05817924237f8d',
 );
 
 foreach ($protected as $relative => $expectedHash) {
@@ -105,6 +105,11 @@ require_markers(
         'publicationPackage?.manifestHash != expected',
         'statuses[book.id] = .updateAvailable("earlier draft")',
         'return try await completeDownload(',
+        'guard book.hasPageMap',
+        'func removeAll(bookKey: String) throws',
+        'task.cancel()',
+        'diskStore.removeAll(bookKey: book.bookKey)',
+        'PageCache.shared.clear(bookKey: book.bookKey)',
     ),
     $failures
 );
@@ -261,7 +266,15 @@ require_markers(
         'Image(systemName: "icloud")',
         'coverImageKind == "authoritative_page_thumbnail_v1"',
         'Button("Delete Local Download"',
+        'Button("Cancel Download"',
         'catch is CancellationError',
+    ),
+    $failures
+);
+require_markers(
+    $root . '/ipca-manual-reader-ios/IPCAManualReader/ViewModels/ReaderViewModels.swift',
+    array(
+        '!book.isAnnexBook || cachedPackage.matchesPublication(book)',
     ),
     $failures
 );

@@ -19,11 +19,13 @@ $nav = (string)file_get_contents($root . '/src/publishing/ControlledPublishingEd
 $reader = (string)file_get_contents($root . '/src/publishing/ControlledPublishingReaderService.php');
 $editorApi = (string)file_get_contents($root . '/public/admin/api/controlled_book_editor_api.php');
 $annexApi = (string)file_get_contents($root . '/public/admin/api/controlled_book_annex_api.php');
+$pageBreakApi = (string)file_get_contents($root . '/public/admin/api/controlled_book_page_break_api.php');
 $annexManager = (string)file_get_contents($root . '/public/admin/compliance/controlled_book_annexes.php');
 $annexPage = (string)file_get_contents($root . '/public/admin/books_manuals/annexes.php');
 $editorPage = (string)file_get_contents($root . '/public/admin/compliance/controlled_book_editor.php');
 $editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
 $pageBreaks = (string)file_get_contents($root . '/src/publishing/ControlledPublishingManualPageBreakService.php');
+$livePageMap = (string)file_get_contents($root . '/src/publishing/ControlledPublishingLivePageMapService.php');
 $migration = (string)file_get_contents($root . '/src/publishing/BooksManualsAnnexMigrationService.php');
 $sql = (string)file_get_contents($root . '/scripts/sql/2026_08_18_annex_book_structure.sql');
 $apply = (string)file_get_contents($root . '/scripts/apply_annex_book_structure.php');
@@ -181,6 +183,15 @@ annex_book_assert(
     str_contains($pageBreaks, 'BooksManualsAnnexBookService::allowsReleasedEdits($version)')
         && str_contains($pageBreaks, "array('draft', 'in_review', 'approved')")
         && str_contains($pageBreaks, 'Released pagination is immutable')
+);
+annex_book_assert(
+    'published Annex edits automatically refresh the approved reader package',
+    str_contains($reader, 'b.book_type')
+        && str_contains($editorApi, "'mutation_kind' => 'published_annex_content'")
+        && str_contains($pageBreakApi, 'cp_pb_refresh_published_annex')
+        && str_contains($livePageMap, 'BooksManualsAnnexBookService::allowsReleasedEdits($publishedVersion)')
+        && str_contains($livePageMap, '$this->store->approve(')
+        && str_contains($workflow, "\$map['generation']")
 );
 annex_book_assert(
     'Governance action is removed from the controlled editor',

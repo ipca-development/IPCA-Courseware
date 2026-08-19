@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualPageBreakService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsAnnexBookService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -21,6 +23,32 @@ function cp_pb_input(): array
     return is_array($decoded) ? $decoded : array_merge($_GET, $_POST);
 }
 
+function cp_pb_refresh_published_annex(
+    ControlledPublishingReaderService $reader,
+    int $versionId,
+    int $uid,
+    string $mutationKind
+): void {
+    $version = $reader->resolveVersionById($versionId);
+    if (!is_array($version)
+        || (string)($version['lifecycle_status'] ?? '') !== 'released'
+        || !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
+        return;
+    }
+    try {
+        $reader->ensureLivePageMap(
+            $versionId,
+            $uid,
+            array(
+                'mutation_kind' => $mutationKind,
+                'layout_impact' => 'suffix',
+            )
+        );
+    } catch (Throwable $e) {
+        error_log('Published Annex page-break refresh could not be queued: ' . $e->getMessage());
+    }
+}
+
 try {
     $user = compliance_require_access($pdo);
     $uid = (int)($user['id'] ?? 0);
@@ -32,6 +60,7 @@ try {
     }
     $action = strtolower(trim((string)($input['action'] ?? 'list')));
     $service = new ControlledPublishingManualPageBreakService($pdo);
+    $reader = new ControlledPublishingReaderService($pdo);
 
     switch ($action) {
         case 'list':
@@ -51,10 +80,12 @@ try {
                 (string)($input['before_block_anchor'] ?? ''),
                 $uid
             );
+            cp_pb_refresh_published_annex($reader, $versionId, $uid, 'manual_page_break_insert');
             cp_pb_json(200, array('ok' => true, 'break' => $row));
 
         case 'remove':
             $service->remove($versionId, (int)($input['break_id'] ?? 0));
+            cp_pb_refresh_published_annex($reader, $versionId, $uid, 'manual_page_break_remove');
             cp_pb_json(200, array('ok' => true));
 
         case 'move':
@@ -64,6 +95,7 @@ try {
                 (string)($input['before_block_anchor'] ?? ''),
                 $uid
             );
+            cp_pb_refresh_published_annex($reader, $versionId, $uid, 'manual_page_break_move');
             cp_pb_json(200, array('ok' => true, 'break' => $row));
 
         default:

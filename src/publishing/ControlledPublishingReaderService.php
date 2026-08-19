@@ -325,6 +325,7 @@ final class ControlledPublishingReaderService
               b.book_key,
               b.title AS book_title,
               b.manual_code,
+              b.book_type,
               b.status AS book_status
             FROM ipca_publishing_book_versions bv
             INNER JOIN ipca_publishing_books b ON b.id = bv.book_id

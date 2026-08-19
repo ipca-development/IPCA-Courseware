@@ -994,9 +994,18 @@ private struct ManualCoverCard: View {
             }
         case .downloading:
             Text("Downloading…")
+            Button("Cancel Download", role: .destructive) {
+                Task { await downloads.removeDownload(for: book) }
+            }
         case .updateAvailable(let priorVersion):
             Text("Update \(book.versionLabel) available · installed \(priorVersion)")
             Button("Download Update", action: downloadUpdate)
+            Button("Delete Local Download", role: .destructive) {
+                Task { await downloads.removeDownload(for: book) }
+            }
+        case .failed:
+            Text("Download failed")
+            Button("Retry Download", action: download)
             Button("Delete Local Download", role: .destructive) {
                 Task { await downloads.removeDownload(for: book) }
             }

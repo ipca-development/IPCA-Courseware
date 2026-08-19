@@ -929,9 +929,14 @@ final class BooksManualsWorkflowService
         }
         $meta = is_array($meta) ? $meta : array();
         $map = is_array($meta['reader_page_map'] ?? null) ? $meta['reader_page_map'] : array();
+        $generation = is_array($map['generation'] ?? null) ? $map['generation'] : array();
         return array(
-            'page_map_hash' => isset($map['page_map_hash']) ? (string)$map['page_map_hash'] : null,
-            'manifest_hash' => isset($map['manifest_hash']) ? (string)$map['manifest_hash'] : null,
+            'page_map_hash' => isset($generation['page_map_hash'])
+                ? (string)$generation['page_map_hash']
+                : null,
+            'manifest_hash' => isset($generation['manifest_hash'])
+                ? (string)$generation['manifest_hash']
+                : null,
         );
     }
 

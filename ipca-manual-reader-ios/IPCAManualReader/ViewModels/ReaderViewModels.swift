@@ -133,6 +133,7 @@ final class ReaderViewModel: ObservableObject {
             )
 #endif
             if cachedPackage.isFullyDownloaded,
+               (!book.isAnnexBook || cachedPackage.matchesPublication(book)),
                openingPageNumber.flatMap({ cachedPackage.page(number: $0)?.pageHtml }) != nil {
                 await applyPackage(cachedPackage)
 #if DEBUG

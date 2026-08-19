@@ -265,6 +265,20 @@ final class ControlledPublishingLivePageMapService
             if (!$promoted) {
                 // This deletes only this candidate. Production is never touched.
                 $this->store->deleteStagingPages($versionId, $profile, $seq, $leaseToken);
+            } else {
+                $publishedVersion = $this->requireMutableVersion($versionId);
+                require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+                if ((string)($publishedVersion['lifecycle_status'] ?? '') === 'released'
+                    && BooksManualsAnnexBookService::allowsReleasedEdits($publishedVersion)) {
+                    // Published Annex Books are edited in place. Their freshly
+                    // promoted map is the new reader publication and must not
+                    // remain hidden behind the normal manual approval gate.
+                    $this->store->approve(
+                        $versionId,
+                        (int)($claim['requested_by_user_id'] ?? 0),
+                        $profile
+                    );
+                }
             }
             return $this->status($versionId, $profile);
         } catch (Throwable $e) {

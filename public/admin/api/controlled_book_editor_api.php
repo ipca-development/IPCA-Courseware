@@ -27,6 +27,7 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportS
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualPageBreakService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPublicationFontService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -51,6 +52,7 @@ function cp_editor_sync_annex_cover_from_parent(
 }
 
 function cp_editor_touch_annex_revision(
+    PDO $pdo,
     ControlledPublishingAnnexService $annexSvc,
     ControlledPublishingSectionService $sections,
     int $versionId,
@@ -66,6 +68,25 @@ function cp_editor_touch_annex_revision(
     }
     $annexSvc->touchAnnexContentRevision($versionId, $sectionId, $uid);
     $annexSvc->regenerateRegister($versionId, $uid);
+    $reader = new ControlledPublishingReaderService($pdo);
+    $version = $reader->resolveVersionById($versionId);
+    if (is_array($version)
+        && (string)($version['lifecycle_status'] ?? '') === 'released'
+        && BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
+        try {
+            $reader->ensureLivePageMap(
+                $versionId,
+                $uid,
+                array(
+                    'section_id' => $sectionId,
+                    'mutation_kind' => 'published_annex_content',
+                    'layout_impact' => 'global',
+                )
+            );
+        } catch (Throwable $e) {
+            error_log('Published Annex reader refresh could not be queued: ' . $e->getMessage());
+        }
+    }
 }
 
 $user = compliance_require_access($pdo);
@@ -287,7 +308,7 @@ try {
             cp_editor_handle_split_block_page_break($pdo, $blocks, $manualPageBreakSvc, $annexSvc, $sections, $uid);
             break;
         case 'delete_block':
-            cp_editor_handle_delete_block($blocks, $annexSvc, $sections, $uid);
+            cp_editor_handle_delete_block($pdo, $blocks, $annexSvc, $sections, $uid);
             break;
         case 'move_block':
             cp_editor_handle_move_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
@@ -2645,7 +2666,14 @@ function cp_editor_handle_create_block(
     if ($block === null) {
         cp_editor_json(500, array('ok' => false, 'error' => 'Block create failed'));
     }
-    cp_editor_touch_annex_revision($annexSvc, $sections, $versionId, $sectionId, $uid);
+    cp_editor_touch_annex_revision(
+        $pdo,
+        $annexSvc,
+        $sections,
+        $versionId,
+        $sectionId,
+        $uid
+    );
 
     cp_editor_json(200, array_merge(array(
         'ok' => true,
@@ -2701,7 +2729,14 @@ function cp_editor_handle_update_block(
 
     $versionId = (int)($block['book_version_id'] ?? 0);
     $sectionId = (int)($block['section_id'] ?? 0);
-    cp_editor_touch_annex_revision($annexSvc, $sections, $versionId, $sectionId, $uid);
+    cp_editor_touch_annex_revision(
+        $pdo,
+        $annexSvc,
+        $sections,
+        $versionId,
+        $sectionId,
+        $uid
+    );
     if ($versionId > 0 && $annexSvc->crossRefSectionId($versionId) === $sectionId) {
         $response['cross_ref_annex'] = $annexSvc->resolveCrossRefCatalog($versionId, $uid);
     }
@@ -2768,6 +2803,7 @@ function cp_editor_handle_split_block_page_break(
     }
 
     cp_editor_touch_annex_revision(
+        $pdo,
         $annexSvc,
         $sections,
         $versionId,
@@ -2800,6 +2836,7 @@ function cp_editor_numbering_payload(array $numbering): array
 }
 
 function cp_editor_handle_delete_block(
+    PDO $pdo,
     ControlledPublishingBlockService $blocks,
     ControlledPublishingAnnexService $annexSvc,
     ControlledPublishingSectionService $sections,
@@ -2815,6 +2852,7 @@ function cp_editor_handle_delete_block(
     $blocks->deleteBlock($blockId, $uid);
     if (is_array($existing)) {
         cp_editor_touch_annex_revision(
+            $pdo,
             $annexSvc,
             $sections,
             (int)($existing['book_version_id'] ?? 0),
