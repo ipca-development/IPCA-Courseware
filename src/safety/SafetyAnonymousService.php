@@ -11,7 +11,8 @@ final class SafetyAnonymousService
         private PDO $pdo,
         private SafetyAuditEventService $events,
         private SafetyFeatureConfigService $config,
-        private SafetyRateLimitService $rateLimits
+        private SafetyRateLimitService $rateLimits,
+        private SafetyOccurrenceIntakeContextService $occurrenceContext
     ) {
     }
 
@@ -26,7 +27,13 @@ final class SafetyAnonymousService
         $this->config->requireEnabled($organizationId);
         $this->config->requireEnabled($organizationId, 'anonymous_reporting_enabled');
         $this->rateLimits->consume($organizationId, 'anonymous_submit', $fingerprintHmac, 8, 3600);
-        $title = SafetySupport::cleanText((string)($input['title'] ?? ''), 240, 'title');
+        $occurrenceType = $this->occurrenceContext->requireOccurrenceType($organizationId, $input);
+        $titleInput = trim((string)($input['title'] ?? ''));
+        $title = SafetySupport::cleanText(
+            $titleInput !== '' ? $titleInput : (string)$occurrenceType['label'],
+            240,
+            'title'
+        );
         $narrative = SafetySupport::cleanText(
             (string)($input['narrative'] ?? $input['description'] ?? ''),
             50000,
@@ -34,8 +41,12 @@ final class SafetyAnonymousService
         );
         $eventAt = SafetySupport::nullableUtc($input['event_at_utc'] ?? $input['occurred_at_utc'] ?? null);
         $location = $input['location_text'] ?? $input['location'] ?? null;
+        $injuryState = $this->triState($input['injury_state'] ?? 'unknown', 'injury_state');
+        $damageState = $this->triState($input['damage_state'] ?? 'unknown', 'damage_state');
+        $weatherRelevance = $this->weatherState($input['weather_relevance'] ?? 'unknown');
         $requestHash = SafetySupport::digest(SafetySupport::json(array(
-            $title, $narrative, $eventAt, $location,
+            $occurrenceType['id'], $title, $narrative, $eventAt, $location,
+            $injuryState, $damageState, $weatherRelevance,
         )));
         $cached = $this->idempotentResponse($organizationId, $fingerprintHmac, $idempotencyKey, $requestHash);
         if ($cached !== null) {
@@ -61,24 +72,45 @@ final class SafetyAnonymousService
             $reportUuid = SafetySupport::uuid();
             $this->pdo->prepare(
                 "INSERT INTO ipca_safety_reports
-                 (organization_id, report_uuid, channel, anonymous_mailbox_id, category_code, title, narrative,
+                 (organization_id, report_uuid, channel, anonymous_mailbox_id,
+                  category_code, occurrence_type_node_id, title, narrative,
                   event_at_utc, location_text, aircraft_registration, immediate_action,
+                  phase_of_flight, injury_state, injury_details, damage_state, damage_details,
+                  weather_relevance, weather_details, intake_context_json,
                   status, confidentiality, submitted_at_utc)
-                 VALUES (?, ?, 'anonymous', ?, ?, ?, ?, ?, ?, ?, ?,
+                 VALUES (?, ?, 'anonymous', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                    'submitted', 'restricted', CURRENT_TIMESTAMP(3))"
             )->execute(array(
                 $organizationId,
                 $reportUuid,
                 $mailboxId,
-                $this->nullable($input['category'] ?? null, 64),
+                (string)$occurrenceType['taxonomy_code'],
+                (int)$occurrenceType['id'],
                 $title,
                 $narrative,
                 $eventAt,
                 $this->nullable($location, 255),
                 $this->nullable($input['aircraft_registration'] ?? null, 32),
                 $this->nullable($input['immediate_action'] ?? null, 12000),
+                $this->nullable($input['phase_of_flight'] ?? null, 64),
+                $injuryState,
+                $this->nullable($input['injury_details'] ?? null, 12000),
+                $damageState,
+                $this->nullable($input['damage_details'] ?? null, 12000),
+                $weatherRelevance,
+                $this->nullable($input['weather_details'] ?? null, 12000),
+                SafetySupport::json(array(
+                    'event_time_source' => (string)($input['event_time_source'] ?? 'device'),
+                    'location_source' => (string)($input['location_source'] ?? 'reporter'),
+                    'occurrence_type_code' => (string)$occurrenceType['taxonomy_code'],
+                )),
             ));
             $reportId = (int)$this->pdo->lastInsertId();
+            $this->pdo->prepare(
+                'INSERT IGNORE INTO ipca_safety_report_taxonomy
+                 (organization_id, report_id, taxonomy_node_id, assigned_by_user_id)
+                 VALUES (?, ?, ?, NULL)'
+            )->execute(array($organizationId, $reportId, (int)$occurrenceType['id']));
             $number = 'SMS-' . gmdate('Y') . '-' . str_pad((string)$reportId, 7, '0', STR_PAD_LEFT);
             $this->pdo->prepare('UPDATE ipca_safety_reports SET report_number = ? WHERE id = ?')
                 ->execute(array($number, $reportId));
@@ -290,5 +322,27 @@ final class SafetyAnonymousService
     {
         $value = trim((string)$value);
         return $value === '' ? null : SafetySupport::cleanText($value, $max, 'value');
+    }
+
+    private function triState(mixed $value, string $field): string
+    {
+        $value = strtolower(trim((string)$value));
+        if (!in_array($value, array('no', 'yes', 'unknown'), true)) {
+            throw new SafetyException('validation_error', $field . ' must be no, yes, or unknown.', 400);
+        }
+        return $value;
+    }
+
+    private function weatherState(mixed $value): string
+    {
+        $value = strtolower(trim((string)$value));
+        if (!in_array($value, array('no', 'yes', 'unsure', 'unknown'), true)) {
+            throw new SafetyException(
+                'validation_error',
+                'weather_relevance must be no, yes, unsure, or unknown.',
+                400
+            );
+        }
+        return $value;
     }
 }

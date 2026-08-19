@@ -8,9 +8,19 @@ struct SafetyReportInput: Codable, Equatable {
     var location: String
     var aircraftRegistration: String
     var immediateAction: String
+    var occurrenceTypeID: Int? = nil
+    var flightLinkChoice: String? = nil
+    var scheduleSlotID: Int? = nil
+    var phaseOfFlight: String? = nil
+    var injuryState: String? = nil
+    var injuryDetails: String? = nil
+    var damageState: String? = nil
+    var damageDetails: String? = nil
+    var weatherRelevance: String? = nil
+    var weatherDetails: String? = nil
 
     var apiPayload: [String: Any] {
-        [
+        var payload: [String: Any] = [
             "category": category,
             "title": title,
             "description": description,
@@ -19,6 +29,89 @@ struct SafetyReportInput: Codable, Equatable {
             "aircraft_registration": aircraftRegistration,
             "immediate_action": immediateAction
         ]
+        payload["occurrence_type_id"] = occurrenceTypeID
+        payload["flight_link_choice"] = flightLinkChoice
+        payload["schedule_slot_id"] = scheduleSlotID
+        payload["phase_of_flight"] = phaseOfFlight
+        payload["injury_state"] = injuryState
+        payload["injury_details"] = injuryDetails
+        payload["damage_state"] = damageState
+        payload["damage_details"] = damageDetails
+        payload["weather_relevance"] = weatherRelevance
+        payload["weather_details"] = weatherDetails
+        payload["event_time_source"] = "device"
+        payload["location_source"] = flightLinkChoice == "scheduled_flight"
+            ? "selected_reservation"
+            : "reporter"
+        return payload
+    }
+}
+
+struct SafetyOccurrenceTypeDTO: Decodable, Hashable, Identifiable {
+    var id: Int
+    var code: String
+    var label: String
+    var description: String?
+    var parentID: Int?
+    var parentLabel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, code, label, description
+        case parentID = "parent_id"
+        case parentLabel = "parent_label"
+    }
+}
+
+struct SafetyFlightCrewDTO: Decodable, Hashable {
+    var userID: Int?
+    var name: String
+    var role: String
+    var pilotFunction: String
+    var isPIC: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name, role
+        case userID = "user_id"
+        case pilotFunction = "pilot_function"
+        case isPIC = "is_pic"
+    }
+}
+
+struct SafetyFlightCandidateDTO: Decodable, Hashable, Identifiable {
+    var scheduleSlotID: Int
+    var schedulerRecordID: String
+    var scheduledStartTime: String
+    var scheduledEndTime: String
+    var scheduleTimezoneIANA: String
+    var aircraftID: Int
+    var aircraftRegistration: String
+    var aircraftType: String
+    var missionCode: String
+    var missionName: String
+    var departureAirport: String
+    var destinationAirport: String
+    var crew: [SafetyFlightCrewDTO]
+    var actualStartUTC: String?
+    var actualEndUTC: String?
+
+    var id: Int { scheduleSlotID }
+
+    enum CodingKeys: String, CodingKey {
+        case crew
+        case scheduleSlotID = "schedule_slot_id"
+        case schedulerRecordID = "scheduler_record_id"
+        case scheduledStartTime = "scheduled_start_time"
+        case scheduledEndTime = "scheduled_end_time"
+        case scheduleTimezoneIANA = "schedule_timezone_iana"
+        case aircraftID = "aircraft_id"
+        case aircraftRegistration = "aircraft_registration"
+        case aircraftType = "aircraft_type"
+        case missionCode = "mission_code"
+        case missionName = "mission_name"
+        case departureAirport = "departure_airport"
+        case destinationAirport = "destination_airport"
+        case actualStartUTC = "actual_start_utc"
+        case actualEndUTC = "actual_end_utc"
     }
 }
 
@@ -285,6 +378,26 @@ struct SafetyMailboxMessageDTO: Decodable, Hashable, Identifiable {
 struct SafetyReportsEnvelope: Decodable {
     var ok: Bool
     var reports: [SafetyReportDTO]
+}
+
+struct SafetyOccurrenceTypesEnvelope: Decodable {
+    var ok: Bool
+    var occurrenceTypes: [SafetyOccurrenceTypeDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case occurrenceTypes = "occurrence_types"
+    }
+}
+
+struct SafetyFlightCandidatesEnvelope: Decodable {
+    var ok: Bool
+    var flightCandidates: [SafetyFlightCandidateDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case flightCandidates = "flight_candidates"
+    }
 }
 
 struct SafetyReportEnvelope: Decodable {

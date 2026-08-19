@@ -32,19 +32,27 @@ makes restricted reporter identities unrecoverable.
 3. Back up the target database and test restoration.
 4. Apply `scripts/sql/2026_08_17_safety_management_foundation.sql` to a staging
    MySQL 8 database.
-5. Run all `tests/safety_*_check.php` contracts and the iOS safety contract/build.
-6. Assign the minimum organization-scoped roles in
+5. Apply `scripts/sql/2026_08_18_safety_aircraft_occurrence_intake.sql`.
+6. Obtain the Safety Manager-approved internal occurrence-type manifest. Import
+   it with `php scripts/safety/occurrence_type_import.php manifest.json --apply`.
+   Do not substitute ECCAIRS/ADREP values or either legacy hard-coded client list.
+   Verify the reporter API returns at least one active type before rollout.
+7. Schedule `scripts/safety/occurrence_flight_link_worker.php` to run after CVR
+   and Garmin intake processing (and periodically) so reports submitted before
+   evidence arrival acquire their durable dispatch/session/flight-record links.
+8. Run all `tests/safety_*_check.php` contracts and the iOS safety contract/build.
+9. Assign the minimum organization-scoped roles in
    `ipca_safety_role_assignments`; do not infer Safety roles from broad platform
    roles.
-7. Verify object storage is private, presigned uploads expire, upload completion
+10. Verify object storage is private, presigned uploads expire, upload completion
    is checked, and malware scanning/quarantine operations are active.
-8. Exercise identified, restricted, and anonymous reports end to end, including
+11. Exercise identified, restricted, and anonymous reports end to end, including
    receipt recovery, feedback, investigation, actions, effectiveness review,
    residual-risk acceptance, and manager-approved closure.
-9. Pilot with a restricted cohort. Review response times, failed mailbox
+12. Pilot with a restricted cohort. Review response times, failed mailbox
    attempts, feedback completion, overdue actions, audit-chain verification,
    and privacy incidents.
-10. Obtain written Safety Manager, privacy/security, and accountable executive
+13. Obtain written Safety Manager, privacy/security, and accountable executive
     acceptance before enabling the capability flags for production.
 
 After sign-off, enable the approved organization and mobile capability:

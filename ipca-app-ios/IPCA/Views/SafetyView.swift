@@ -335,45 +335,149 @@ struct SafetyReportFormView: View {
     var onSubmitted: (SafetyReportDTO) -> Void = { _ in }
     var onAnonymousSubmitted: (AnonymousSafetyReceipt) -> Void = { _ in }
 
-    @State private var category = "hazard"
-    @State private var title = ""
+    @State private var occurrenceTypes: [SafetyOccurrenceTypeDTO] = []
+    @State private var selectedOccurrenceTypeID: Int?
+    @State private var flightCandidates: [SafetyFlightCandidateDTO] = []
+    @State private var selectedScheduleSlotID: Int?
+    @State private var flightLinkChoice = ""
     @State private var description = ""
     @State private var occurredAt = Date()
     @State private var location = ""
     @State private var aircraftRegistration = ""
     @State private var immediateAction = ""
+    @State private var phaseOfFlight = ""
+    @State private var injuryState = ""
+    @State private var injuryDetails = ""
+    @State private var damageState = ""
+    @State private var damageDetails = ""
+    @State private var weatherRelevance = ""
+    @State private var weatherDetails = ""
+    @State private var showMoreDetails = false
+    @State private var showAllFlights = false
+    @State private var loadingContext = true
     @State private var attachments: [SafetyDraftAttachment] = []
     @State private var pickingAttachment = false
     @State private var submitting = false
     @State private var submitted = false
     @State private var errorMessage: String?
 
-    private let categories = ["hazard", "occurrence", "near_miss", "security", "fatigue", "other"]
-
     var body: some View {
         NavigationStack {
             ZStack {
                 IPCABackground()
                 Form {
-                    Section("1. What are you reporting?") {
-                        Picker("Category", selection: $category) {
-                            ForEach(categories, id: \.self) {
-                                Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0)
+                    if mode == .identified {
+                        Section("1. Select the flight") {
+                            if loadingContext {
+                                ProgressView("Finding your flights…")
+                            } else if flightCandidates.isEmpty {
+                                Text("No nearby scheduled flights were found.")
+                                    .foregroundStyle(IPCATheme.Colors.textSecondary)
+                            } else {
+                                ForEach(flightCandidates.prefix(showAllFlights ? flightCandidates.count : 4)) { flight in
+                                    Button {
+                                        selectFlight(flight)
+                                    } label: {
+                                        HStack(alignment: .top) {
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text(flight.aircraftRegistration)
+                                                    .font(.headline)
+                                                Text(flight.missionCode.isEmpty ? flight.missionName : flight.missionCode)
+                                                Text(flightSummary(flight))
+                                                    .font(.caption)
+                                                    .foregroundStyle(IPCATheme.Colors.textSecondary)
+                                            }
+                                            Spacer()
+                                            if selectedScheduleSlotID == flight.scheduleSlotID {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+                                            } else {
+                                                Text("Use this flight")
+                                                    .font(.caption.bold())
+                                                    .foregroundStyle(IPCATheme.Colors.ipcaBlue)
+                                            }
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                if flightCandidates.count > 4 {
+                                    Button(showAllFlights ? "Show likely flights only" : "Choose another reservation") {
+                                        showAllFlights.toggle()
+                                    }
+                                }
+                            }
+                            Button("Not related to a scheduled flight") {
+                                flightLinkChoice = "no_reservation"
+                                selectedScheduleSlotID = nil
+                            }
+                            if flightLinkChoice == "no_reservation" {
+                                Label("No reservation selected", systemImage: "checkmark.circle.fill")
+                                    .font(.footnote)
+                                    .foregroundStyle(IPCATheme.Colors.textSecondary)
                             }
                         }
-                        TextField("Short title", text: $title)
+                    }
+                    Section(mode == .identified ? "2. What happened?" : "1. What happened?") {
+                        Picker("Occurrence type", selection: $selectedOccurrenceTypeID) {
+                            Text("Select type").tag(Int?.none)
+                            ForEach(occurrenceTypes) { type in
+                                Text(type.label).tag(Optional(type.id))
+                            }
+                        }
+                        if occurrenceTypes.isEmpty && !loadingContext {
+                            Text("No active occurrence types are configured. Contact the Safety Manager.")
+                                .font(.footnote)
+                                .foregroundStyle(IPCATheme.Colors.destructive)
+                        }
                         TextField("Describe what happened or could happen", text: $description, axis: .vertical)
                             .lineLimit(5...10)
                     }
-                    Section("2. When and where?") {
-                        DatePicker("Date and time", selection: $occurredAt)
-                        TextField("Location (optional)", text: $location)
-                        TextField("Aircraft registration (optional)", text: $aircraftRegistration)
-                            .textInputAutocapitalization(.characters)
+                    Section(mode == .identified ? "3. Safety impact" : "2. Safety impact") {
+                        Picker("Injury", selection: $injuryState) {
+                            Text("Select").tag("")
+                            Text("No").tag("no")
+                            Text("Yes").tag("yes")
+                            Text("Unknown").tag("unknown")
+                        }
+                        if injuryState == "yes" {
+                            TextField("Injury details", text: $injuryDetails, axis: .vertical)
+                        }
+                        Picker("Damage", selection: $damageState) {
+                            Text("Select").tag("")
+                            Text("No").tag("no")
+                            Text("Yes").tag("yes")
+                            Text("Unknown").tag("unknown")
+                        }
+                        if damageState == "yes" {
+                            TextField("Damage details", text: $damageDetails, axis: .vertical)
+                        }
+                        Picker("Weather relevant", selection: $weatherRelevance) {
+                            Text("Select").tag("")
+                            Text("No").tag("no")
+                            Text("Yes").tag("yes")
+                            Text("Unsure").tag("unsure")
+                        }
+                        if weatherRelevance == "yes" || weatherRelevance == "unsure" {
+                            TextField("Weather details", text: $weatherDetails, axis: .vertical)
+                        }
                     }
-                    Section("3. Immediate action") {
-                        TextField("What was done to reduce the risk? (optional)", text: $immediateAction, axis: .vertical)
-                            .lineLimit(3...6)
+                    Section {
+                        DisclosureGroup("More details", isExpanded: $showMoreDetails) {
+                            DatePicker("Date and time", selection: $occurredAt)
+                            if mode == .identified {
+                                Button("Find flights near this time") {
+                                    Task { await reloadFlightCandidates() }
+                                }
+                            }
+                            TextField("Location (optional)", text: $location)
+                            if flightLinkChoice != "scheduled_flight" {
+                                TextField("Aircraft registration (optional)", text: $aircraftRegistration)
+                                    .textInputAutocapitalization(.characters)
+                            }
+                            TextField("Phase of flight (optional)", text: $phaseOfFlight)
+                            TextField("Immediate action taken (optional)", text: $immediateAction, axis: .vertical)
+                                .lineLimit(3...6)
+                        }
                     }
                     if mode == .identified && session.capabilities.attachmentsEnabled {
                         Section("4. Private attachments") {
@@ -444,6 +548,7 @@ struct SafetyReportFormView: View {
                 }
             }
             .onAppear { restoreDraft() }
+            .task { await loadContext() }
             .onDisappear { saveDraft() }
             .fileImporter(
                 isPresented: $pickingAttachment,
@@ -458,20 +563,108 @@ struct SafetyReportFormView: View {
     }
 
     private var canSubmit: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        selectedOccurrenceTypeID != nil &&
+        !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !injuryState.isEmpty &&
+        !damageState.isEmpty &&
+        !weatherRelevance.isEmpty &&
+        (mode == .anonymous || flightLinkChoice == "no_reservation" || selectedScheduleSlotID != nil)
     }
 
     private var input: SafetyReportInput {
-        SafetyReportInput(
-            category: category,
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+        let selectedType = occurrenceTypes.first { $0.id == selectedOccurrenceTypeID }
+        return SafetyReportInput(
+            category: selectedType?.code ?? "",
+            title: "",
             description: description.trimmingCharacters(in: .whitespacesAndNewlines),
             occurredAtUTC: ISO8601DateFormatter().string(from: occurredAt),
             location: location.trimmingCharacters(in: .whitespacesAndNewlines),
             aircraftRegistration: aircraftRegistration.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
-            immediateAction: immediateAction.trimmingCharacters(in: .whitespacesAndNewlines)
+            immediateAction: immediateAction.trimmingCharacters(in: .whitespacesAndNewlines),
+            occurrenceTypeID: selectedOccurrenceTypeID,
+            flightLinkChoice: mode == .identified ? flightLinkChoice : nil,
+            scheduleSlotID: selectedScheduleSlotID,
+            phaseOfFlight: optional(phaseOfFlight),
+            injuryState: optional(injuryState),
+            injuryDetails: optional(injuryDetails),
+            damageState: optional(damageState),
+            damageDetails: optional(damageDetails),
+            weatherRelevance: optional(weatherRelevance),
+            weatherDetails: optional(weatherDetails)
         )
+    }
+
+    @MainActor
+    private func loadContext() async {
+        loadingContext = true
+        defer { loadingContext = false }
+        do {
+            occurrenceTypes = try await session.loadSafetyOccurrenceTypes(anonymous: mode == .anonymous)
+            if selectedOccurrenceTypeID == nil,
+               let savedCode = currentDraftInput?.category,
+               !savedCode.isEmpty {
+                selectedOccurrenceTypeID = occurrenceTypes.first { $0.code == savedCode }?.id
+            }
+            if mode == .identified {
+                flightCandidates = try await session.loadSafetyFlightCandidates(eventAt: occurredAt)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func reloadFlightCandidates() async {
+        do {
+            flightCandidates = try await session.loadSafetyFlightCandidates(eventAt: occurredAt)
+            showAllFlights = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private var currentDraftInput: SafetyReportInput? {
+        switch mode {
+        case .identified:
+            return IdentifiedSafetyDraftStore.loadSubmission(userUUID: session.user?.uuid ?? "")?.input
+        case .anonymous:
+            return AnonymousSafetyDraftStore.load()?.input
+        }
+    }
+
+    private func selectFlight(_ flight: SafetyFlightCandidateDTO) {
+        selectedScheduleSlotID = flight.scheduleSlotID
+        flightLinkChoice = "scheduled_flight"
+        aircraftRegistration = flight.aircraftRegistration
+        let route = [flight.departureAirport, flight.destinationAirport].filter { !$0.isEmpty }
+        if !route.isEmpty {
+            location = route.joined(separator: " → ")
+        }
+    }
+
+    private func flightSummary(_ flight: SafetyFlightCandidateDTO) -> String {
+        let start = flight.scheduledStartTime.count >= 16
+            ? String(flight.scheduledStartTime.suffix(from: flight.scheduledStartTime.index(
+                flight.scheduledStartTime.startIndex,
+                offsetBy: 11
+            )).prefix(5))
+            : flight.scheduledStartTime
+        let end = flight.scheduledEndTime.count >= 16
+            ? String(flight.scheduledEndTime.suffix(from: flight.scheduledEndTime.index(
+                flight.scheduledEndTime.startIndex,
+                offsetBy: 11
+            )).prefix(5))
+            : flight.scheduledEndTime
+        let route = [flight.departureAirport, flight.destinationAirport]
+            .filter { !$0.isEmpty }
+            .joined(separator: " → ")
+        let crew = flight.crew.map(\.name).filter { !$0.isEmpty }.joined(separator: " · ")
+        return [start + "–" + end, route, crew].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func optional(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func submit() async {
@@ -508,12 +701,20 @@ struct SafetyReportFormView: View {
         }
         guard let submission else { return }
         let draft = submission.input
-        category = draft.category
-        title = draft.title
+        selectedOccurrenceTypeID = draft.occurrenceTypeID
+        flightLinkChoice = draft.flightLinkChoice ?? ""
+        selectedScheduleSlotID = draft.scheduleSlotID
         description = draft.description
         location = draft.location
         aircraftRegistration = draft.aircraftRegistration
         immediateAction = draft.immediateAction
+        phaseOfFlight = draft.phaseOfFlight ?? ""
+        injuryState = draft.injuryState ?? ""
+        injuryDetails = draft.injuryDetails ?? ""
+        damageState = draft.damageState ?? ""
+        damageDetails = draft.damageDetails ?? ""
+        weatherRelevance = draft.weatherRelevance ?? ""
+        weatherDetails = draft.weatherDetails ?? ""
         if let date = ISO8601DateFormatter().date(from: draft.occurredAtUTC) {
             occurredAt = date
         }
@@ -523,7 +724,7 @@ struct SafetyReportFormView: View {
     }
 
     private func saveDraft() {
-        guard !submitted, canSubmit else { return }
+        guard !submitted else { return }
         switch mode {
         case .identified:
             let userUUID = session.user?.uuid ?? ""

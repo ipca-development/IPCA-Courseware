@@ -7,6 +7,24 @@ try {
     $session = $communicationKernel->auth->requireSession();
     $method = SafetyHttp::requireMethod('GET', 'POST', 'PATCH');
     if ($method === 'GET') {
+        $action = strtolower(trim((string)($_GET['action'] ?? 'list')));
+        if ($action === 'occurrence_types') {
+            SafetyHttp::json(200, array(
+                'ok' => true,
+                'occurrence_types' => $safetyKernel->occurrenceIntakeContext->occurrenceTypes(
+                    SafetySupport::organizationId($session)
+                ),
+            ));
+        }
+        if ($action === 'flight_candidates') {
+            SafetyHttp::json(200, array(
+                'ok' => true,
+                'flight_candidates' => $safetyKernel->occurrenceIntakeContext->flightCandidates(
+                    $session,
+                    trim((string)($_GET['event_at_utc'] ?? '')) ?: null
+                ),
+            ));
+        }
         $reportUuid = trim((string)($_GET['report_uuid'] ?? ''));
         SafetyHttp::json(200, $reportUuid === ''
             ? array('ok' => true, 'reports' => $safetyKernel->intake->listOwn($session))

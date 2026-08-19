@@ -12,7 +12,8 @@ final class SafetyIntakeService
         private PDO $pdo,
         private SafetyAccessService $access,
         private SafetyAuditEventService $events,
-        private SafetyFeatureConfigService $config
+        private SafetyFeatureConfigService $config,
+        private SafetyOccurrenceIntakeContextService $occurrenceContext
     ) {
     }
 
@@ -23,18 +24,34 @@ final class SafetyIntakeService
         $this->config->requireEnabled($organizationId);
         $userId = (int)$session['user']['id'];
         $subjectHash = SafetySupport::reporterSubjectHash($organizationId, $userId);
-        $title = SafetySupport::cleanText((string)($input['title'] ?? ''), 240, 'title');
+        $occurrenceType = $this->occurrenceContext->requireOccurrenceType($organizationId, $input);
+        $selectedFlight = $this->occurrenceContext->selectedFlight($organizationId, $userId, $input);
+        $titleInput = trim((string)($input['title'] ?? ''));
+        $title = SafetySupport::cleanText(
+            $titleInput !== ''
+                ? $titleInput
+                : $this->generatedTitle($occurrenceType, $selectedFlight, $input),
+            240,
+            'title'
+        );
         $narrative = SafetySupport::cleanText(
             (string)($input['narrative'] ?? $input['description'] ?? ''),
             50000,
             'narrative'
         );
         $eventAt = SafetySupport::nullableUtc($input['event_at_utc'] ?? $input['occurred_at_utc'] ?? null);
-        $location = $input['location_text'] ?? $input['location'] ?? null;
+        $location = $input['location_text'] ?? $input['location']
+            ?? $selectedFlight['location_text'] ?? null;
+        $aircraftRegistration = $input['aircraft_registration']
+            ?? $selectedFlight['aircraft_registration'] ?? null;
+        $injuryState = $this->triState($input['injury_state'] ?? 'unknown', 'injury_state');
+        $damageState = $this->triState($input['damage_state'] ?? 'unknown', 'damage_state');
+        $weatherRelevance = $this->weatherState($input['weather_relevance'] ?? 'unknown');
         $confidentiality = in_array(($input['confidentiality'] ?? ''), array('standard', 'restricted'), true)
             ? (string)$input['confidentiality'] : 'standard';
         $requestHash = SafetySupport::digest(SafetySupport::json(array(
-            $title, $narrative, $eventAt, $location, $confidentiality,
+            $occurrenceType['id'], $title, $narrative, $eventAt, $location, $aircraftRegistration,
+            $injuryState, $damageState, $weatherRelevance, $selectedFlight, $confidentiality,
         )));
         $cached = $this->idempotency(
             $organizationId, 'user', $subjectHash, 'report.create', $idempotencyKey, $requestHash
@@ -51,26 +68,56 @@ final class SafetyIntakeService
             $this->pdo->prepare(
                 'INSERT INTO ipca_safety_reports
                  (organization_id, report_uuid, channel, reporter_user_id, reporter_subject_hash,
-                  category_code, title, narrative,
-                  event_at_utc, location_text, aircraft_registration, immediate_action, status, confidentiality)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                  category_code, occurrence_type_node_id, title, narrative,
+                  event_at_utc, location_text, aircraft_registration, immediate_action,
+                  phase_of_flight, injury_state, injury_details, damage_state, damage_details,
+                  weather_relevance, weather_details, intake_context_json, status, confidentiality)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute(array(
                 $organizationId,
                 $uuid,
                 'authenticated',
                 $confidentiality === 'restricted' ? null : $userId,
                 $subjectHash,
-                $this->nullableText($input['category'] ?? null, 64),
+                (string)$occurrenceType['taxonomy_code'],
+                (int)$occurrenceType['id'],
                 $title,
                 $narrative,
                 $eventAt,
                 $this->nullableText($location, 255),
-                $this->nullableText($input['aircraft_registration'] ?? null, 32),
+                $this->nullableText($aircraftRegistration, 32),
                 $this->nullableText($input['immediate_action'] ?? null, 12000),
+                $this->nullableText($input['phase_of_flight'] ?? null, 64),
+                $injuryState,
+                $this->nullableText($input['injury_details'] ?? null, 12000),
+                $damageState,
+                $this->nullableText($input['damage_details'] ?? null, 12000),
+                $weatherRelevance,
+                $this->nullableText($input['weather_details'] ?? null, 12000),
+                SafetySupport::json(array(
+                    'event_time_source' => (string)($input['event_time_source'] ?? 'device'),
+                    'location_source' => trim((string)($input['location_source'] ?? '')) !== ''
+                        ? (string)$input['location_source']
+                        : ($selectedFlight !== null ? 'selected_reservation' : 'reporter'),
+                    'occurrence_type_code' => (string)$occurrenceType['taxonomy_code'],
+                )),
                 'draft',
                 $confidentiality,
             ));
             $id = (int)$this->pdo->lastInsertId();
+            $this->pdo->prepare(
+                'INSERT IGNORE INTO ipca_safety_report_taxonomy
+                 (organization_id, report_id, taxonomy_node_id, assigned_by_user_id)
+                 VALUES (?, ?, ?, ?)'
+            )->execute(array($organizationId, $id, (int)$occurrenceType['id'], $userId));
+            if ($selectedFlight !== null) {
+                $this->occurrenceContext->persistFlightLink(
+                    $organizationId,
+                    $id,
+                    $userId,
+                    $selectedFlight
+                );
+            }
             if ($vaultIdentity !== null) {
                 $this->pdo->prepare(
                     'INSERT INTO ipca_safety_reporter_vault
@@ -128,6 +175,14 @@ final class SafetyIntakeService
     public function updateOwn(array $session, string $reportUuid, array $input): array
     {
         $row = $this->access->requireOwnReport($session, $reportUuid, true);
+        $occurrenceType = null;
+        if (array_key_exists('occurrence_type_id', $input)
+            || array_key_exists('occurrence_type_node_id', $input)
+            || array_key_exists('occurrence_type_code', $input)
+            || array_key_exists('category', $input)
+        ) {
+            $occurrenceType = $this->occurrenceContext->requireOccurrenceType((int)$row['organization_id'], $input);
+        }
         $title = SafetySupport::cleanText((string)($input['title'] ?? $row['title']), 240, 'title');
         $narrative = SafetySupport::cleanText(
             (string)($input['narrative'] ?? $input['description'] ?? $row['narrative']),
@@ -135,12 +190,15 @@ final class SafetyIntakeService
             'narrative'
         );
         $this->pdo->prepare(
-            'UPDATE ipca_safety_reports SET category_code = ?, title = ?, narrative = ?, event_at_utc = ?,
-             location_text = ?, aircraft_registration = ?, immediate_action = ?
+            'UPDATE ipca_safety_reports SET category_code = ?, occurrence_type_node_id = ?,
+             title = ?, narrative = ?, event_at_utc = ?,
+             location_text = ?, aircraft_registration = ?, immediate_action = ?, phase_of_flight = ?,
+             injury_state = ?, injury_details = ?, damage_state = ?, damage_details = ?,
+             weather_relevance = ?, weather_details = ?
              WHERE id = ? AND organization_id = ?'
         )->execute(array(
-            array_key_exists('category', $input)
-                ? $this->nullableText($input['category'], 64) : $row['category_code'],
+            $occurrenceType === null ? $row['category_code'] : (string)$occurrenceType['taxonomy_code'],
+            $occurrenceType === null ? $row['occurrence_type_node_id'] : (int)$occurrenceType['id'],
             $title,
             $narrative,
             array_key_exists('event_at_utc', $input) || array_key_exists('occurred_at_utc', $input)
@@ -151,9 +209,39 @@ final class SafetyIntakeService
                 ? $this->nullableText($input['aircraft_registration'], 32) : $row['aircraft_registration'],
             array_key_exists('immediate_action', $input)
                 ? $this->nullableText($input['immediate_action'], 12000) : $row['immediate_action'],
+            array_key_exists('phase_of_flight', $input)
+                ? $this->nullableText($input['phase_of_flight'], 64) : $row['phase_of_flight'],
+            array_key_exists('injury_state', $input)
+                ? $this->triState($input['injury_state'], 'injury_state') : $row['injury_state'],
+            array_key_exists('injury_details', $input)
+                ? $this->nullableText($input['injury_details'], 12000) : $row['injury_details'],
+            array_key_exists('damage_state', $input)
+                ? $this->triState($input['damage_state'], 'damage_state') : $row['damage_state'],
+            array_key_exists('damage_details', $input)
+                ? $this->nullableText($input['damage_details'], 12000) : $row['damage_details'],
+            array_key_exists('weather_relevance', $input)
+                ? $this->weatherState($input['weather_relevance']) : $row['weather_relevance'],
+            array_key_exists('weather_details', $input)
+                ? $this->nullableText($input['weather_details'], 12000) : $row['weather_details'],
             (int)$row['id'],
             (int)$row['organization_id'],
         ));
+        if ($occurrenceType !== null) {
+            $this->pdo->prepare(
+                'DELETE FROM ipca_safety_report_taxonomy
+                 WHERE report_id = ? AND taxonomy_node_id = ?'
+            )->execute(array((int)$row['id'], (int)$row['occurrence_type_node_id']));
+            $this->pdo->prepare(
+                'INSERT IGNORE INTO ipca_safety_report_taxonomy
+                 (organization_id, report_id, taxonomy_node_id, assigned_by_user_id)
+                 VALUES (?, ?, ?, ?)'
+            )->execute(array(
+                (int)$row['organization_id'],
+                (int)$row['id'],
+                (int)$occurrenceType['id'],
+                (int)$session['user']['id'],
+            ));
+        }
         $this->appendReporterEvent($session, $row, 'report.updated');
         return $this->publicReport($this->reportById((int)$row['organization_id'], (int)$row['id']));
     }
@@ -277,6 +365,9 @@ final class SafetyIntakeService
             'reference' => $row['report_number'] ?? (string)$row['report_uuid'],
             'report_number' => $row['report_number'],
             'category' => $row['category_code'],
+            'occurrence_type_id' => $row['occurrence_type_node_id'] === null
+                ? null : (int)$row['occurrence_type_node_id'],
+            'occurrence_type_code' => $row['category_code'],
             'title' => (string)$row['title'],
             'description' => (string)$row['narrative'],
             'narrative' => (string)$row['narrative'],
@@ -286,6 +377,13 @@ final class SafetyIntakeService
             'location_text' => $row['location_text'],
             'aircraft_registration' => $row['aircraft_registration'],
             'immediate_action' => $row['immediate_action'],
+            'phase_of_flight' => $row['phase_of_flight'] ?? null,
+            'injury_state' => (string)($row['injury_state'] ?? 'unknown'),
+            'injury_details' => $row['injury_details'] ?? null,
+            'damage_state' => (string)($row['damage_state'] ?? 'unknown'),
+            'damage_details' => $row['damage_details'] ?? null,
+            'weather_relevance' => (string)($row['weather_relevance'] ?? 'unknown'),
+            'weather_details' => $row['weather_details'] ?? null,
             'status' => (string)$row['status'],
             'confidentiality' => (string)$row['confidentiality'],
             'submitted_at_utc' => $row['submitted_at_utc'],
@@ -300,6 +398,45 @@ final class SafetyIntakeService
             return null;
         }
         return SafetySupport::cleanText((string)$value, $max, 'value');
+    }
+
+    private function triState(mixed $value, string $field): string
+    {
+        $value = strtolower(trim((string)$value));
+        if (!in_array($value, array('no', 'yes', 'unknown'), true)) {
+            throw new SafetyException('validation_error', $field . ' must be no, yes, or unknown.', 400);
+        }
+        return $value;
+    }
+
+    private function weatherState(mixed $value): string
+    {
+        $value = strtolower(trim((string)$value));
+        if (!in_array($value, array('no', 'yes', 'unsure', 'unknown'), true)) {
+            throw new SafetyException(
+                'validation_error',
+                'weather_relevance must be no, yes, unsure, or unknown.',
+                400
+            );
+        }
+        return $value;
+    }
+
+    /** @param array<string,mixed> $type @param array<string,mixed>|null $flight @param array<string,mixed> $input */
+    private function generatedTitle(array $type, ?array $flight, array $input): string
+    {
+        $parts = array((string)$type['label']);
+        $registration = trim((string)(
+            $input['aircraft_registration'] ?? $flight['aircraft_registration'] ?? ''
+        ));
+        if ($registration !== '') {
+            $parts[] = strtoupper($registration);
+        }
+        $event = SafetySupport::nullableUtc($input['event_at_utc'] ?? $input['occurred_at_utc'] ?? null);
+        if ($event !== null) {
+            $parts[] = substr($event, 0, 10);
+        }
+        return implode(' · ', $parts);
     }
 
     /** @param array<string,mixed> $session @param array<string,mixed> $report */

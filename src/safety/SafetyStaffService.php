@@ -16,7 +16,8 @@ final class SafetyStaffService
     public function __construct(
         private PDO $pdo,
         private SafetyAccessService $access,
-        private SafetyAuditEventService $events
+        private SafetyAuditEventService $events,
+        private SafetyOccurrenceIntakeContextService $occurrenceContext
     ) {
     }
 
@@ -94,8 +95,10 @@ final class SafetyStaffService
         $this->access->requirePermission($session, 'report.read_all');
         $org = SafetySupport::organizationId($session);
         $rows = $this->rows(
-            'SELECT id, report_uuid, report_number, channel, category_code, title, narrative,
-                    event_at_utc, location_text, aircraft_registration, immediate_action, status,
+            'SELECT id, report_uuid, report_number, channel, category_code, occurrence_type_node_id,
+                    title, narrative, event_at_utc, location_text, aircraft_registration,
+                    immediate_action, phase_of_flight, injury_state, injury_details,
+                    damage_state, damage_details, weather_relevance, weather_details, status,
                     confidentiality, owner_user_id, submitted_at_utc, triaged_at_utc,
                     closed_at_utc, created_at_utc, updated_at_utc
              FROM ipca_safety_reports WHERE organization_id = ? AND report_uuid = ? LIMIT 1',
@@ -106,6 +109,7 @@ final class SafetyStaffService
         }
         $report = $rows[0];
         $id = (int)$report['id'];
+        $report['flight_link'] = $this->occurrenceContext->flightLinkForReport($org, $id);
         $report['occurrences'] = $this->rows(
             'SELECT o.id, o.occurrence_uuid, o.occurrence_type, o.occurred_at_utc, o.state,
                     a.id AS assessment_id, a.framework_code, a.decision, a.rationale,

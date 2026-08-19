@@ -501,6 +501,24 @@ actor APIClient {
         return envelope.reports
     }
 
+    func safetyOccurrenceTypes(anonymous: Bool = false) async throws -> [SafetyOccurrenceTypeDTO] {
+        let envelope: SafetyOccurrenceTypesEnvelope
+        if anonymous {
+            envelope = try await get("api/safety/anonymous/types.php", authorized: false)
+        } else {
+            envelope = try await get("api/safety/reports.php", query: ["action": "occurrence_types"])
+        }
+        return envelope.occurrenceTypes
+    }
+
+    func safetyFlightCandidates(eventAtUTC: String) async throws -> [SafetyFlightCandidateDTO] {
+        let envelope: SafetyFlightCandidatesEnvelope = try await get("api/safety/reports.php", query: [
+            "action": "flight_candidates",
+            "event_at_utc": eventAtUTC
+        ])
+        return envelope.flightCandidates
+    }
+
     func safetyReport(_ reportUUID: String) async throws -> SafetyReportDTO {
         let envelope: SafetyReportEnvelope = try await get("api/safety/reports.php", query: [
             "action": "detail",
