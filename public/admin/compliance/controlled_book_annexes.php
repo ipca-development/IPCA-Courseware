@@ -83,6 +83,7 @@ compliance_page_open(array(
   <div id="cp-annex-status" style="margin-top:16px;font-size:13px;color:#334155;"></div>
 </section>
 <style>
+  #cp-annex-list { container-type: inline-size; }
   #cp-annex-manager .cp-annex-list-table {
     width: 100%;
     border-collapse: collapse;
@@ -91,16 +92,26 @@ compliance_page_open(array(
   }
   #cp-annex-manager .cp-annex-list-table th,
   #cp-annex-manager .cp-annex-list-table td {
-    padding: 8px 6px;
+    padding: 8px 5px;
     vertical-align: top;
   }
-  #cp-annex-manager .cp-annex-list-table th:nth-child(1) { width: 46px; }
-  #cp-annex-manager .cp-annex-list-table th:nth-child(3) { width: 54px; }
-  #cp-annex-manager .cp-annex-list-table th:nth-child(4) { width: 92px; }
-  #cp-annex-manager .cp-annex-list-table th:nth-child(5),
-  #cp-annex-manager .cp-annex-list-table th:nth-child(6) { width: 44px; text-align: center; }
-  #cp-annex-manager .cp-annex-list-table th:last-child { width: 214px; }
+  #cp-annex-manager .cp-annex-col-number { width: 42px; }
+  #cp-annex-manager .cp-annex-col-revision { width: 60px; }
+  #cp-annex-manager .cp-annex-col-date { width: 104px; }
+  #cp-annex-manager .cp-annex-col-type,
+  #cp-annex-manager .cp-annex-col-orientation { width: 38px; }
+  #cp-annex-manager .cp-annex-col-actions { width: 176px; }
+  #cp-annex-manager .cp-annex-meta {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  #cp-annex-manager .cp-annex-icon-heading,
   #cp-annex-manager .cp-annex-icon-cell { text-align: center; }
+  #cp-annex-manager .cp-annex-icon-heading {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
   #cp-annex-manager .cp-annex-symbol {
     display: inline-flex;
     width: 24px;
@@ -110,25 +121,69 @@ compliance_page_open(array(
     color: #475569;
   }
   #cp-annex-manager .cp-annex-symbol svg { width: 20px; height: 20px; }
+  #cp-annex-manager .cp-annex-icon-heading .cp-annex-symbol {
+    width: 20px;
+    height: 20px;
+  }
   #cp-annex-manager .cp-annex-row-actions {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 5px;
     align-items: center;
   }
   #cp-annex-manager .cp-annex-row-actions .app-btn {
+    width: 100%;
     min-height: 30px;
     height: 30px;
-    padding: 0 9px;
+    padding: 0 5px;
     margin: 0;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 28px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  #cp-annex-manager .cp-annex-row-actions .cp-annex-restore-btn {
+    grid-column: 1 / -1;
   }
   #cp-annex-revert-modal .cp-annex-revert-apply {
     min-height: 30px;
     height: 30px;
     padding: 0 9px;
     font-size: 12px;
+  }
+  @container (max-width: 560px) {
+    #cp-annex-manager .cp-annex-list-table,
+    #cp-annex-manager .cp-annex-list-table tbody {
+      display: block;
+    }
+    #cp-annex-manager .cp-annex-list-table colgroup,
+    #cp-annex-manager .cp-annex-list-table thead {
+      display: none;
+    }
+    #cp-annex-manager .cp-annex-list-table tr {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) 38px 38px;
+      align-items: start;
+      padding: 7px 0;
+    }
+    #cp-annex-manager .cp-annex-list-table td { padding: 5px; }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(1) { grid-area: 1 / 1; }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(2) { grid-area: 1 / 2; }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(5) { grid-area: 1 / 3; }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(6) { grid-area: 1 / 4; }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(3) { grid-area: 2 / 1; }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(4) { grid-area: 2 / 2 / 2 / 5; }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(7) { grid-area: 3 / 1 / 3 / 5; }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(3)::before {
+      content: "Rev ";
+      color: #64748b;
+      font-size: 10px;
+    }
+    #cp-annex-manager .cp-annex-list-table td:nth-child(4)::before {
+      content: "Date ";
+      color: #64748b;
+      font-size: 10px;
+    }
   }
 </style>
 
@@ -316,19 +371,28 @@ compliance_page_open(array(
       listEl.innerHTML = '<p style="margin:0;color:#64748b;">No annexes yet. Use + New Annex to add one.</p>';
       return;
     }
-    var html = '<table class="cp-annex-list-table"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0;">'
-      + '<th>Nr</th><th>Title</th><th>Rev</th><th>Date</th><th title="Content type">Type</th><th title="Page orientation">Page</th><th>Actions</th></tr></thead><tbody>';
+    var typeHeading = '<span class="cp-annex-symbol" role="img" aria-label="Content type" title="Content type">'
+      + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.75h8l4 4V21.25H6zM14 2.75v4h4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span>';
+    var pageHeading = '<span class="cp-annex-symbol" role="img" aria-label="Page orientation" title="Page orientation">'
+      + '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.25" y="2.75" width="11.5" height="18.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span>';
+    var html = '<table class="cp-annex-list-table"><colgroup>'
+      + '<col class="cp-annex-col-number"><col><col class="cp-annex-col-revision"><col class="cp-annex-col-date">'
+      + '<col class="cp-annex-col-type"><col class="cp-annex-col-orientation"><col class="cp-annex-col-actions">'
+      + '</colgroup><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0;">'
+      + '<th class="cp-annex-meta">Nr</th><th>Title</th><th class="cp-annex-meta">Rev</th><th class="cp-annex-meta">Date</th>'
+      + '<th class="cp-annex-icon-heading">' + typeHeading + '</th><th class="cp-annex-icon-heading">' + pageHeading + '</th>'
+      + '<th class="cp-annex-meta">Actions</th></tr></thead><tbody>';
     annexes.forEach(function (a) {
       var num = a.annex_display_number || String(a.annex_number || 0).padStart(2, '0');
       var editUrl = '/admin/compliance/controlled_book_editor.php?version_id=' + versionId + '&section_id=' + a.section_id;
       var shortTitle = a.annex_short_title || '';
       var deleted = !!a.deleted;
       html += '<tr style="border-bottom:1px solid #f1f5f9;' + (deleted ? 'opacity:0.65;' : '') + '">'
-        + '<td>' + num + '</td>'
+        + '<td class="cp-annex-meta">' + num + '</td>'
         + '<td>' + (a.title || '')
         + (deleted ? ' <span style="color:#b45309;">(deleted)</span>' : '') + '</td>'
-        + '<td>' + (a.revision || '') + '</td>'
-        + '<td>' + (a.revision_date || '') + '</td>'
+        + '<td class="cp-annex-meta">' + (a.revision || '') + '</td>'
+        + '<td class="cp-annex-meta">' + (a.revision_date || '') + '</td>'
         + '<td class="cp-annex-icon-cell">' + contentModeSymbol(a.content_mode) + '</td>'
         + '<td class="cp-annex-icon-cell">' + orientationSymbol(a.orientation) + '</td>'
         + '<td><div class="cp-annex-row-actions">';

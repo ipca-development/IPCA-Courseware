@@ -158,7 +158,9 @@ annex_book_assert(
         && str_contains($annexManager, 'cp-annex-row-actions')
         && str_contains($annexManager, 'contentModeSymbol')
         && str_contains($annexManager, 'orientationSymbol')
-        && !str_contains($annexManager, 'white-space:nowrap')
+        && str_contains($annexManager, 'cp-annex-col-date')
+        && str_contains($annexManager, 'overflow-wrap: normal')
+        && str_contains($annexManager, '@container (max-width: 560px)')
 );
 annex_book_assert(
     'Annex Editor keeps editable toolbars and omits outline controls',
