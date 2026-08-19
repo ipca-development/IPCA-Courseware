@@ -251,6 +251,8 @@ bm_contract_assert(
         && str_contains($workflow, "Annex Books can only be Published or Unpublished.")
         && str_contains($foundation, 'function releaseAnnexBookVersion')
         && str_contains($foundation, 'ensureAnnexBookPageMapApproved')
+        && str_contains($foundation, 'ensureAnnexBookReleaseBaseline')
+        && str_contains($foundation, 'source_baseline_id = ?')
         && str_contains($annexBook, 'function allowsReleasedEdits')
         && str_contains($manualPage, 'Annex Books are Published or not Published')
         && str_contains($manualPage, 'if (!$isAnnexBook)')

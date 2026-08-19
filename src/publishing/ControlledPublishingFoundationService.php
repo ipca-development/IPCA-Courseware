@@ -456,8 +456,9 @@ final class ControlledPublishingFoundationService
         if ($previousLimit > 0 && $previousLimit < 300) {
             set_time_limit(300);
         }
-        (new ControlledPublishingReaderService($this->pdo))
+        $generation = (new ControlledPublishingReaderService($this->pdo))
             ->ensureAnnexBookPageMapApproved($version, $actorUserId);
+        $this->ensureAnnexBookReleaseBaseline($version, $generation, $actorUserId);
 
         $stmt = $this->pdo->prepare("
             UPDATE ipca_publishing_book_versions
@@ -474,6 +475,117 @@ final class ControlledPublishingFoundationService
         ));
         if ($stmt->rowCount() === 0) {
             throw new RuntimeException('Annex Book could not be published.');
+        }
+    }
+
+    /**
+     * Annex Books have authored content rather than canonical source-set
+     * selections, but released versions must still reference an immutable
+     * baseline. Bind the approved publication identity as that baseline.
+     *
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $generation
+     */
+    private function ensureAnnexBookReleaseBaseline(
+        array $version,
+        array $generation,
+        ?int $actorUserId = null
+    ): int {
+        $existingId = (int)($version['source_baseline_id'] ?? 0);
+        if ($existingId > 0) {
+            return $existingId;
+        }
+
+        $versionId = (int)($version['id'] ?? 0);
+        if ($versionId <= 0) {
+            throw new RuntimeException('Annex Book version identity is missing.');
+        }
+        $sourceSnapshot = array(
+            'schema_version' => 1,
+            'baseline_kind' => 'annex_book_authored_publication',
+            'book_version_id' => $versionId,
+            'book_key' => (string)($version['book_key'] ?? ''),
+            'version_label' => (string)($version['version_label'] ?? ''),
+            'frozen_at' => gmdate('c'),
+            'source_sets' => array(),
+            'publication_identity' => array(
+                'source_hash' => (string)($generation['source_hash'] ?? ''),
+                'style_hash' => (string)($generation['style_hash'] ?? ''),
+                'manifest_hash' => (string)($generation['manifest_hash'] ?? ''),
+                'layout_hash' => (string)($generation['layout_hash'] ?? ''),
+                'page_map_hash' => (string)($generation['page_map_hash'] ?? ''),
+                'page_count' => (int)($generation['page_count'] ?? 0),
+            ),
+        );
+        $mappingSnapshot = array(
+            'status' => 'not_applicable',
+            'reason' => 'Annex Books publish authored annex content without canonical source sets.',
+        );
+        $baselineHash = hash('sha256', json_encode(
+            array(
+                'source_snapshot' => $sourceSnapshot,
+                'mapping_snapshot' => $mappingSnapshot,
+            ),
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+        ));
+        $baselineKey = sprintf(
+            'ANNEX-PUBLISH-%d-%s',
+            $versionId,
+            substr($baselineHash, 0, 16)
+        );
+
+        $this->pdo->beginTransaction();
+        try {
+            $lock = $this->pdo->prepare(
+                'SELECT source_baseline_id FROM ipca_publishing_book_versions
+                 WHERE id = ? FOR UPDATE'
+            );
+            $lock->execute(array($versionId));
+            $lockedId = (int)$lock->fetchColumn();
+            if ($lockedId > 0) {
+                $this->pdo->commit();
+                return $lockedId;
+            }
+
+            $insert = $this->pdo->prepare(
+                "INSERT INTO ipca_publishing_source_baselines
+                  (book_version_id, baseline_key, baseline_status, baseline_hash,
+                   source_snapshot_json, mapping_snapshot_json, frozen_at, frozen_by)
+                 VALUES (?, ?, 'frozen', ?, ?, ?, CURRENT_TIMESTAMP, ?)"
+            );
+            $insert->execute(array(
+                $versionId,
+                $baselineKey,
+                $baselineHash,
+                json_encode(
+                    $sourceSnapshot,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+                ),
+                json_encode(
+                    $mappingSnapshot,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+                ),
+                $actorUserId,
+            ));
+            $baselineId = (int)$this->pdo->lastInsertId();
+
+            $update = $this->pdo->prepare(
+                'UPDATE ipca_publishing_book_versions
+                 SET source_baseline_id = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ? AND source_baseline_id IS NULL'
+            );
+            $update->execute(array($baselineId, $versionId));
+            if ($update->rowCount() !== 1) {
+                throw new RuntimeException('Annex Book release baseline could not be attached.');
+            }
+
+            $this->pdo->commit();
+            return $baselineId;
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
         }
     }
 
