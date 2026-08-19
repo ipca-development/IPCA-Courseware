@@ -262,9 +262,36 @@
     });
   }
 
+  function setupPendingAnalysis() {
+    if (root.dataset.analysisPending !== '1' || planId <= 0) return;
+    var consecutiveErrors = 0;
+    async function check() {
+      try {
+        var result = await request('analysis_status');
+        consecutiveErrors = 0;
+        if (result.complete) {
+          window.location.reload();
+          return;
+        }
+        if (result.failed) {
+          toast(result.message || 'Analysis could not be completed.', true);
+          return;
+        }
+      } catch (error) {
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= 4) {
+          toast('Analysis is still running. This page will keep checking.', true);
+        }
+      }
+      window.setTimeout(check, 3000);
+    }
+    window.setTimeout(check, 1200);
+  }
+
   setupFiles();
   setupIntake();
   setupImpactDecisions();
   setupDraftDecisions();
   setupProgression();
+  setupPendingAnalysis();
 }());

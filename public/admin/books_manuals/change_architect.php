@@ -149,6 +149,9 @@ $operations = array_values(array_filter((array)($report['operations'] ?? array()
 $operation = $operations === array() ? array() : $operations[array_key_last($operations)];
 
 $step1Complete = $report !== array() && $impacts !== array();
+$analysisPending = $report !== array()
+    && $impacts === array()
+    && in_array((string)($report['status'] ?? ''), array('active', 'analyzing'), true);
 $step2Complete = $amendments !== array() && !in_array(
     false,
     array_map(static fn(array $impact): bool => (string)($impact['status'] ?? '') === 'approved', $amendments),
@@ -187,6 +190,7 @@ books_manuals_page_open(array(
   data-api-url="/admin/api/books_manuals_change_architect_api.php"
   data-csrf-token="<?= h($csrf) ?>"
   data-active-step="<?= $activeStep ?>"
+  data-analysis-pending="<?= $analysisPending ? '1' : '0' ?>"
 >
   <?php if ($loadError !== '' && $report === array()): ?>
     <div class="cmp-alert cmp-alert--error"><?= h($loadError) ?></div>
@@ -200,7 +204,22 @@ books_manuals_page_open(array(
   <?php endif; ?>
 
   <div class="mcw-steps">
-    <?php if ($step1Complete): ?>
+    <?php if ($analysisPending): ?>
+      <section class="mcw-step mcw-step--active" data-mcw-step="1" data-mcw-pending-analysis>
+        <header><span class="mcw-step-number">1</span><div><h2>Change Request &amp; Sources</h2><p><?= h(mcw_text($report['title'] ?? '', 'Analyzing requested change')) ?> · <?= h((string)($manual['book_key'] ?? 'Manual')) ?> <?= h((string)($manual['version_label'] ?? '')) ?></p></div></header>
+        <div class="mcw-analysis-progress">
+          <strong>Analyzing your change…</strong>
+          <ul>
+            <li class="is-complete">✓ Understanding requested change</li>
+            <li class="is-complete">✓ Reviewing supporting evidence</li>
+            <li class="is-complete">✓ Reviewing selected manual</li>
+            <li class="is-complete">✓ Checking related sections</li>
+            <li>● Building amendment recommendation</li>
+          </ul>
+          <p>This page will continue automatically when the recommendation is ready.</p>
+        </div>
+      </section>
+    <?php elseif ($step1Complete): ?>
       <details class="mcw-step mcw-step--complete" <?= $activeStep === 1 ? 'open' : '' ?>>
         <summary>
           <span class="mcw-check">✓</span>

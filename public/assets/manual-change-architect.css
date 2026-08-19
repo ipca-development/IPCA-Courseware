@@ -331,6 +331,12 @@
   color: var(--mcw-green);
 }
 
+.mcw-analysis-progress > p {
+  margin: 14px 0 0;
+  color: var(--mcw-muted);
+  font-size: 10px;
+}
+
 .mcw-amendments {
   display: grid;
   gap: 12px;

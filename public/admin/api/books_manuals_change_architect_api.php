@@ -17,6 +17,22 @@ function architect_api_json(int $status, array $payload): never
     exit;
 }
 
+/** @param array<string,mixed> $payload */
+function architect_api_finish_response(int $status, array $payload): void
+{
+    http_response_code($status);
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+        return;
+    }
+    @ob_flush();
+    flush();
+}
+
 /** @return array<string,mixed> */
 function architect_api_input(): array
 {
@@ -185,20 +201,57 @@ try {
             }
             $evidence = array_merge($evidence, architect_api_uploaded_evidence());
             $title = mb_strimwidth(preg_replace('/\s+/u', ' ', $request) ?? $request, 0, 110, '…');
-            $result = $architect->createAndRunCheckpoint(
+            $options = array(
+                'title' => $title,
+                'objective' => $request,
+                'change_request' => $request,
+                'use_openai' => true,
+            );
+            $plan = $plans->createPlan(
                 $versionId,
-                $evidence,
                 array(
                     'title' => $title,
                     'objective' => $request,
                     'change_request' => $request,
-                    'use_openai' => true,
                 ),
                 $userId
             );
-            architect_api_json(201, array(
+            $planId = (int)($plan['id'] ?? 0);
+            architect_api_finish_response(202, array(
                 'ok' => true,
-                'plan_id' => (int)($result['id'] ?? 0),
+                'plan_id' => $planId,
+                'status' => 'analyzing',
+                'csrf_token' => architect_api_csrf(),
+            ));
+            ignore_user_abort(true);
+            @set_time_limit(300);
+            try {
+                $architect->runCheckpoint($planId, $evidence, $options, $userId);
+            } catch (Throwable $analysisError) {
+                error_log(
+                    'Manual Change Architect background analysis failed for plan '
+                    . $planId . ': ' . $analysisError->getMessage()
+                );
+            }
+            exit;
+
+        case 'analysis_status':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $plan = $plans->getPlan($planId);
+            if ((int)($plan['owner_id'] ?? 0) !== $userId) {
+                throw new RuntimeException('Only the Change Plan owner can view analysis progress.');
+            }
+            $status = (string)($plan['status'] ?? 'analyzing');
+            architect_api_json(200, array(
+                'ok' => true,
+                'plan_id' => $planId,
+                'status' => $status,
+                'stage' => (string)($plan['stage'] ?? 'intent'),
+                'complete' => in_array($status, array('ready_for_review', 'blocked'), true),
+                'failed' => $status === 'failed',
+                'message' => $status === 'failed'
+                    ? (string)($plan['failure_message'] ?? 'Analysis failed.')
+                    : '',
                 'csrf_token' => architect_api_csrf(),
             ));
 

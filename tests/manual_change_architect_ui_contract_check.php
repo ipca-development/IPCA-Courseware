@@ -60,9 +60,19 @@ architect_ui_assert(str_contains($page, 'data-mcw-impact-decision="MODIFY"'), 'G
 architect_ui_assert(str_contains($page, 'data-mcw-impact-decision="REJECT"'), 'Governed Reject control is missing.');
 architect_ui_assert(str_contains($page, '/admin/api/books_manuals_change_architect_api.php'), 'Architect workspace is not isolated behind its own API.');
 architect_ui_assert(str_contains($js, "request('analyze_change'"), 'Analyze Change is not connected to the Architect.');
+architect_ui_assert(
+    str_contains($js, "request('analysis_status'") && str_contains($page, 'data-analysis-pending'),
+    'Long-running analysis must progress by polling instead of holding the browser request open.'
+);
 architect_ui_assert(str_contains($js, "request('accept_impact_analysis'"), 'Impact acceptance is not connected to wizard progression.');
 architect_ui_assert(str_contains($api, "case 'impact_decision':"), 'Architect impact decision API is missing.');
 architect_ui_assert(str_contains($api, "case 'analyze_change':"), 'Wizard analysis API is missing.');
+architect_ui_assert(
+    str_contains($api, 'architect_api_finish_response(202')
+        && str_contains($api, "case 'analysis_status':")
+        && str_contains($api, '$architect->runCheckpoint('),
+    'Analysis must return its Plan before continuing the reasoning checkpoint.'
+);
 architect_ui_assert(!str_contains($api, 'BooksManualsChangeAssistantService'), 'Architect API must remain separate from the legacy Change Assistant.');
 architect_ui_assert(str_contains($plans, 'recordImpactDecision('), 'Governed impact decision persistence is missing.');
 architect_ui_assert(str_contains($plans, 'acceptImpactAnalysis('), 'Governed wizard progression is missing.');
