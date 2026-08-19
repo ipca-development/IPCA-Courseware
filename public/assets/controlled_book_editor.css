@@ -1330,6 +1330,10 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: linear-gradient(180deg, #e8edf4 0%, #dfe6f0 100%);
 }
 
+.cpb-editor-root:not(.cpb-editor-paginated-mode) .cpb-canvas-scroll:has(.cpb-sheet--landscape) {
+  overflow-x: auto;
+}
+
 .cpb-section-assembly {
   position: absolute;
   inset: 0;
@@ -1838,15 +1842,24 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-sheet.cpb-print-layout {
+  --cpb-print-page-width: 816px;
+  --cpb-print-page-height: 1056px;
+  --cpb-print-content-width: 704px;
   position: relative;
   box-sizing: border-box;
-  width: 816px;
+  width: var(--cpb-print-page-width);
   max-width: none;
-  min-height: 1056px;
+  min-height: var(--cpb-print-page-height);
   padding: 0;
   overflow: visible;
   background: transparent;
   box-shadow: none;
+}
+
+.cpb-sheet.cpb-print-layout.cpb-sheet--landscape {
+  --cpb-print-page-width: 1056px;
+  --cpb-print-page-height: 816px;
+  --cpb-print-content-width: 944px;
 }
 
 .cpb-print-layout > .cpb-print-template {
@@ -1868,8 +1881,8 @@ body.cpb-browser-fullscreen .cpb-workspace {
   position: relative;
   z-index: 3;
   display: grid;
-  width: 704px;
-  max-width: 704px;
+  width: var(--cpb-print-content-width, 704px);
+  max-width: var(--cpb-print-content-width, 704px);
   margin: 0 56px;
   padding: var(--cpb-print-content-top, 152px) 0 0;
   box-sizing: border-box;
@@ -1879,15 +1892,15 @@ body.cpb-browser-fullscreen .cpb-workspace {
   position: absolute;
   z-index: auto;
   inset: 0;
-  width: 816px;
+  width: var(--cpb-print-page-width, 816px);
   pointer-events: none;
 }
 
 .cpb-print-page {
   position: absolute;
   left: 0;
-  width: 816px;
-  height: 1056px;
+  width: var(--cpb-print-page-width, 816px);
+  height: var(--cpb-print-page-height, 1056px);
   box-sizing: border-box;
   background: #fff;
   border: 1px solid #c8cdd4;
@@ -1899,7 +1912,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
   position: absolute !important;
   z-index: 4;
   left: 56px;
-  width: 704px !important;
+  width: var(--cpb-print-content-width, 704px) !important;
   height: var(--cpb-print-header-height, 84px);
   margin: 0 !important;
   box-sizing: border-box !important;
@@ -1999,7 +2012,7 @@ span.cpb-flow-page-break {
   left: 56px;
   display: flex;
   align-items: center;
-  width: 704px;
+  width: var(--cpb-print-content-width, 704px);
   gap: 6px;
   transform: translateY(-50%);
   color: #64748b;

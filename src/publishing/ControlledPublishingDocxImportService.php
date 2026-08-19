@@ -960,7 +960,8 @@ final class ControlledPublishingDocxImportService
                 $payload = $this->tablePayloadFromRows(
                     is_array($node['rows'] ?? null) ? $node['rows'] : array(),
                     'text',
-                    $contentTableStyle
+                    $contentTableStyle,
+                    is_array($node['row_colspans'] ?? null) ? $node['row_colspans'] : null
                 );
                 $this->blocks->createBlock($versionId, $sectionId, 'table', $payload, $actorUserId);
                 $blocksCreated++;
@@ -1391,64 +1392,60 @@ final class ControlledPublishingDocxImportService
     /**
      * @param list<list<string>> $rows
      * @param array<string,mixed> $styleDef
+     * @param list<list<int>>|null $explicitRowColspans
      * @return array<string,mixed>
      */
-    private function tablePayloadFromRows(array $rows, string $kind, array $styleDef): array
-    {
+    private function tablePayloadFromRows(
+        array $rows,
+        string $kind,
+        array $styleDef,
+        ?array $explicitRowColspans = null
+    ): array {
         if ($rows === array()) {
             $rows = array(array('Column 1', 'Column 2'), array('', ''));
+            $explicitRowColspans = array(array(1, 1), array(1, 1));
         }
 
         $rows = $this->normalizeImportedTableRows($rows);
+        $rowColspans = $this->normalizeImportedTableColspans($rows, $explicitRowColspans);
         $hasTitleRow = false;
         $title = '';
-        $headerColspans = array();
-        $rowColspans = array();
 
         if (count($rows) >= 2) {
-            $firstCollapsed = $this->collapseTableRowColspans($rows[0]);
-            $secondCollapsed = $this->collapseTableRowColspans($rows[1]);
-            $firstText = trim(implode(' ', $firstCollapsed['cells']));
+            $firstText = trim(implode(' ', $rows[0]));
+            $firstLogical = array_sum($rowColspans[0]);
             if ($firstText !== ''
-                && count($firstCollapsed['cells']) === 1
-                && count($secondCollapsed['cells']) > 1) {
+                && count($rows[0]) === 1
+                && $firstLogical > 1
+                && count($rows[1]) > 1) {
                 $hasTitleRow = true;
                 $title = $firstText;
                 array_shift($rows);
+                array_shift($rowColspans);
             }
         }
 
-        $headerCollapsed = $this->collapseTableRowColspans($rows[0] ?? array('Column 1', 'Column 2'));
-        $headers = $headerCollapsed['cells'];
-        $headerColspans = $headerCollapsed['colspans'];
+        $headers = $rows[0] ?? array('Column 1', 'Column 2');
+        $headerColspans = $rowColspans[0] ?? array_fill(0, count($headers), 1);
         $bodyRows = array();
+        $bodyColspans = array();
         for ($i = 1, $c = count($rows); $i < $c; $i++) {
-            $collapsed = $this->collapseTableRowColspans($rows[$i]);
-            $bodyRows[] = $collapsed['cells'];
-            $rowColspans[] = $collapsed['colspans'];
+            $bodyRows[] = $rows[$i];
+            $bodyColspans[] = $rowColspans[$i];
         }
         if ($bodyRows === array()) {
             $bodyRows = array(array(''));
-            $rowColspans = array(array(1));
+            $bodyColspans = array(array(1));
         }
 
         $colCount = max(count($headers), 1);
-        foreach ($rowColspans as $spans) {
+        foreach ($bodyColspans as $spans) {
             $colCount = max($colCount, array_sum($spans));
         }
         $colCount = max($colCount, array_sum($headerColspans));
 
-        $headers = array_pad(array_slice($headers, 0, count($headers)), count($headers), '');
         if ($headerColspans === array()) {
             $headerColspans = array_fill(0, count($headers), 1);
-        }
-        $normalizedRows = array();
-        foreach ($bodyRows as $rowIdx => $row) {
-            $spans = $rowColspans[$rowIdx] ?? array();
-            $normalizedRows[] = $row;
-            if ($spans === array()) {
-                $rowColspans[$rowIdx] = array_fill(0, count($row), 1);
-            }
         }
 
         $colWidth = max(60, min(600, (int)floor(840 / $colCount)));
@@ -1475,7 +1472,7 @@ final class ControlledPublishingDocxImportService
         $cellFontFamily = array();
         $cellFontSize = array();
         $cellTextColor = array();
-        foreach ($normalizedRows as $row) {
+        foreach ($bodyRows as $row) {
             unset($row);
             $cellFontFamily[] = array_fill(0, $colCount, $bodyFont);
             $cellFontSize[] = array_fill(0, $colCount, $bodySize);
@@ -1487,8 +1484,8 @@ final class ControlledPublishingDocxImportService
             'has_title_row' => $hasTitleRow,
             'headers' => $headers,
             'header_colspans' => $headerColspans,
-            'rows' => $normalizedRows,
-            'row_colspans' => $rowColspans,
+            'rows' => $bodyRows,
+            'row_colspans' => $bodyColspans,
             'col_widths' => array_fill(0, $colCount, $colWidth),
             'border_width' => (string)($styleDef['border_width'] ?? 'medium'),
             'border_color' => (string)($styleDef['border_color'] ?? '#94a3b8'),
@@ -1511,43 +1508,25 @@ final class ControlledPublishingDocxImportService
     }
 
     /**
-     * Merge adjacent empty cells into colspan metadata for HTML rendering.
-     *
-     * @param list<string> $row
-     * @return array{cells:list<string>,colspans:list<int>}
+     * @param list<list<string>> $rows
+     * @param list<list<int>>|null $explicitRowColspans
+     * @return list<list<int>>
      */
-    private function collapseTableRowColspans(array $row): array
+    private function normalizeImportedTableColspans(array $rows, ?array $explicitRowColspans): array
     {
-        $cells = array();
-        $colspans = array();
-        $count = count($row);
-        $index = 0;
-        while ($index < $count) {
-            $text = trim((string)$row[$index]);
-            if ($text === '') {
-                $index++;
-                continue;
+        $normalized = array();
+        foreach ($rows as $index => $row) {
+            $spans = is_array($explicitRowColspans[$index] ?? null)
+                ? array_values($explicitRowColspans[$index])
+                : array();
+            $spans = array_map(static fn (mixed $span): int => max(1, (int)$span), $spans);
+            if (count($spans) !== count($row)) {
+                $spans = array_fill(0, count($row), 1);
             }
-            $span = 1;
-            while ($index + $span < $count && trim((string)$row[$index + $span]) === '') {
-                $span++;
-            }
-            $cells[] = $text;
-            $colspans[] = $span;
-            $index += $span;
+            $normalized[] = $spans;
         }
 
-        if ($cells === array()) {
-            return array(
-                'cells' => array(''),
-                'colspans' => array(max(1, $count)),
-            );
-        }
-
-        return array(
-            'cells' => $cells,
-            'colspans' => $colspans,
-        );
+        return $normalized;
     }
 
     /**
@@ -1712,7 +1691,7 @@ final class ControlledPublishingDocxImportService
     /**
      * Import all DOCX body content into a single annex section (no chapter routing).
      *
-     * @return array{blocks_created:int,images_uploaded:int,warnings:list<string>}
+     * @return array{blocks_created:int,images_uploaded:int,warnings:list<string>,orientation:string}
      */
     public function importAnnexSectionContent(
         int $versionId,
@@ -1726,7 +1705,10 @@ final class ControlledPublishingDocxImportService
             ? $bookStyles['table_styles']['text']
             : $this->styleService->resolveStandardTableStyle($bookStyles);
 
-        $parsed = $this->reader->parseFile($docxPath, -1);
+        $parsed = $this->reader->parseFile($docxPath, -1, array(
+            'include_front_matter' => true,
+            'detect_part_from_filename' => false,
+        ));
         $nodes = is_array($parsed['nodes'] ?? null) ? $parsed['nodes'] : array();
         $warnings = is_array($parsed['warnings'] ?? null) ? $parsed['warnings'] : array();
 
@@ -1748,6 +1730,9 @@ final class ControlledPublishingDocxImportService
             'blocks_created' => $result['blocks_created'],
             'images_uploaded' => $result['images_uploaded'],
             'warnings' => $warnings,
+            'orientation' => ((string)($parsed['orientation'] ?? 'portrait')) === 'landscape'
+                ? 'landscape'
+                : 'portrait',
         );
     }
 

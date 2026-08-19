@@ -42,7 +42,10 @@ final class ControlledPublishingSectionLayoutService
     {
         $section = $this->requireSection($versionId, $sectionId);
         $meta = $this->decodeMeta($section);
-        $orientation = strtolower(trim((string)($layout['orientation'] ?? 'portrait')));
+        $orientation = strtolower(trim((string)($layout['orientation'] ?? '')));
+        if ($orientation !== 'landscape' && $orientation !== 'portrait') {
+            $orientation = $this->resolveLayout($section)['orientation'];
+        }
         if ($orientation !== 'landscape') {
             $orientation = 'portrait';
         }

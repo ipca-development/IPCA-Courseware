@@ -1483,7 +1483,8 @@
     var hideFurniture = !!(state.pageLayout && state.pageLayout.hide_header_footer);
     var host = document.createElement('div');
     host.setAttribute('aria-hidden', 'true');
-    host.style.cssText = 'position:fixed;left:-10000px;top:0;width:704px;'
+    var contentWidth = Math.max(1, (PRINT_PAGE.width || 816) - ((PRINT_PAGE.side || 56) * 2));
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + contentWidth + 'px;'
       + 'height:auto;visibility:hidden;overflow:visible;pointer-events:none;';
     var sheetStyle = window.getComputedStyle(sheet);
     [
@@ -1528,16 +1529,34 @@
       - (footerHeight > 0 ? PRINT_PAGE.footerGap : 0)
       - PRINT_PAGE.contentTop;
     if (PRINT_PAGE.contentHeight <= 0) {
-      PRINT_PAGE.contentTop = 152;
-      PRINT_PAGE.contentHeight = 744;
       PRINT_PAGE.headerHeight = 84;
-      PRINT_PAGE.footerTop = 920;
       PRINT_PAGE.footerHeight = 72;
+      PRINT_PAGE.contentTop = PRINT_PAGE.headerTop
+        + PRINT_PAGE.headerHeight
+        + PRINT_PAGE.headerGap;
+      PRINT_PAGE.footerTop = PRINT_PAGE.height - PRINT_PAGE.bottomMargin - PRINT_PAGE.footerHeight;
+      PRINT_PAGE.contentHeight = PRINT_PAGE.footerTop
+        - PRINT_PAGE.footerGap
+        - PRINT_PAGE.contentTop;
     }
     sheet.style.setProperty('--cpb-print-content-top', PRINT_PAGE.contentTop + 'px');
     sheet.style.setProperty('--cpb-print-header-height', PRINT_PAGE.headerHeight + 'px');
     sheet.style.setProperty('--cpb-print-footer-top', PRINT_PAGE.footerTop + 'px');
     sheet.style.setProperty('--cpb-print-footer-height', PRINT_PAGE.footerHeight + 'px');
+  }
+
+  function syncPrintPageGeometry(sheet) {
+    var landscape = !!(state.pageLayout && state.pageLayout.orientation === 'landscape');
+    PRINT_PAGE.width = landscape ? 1056 : 816;
+    PRINT_PAGE.height = landscape ? 816 : 1056;
+    if (!sheet) return;
+    sheet.classList.toggle('cpb-sheet--landscape', landscape);
+    sheet.style.setProperty('--cpb-print-page-width', PRINT_PAGE.width + 'px');
+    sheet.style.setProperty('--cpb-print-page-height', PRINT_PAGE.height + 'px');
+    sheet.style.setProperty(
+      '--cpb-print-content-width',
+      (PRINT_PAGE.width - PRINT_PAGE.side * 2) + 'px'
+    );
   }
 
   function applyUnifiedPrintLayout() {
@@ -1547,6 +1566,7 @@
     var caret = capturePrintCaret();
     removeAutomaticPrintBreaks(sheet);
     sheet.classList.add('cpb-print-layout');
+    syncPrintPageGeometry(sheet);
     measurePrintFurnitureGeometry(sheet);
     var blocks = Array.prototype.slice.call(body.querySelectorAll(':scope > .cpb-block'));
     var manualAnchors = {};

@@ -27,13 +27,18 @@ final class ControlledPublishingDocxReader
     private ?ZipArchive $zip = null;
 
     /**
+     * @param array{
+     *   include_front_matter?:bool,
+     *   detect_part_from_filename?:bool
+     * } $options
      * @return array{
      *   manual_part:int,
      *   nodes:list<array<string,mixed>>,
-     *   warnings:list<string>
+     *   warnings:list<string>,
+     *   orientation:string
      * }
      */
-    public function parseFile(string $path, ?int $manualPart = null): array
+    public function parseFile(string $path, ?int $manualPart = null, array $options = array()): array
     {
         if (!is_readable($path)) {
             throw new RuntimeException('DOCX file is not readable: ' . $path);
@@ -44,8 +49,13 @@ final class ControlledPublishingDocxReader
             throw new RuntimeException('Could not open DOCX archive: ' . basename($path));
         }
 
-        if ($manualPart === null || $manualPart < 0) {
+        $detectPartFromFilename = !array_key_exists('detect_part_from_filename', $options)
+            || !empty($options['detect_part_from_filename']);
+        if (($manualPart === null || $manualPart < 0) && $detectPartFromFilename) {
             $manualPart = self::detectManualPartFromFilename($path);
+        }
+        if ($manualPart === null) {
+            $manualPart = -1;
         }
 
         $this->zip = $zip;
@@ -79,18 +89,23 @@ final class ControlledPublishingDocxReader
 
         $warnings = array();
         $nodes = array();
-        $pastToc = false;
+        $orientation = 'portrait';
+        $pastToc = !empty($options['include_front_matter']);
 
-        foreach ($body->childNodes as $child) {
-            if (!$child instanceof DOMElement) {
-                continue;
-            }
-
-            if ($child->namespaceURI !== self::W_NS) {
+        foreach ($this->eachWordBlock($body) as $child) {
+            if ($child->localName === 'sectPr') {
+                if ($this->sectPrOrientation($child) === 'landscape') {
+                    $orientation = 'landscape';
+                }
                 continue;
             }
 
             if ($child->localName === 'p') {
+                $paragraphSectPr = $this->paragraphSectPr($child);
+                if ($paragraphSectPr !== null && $this->sectPrOrientation($paragraphSectPr) === 'landscape') {
+                    $orientation = 'landscape';
+                }
+
                 $paragraph = $this->parseParagraph($child, $xpath, $manualPart);
                 if ($paragraph === null) {
                     continue;
@@ -146,10 +161,6 @@ final class ControlledPublishingDocxReader
                 continue;
             }
 
-            if ($child->localName === 'sectPr') {
-                continue;
-            }
-
             $warnings[] = 'Skipped unsupported body element: ' . $child->localName;
         }
 
@@ -162,6 +173,7 @@ final class ControlledPublishingDocxReader
             'manual_part' => $manualPart,
             'nodes' => $nodes,
             'warnings' => $warnings,
+            'orientation' => $orientation === 'landscape' ? 'landscape' : 'portrait',
         );
     }
 
@@ -172,6 +184,77 @@ final class ControlledPublishingDocxReader
             return (int)$m[1];
         }
         return -1;
+    }
+
+    /**
+     * Flatten Word content-control wrappers so nested paragraphs and tables are imported.
+     *
+     * @return list<DOMElement>
+     */
+    private function eachWordBlock(DOMElement $parent): array
+    {
+        $elements = array();
+        foreach ($parent->childNodes as $child) {
+            if (!$child instanceof DOMElement || $child->namespaceURI !== self::W_NS) {
+                continue;
+            }
+            $name = $child->localName;
+            if (in_array($name, array('del', 'moveFrom'), true)) {
+                continue;
+            }
+            if (in_array($name, array('sdt', 'customXml', 'ins', 'smartTag', 'moveTo'), true)) {
+                $inner = $name === 'sdt' ? $this->contentControlBody($child) : $child;
+                foreach ($this->eachWordBlock($inner) as $nested) {
+                    $elements[] = $nested;
+                }
+                continue;
+            }
+            if ($name === 'sdtContent') {
+                foreach ($this->eachWordBlock($child) as $nested) {
+                    $elements[] = $nested;
+                }
+                continue;
+            }
+            $elements[] = $child;
+        }
+
+        return $elements;
+    }
+
+    private function contentControlBody(DOMElement $sdt): DOMElement
+    {
+        foreach ($this->directWordChildElements($sdt, 'sdtContent') as $content) {
+            return $content;
+        }
+
+        return $sdt;
+    }
+
+    private function paragraphSectPr(DOMElement $paragraph): ?DOMElement
+    {
+        foreach ($this->directWordChildElements($paragraph, 'pPr') as $props) {
+            foreach ($this->directWordChildElements($props, 'sectPr') as $sectPr) {
+                return $sectPr;
+            }
+        }
+
+        return null;
+    }
+
+    private function sectPrOrientation(DOMElement $sectPr): string
+    {
+        foreach ($this->directWordChildElements($sectPr, 'pgSz') as $pageSize) {
+            if (strtolower(trim($this->wordAttribute($pageSize, 'orient'))) === 'landscape') {
+                return 'landscape';
+            }
+            $width = $this->wordIntAttribute($pageSize, 'w');
+            $height = $this->wordIntAttribute($pageSize, 'h');
+            if ($width > 0 && $height > 0 && $width > $height) {
+                return 'landscape';
+            }
+        }
+
+        return 'portrait';
     }
 
     /**
@@ -1133,32 +1216,47 @@ final class ControlledPublishingDocxReader
     }
 
     /**
-     * @return array{type:string,rows:list<list<string>>}|null
+     * @return array{type:string,rows:list<list<string>>,row_colspans:list<list<int>>}|null
      */
     private function parseTable(DOMElement $tbl, DOMXPath $xpath): ?array
     {
-        unset($xpath);
         $gridColCount = $this->tableGridColumnCount($tbl);
         $rows = array();
+        $rowColspans = array();
 
         foreach ($this->directWordChildElements($tbl, 'tr') as $tr) {
-            $cells = $this->parseTableRowCells($tr);
-            if ($cells === array()) {
+            $parsedRow = $this->parseTableRow($tr, $xpath, $gridColCount);
+            if ($parsedRow['cells'] === array()) {
                 continue;
             }
-            $cells = $this->expandTabSeparatedRowCells($cells, $gridColCount);
-            $rows[] = $cells;
+            $rows[] = $parsedRow['cells'];
+            $rowColspans[] = $parsedRow['colspans'];
         }
 
         if ($rows === array()) {
             return null;
         }
 
-        $rows = $this->normalizeTableRowWidths($rows, $gridColCount);
+        $maxLogical = $gridColCount;
+        foreach ($rowColspans as $spans) {
+            $maxLogical = max($maxLogical, array_sum($spans));
+        }
+        if ($maxLogical <= 0) {
+            $maxLogical = 1;
+        }
+        foreach ($rows as $index => $row) {
+            $logical = array_sum($rowColspans[$index]);
+            while ($logical < $maxLogical) {
+                $rows[$index][] = '';
+                $rowColspans[$index][] = 1;
+                $logical++;
+            }
+        }
 
         return array(
             'type' => 'table',
             'rows' => $rows,
+            'row_colspans' => $rowColspans,
         );
     }
 
@@ -1219,34 +1317,59 @@ final class ControlledPublishingDocxReader
     }
 
     /**
-     * @return list<string>
+     * @return array{cells:list<string>,colspans:list<int>}
      */
-    private function parseTableRowCells(DOMElement $tr): array
+    private function parseTableRow(DOMElement $tr, DOMXPath $xpath, int $gridColCount): array
     {
         $cells = array();
+        $colspans = array();
         foreach ($this->tableRowCellElements($tr) as $tc) {
             if ($this->tableCellVMerge($tc) === 'continue') {
                 continue;
             }
 
-            $text = self::sanitizeImportedText($this->extractTableCellText($tc));
-            $gridSpan = $this->tableCellGridSpan($tc);
+            $text = self::sanitizeImportedText($this->extractTableCellText($tc, $xpath));
             $cells[] = $text;
-            for ($i = 1; $i < $gridSpan; $i++) {
-                $cells[] = '';
-            }
+            $colspans[] = $this->tableCellGridSpan($tc);
         }
 
-        return $cells;
+        $expanded = $this->expandTabSeparatedRowCells($cells, $gridColCount);
+        if ($expanded !== $cells) {
+            $cells = $expanded;
+            $colspans = array_fill(0, count($cells), 1);
+        } elseif (count($colspans) !== count($cells)) {
+            $colspans = array_fill(0, count($cells), 1);
+        }
+
+        return array(
+            'cells' => $cells,
+            'colspans' => $colspans,
+        );
     }
 
-    private function extractTableCellText(DOMElement $tc): string
+    private function extractTableCellText(DOMElement $tc, DOMXPath $xpath): string
     {
         $cellParts = array();
-        foreach ($this->directWordChildElements($tc, 'p') as $p) {
-            $line = trim($this->extractParagraphTextRaw($p));
-            if ($line !== '') {
-                $cellParts[] = $line;
+        foreach ($this->eachWordBlock($tc) as $child) {
+            if ($child->localName === 'p') {
+                $line = trim($this->extractParagraphTextRaw($child));
+                if ($line !== '') {
+                    $cellParts[] = $line;
+                }
+                continue;
+            }
+            if ($child->localName !== 'tbl') {
+                continue;
+            }
+            $nested = $this->parseTable($child, $xpath);
+            if ($nested === null) {
+                continue;
+            }
+            foreach ($nested['rows'] as $row) {
+                $line = trim(implode("\t", array_map('trim', $row)));
+                if ($line !== '') {
+                    $cellParts[] = $line;
+                }
             }
         }
         if ($cellParts === array()) {

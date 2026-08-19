@@ -509,7 +509,7 @@ final class ControlledPublishingAnnexService
     }
 
     /**
-     * @return array{blocks_created:int,images_uploaded:int,warnings:list<string>}
+     * @return array{blocks_created:int,images_uploaded:int,warnings:list<string>,orientation?:string}
      */
     public function importAnnexDocx(
         int $versionId,
@@ -541,7 +541,11 @@ final class ControlledPublishingAnnexService
         }
 
         $result = $importSvc->importAnnexSectionContent($versionId, $sectionId, $docxPath, $actorUserId);
-        $this->updateAnnexMeta($sectionId, array('content_mode' => 'docx'), $actorUserId);
+        $metaPatch = array('content_mode' => 'docx');
+        if (($result['orientation'] ?? '') === 'landscape') {
+            $metaPatch['page_orientation'] = 'landscape';
+        }
+        $this->updateAnnexMeta($sectionId, $metaPatch, $actorUserId);
         if ($recordRevision) {
             $this->recordAnnexRevision(
                 $versionId,
