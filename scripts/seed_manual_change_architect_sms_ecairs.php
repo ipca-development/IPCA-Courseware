@@ -18,6 +18,8 @@ if ($actorUserId <= 0) {
 
 $pdo = cw_db();
 $title = 'SMS / ECCAIRS Occurrence Lifecycle';
+$readableStructure = require __DIR__ . '/../tests/fixtures/manual_change_architect_sms_structure_readable.php';
+$readableAmendment = require __DIR__ . '/../tests/fixtures/manual_change_architect_sms_amendment_readable.php';
 $existing = $pdo->prepare(
     'SELECT id FROM ipca_manual_ai_architect_plans
      WHERE primary_book_version_id=? AND title=?
@@ -308,6 +310,129 @@ try {
          status='decided'
          WHERE plan_id=?"
     )->execute(array($planId));
+
+    $pdo->prepare('DELETE FROM ipca_manual_ai_architect_operations WHERE plan_id=?')->execute(array($planId));
+    $pdo->prepare('DELETE FROM ipca_manual_ai_architect_reviews WHERE plan_id=?')->execute(array($planId));
+    $pdo->prepare('DELETE FROM ipca_manual_ai_architect_drafts WHERE plan_id=?')->execute(array($planId));
+    $pdo->prepare(
+        'DELETE n FROM ipca_manual_ai_architect_structure_nodes n
+         JOIN ipca_manual_ai_architect_structure_proposals p ON p.id=n.structure_proposal_id
+         WHERE p.plan_id=?'
+    )->execute(array($planId));
+    $pdo->prepare('DELETE FROM ipca_manual_ai_architect_structure_proposals WHERE plan_id=?')
+        ->execute(array($planId));
+
+    $structureFingerprint = hash('sha256', $json($readableStructure));
+    $insertStructure = $pdo->prepare(
+        "INSERT INTO ipca_manual_ai_architect_structure_proposals
+          (plan_id,proposal_uuid,proposal_version,title,rationale,status,
+           structure_fingerprint,proposed_by)
+         VALUES (?,?,1,?,?,'proposed',?,?)"
+    );
+    $insertStructure->execute(array(
+        $planId,
+        $uuid(),
+        (string)$readableStructure['title'],
+        (string)$readableStructure['rationale'],
+        $structureFingerprint,
+        $actorUserId,
+    ));
+    $structureId = (int)$pdo->lastInsertId();
+    $futureNodes = array();
+    foreach ((array)$readableStructure['areas'] as $area) {
+        if ((string)($area['section_number'] ?? '') === '5.6') {
+            $futureNodes = (array)($area['future'] ?? array());
+            break;
+        }
+    }
+    $insertNode = $pdo->prepare(
+        "INSERT INTO ipca_manual_ai_architect_structure_nodes
+          (structure_proposal_id,node_uuid,parent_node_id,source_section_id,node_key,
+           node_type,title,purpose,action,decision_status,depth,sort_order,node_fingerprint)
+         VALUES (?,?,?,?,?,?,?,?,?,'proposed',?,?,?)"
+    );
+    $rootNode = $futureNodes[0] ?? array();
+    $insertNode->execute(array(
+        $structureId,
+        $uuid(),
+        null,
+        58646,
+        (string)($rootNode['number'] ?? '5.6'),
+        'section',
+        (string)($rootNode['title'] ?? 'Occurrence Reporting and Internal Safety Investigation'),
+        (string)($rootNode['purpose'] ?? ''),
+        (string)($rootNode['action'] ?? 'PRESERVE'),
+        0,
+        10,
+        hash('sha256', $json(array('5.6', $rootNode))),
+    ));
+    $rootNodeId = (int)$pdo->lastInsertId();
+    foreach ((array)($rootNode['children'] ?? array()) as $index => $node) {
+        $insertNode->execute(array(
+            $structureId,
+            $uuid(),
+            $rootNodeId,
+            58646,
+            (string)$node['number'],
+            'subsection',
+            (string)$node['title'],
+            'Operational lifecycle step within the controlled occurrence process.',
+            (string)$node['action'],
+            1,
+            ($index + 1) * 10,
+            hash('sha256', $json(array($node['number'], $node))),
+        ));
+    }
+
+    $draftPayload = $readableAmendment;
+    $draftFingerprint = hash('sha256', $json($draftPayload));
+    $insertDraft = $pdo->prepare(
+        "INSERT INTO ipca_manual_ai_architect_drafts
+          (draft_uuid,plan_id,structure_proposal_id,target_book_version_id,draft_version,
+           status,source_fingerprint,content_fingerprint,draft_payload_json,created_by)
+         VALUES (?,?,?,?,1,'generated',?,?,?,?)"
+    );
+    $insertDraft->execute(array(
+        $uuid(),
+        $planId,
+        $structureId,
+        $versionId,
+        hash('sha256', $request),
+        $draftFingerprint,
+        $json($draftPayload),
+        $actorUserId,
+    ));
+    $draftId = (int)$pdo->lastInsertId();
+    $preparedReview = array(
+        'status' => 'REVIEW_PENDING',
+        'summary' => 'The accepted wording is ready for independent consistency review.',
+        'prepared_result' => array(
+            'status' => 'READY',
+            'checks' => array(
+                'Requested change fully covered' => true,
+                'Existing valid SMS logic preserved' => true,
+                'Responsibilities consistent' => true,
+                'Records consistent' => true,
+                'Training consistent' => true,
+                'Monitoring consistent' => true,
+                'No obsolete references remain in amendment scope' => true,
+                'No unsupported system capabilities' => true,
+                'Structure and cross-references valid' => true,
+            ),
+        ),
+    );
+    $pdo->prepare(
+        "INSERT INTO ipca_manual_ai_architect_reviews
+          (review_uuid,plan_id,draft_id,review_type,status,review_payload_json,
+           requested_by,requested_at)
+         VALUES (?,?,?,'independent_consistency','requested',?,?,CURRENT_TIMESTAMP(3))"
+    )->execute(array(
+        $uuid(),
+        $planId,
+        $draftId,
+        $json($preparedReview),
+        $actorUserId,
+    ));
     $pdo->prepare(
         "UPDATE ipca_manual_ai_architect_plans
          SET status='ready_for_review',stage='impact',updated_by=? WHERE id=?"

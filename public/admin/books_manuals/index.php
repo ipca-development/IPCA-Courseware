@@ -150,7 +150,7 @@ books_manuals_page_open(array(
         array('label' => 'Approved', 'value' => $approved, 'tone' => 'ok'),
     ),
     'actions' => array(
-        array('label' => 'AI Change Assistant', 'href' => '/admin/books_manuals/change_projects.php'),
+        array('label' => 'Manual Change Wizzard', 'href' => '/admin/books_manuals/change_architect.php'),
         array('label' => 'Annexes', 'href' => '/admin/books_manuals/annexes.php'),
         array('label' => '+', 'modal' => 'bm-create-manual'),
     ),

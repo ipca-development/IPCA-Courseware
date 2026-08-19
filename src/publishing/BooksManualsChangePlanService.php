@@ -465,6 +465,255 @@ final class BooksManualsChangePlanService
         );
     }
 
+    /** @return array{accepted_count:int,stage:string} */
+    public function acceptImpactAnalysis(int $planId, int $actorUserId): array
+    {
+        $this->assertPlanOwner($planId, $actorUserId);
+        $stmt = $this->pdo->prepare(
+            "SELECT id,status FROM " . self::TABLES['impacts']
+            . " WHERE plan_id=? AND treatment IN ('AMEND','REPLACE','RESTRUCTURE','ADD','REMOVE_OBSOLETE')"
+        );
+        $stmt->execute(array($planId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($rows === array()) {
+            throw new RuntimeException('No governed amendment areas are available to accept.');
+        }
+        foreach ($rows as $row) {
+            if ((string)($row['status'] ?? '') === 'dismissed') {
+                throw new RuntimeException('Resolve rejected amendment areas before continuing.');
+            }
+        }
+        $this->pdo->beginTransaction();
+        try {
+            $update = $this->pdo->prepare(
+                'UPDATE ' . self::TABLES['impacts']
+                . " SET status='approved',updated_at=CURRENT_TIMESTAMP(3)"
+                . " WHERE plan_id=? AND treatment IN ('AMEND','REPLACE','RESTRUCTURE','ADD','REMOVE_OBSOLETE')"
+            );
+            $update->execute(array($planId));
+            $this->updatePlan($planId, array('stage' => 'structure', 'updated_by' => $actorUserId));
+            $this->appendEvent($planId, 'IMPACT_ANALYSIS_ACCEPTED', 10, array(
+                'impact_ids' => array_map('intval', array_column($rows, 'id')),
+            ), $actorUserId);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        return array('accepted_count' => count($rows), 'stage' => 'structure');
+    }
+
+    /** @return array{proposal_id:int,node_count:int,stage:string} */
+    public function acceptStructure(int $planId, int $actorUserId): array
+    {
+        $this->assertPlanOwner($planId, $actorUserId);
+        $proposal = $this->row(
+            'SELECT * FROM ' . self::TABLES['structure_proposals']
+            . ' WHERE plan_id=? ORDER BY proposal_version DESC,id DESC LIMIT 1',
+            array($planId)
+        );
+        if ($proposal === null) {
+            throw new RuntimeException('The proposed manual structure is not ready yet.');
+        }
+        $proposalId = (int)$proposal['id'];
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ' . self::TABLES['structure_proposals']
+                . " SET status='approved',updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND plan_id=?"
+            )->execute(array($proposalId, $planId));
+            $nodes = $this->pdo->prepare(
+                'UPDATE ' . self::TABLES['structure_nodes']
+                . " SET decision_status='accepted',decided_by=?,decided_at=CURRENT_TIMESTAMP(3)"
+                . ' WHERE structure_proposal_id=?'
+            );
+            $nodes->execute(array($actorUserId, $proposalId));
+            $this->updatePlan($planId, array('stage' => 'drafting', 'updated_by' => $actorUserId));
+            $this->appendEvent($planId, 'STRUCTURE_ACCEPTED', 11, array(
+                'structure_proposal_id' => $proposalId,
+                'node_count' => $nodes->rowCount(),
+            ), $actorUserId);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        return array(
+            'proposal_id' => $proposalId,
+            'node_count' => $nodes->rowCount(),
+            'stage' => 'drafting',
+        );
+    }
+
+    /** @return array{draft_id:int,section_number:string,decision:string} */
+    public function recordDraftDecision(
+        int $planId,
+        string $sectionNumber,
+        string $decision,
+        int $actorUserId
+    ): array {
+        $this->assertPlanOwner($planId, $actorUserId);
+        $sectionNumber = trim($sectionNumber);
+        $decision = strtolower(trim($decision));
+        if ($sectionNumber === '' || !in_array(
+            $decision,
+            array('accepted', 'edit_requested', 'regenerate_requested', 'rejected'),
+            true
+        )) {
+            throw new InvalidArgumentException('Unsupported draft decision.');
+        }
+        $draft = $this->row(
+            'SELECT * FROM ' . self::TABLES['drafts']
+            . ' WHERE plan_id=? ORDER BY draft_version DESC,id DESC LIMIT 1',
+            array($planId)
+        );
+        if ($draft === null || (string)($draft['status'] ?? '') !== 'generated') {
+            throw new RuntimeException('The draft amendment package is not open for section decisions.');
+        }
+        $payload = $this->decodeJson($draft['draft_payload_json'] ?? null);
+        $sections = (array)($payload['section_drafts'] ?? $payload['sections'] ?? array());
+        if (!array_key_exists($sectionNumber, $sections)) {
+            throw new RuntimeException('That amendment section is not part of the governed draft.');
+        }
+        $payload['decisions'] = is_array($payload['decisions'] ?? null) ? $payload['decisions'] : array();
+        $payload['decisions'][$sectionNumber] = array(
+            'decision' => $decision,
+            'actor_id' => $actorUserId,
+            'decided_at' => gmdate('c'),
+        );
+        $draftId = (int)$draft['id'];
+        $this->pdo->prepare(
+            'UPDATE ' . self::TABLES['drafts']
+            . ' SET draft_payload_json=?,content_fingerprint=? WHERE id=? AND plan_id=?'
+        )->execute(array(
+            $this->json($payload),
+            hash('sha256', $this->json($payload)),
+            $draftId,
+            $planId,
+        ));
+        $this->appendEvent($planId, 'DRAFT_SECTION_DECIDED', 12, array(
+            'draft_id' => $draftId,
+            'section_number' => $sectionNumber,
+            'decision' => $decision,
+        ), $actorUserId);
+        return array(
+            'draft_id' => $draftId,
+            'section_number' => $sectionNumber,
+            'decision' => $decision,
+        );
+    }
+
+    /** @return array{draft_id:int,stage:string} */
+    public function acceptDrafts(int $planId, int $actorUserId): array
+    {
+        $this->assertPlanOwner($planId, $actorUserId);
+        $draft = $this->row(
+            'SELECT * FROM ' . self::TABLES['drafts']
+            . ' WHERE plan_id=? ORDER BY draft_version DESC,id DESC LIMIT 1',
+            array($planId)
+        );
+        if ($draft === null || (string)($draft['status'] ?? '') !== 'generated') {
+            throw new RuntimeException('The proposed manual amendments are not ready for acceptance.');
+        }
+        $payload = $this->decodeJson($draft['draft_payload_json'] ?? null);
+        $sections = (array)($payload['section_drafts'] ?? $payload['sections'] ?? array());
+        $decisions = (array)($payload['decisions'] ?? array());
+        foreach (array_keys($sections) as $sectionNumber) {
+            if ((string)($decisions[$sectionNumber]['decision'] ?? '') !== 'accepted') {
+                throw new RuntimeException('Every required amendment must be accepted before continuing.');
+            }
+        }
+        $draftId = (int)$draft['id'];
+        $payload['wizard_status'] = 'accepted';
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ' . self::TABLES['drafts']
+                . ' SET draft_payload_json=?,content_fingerprint=? WHERE id=? AND plan_id=?'
+            )->execute(array(
+                $this->json($payload),
+                hash('sha256', $this->json($payload)),
+                $draftId,
+                $planId,
+            ));
+            $this->updatePlan($planId, array('stage' => 'review', 'updated_by' => $actorUserId));
+            $this->appendEvent($planId, 'DRAFT_AMENDMENTS_ACCEPTED', 12, array(
+                'draft_id' => $draftId,
+            ), $actorUserId);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        return array('draft_id' => $draftId, 'stage' => 'review');
+    }
+
+    /** @return array{review_id:int,status:string} */
+    public function runIndependentReview(int $planId, int $actorUserId): array
+    {
+        $this->assertPlanOwner($planId, $actorUserId);
+        $review = $this->row(
+            'SELECT * FROM ' . self::TABLES['reviews']
+            . ' WHERE plan_id=? ORDER BY id DESC LIMIT 1',
+            array($planId)
+        );
+        if ($review === null) {
+            throw new RuntimeException('The independent review package is not ready yet.');
+        }
+        $payload = $this->decodeJson($review['review_payload_json'] ?? null);
+        $result = $payload['prepared_result'] ?? null;
+        if (!is_array($result) || strtoupper((string)($result['status'] ?? '')) !== 'READY') {
+            throw new RuntimeException('Independent Review requires further reviewer work.');
+        }
+        $reviewId = (int)$review['id'];
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ' . self::TABLES['reviews']
+                . " SET status='approved',review_payload_json=?,reviewer_id=?,completed_at=CURRENT_TIMESTAMP(3)"
+                . ' WHERE id=? AND plan_id=?'
+            )->execute(array($this->json($result), $actorUserId, $reviewId, $planId));
+            $this->appendEvent($planId, 'INDEPENDENT_REVIEW_COMPLETED', 12, array(
+                'review_id' => $reviewId,
+                'status' => 'READY',
+            ), $actorUserId);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        return array('review_id' => $reviewId, 'status' => 'READY');
+    }
+
+    /** @return array{stage:string} */
+    public function continueToApply(int $planId, int $actorUserId): array
+    {
+        $this->assertPlanOwner($planId, $actorUserId);
+        $review = $this->row(
+            'SELECT * FROM ' . self::TABLES['reviews']
+            . ' WHERE plan_id=? ORDER BY id DESC LIMIT 1',
+            array($planId)
+        );
+        $payload = $review === null ? array() : $this->decodeJson($review['review_payload_json'] ?? null);
+        $status = strtoupper((string)($payload['status'] ?? $review['status'] ?? ''));
+        if (!in_array($status, array('READY', 'READY_FOR_HUMAN_REVIEW', 'APPROVED'), true)) {
+            throw new RuntimeException('Independent Review must be READY before continuing.');
+        }
+        $this->updatePlan($planId, array('stage' => 'operations', 'updated_by' => $actorUserId));
+        $this->appendEvent($planId, 'REVIEW_ACCEPTED_FOR_APPLY', 13, array(
+            'review_id' => (int)($review['id'] ?? 0),
+        ), $actorUserId);
+        return array('stage' => 'operations');
+    }
+
     /**
      * Persist a node beneath a proposal after verifying plan ownership.
      *
@@ -497,6 +746,28 @@ final class BooksManualsChangePlanService
         }
         $metadata = $plan['metadata_json'] ?? null;
         return (int)($metadata['primary_version']['id'] ?? 0);
+    }
+
+    private function assertPlanOwner(int $planId, int $actorUserId): array
+    {
+        $plan = $this->getPlan($planId);
+        if ($actorUserId <= 0 || (int)($plan['owner_id'] ?? 0) !== $actorUserId) {
+            throw new RuntimeException('Only the Change Plan owner can continue this wizard.');
+        }
+        return $plan;
+    }
+
+    /** @return array<string,mixed> */
+    private function decodeJson(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        if (!is_string($value) || $value === '') {
+            return array();
+        }
+        $decoded = json_decode($value, true);
+        return is_array($decoded) ? $decoded : array();
     }
 
     /** @return list<array<string,mixed>> */

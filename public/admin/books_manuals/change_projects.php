@@ -105,7 +105,7 @@ books_manuals_page_open(array(
     'actions' => $featureEnabled
         ? array_values(array_filter(array(
             $latestArchitectPlanId > 0 ? array(
-                'label' => 'Open Manual Change Architect',
+                'label' => 'Manual Change Wizzard',
                 'href' => '/admin/books_manuals/change_architect.php?plan_id=' . $latestArchitectPlanId,
                 'variant' => 'secondary',
             ) : null,
