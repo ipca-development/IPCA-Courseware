@@ -220,10 +220,11 @@ async function main() {
     const measuredBands = await page.evaluate(async ({
       headerTemplates,
       footerTemplates,
-      width
+      portraitWidth,
+      landscapeWidth
     }) => {
       const templates = (kind) => kind === "header" ? headerTemplates : footerTemplates;
-      const measure = async (html, kind) => {
+      const measure = async (html, kind, width) => {
         const region = document.createElement("div");
         region.className = `reader-page-${kind}-measurement`;
         region.style.cssText = `position:absolute;left:0;top:0;width:${width}px;`
@@ -240,16 +241,23 @@ async function main() {
         }
         document.body.appendChild(region);
         await Promise.all(Array.from(region.querySelectorAll("img")).map(async (image) => {
-          if (image.complete) return;
           try {
             await image.decode();
           } catch (_) {
-            await new Promise((resolve) => {
-              image.addEventListener("load", resolve, { once: true });
-              image.addEventListener("error", resolve, { once: true });
-            });
+            if (!image.complete) {
+              await new Promise((resolve) => {
+                image.addEventListener("load", resolve, { once: true });
+                image.addEventListener("error", resolve, { once: true });
+              });
+            }
           }
         }));
+        if (document.fonts && document.fonts.ready) {
+          await document.fonts.ready;
+        }
+        await new Promise((resolve) => requestAnimationFrame(
+          () => requestAnimationFrame(resolve)
+        ));
         const height = Math.max(
           root ? root.getBoundingClientRect().height : 0,
           root ? root.scrollHeight : 0,
@@ -258,24 +266,34 @@ async function main() {
         region.remove();
         return height;
       };
-      const heights = async (kind) => Promise.all(
-        templates(kind).map((template) => measure(template, kind))
+      const heights = async (kind, width) => Promise.all(
+        templates(kind).map((template) => measure(template, kind, width))
       );
-      const [headerHeights, footerHeights] = await Promise.all([
-        heights("header"),
-        heights("footer")
-      ]);
-      return {
-        header: Math.max(0, ...headerHeights),
-        footer: Math.max(0, ...footerHeights)
+      const bandsAtWidth = async (width) => {
+        const [headerHeights, footerHeights] = await Promise.all([
+          heights("header", width),
+          heights("footer", width)
+        ]);
+        return {
+          header: Math.max(0, ...headerHeights),
+          footer: Math.max(0, ...footerHeights)
+        };
       };
+      const [portrait, landscape] = await Promise.all([
+        bandsAtWidth(portraitWidth),
+        bandsAtWidth(landscapeWidth)
+      ]);
+      return { portrait, landscape };
     }, {
       headerTemplates: hydratedHeaderTemplates,
       footerTemplates: hydratedFooterTemplates,
-      width: pageWidth - side * 2
+      portraitWidth: pageWidth - side * 2,
+      landscapeWidth: pageHeight - side * 2
     });
-    const resolvedHeaderHeight = measuredBands.header || headerHeight;
-    const resolvedFooterHeight = measuredBands.footer || footerHeight;
+    const resolvedHeaderHeight = measuredBands.portrait.header || headerHeight;
+    const resolvedFooterHeight = measuredBands.portrait.footer || footerHeight;
+    layout.landscapeHeaderHeight = measuredBands.landscape.header || resolvedHeaderHeight;
+    layout.landscapeFooterHeight = measuredBands.landscape.footer || resolvedFooterHeight;
     const resolvedContentY = top + resolvedHeaderHeight + headerGap;
     const resolvedFooterY = pageHeight - bottom - resolvedFooterHeight;
     const resolvedContentHeight = resolvedFooterY - footerGap - resolvedContentY;

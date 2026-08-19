@@ -33,8 +33,16 @@
     const side = Number(layout.innerMargin);
     const top = Number(layout.topMargin);
     const bottom = Number(layout.bottomMargin);
-    const headerHeight = Number(layout.headerFrame && layout.headerFrame.height || 0);
-    const footerHeight = Number(layout.footerFrame && layout.footerFrame.height || 0);
+    const headerHeight = Number(
+      layout.landscapeHeaderHeight
+      ?? (layout.headerFrame && layout.headerFrame.height)
+      ?? 0
+    );
+    const footerHeight = Number(
+      layout.landscapeFooterHeight
+      ?? (layout.footerFrame && layout.footerFrame.height)
+      ?? 0
+    );
     const headerGap = Number(layout.headerBodySpacing);
     const footerGap = Number(layout.bodyFooterSpacing);
     const contentY = top + headerHeight + headerGap;
@@ -2283,10 +2291,27 @@
               startContinuation(sourceFragment, "oversized");
               continue;
             }
+            const probeEnd = Math.min(sourceFragment.textLength, offset + 1);
+            const probe = piece(
+              sourceFragment,
+              cloneTextRangeHTML(sourceFragment.html, offset, probeEnd, offset > 0),
+              offset,
+              probeEnd,
+              false
+            );
+            const probeMeasurement = measurePage(
+              pageWith(current.section, current.pieces.concat([probe]), {})
+            );
             diagnostic(
               "UNLAYOUTABLE_FRAGMENT",
               "failure",
-              `No safe split fits ${sourceFragment.id} inside the content frame.`,
+              `No safe split fits ${sourceFragment.id} inside the content frame `
+                + `(${probeMeasurement.bodyHeight.toFixed(2)}px body / `
+                + `${probeMeasurement.clientHeight.toFixed(2)}px frame; `
+                + `${probeMeasurement.horizontalOverflow.toFixed(2)}px horizontal overflow; `
+                + `offending descendant ${JSON.stringify(probeMeasurement.overflowingDescendant)}; `
+                + `header overflow ${JSON.stringify(probeMeasurement.headerOverflow)}; `
+                + `footer overflow ${JSON.stringify(probeMeasurement.footerOverflow)}).`,
               sourceFragment,
               pages.length + 1
             );

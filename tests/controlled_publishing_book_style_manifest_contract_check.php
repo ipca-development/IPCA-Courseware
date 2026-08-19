@@ -147,7 +147,11 @@ foreach (array('OMM', 'FUTURE_MANUAL') as $manualCode) {
 $convertedHtml = ControlledPublishingPublicationFontService::applyToRenderedHtml(
     '<p style="font-family:system-ui,-apple-system,Segoe UI,sans-serif">Trial</p>'
 );
-$assert(str_contains($convertedHtml, '"IPCA TM GEN Noto Sans",sans-serif'), 'Rendered inline typography is not normalized to the deterministic publication font.');
+$assert(str_contains($convertedHtml, "'IPCA TM GEN Noto Sans',sans-serif"), 'Rendered inline typography is not normalized to the deterministic publication font.');
+$assert(
+    str_contains($convertedHtml, 'style="font-family:\'IPCA TM GEN Noto Sans\',sans-serif"'),
+    'Rendered deterministic typography breaks the surrounding HTML style attribute.'
+);
 
 $timestampVariant = $version;
 $timestampVariant['released_at'] = '2030-01-01 00:00:00';

@@ -73,7 +73,9 @@ final class ControlledPublishingPublicationFontService
         if ($html === '') {
             return '';
         }
-        $replacement = '"' . self::FAMILY . '",sans-serif';
+        // Rendered HTML uses double-quoted style attributes. Single quotes keep
+        // the CSS family name valid without terminating the surrounding HTML.
+        $replacement = "'" . self::FAMILY . "',sans-serif";
         $patterns = array(
             '/system-ui\s*,\s*-apple-system\s*,\s*Segoe UI\s*,\s*sans-serif/i',
             '/Arial\s*,\s*Helvetica\s*,\s*sans-serif/i',
