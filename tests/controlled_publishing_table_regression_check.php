@@ -130,6 +130,9 @@ $requiredMarkers = array(
     'function buildSelectedCellsCopy(blockEl, cells)',
     'function tableMergeCellDown(blockEl)',
     'function tableUnmergeCellDown(blockEl)',
+    'function rebuildTableColumnResizeHandles(blockEl)',
+    "handle.setAttribute('data-col-index', String(logicalIndex + colspan - 1));",
+    "table.querySelectorAll('.cpb-col-resize')",
     'domRange: range.cloneRange()',
 );
 foreach ($requiredMarkers as $marker) {

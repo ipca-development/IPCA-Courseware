@@ -8409,8 +8409,7 @@
     var th = document.createElement('th');
     th.contentEditable = 'true';
     th.setAttribute('data-col-index', String(colIndex));
-    th.innerHTML = '<span class="cpb-th-text"></span>'
-      + '<span class="cpb-col-resize" data-col-index="' + colIndex + '" title="Resize column"></span>';
+    th.innerHTML = '<span class="cpb-th-text"></span>';
     return th;
   }
 
@@ -8945,28 +8944,39 @@
     return state.resizeHintEl;
   }
 
+  function rebuildTableColumnResizeHandles(blockEl) {
+    var table = blockEl.querySelector('table');
+    if (!table) return;
+    table.querySelectorAll('.cpb-col-resize').forEach(function (handle) {
+      handle.remove();
+    });
+    var resizeRow = tableHeaderRow(blockEl)
+      || table.querySelector('tbody[data-table-part="body"] tr');
+    if (!resizeRow) return;
+    var logicalIndex = 0;
+    Array.prototype.slice.call(resizeRow.cells).forEach(function (cell) {
+      var colspan = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
+      var handle = document.createElement('span');
+      handle.className = 'cpb-col-resize';
+      handle.setAttribute('data-col-index', String(logicalIndex + colspan - 1));
+      handle.setAttribute('title', 'Resize column');
+      handle.setAttribute('contenteditable', 'false');
+      cell.appendChild(handle);
+      logicalIndex += colspan;
+    });
+  }
+
   function wireTableResize(blockEl) {
     var table = blockEl.querySelector('table');
     if (!table) return;
-    table.querySelectorAll('tbody .cpb-col-resize').forEach(function (handle) {
-      handle.remove();
-    });
-    if (!tableHeaderRow(blockEl)) {
-      var firstBodyRow = table.querySelector('tbody[data-table-part="body"] tr');
-      var colIndex = 0;
-      if (firstBodyRow) {
-        Array.prototype.slice.call(firstBodyRow.children).forEach(function (cell) {
-          var colspan = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
-          var handle = document.createElement('span');
-          handle.className = 'cpb-col-resize';
-          handle.setAttribute('data-col-index', String(colIndex + colspan - 1));
-          handle.setAttribute('title', 'Resize column');
-          handle.setAttribute('contenteditable', 'false');
-          cell.appendChild(handle);
-          colIndex += colspan;
-        });
+    rebuildTableColumnResizeHandles(blockEl);
+    var cols = table.querySelectorAll('colgroup col');
+    table.querySelectorAll('.cpb-col-resize').forEach(function (handle) {
+      var logicalIndex = parseInt(handle.getAttribute('data-col-index') || '-1', 10);
+      if (logicalIndex < 0 || logicalIndex >= cols.length) {
+        handle.remove();
       }
-    }
+    });
     syncTableWidth(blockEl);
   }
 
