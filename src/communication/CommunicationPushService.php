@@ -175,6 +175,59 @@ final class CommunicationPushService
         }
     }
 
+    public function notifyRemoteSessionCode(int $userId, string $codeUuid, string $kind): void
+    {
+        $codeUuid = strtolower(trim($codeUuid));
+        if ($userId < 1 || !CommunicationSupport::isUuid($codeUuid)) {
+            return;
+        }
+        $kind = $kind === 'mock_oral' ? 'mock_oral' : 'progress_test';
+        $title = $kind === 'mock_oral' ? 'Mock Oral Code' : 'Progress Test Code';
+        $body = $kind === 'mock_oral'
+            ? 'Your Mock Oral Code is ready. Open IPCA to view it.'
+            : 'Your Progress Test Code is ready. Open IPCA to view it.';
+        foreach ($this->userDevices($userId, 0) as $device) {
+            if (!$this->isConfigured()) {
+                return;
+            }
+            $environment = strtolower(trim((string)($device['apns_environment'] ?? 'sandbox')));
+            if ($environment !== 'production') {
+                $environment = 'sandbox';
+            }
+            $payload = array(
+                'aps' => array(
+                    'alert' => array(
+                        'title' => $title,
+                        'body' => $body,
+                    ),
+                    'sound' => 'default',
+                ),
+                'type' => 'remote_session_code',
+                'kind' => $kind,
+                'code_id' => $codeUuid,
+            );
+            $result = $this->transport->send((string)$device['apns_token'], $environment, $payload);
+            if ($result->invalidateToken) {
+                $this->pdo->prepare(
+                    'UPDATE ipca_communication_devices
+                     SET apns_token = NULL, push_authorized = 0, updated_at_utc = ? WHERE id = ?'
+                )->execute(array(CommunicationSupport::nowUtc(), (int)$device['id']));
+            }
+            CommunicationSupport::log(
+                $result->accepted
+                    ? 'communication.remote_session_code.push.accepted'
+                    : 'communication.remote_session_code.push.failed',
+                array(
+                    'code_id' => $codeUuid,
+                    'kind' => $kind,
+                    'environment' => $environment,
+                    'http_status' => $result->httpStatus,
+                    'reason' => $result->reason,
+                )
+            );
+        }
+    }
+
     /**
      * Community comments must not write message delivery evidence.
      *

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/CommunicationConfigService.php';
 require_once __DIR__ . '/CommunicationSupport.php';
+require_once dirname(__DIR__) . '/remote_session_auth/RemoteSessionAppCodeService.php';
 
 /**
  * Read-only Training companion. Does not write training records, invent
@@ -285,6 +286,15 @@ final class CommunicationTrainingService
     private function actions(int $userId): array
     {
         $items = array();
+        if ($this->tableExists('ipca_remote_session_codes')) {
+            try {
+                $items = array_merge(
+                    $items,
+                    (new RemoteSessionAppCodeService($this->pdo))->pendingTrainingActions($userId)
+                );
+            } catch (Throwable) {
+            }
+        }
         if ($this->tableExists('lesson_activity') && $this->tableExists('lessons')) {
             try {
                 $stmt = $this->pdo->prepare("

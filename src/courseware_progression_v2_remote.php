@@ -406,15 +406,7 @@ trait CoursewareProgressionV2RemoteTrait
         }
 
         if ($auth && in_array((string)$auth['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
-            return [
-                'mode' => 'remote_auth_pending',
-                'label' => 'Check your email',
-                'button_class' => 'remote',
-                'disabled' => true,
-                'show_code_modal' => false,
-                'progress_test_url' => $ptUrl,
-                'message' => 'Open the authentication link in your email to receive your Progress Test Code.',
-            ];
+            return $this->ptr_pending_remote_auth_button($ptUrl);
         }
 
         return [
@@ -453,17 +445,8 @@ trait CoursewareProgressionV2RemoteTrait
             if ((string)$existing['status'] === 'AUTHENTICATED') {
                 throw new RuntimeException('You already completed remote authentication. Click Enter Progress Test Code on the course page.');
             }
-            if ((string)$existing['status'] === 'EMAIL_SENT') {
-                $updatedAt = strtotime((string)($existing['updated_at'] ?? '') . ' UTC') ?: 0;
-                if ($updatedAt > 0 && (time() - $updatedAt) < PTR_RESEND_COOLDOWN_SECONDS) {
-                    return [
-                        'ok' => true,
-                        'reused' => true,
-                        'authorization_id' => (int)$existing['id'],
-                        'message' => 'An authentication email was already sent. Check your inbox and spam folder. You can request a new link in a couple of minutes if it has not arrived.',
-                    ];
-                }
-                return $this->ptr_rotate_and_send_remote_auth_email(
+            if (in_array((string)$existing['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
+                return $this->ptr_rotate_and_issue_remote_auth(
                     $existing,
                     $studentId,
                     $cohortId,
@@ -503,7 +486,7 @@ trait CoursewareProgressionV2RemoteTrait
         ]);
         $authId = (int)$this->pdo->lastInsertId();
 
-        return $this->ptr_dispatch_remote_auth_email(
+        return $this->ptr_issue_remote_auth_session(
             $authId,
             $studentId,
             $cohortId,
@@ -515,7 +498,22 @@ trait CoursewareProgressionV2RemoteTrait
         );
     }
 
-    private function ptr_rotate_and_send_remote_auth_email(
+    private function ptr_pending_remote_auth_button(string $ptUrl): array
+    {
+        return [
+            'mode' => 'remote_request',
+            'label' => 'Open Authentication',
+            'button_class' => 'remote',
+            'disabled' => false,
+            'show_code_modal' => false,
+            'progress_test_url' => $ptUrl,
+            'message' => rsa_browser_auth_message('progress_test', false),
+            'auth_start_channel' => rsa_auth_start_channel(),
+            'code_delivery_channel' => rsa_code_delivery_channel(),
+        ];
+    }
+
+    private function ptr_rotate_and_issue_remote_auth(
         array $existing,
         int $studentId,
         int $cohortId,
@@ -548,7 +546,7 @@ trait CoursewareProgressionV2RemoteTrait
             $authId,
         ]);
 
-        return $this->ptr_dispatch_remote_auth_email(
+        return $this->ptr_issue_remote_auth_session(
             $authId,
             $studentId,
             $cohortId,
@@ -560,7 +558,7 @@ trait CoursewareProgressionV2RemoteTrait
         );
     }
 
-    private function ptr_dispatch_remote_auth_email(
+    private function ptr_issue_remote_auth_session(
         int $authId,
         int $studentId,
         int $cohortId,
@@ -571,7 +569,80 @@ trait CoursewareProgressionV2RemoteTrait
         bool $resent
     ): array {
         $authLink = ptr_app_base_url() . '/student/progress_test_auth.php?token=' . urlencode($rawToken);
+        $startChannel = rsa_auth_start_channel();
+        $delivery = rsa_remote_delivery_payload($authLink, [
+            'kind' => 'progress_test',
+            'authorization_id' => $authId,
+            'student_id' => $studentId,
+        ]);
 
+        $this->logProgressionEvent([
+            'user_id' => $studentId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'event_type' => 'progress_test',
+            'event_code' => $resent ? 'REMOTE_PROGRESS_TEST_AUTH_REISSUED' : 'REMOTE_PROGRESS_TEST_REQUESTED',
+            'event_status' => 'info',
+            'actor_type' => 'student',
+            'actor_user_id' => $studentId,
+            'payload' => [
+                'authorization_id' => $authId,
+                'resent' => $resent ? 1 : 0,
+                'auth_start_channel' => $startChannel,
+                'code_delivery_channel' => (string)$delivery['code_delivery_channel'],
+            ],
+            'legal_note' => $resent
+                ? 'Student reopened remote progress test authentication (token rotated).'
+                : 'Student requested remote progress test authorization (no attempt created).',
+        ]);
+
+        if ($startChannel === 'email') {
+            return array_merge($delivery, $this->ptr_dispatch_remote_auth_email(
+                $authId,
+                $studentId,
+                $cohortId,
+                $lessonId,
+                $authLink,
+                $expiresAt,
+                $titles,
+                $resent
+            ));
+        }
+
+        $this->logProgressionEvent([
+            'user_id' => $studentId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'event_type' => 'progress_test',
+            'event_code' => 'REMOTE_PROGRESS_TEST_AUTH_LINK_ISSUED',
+            'event_status' => 'info',
+            'actor_type' => 'system',
+            'payload' => [
+                'authorization_id' => $authId,
+                'auth_start_channel' => $startChannel,
+                'resent' => $resent ? 1 : 0,
+            ],
+            'legal_note' => 'Remote progress test authentication URL issued in-browser (email not sent).',
+        ]);
+
+        return array_merge($delivery, [
+            'ok' => true,
+            'authorization_id' => $authId,
+            'resent' => $resent,
+            'message' => rsa_browser_auth_message('progress_test', $resent),
+        ]);
+    }
+
+    private function ptr_dispatch_remote_auth_email(
+        int $authId,
+        int $studentId,
+        int $cohortId,
+        int $lessonId,
+        string $authLink,
+        string $expiresAt,
+        array $titles,
+        bool $resent
+    ): array {
         $stUser = $this->pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email) AS student_name, email FROM users WHERE id = ? LIMIT 1");
         $stUser->execute([$studentId]);
         $userRow = $stUser->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -595,21 +666,6 @@ trait CoursewareProgressionV2RemoteTrait
             'support_email' => ptr_support_email(),
             'authorization_id' => $authId,
         ];
-
-        $this->logProgressionEvent([
-            'user_id' => $studentId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'event_type' => 'progress_test',
-            'event_code' => $resent ? 'REMOTE_PROGRESS_TEST_EMAIL_RESENT' : 'REMOTE_PROGRESS_TEST_REQUESTED',
-            'event_status' => 'info',
-            'actor_type' => 'student',
-            'actor_user_id' => $studentId,
-            'payload' => ['authorization_id' => $authId, 'resent' => $resent ? 1 : 0],
-            'legal_note' => $resent
-                ? 'Student requested a new remote progress test authentication email (token rotated).'
-                : 'Student requested remote progress test authorization (no attempt created).',
-        ]);
 
         $automationResult = $this->dispatchAutomationEventIfAvailable(
             'remote_progress_test_requested',
@@ -668,9 +724,10 @@ trait CoursewareProgressionV2RemoteTrait
             'ok' => true,
             'authorization_id' => $authId,
             'resent' => $resent,
+            'open_auth_in_browser' => false,
             'message' => $resent
-                ? 'A new authentication email was sent. Check your inbox and spam folder for the link.'
-                : 'Your progress test request was received. You will receive an email with your authentication link in a few moments. Check your inbox and spam folder.',
+                ? 'Authentication reopened. Complete photo and password verification, then check the IPCA app for your Progress Test Code.'
+                : 'Complete photo and password verification, then check the IPCA app for your Progress Test Code.',
         ];
     }
 
@@ -755,13 +812,25 @@ trait CoursewareProgressionV2RemoteTrait
             ]);
         }
 
-        return [
-            'ok' => true,
-            'authorization_id' => (int)$auth['id'],
-            'progress_test_code' => $code,
-            'cohort_id' => (int)$auth['cohort_id'],
-            'lesson_id' => (int)$auth['lesson_id'],
-        ];
+        return rsa_with_code_delivery_fields(
+            [
+                'ok' => true,
+                'authorization_id' => (int)$auth['id'],
+                'cohort_id' => (int)$auth['cohort_id'],
+                'lesson_id' => (int)$auth['lesson_id'],
+            ],
+            $code,
+            'progress_test_code',
+            [
+                'kind' => 'progress_test',
+                'authorization_id' => (int)$auth['id'],
+                'student_id' => $studentId,
+                'cohort_id' => (int)$auth['cohort_id'],
+                'lesson_id' => (int)$auth['lesson_id'],
+                'pdo' => $this->pdo,
+                'expires_at' => (string)($auth['expires_at'] ?? ''),
+            ]
+        );
     }
 
     public function verifyRemoteProgressTestCodeAndStartAttempt(int $studentId, int $cohortId, int $lessonId, string $code, string $cookieHeader = ''): array
@@ -841,6 +910,7 @@ trait CoursewareProgressionV2RemoteTrait
                 updated_at = UTC_TIMESTAMP()
             WHERE id = ?
         ")->execute([$testId, $testId, (int)$auth['id']]);
+        rsa_consume_app_code($this->pdo, $studentId, 'progress_test', (int)$auth['id']);
 
         $this->logProgressionEvent([
             'user_id' => $studentId,

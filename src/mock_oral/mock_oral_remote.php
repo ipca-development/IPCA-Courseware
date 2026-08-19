@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../remote_session_auth/remote_session_auth_delivery.php';
+
 function mo_remote_auth_email_html(): string
 {
     return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0; padding:0; width:100%; background-color:#f3f6fb;"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:600px; margin:0 auto;"><tr><td style="padding:0;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; background:linear-gradient(180deg,#122b4a 0%,#1a3a63 100%); border-radius:18px 18px 0 0;"><tr><td align="center" style="padding:28px 24px;"><img src="https://ipca.training/assets/logo/ipca_logo_white.png" alt="IPCA" style="display:block; width:150px; max-width:100%; height:auto;"></td></tr></table><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; background-color:#ffffff; border-left:1px solid #e5e7eb; border-right:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb; border-radius:0 0 18px 18px;"><tr><td style="padding:32px 28px; font-family:Arial,Helvetica,sans-serif; color:#1f2937;"><div style="font-size:22px; font-weight:700; color:#111827; margin-bottom:18px;">Mock Oral Exam Authentication</div><div style="font-size:15px; line-height:24px; color:#374151; margin-bottom:22px;">Dear {{student_name}},<br><br>You requested mock oral exam authentication for <strong>{{area_title}}</strong>.<br><br>Use the secure link below to verify your identity with a live photo and your account password. You will receive a Mock Oral Code to enter on the mock oral page before your session is prepared.<br><br>This link expires at <strong>{{expires_at}}</strong>.</div><table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:#1a3a63; border-radius:10px;"><a href="{{auth_link}}" style="display:inline-block; padding:14px 22px; font-family:Arial,Helvetica,sans-serif; font-size:14px; font-weight:700; color:#ffffff; text-decoration:none;">Open Authentication Page</a></td></tr></table><div style="margin-top:22px; font-size:14px; line-height:22px; color:#6b7280;">If you did not request this email, contact <a href="mailto:{{support_email}}" style="color:#1a3a63; text-decoration:none;">{{support_email}}</a>.</div><div style="margin-top:28px; font-size:15px; line-height:24px; color:#374151;">Best regards,<br><strong style="color:#111827;">Kay Vereeken</strong><br>Head of Training</div></td></tr></table></td></tr></table></td></tr></table>';
@@ -99,14 +101,15 @@ function mo_ensure_remote_email_automation(PDO $pdo): void
     $flowSt = $pdo->prepare("SELECT id FROM automation_flows WHERE event_key = 'mock_oral_auth_requested' LIMIT 1");
     $flowSt->execute();
     $flowId = (int)$flowSt->fetchColumn();
+    $emailActive = rsa_auth_start_channel() === 'email' ? 1 : 0;
     if ($flowId <= 0) {
         $pdo->prepare("
             INSERT INTO automation_flows (name, description, event_key, is_active, priority, created_at, updated_at)
-            VALUES ('Theory — Mock oral auth email', 'send_email → mock_oral_auth_request', 'mock_oral_auth_requested', 1, 10, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-        ")->execute();
+            VALUES ('Theory — Mock oral auth email', 'send_email → mock_oral_auth_request', 'mock_oral_auth_requested', ?, 10, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+        ")->execute([$emailActive]);
         $flowId = (int)$pdo->lastInsertId();
     } else {
-        $pdo->prepare('UPDATE automation_flows SET is_active = 1, updated_at = UTC_TIMESTAMP() WHERE id = ?')->execute([$flowId]);
+        $pdo->prepare('UPDATE automation_flows SET is_active = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?')->execute([$emailActive, $flowId]);
     }
 
     if ($flowId > 0) {

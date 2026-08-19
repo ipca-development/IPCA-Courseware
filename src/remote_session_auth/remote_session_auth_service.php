@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/remote_session_auth_constants.php';
+require_once __DIR__ . '/remote_session_auth_delivery.php';
 
 /**
  * Shared remote session authentication helpers (interface-first layer).
@@ -51,11 +52,21 @@ final class RemoteSessionAuthService
 
         $updateAuthAuthenticated($authId, $codeHash, $photo['path'], $photo['hash']);
 
-        return [
-            'ok' => true,
-            'verification_code' => $code,
-            'authorization_id' => $authId,
-        ];
+        return rsa_with_code_delivery_fields(
+            [
+                'ok' => true,
+                'authorization_id' => $authId,
+            ],
+            $code,
+            'verification_code',
+            [
+                'kind' => 'mock_oral',
+                'authorization_id' => $authId,
+                'student_id' => $studentId,
+                'pdo' => $pdo,
+                'expires_at' => (string)($authRow['expires_at'] ?? ''),
+            ]
+        );
     }
 
     public static function verifyCode(

@@ -9,6 +9,7 @@ require_once __DIR__ . '/ConversationalOrchestrator.php';
 require_once __DIR__ . '/MockOralDebriefService.php';
 require_once __DIR__ . '/../remote_session_auth/remote_session_auth_service.php';
 require_once __DIR__ . '/../remote_session_auth/remote_session_auth_constants.php';
+require_once __DIR__ . '/../remote_session_auth/remote_session_auth_delivery.php';
 
 function mo_photo_storage_dir(): string
 {

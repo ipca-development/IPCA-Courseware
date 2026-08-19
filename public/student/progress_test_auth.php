@@ -148,10 +148,13 @@ cw_header('Remote Progress Test Authentication');
       </div>
 
       <div id="ptrCodeBlock" style="display:none;">
-        <div class="ptr-warn">
+        <div class="ptr-warn" id="ptrCodeWarn">
           Copy your Progress Test Code now. It is shown <strong>only once</strong> and cannot be retrieved later.
           Switch back to your <strong>existing course page tab</strong> (do not open a new one), click
           <strong>Enter Progress Test Code</strong>, paste the code, then wait on the course page while your test is prepared.
+        </div>
+        <div class="ptr-warn" id="ptrAppCodeWarn" style="display:none;">
+          Your Progress Test Code was sent to the <strong>IPCA app</strong>. Check the app, write the code down, then enter it on your course page.
         </div>
         <div class="ptr-code-box">
           <div class="ptr-muted" style="margin-top:0;">Your Progress Test Code</div>
@@ -232,7 +235,21 @@ cw_header('Remote Progress Test Authentication');
         }
         document.getElementById('ptrFormBlock').style.display = 'none';
         document.getElementById('ptrCodeBlock').style.display = 'block';
-        document.getElementById('ptrCodeValue').textContent = String(j.progress_test_code || '');
+        var showOnPage = j.show_code_on_page !== false && String(j.progress_test_code || '') !== '';
+        var pageWarn = document.getElementById('ptrCodeWarn');
+        var appWarn = document.getElementById('ptrAppCodeWarn');
+        var copyBtn = document.getElementById('ptrCopyBtn');
+        if (showOnPage) {
+          document.getElementById('ptrCodeValue').textContent = String(j.progress_test_code || '');
+          if (pageWarn) pageWarn.style.display = '';
+          if (appWarn) appWarn.style.display = 'none';
+          if (copyBtn) copyBtn.style.display = '';
+        } else {
+          document.getElementById('ptrCodeValue').textContent = 'In app';
+          if (pageWarn) pageWarn.style.display = 'none';
+          if (appWarn) appWarn.style.display = 'block';
+          if (copyBtn) copyBtn.style.display = 'none';
+        }
         if (video.srcObject) {
           video.srcObject.getTracks().forEach(function (t) { t.stop(); });
         }

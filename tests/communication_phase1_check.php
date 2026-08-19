@@ -1141,6 +1141,28 @@ comm_assert('system message endpoint exists', is_file($root . '/public/api/commu
 comm_assert('acknowledgement endpoint exists', is_file($root . '/public/api/communication/acknowledgements.php'));
 comm_assert('Needs Attention endpoint exists', is_file($root . '/public/api/communication/actions.php'));
 comm_assert('training endpoint exists', is_file($root . '/public/api/communication/training.php'));
+comm_assert('remote session code endpoint exists', is_file($root . '/public/api/communication/remote_session_code.php'));
+$remoteCodePhp = (string)file_get_contents($root . '/public/api/communication/remote_session_code.php');
+$pushSrc = (string)file_get_contents($root . '/src/communication/CommunicationPushService.php');
+$trainingSrc = (string)file_get_contents($root . '/src/communication/CommunicationTrainingService.php');
+comm_assert(
+    'remote session code API requires an app session and never logs digits',
+    str_contains($remoteCodePhp, 'requireSession()')
+    && str_contains($remoteCodePhp, 'RemoteSessionAppCodeService')
+    && !str_contains($remoteCodePhp, 'code_plaintext')
+);
+comm_assert(
+    'Progress Test Code APNs uses code_id only',
+    str_contains($pushSrc, 'notifyRemoteSessionCode(')
+    && str_contains($pushSrc, "'type' => 'remote_session_code'")
+    && str_contains($pushSrc, "'code_id' => \$codeUuid")
+    && str_contains($pushSrc, 'Open IPCA to view it.')
+);
+comm_assert(
+    'Training Needs Attention can open a remote session code',
+    str_contains($trainingSrc, "'source' => 'remote_session_code'")
+    || str_contains($trainingSrc, 'pendingTrainingActions')
+);
 $phase5Sql = (string)file_get_contents($root . '/scripts/sql/2026_08_14_communication_phase5_training.sql');
 comm_assert('phase 5 SQL enables the Training companion flag', str_contains($phase5Sql, 'training_enabled'));
 comm_assert('community endpoint exists', is_file($root . '/public/api/communication/community.php'));
@@ -2403,6 +2425,15 @@ if ($iosApp === '') {
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIClient.swift'), 'change_password')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/PasswordResetView.swift'), 'Paste token')
         && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Info.plist'), 'profile photo')
+    );
+    comm_assert(
+        'iOS reveals remote Progress Test codes in-session from code_id only',
+        is_file($root . '/ipca-app-ios/IPCA/Views/RemoteSessionCodeView.swift')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Networking/APIClient.swift'), 'remote_session_code.php')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/App/AppDelegate.swift'), 'type == "remote_session_code"')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/App/AppSession.swift'), 'host == "code"')
+        && str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/Views/TrainingView.swift'), 'openRemoteSessionCode')
+        && !str_contains((string)file_get_contents($root . '/ipca-app-ios/IPCA/App/AppDelegate.swift'), 'userInfo["code"]')
     );
 }
 

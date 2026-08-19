@@ -25,12 +25,23 @@
   function showRequestToast(message) {
     var toast = document.getElementById('moRemoteRequestToast');
     if (!toast) return;
-    toast.textContent = message || 'Your mock oral request was received. Check your email for the authentication link in a few moments.';
+    toast.textContent = message || 'Complete photo and password verification, then check the IPCA app for your Mock Oral Code.';
     toast.classList.add('show');
     if (toast._hideTimer) window.clearTimeout(toast._hideTimer);
     toast._hideTimer = window.setTimeout(function () {
       toast.classList.remove('show');
     }, 5000);
+  }
+
+  function openRemoteAuthSession(authUrl) {
+    if (!authUrl) return 'missing';
+    var opened = window.open(authUrl, 'ipca_mo_remote_auth');
+    if (!opened) {
+      window.location.assign(authUrl);
+      return 'same_tab';
+    }
+    try { opened.focus(); } catch (e) {}
+    return 'new_tab';
   }
 
   document.querySelectorAll('.moe-remote-request-btn').forEach(function (btn) {
@@ -41,6 +52,14 @@
       postJson(apiBase + '/mock_oral_remote_request.php', { cohort_id: cohortId, area_id: areaId })
         .then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Unable to submit request');
+          if (res.open_auth_in_browser && res.auth_url) {
+            var opened = openRemoteAuthSession(String(res.auth_url));
+            showRequestToast(res.message);
+            if (opened === 'new_tab') {
+              window.setTimeout(function () { window.location.reload(); }, 400);
+            }
+            return;
+          }
           showRequestToast(res.message);
           window.setTimeout(function () { window.location.reload(); }, 1200);
         })

@@ -90,7 +90,7 @@ cw_header('Mock Oral Exam Preparation');
                   </div>
                   <div class="moe-prep-label <?= mo_h((string)($prep['class'] ?? 'info')) ?>"><?= mo_h((string)($prep['label'] ?? 'Preparing your Mock Oral Exam Session…')) ?></div>
                 </div>
-              <?php elseif ($mode === 'remote_request'): ?>
+              <?php elseif ($mode === 'remote_request' || ($mode === 'remote_auth_pending' && empty($state['disabled']))): ?>
                 <button type="button" class="app-btn app-btn-secondary moe-remote-request-btn" data-area-id="<?= (int)$area['id'] ?>"><?= mo_h((string)$state['label']) ?></button>
               <?php elseif ($mode === 'remote_code_entry'): ?>
                 <button type="button" class="app-btn app-btn-primary moe-code-btn" data-area-id="<?= (int)$area['id'] ?>" data-auto-open-remote-code="<?= $autoOpenCodeModal ? '1' : '0' ?>"><?= mo_h((string)$state['label']) ?></button>
@@ -130,6 +130,6 @@ window.MOCK_ORAL_HUB = {
   apiBase: '/student/api'
 };
 </script>
-<script src="/assets/mock_oral_hub.js?v=3"></script>
+<script src="/assets/mock_oral_hub.js?v=4"></script>
 
 <?php cw_footer(); ?>

@@ -113,7 +113,8 @@ cw_header('Mock Oral Authentication');
         <div class="ptr-error" id="ptrError" style="display:none;"></div>
       </div>
       <div id="ptrCodeBlock" style="display:none;">
-        <div class="ptr-warn">Copy your Mock Oral Code now. It is shown only once.</div>
+        <div class="ptr-warn" id="ptrCodeWarn">Copy your Mock Oral Code now. It is shown only once.</div>
+        <div class="ptr-warn" id="ptrAppCodeWarn" style="display:none;">Your Mock Oral Code was sent to the IPCA app. Check the app, then enter it on the mock oral page.</div>
         <div class="ptr-code-box"><div class="ptr-muted">Your Mock Oral Code</div><div class="ptr-code" id="ptrCodeValue"></div></div>
         <div class="ptr-actions"><button type="button" class="ptr-btn primary" id="ptrCopyBtn">Copy code</button></div>
         <div class="ptr-copy-ok" id="ptrCopyOk">Code copied.</div>
@@ -159,7 +160,21 @@ cw_header('Mock Oral Authentication');
         if (!j || !j.ok) throw new Error(j.error||'Verification failed');
         document.getElementById('ptrFormBlock').style.display='none';
         document.getElementById('ptrCodeBlock').style.display='block';
-        document.getElementById('ptrCodeValue').textContent=String(j.verification_code||'');
+        var showOnPage = j.show_code_on_page !== false && String(j.verification_code||'') !== '';
+        var pageWarn = document.getElementById('ptrCodeWarn');
+        var appWarn = document.getElementById('ptrAppCodeWarn');
+        var copyBtn = document.getElementById('ptrCopyBtn');
+        if (showOnPage) {
+          document.getElementById('ptrCodeValue').textContent=String(j.verification_code||'');
+          if (pageWarn) pageWarn.style.display='';
+          if (appWarn) appWarn.style.display='none';
+          if (copyBtn) copyBtn.style.display='';
+        } else {
+          document.getElementById('ptrCodeValue').textContent='In app';
+          if (pageWarn) pageWarn.style.display='none';
+          if (appWarn) appWarn.style.display='block';
+          if (copyBtn) copyBtn.style.display='none';
+        }
         if (video.srcObject) video.srcObject.getTracks().forEach(function(t){ t.stop(); });
         (function notifyMockOralHubAuthComplete() {
           var payload = {

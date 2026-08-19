@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/progress_test_access.php';
+require_once __DIR__ . '/remote_session_auth/remote_session_auth_delivery.php';
 
 const PTR_AUTH_TTL_MINUTES = 240;
 const PTR_RESEND_COOLDOWN_SECONDS = 120;
@@ -135,14 +136,15 @@ function ptr_ensure_remote_email_automation(PDO $pdo): void
     $flowSt = $pdo->prepare("SELECT id FROM automation_flows WHERE event_key = 'remote_progress_test_requested' LIMIT 1");
     $flowSt->execute();
     $flowId = (int)$flowSt->fetchColumn();
+    $emailActive = rsa_auth_start_channel() === 'email' ? 1 : 0;
     if ($flowId <= 0) {
         $pdo->prepare("
             INSERT INTO automation_flows (name, description, event_key, is_active, priority, created_at, updated_at)
-            VALUES ('Theory — Remote progress test auth email', 'send_email → remote_progress_test_auth_request', 'remote_progress_test_requested', 1, 10, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-        ")->execute();
+            VALUES ('Theory — Remote progress test auth email', 'send_email → remote_progress_test_auth_request', 'remote_progress_test_requested', ?, 10, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+        ")->execute([$emailActive]);
         $flowId = (int)$pdo->lastInsertId();
     } else {
-        $pdo->prepare("UPDATE automation_flows SET is_active = 1, updated_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$flowId]);
+        $pdo->prepare("UPDATE automation_flows SET is_active = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$emailActive, $flowId]);
     }
 
     if ($flowId > 0) {

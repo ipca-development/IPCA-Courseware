@@ -2113,7 +2113,8 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
                           <?php elseif ($showRemoteRequestButton): ?>
                             <button type="button" class="action-btn remote pt-remote-request"
                               data-cohort-id="<?= (int)$cohortId ?>"
-                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></button>
+                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"
+                              data-user-id="<?= (int)$userId ?>"><?= h($testLabel) ?></button>
                           <?php elseif ($showCodeModalButton): ?>
                             <button type="button" class="action-btn primary pt-remote-code-open"
                               data-cohort-id="<?= (int)$cohortId ?>"
@@ -2356,7 +2357,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
   function showRemoteRequestToast(message) {
     var toast = document.getElementById('ptRemoteRequestToast');
     if (!toast) return;
-    toast.textContent = message || 'Your progress test request was received. Check your email for the authentication link in a few moments.';
+    toast.textContent = message || 'Complete photo and password verification, then check the IPCA app for your Progress Test Code.';
     toast.classList.add('show');
     if (toast._hideTimer) {
       window.clearTimeout(toast._hideTimer);
@@ -2366,17 +2367,31 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     }, 5000);
   }
 
+  function openRemoteAuthSession(authUrl) {
+    if (!authUrl) return 'missing';
+    var opened = window.open(authUrl, 'ipca_pt_remote_auth');
+    if (!opened) {
+      window.location.assign(authUrl);
+      return 'same_tab';
+    }
+    try { opened.focus(); } catch (e) {}
+    return 'new_tab';
+  }
+
   document.querySelectorAll('.pt-remote-request').forEach(function (btn) {
     btn.addEventListener('click', function () {
       if (btn.disabled) return;
       btn.disabled = true;
       var cohortId = parseInt(btn.getAttribute('data-cohort-id') || '0', 10);
       var lessonId = parseInt(btn.getAttribute('data-lesson-id') || '0', 10);
+      var userId = parseInt(btn.getAttribute('data-user-id') || '0', 10);
+      var payload = { cohort_id: cohortId, lesson_id: lessonId };
+      if (userId > 0) payload.user_id = userId;
       fetch('/student/api/progress_test_remote_request.php', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cohort_id: cohortId, lesson_id: lessonId })
+        body: JSON.stringify(payload)
       })
         .then(function (res) { return res.json(); })
         .then(function (j) {
@@ -2385,7 +2400,16 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
             alert(j && j.error ? j.error : 'Could not submit request.');
             return;
           }
-          showRemoteRequestToast(j.message || 'Your progress test request was received. Check your email for the authentication link in a few moments.');
+          if (j.open_auth_in_browser && j.auth_url) {
+            var opened = openRemoteAuthSession(String(j.auth_url));
+            showRemoteRequestToast(j.message || 'Complete photo and password verification, then check the IPCA app for your Progress Test Code.');
+            if (opened === 'new_tab') {
+              window.setTimeout(function () { window.location.reload(); }, 400);
+            }
+            return;
+          }
+          showRemoteRequestToast(j.message || 'Check the IPCA app for your Progress Test Code.');
+          window.setTimeout(function () { window.location.reload(); }, 1200);
         })
         .catch(function () {
           btn.disabled = false;

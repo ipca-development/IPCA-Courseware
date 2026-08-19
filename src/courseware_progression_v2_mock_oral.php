@@ -200,13 +200,7 @@ trait CoursewareProgressionV2MockOralTrait
         }
 
         if ($auth && in_array((string)$auth['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
-            return [
-                'mode' => 'remote_auth_pending',
-                'label' => 'Check your email',
-                'button_class' => 'remote',
-                'disabled' => true,
-                'message' => 'Open the authentication link in your email to receive your Mock Oral Code.',
-            ];
+            return $this->mo_pending_remote_auth_button();
         }
 
         return [
@@ -241,12 +235,18 @@ trait CoursewareProgressionV2MockOralTrait
                 throw new RuntimeException('You already completed authentication. Click Enter Mock Oral Code on the mock oral page.');
             }
             if (in_array((string)$existing['status'], ['REQUESTED', 'EMAIL_SENT'], true)) {
-                return [
-                    'ok' => true,
-                    'reused' => true,
-                    'authorization_id' => (int)$existing['id'],
-                    'message' => 'An active authentication request already exists. Check your email for the link.',
-                ];
+                $rawToken = $this->mo_reissue_auth_token((int)$existing['id']);
+                $expiresAt = (string)($existing['expires_at'] ?? gmdate('Y-m-d H:i:s', time() + (RSA_AUTH_TTL_MINUTES * 60)));
+                return $this->mo_issue_remote_auth_session(
+                    (int)$existing['id'],
+                    $studentId,
+                    $cohortId,
+                    $areaId,
+                    (string)$area['title'],
+                    $rawToken,
+                    $expiresAt,
+                    true
+                );
             }
             $this->pdo->prepare('DELETE FROM mock_oral_remote_authorizations WHERE id = ?')->execute([(int)$existing['id']]);
         }
@@ -277,8 +277,100 @@ trait CoursewareProgressionV2MockOralTrait
             rsa_user_agent_hash() ?: null,
         ]);
         $authId = (int)$this->pdo->lastInsertId();
-        $authLink = mo_app_base_url() . '/student/mock_oral_auth.php?token=' . urlencode($rawToken);
 
+        return $this->mo_issue_remote_auth_session(
+            $authId,
+            $studentId,
+            $cohortId,
+            $areaId,
+            (string)$area['title'],
+            $rawToken,
+            $expiresAt,
+            false
+        );
+    }
+
+    private function mo_pending_remote_auth_button(): array
+    {
+        return [
+            'mode' => 'remote_request',
+            'label' => 'Open Authentication',
+            'button_class' => 'remote',
+            'disabled' => false,
+            'message' => rsa_browser_auth_message('mock_oral', false),
+            'auth_start_channel' => rsa_auth_start_channel(),
+            'code_delivery_channel' => rsa_code_delivery_channel(),
+        ];
+    }
+
+    private function mo_issue_remote_auth_session(
+        int $authId,
+        int $studentId,
+        int $cohortId,
+        int $areaId,
+        string $areaTitle,
+        string $rawToken,
+        string $expiresAt,
+        bool $resent
+    ): array {
+        $authLink = mo_app_base_url() . '/student/mock_oral_auth.php?token=' . urlencode($rawToken);
+        $startChannel = rsa_auth_start_channel();
+        $delivery = rsa_remote_delivery_payload($authLink, [
+            'kind' => 'mock_oral',
+            'authorization_id' => $authId,
+            'student_id' => $studentId,
+        ]);
+
+        $this->logProgressionEvent([
+            'user_id' => $studentId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => 0,
+            'event_type' => 'mock_oral',
+            'event_code' => $resent ? 'MOCK_ORAL_AUTH_REISSUED' : 'MOCK_ORAL_AUTH_REQUESTED',
+            'event_status' => 'info',
+            'actor_type' => 'student',
+            'actor_user_id' => $studentId,
+            'payload' => [
+                'authorization_id' => $authId,
+                'area_id' => $areaId,
+                'auth_start_channel' => $startChannel,
+                'code_delivery_channel' => (string)$delivery['code_delivery_channel'],
+                'resent' => $resent ? 1 : 0,
+            ],
+            'legal_note' => $resent
+                ? 'Student reopened mock oral authentication (token rotated).'
+                : 'Student requested mock oral authentication (no session created).',
+        ]);
+
+        if ($startChannel === 'email') {
+            return array_merge($delivery, $this->mo_dispatch_remote_auth_email(
+                $authId,
+                $studentId,
+                $cohortId,
+                $areaId,
+                $areaTitle,
+                $authLink,
+                $expiresAt
+            ));
+        }
+
+        return array_merge($delivery, [
+            'ok' => true,
+            'authorization_id' => $authId,
+            'resent' => $resent,
+            'message' => rsa_browser_auth_message('mock_oral', $resent),
+        ]);
+    }
+
+    private function mo_dispatch_remote_auth_email(
+        int $authId,
+        int $studentId,
+        int $cohortId,
+        int $areaId,
+        string $areaTitle,
+        string $authLink,
+        string $expiresAt
+    ): array {
         $stUser = $this->pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email) AS student_name, email FROM users WHERE id = ? LIMIT 1");
         $stUser->execute([$studentId]);
         $userRow = $stUser->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -295,25 +387,12 @@ trait CoursewareProgressionV2MockOralTrait
             'area_id' => $areaId,
             'student_name' => (string)($userRow['student_name'] ?? 'Student'),
             'student_email' => $studentEmail,
-            'area_title' => (string)$area['title'],
+            'area_title' => $areaTitle,
             'auth_link' => $authLink,
             'expires_at' => $expiresAt,
             'support_email' => mo_support_email(),
             'authorization_id' => $authId,
         ];
-
-        $this->logProgressionEvent([
-            'user_id' => $studentId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => 0,
-            'event_type' => 'mock_oral',
-            'event_code' => 'MOCK_ORAL_AUTH_REQUESTED',
-            'event_status' => 'info',
-            'actor_type' => 'student',
-            'actor_user_id' => $studentId,
-            'payload' => ['authorization_id' => $authId, 'area_id' => $areaId],
-            'legal_note' => 'Student requested mock oral authentication (no session created).',
-        ]);
 
         $automationResult = $this->dispatchAutomationEventIfAvailable(
             'mock_oral_auth_requested',
@@ -349,7 +428,12 @@ trait CoursewareProgressionV2MockOralTrait
         $this->pdo->prepare("UPDATE mock_oral_remote_authorizations SET status = 'EMAIL_SENT', updated_at = UTC_TIMESTAMP() WHERE id = ?")
             ->execute([$authId]);
 
-        return ['ok' => true, 'authorization_id' => $authId, 'message' => 'Your mock oral request was received. Check your email for the authentication link in a few moments.'];
+        return [
+            'ok' => true,
+            'authorization_id' => $authId,
+            'open_auth_in_browser' => false,
+            'message' => 'Complete photo and password verification, then check the IPCA app for your Mock Oral Code.',
+        ];
     }
 
     public function loadMockOralAuthorizationByToken(string $rawToken): ?array
@@ -460,6 +544,7 @@ trait CoursewareProgressionV2MockOralTrait
                         updated_at = UTC_TIMESTAMP()
                     WHERE id = ?
                 ")->execute([(int)$session['session_id'], $verifyAuthId]);
+                rsa_consume_app_code($this->pdo, $studentId, 'mock_oral', $verifyAuthId);
 
                 mo_prep_schedule_mock_oral(
                     $this->pdo,
@@ -602,7 +687,7 @@ trait CoursewareProgressionV2MockOralTrait
         $rawToken = rsa_generate_token();
         $this->pdo->prepare('
             UPDATE mock_oral_remote_authorizations
-            SET request_token_hash = ?, status = \'EMAIL_SENT\', updated_at = UTC_TIMESTAMP()
+            SET request_token_hash = ?, status = \'REQUESTED\', updated_at = UTC_TIMESTAMP()
             WHERE id = ?
         ')->execute([rsa_hash($rawToken), $authId]);
 
