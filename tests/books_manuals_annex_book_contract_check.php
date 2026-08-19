@@ -21,6 +21,8 @@ $editorApi = (string)file_get_contents($root . '/public/admin/api/controlled_boo
 $annexApi = (string)file_get_contents($root . '/public/admin/api/controlled_book_annex_api.php');
 $annexManager = (string)file_get_contents($root . '/public/admin/compliance/controlled_book_annexes.php');
 $annexPage = (string)file_get_contents($root . '/public/admin/books_manuals/annexes.php');
+$editorPage = (string)file_get_contents($root . '/public/admin/compliance/controlled_book_editor.php');
+$editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
 $migration = (string)file_get_contents($root . '/src/publishing/BooksManualsAnnexMigrationService.php');
 $sql = (string)file_get_contents($root . '/scripts/sql/2026_08_18_annex_book_structure.sql');
 $apply = (string)file_get_contents($root . '/scripts/apply_annex_book_structure.php');
@@ -151,6 +153,26 @@ annex_book_assert(
         && str_contains($annex, 'function captureAnnexSnapshot')
 );
 annex_book_assert(
+    'Manage Annexes uses compact actions and content symbols',
+    str_contains($annexManager, 'cp-annex-list-table')
+        && str_contains($annexManager, 'cp-annex-row-actions')
+        && str_contains($annexManager, 'contentModeSymbol')
+        && str_contains($annexManager, 'orientationSymbol')
+        && !str_contains($annexManager, 'white-space:nowrap')
+);
+annex_book_assert(
+    'Annex Editor keeps editable toolbars and omits outline controls',
+    str_contains($editorPage, 'data-annex-book=')
+        && str_contains($editorPage, 'if (!$isAnnexBook)')
+        && str_contains($editorApi, "'is_annex_book' => BooksManualsAnnexBookService::isAnnexBookVersion(\$version)")
+        && str_contains($editorJs, '(isReleased && !isAnnexBook)')
+        && str_contains($editorJs, "documentType !== 'form' && !isAnnexBook")
+);
+annex_book_assert(
+    'Governance action is removed from the controlled editor',
+    !str_contains($editorPage, "'label' => 'Governance'")
+);
+annex_book_assert(
     'annex revision snapshots are additive',
     str_contains($sql, 'ipca_publishing_annex_revisions')
         && str_contains((string)file_get_contents($root . '/scripts/sql/2026_08_18_annex_revision_snapshots.sql'), 'snapshot_json')
@@ -167,6 +189,9 @@ annex_book_assert(
         && str_contains($foundation, 'ensureAnnexBookPageMapApproved')
         && str_contains($foundation, 'ensureAnnexBookReleaseBaseline')
         && str_contains($foundation, "'annex_book_authored_publication'")
+        && str_contains($foundation, "\$version['released_at'] = \$releaseAt")
+        && str_contains($foundation, 'released_at = :released_at')
+        && str_contains($foundation, "':released_at' => \$releaseAt")
         && str_contains($reader, 'function ensureAnnexBookPageMapApproved')
         && str_contains($annexBook, 'function allowsReleasedEdits')
         && str_contains($annexPage, 'name="action" value="transition"')

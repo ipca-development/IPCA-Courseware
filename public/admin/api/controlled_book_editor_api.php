@@ -907,6 +907,7 @@ function cp_editor_handle_load(
             'book_title' => (string)($version['book_title'] ?? ''),
             'version_label' => (string)$version['version_label'],
             'lifecycle_status' => (string)$version['lifecycle_status'],
+            'is_annex_book' => BooksManualsAnnexBookService::isAnnexBookVersion($version),
         ),
         'section_id' => $sectionId,
         'section' => $section,

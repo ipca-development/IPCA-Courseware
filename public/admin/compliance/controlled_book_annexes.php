@@ -82,6 +82,55 @@ compliance_page_open(array(
   <?php endif; ?>
   <div id="cp-annex-status" style="margin-top:16px;font-size:13px;color:#334155;"></div>
 </section>
+<style>
+  #cp-annex-manager .cp-annex-list-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
+  }
+  #cp-annex-manager .cp-annex-list-table th,
+  #cp-annex-manager .cp-annex-list-table td {
+    padding: 8px 6px;
+    vertical-align: top;
+  }
+  #cp-annex-manager .cp-annex-list-table th:nth-child(1) { width: 46px; }
+  #cp-annex-manager .cp-annex-list-table th:nth-child(3) { width: 54px; }
+  #cp-annex-manager .cp-annex-list-table th:nth-child(4) { width: 92px; }
+  #cp-annex-manager .cp-annex-list-table th:nth-child(5),
+  #cp-annex-manager .cp-annex-list-table th:nth-child(6) { width: 44px; text-align: center; }
+  #cp-annex-manager .cp-annex-list-table th:last-child { width: 214px; }
+  #cp-annex-manager .cp-annex-icon-cell { text-align: center; }
+  #cp-annex-manager .cp-annex-symbol {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    color: #475569;
+  }
+  #cp-annex-manager .cp-annex-symbol svg { width: 20px; height: 20px; }
+  #cp-annex-manager .cp-annex-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: center;
+  }
+  #cp-annex-manager .cp-annex-row-actions .app-btn {
+    min-height: 30px;
+    height: 30px;
+    padding: 0 9px;
+    margin: 0;
+    font-size: 12px;
+    line-height: 28px;
+  }
+  #cp-annex-revert-modal .cp-annex-revert-apply {
+    min-height: 30px;
+    height: 30px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+</style>
 
 <?php if ($canEdit): ?>
 <dialog class="compliance-modal" id="cp-annex-create-modal">
@@ -241,35 +290,56 @@ compliance_page_open(array(
     if (docxWrap) docxWrap.style.display = mode === 'docx' ? 'block' : 'none';
   }
 
+  function contentModeSymbol(mode) {
+    var normalized = String(mode || 'empty').toLowerCase();
+    var label = normalized === 'docx' ? 'Word DOCX' : (normalized === 'image' ? 'Image' : 'Editor content');
+    var svg = normalized === 'docx'
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.75h8l4 4V21.25H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M14 2.75v4h4M8.5 11l1.2 5 1.3-3.6 1.3 3.6 1.2-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      : (normalized === 'image'
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="9" r="1.5" fill="currentColor"/><path d="m5 17 4.5-4 3 2.5 2.5-2 4 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h14v17H5zM8 8h8M8 12h8M8 16h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>');
+    return '<span class="cp-annex-symbol" role="img" aria-label="' + label + '" title="' + label + '">' + svg + '</span>';
+  }
+
+  function orientationSymbol(orientation) {
+    var landscape = String(orientation || 'portrait').toLowerCase() === 'landscape';
+    var label = landscape ? 'Landscape' : 'Portrait';
+    var rect = landscape
+      ? '<rect x="2.75" y="6.25" width="18.5" height="11.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/>'
+      : '<rect x="6.25" y="2.75" width="11.5" height="18.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/>';
+    return '<span class="cp-annex-symbol" role="img" aria-label="' + label + '" title="' + label + '"><svg viewBox="0 0 24 24" aria-hidden="true">' + rect + '</svg></span>';
+  }
+
   function renderList(annexes) {
     if (!listEl) return;
     if (!annexes || !annexes.length) {
       listEl.innerHTML = '<p style="margin:0;color:#64748b;">No annexes yet. Use + New Annex to add one.</p>';
       return;
     }
-    var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0;">'
-      + '<th style="padding:8px 6px;">Nr</th><th>Title</th><th>Rev</th><th>Date</th><th>Mode</th><th></th></tr></thead><tbody>';
+    var html = '<table class="cp-annex-list-table"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0;">'
+      + '<th>Nr</th><th>Title</th><th>Rev</th><th>Date</th><th title="Content type">Type</th><th title="Page orientation">Page</th><th>Actions</th></tr></thead><tbody>';
     annexes.forEach(function (a) {
       var num = a.annex_display_number || String(a.annex_number || 0).padStart(2, '0');
       var editUrl = '/admin/compliance/controlled_book_editor.php?version_id=' + versionId + '&section_id=' + a.section_id;
       var shortTitle = a.annex_short_title || '';
       var deleted = !!a.deleted;
       html += '<tr style="border-bottom:1px solid #f1f5f9;' + (deleted ? 'opacity:0.65;' : '') + '">'
-        + '<td style="padding:8px 6px;vertical-align:top;">' + num + '</td>'
-        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.title || '')
+        + '<td>' + num + '</td>'
+        + '<td>' + (a.title || '')
         + (deleted ? ' <span style="color:#b45309;">(deleted)</span>' : '') + '</td>'
-        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.revision || '') + '</td>'
-        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.revision_date || '') + '</td>'
-        + '<td style="padding:8px 6px;vertical-align:top;">' + (a.content_mode || '') + ' / ' + (a.orientation || 'portrait') + '</td>'
-        + '<td style="padding:8px 6px;vertical-align:top;white-space:nowrap;">';
+        + '<td>' + (a.revision || '') + '</td>'
+        + '<td>' + (a.revision_date || '') + '</td>'
+        + '<td class="cp-annex-icon-cell">' + contentModeSymbol(a.content_mode) + '</td>'
+        + '<td class="cp-annex-icon-cell">' + orientationSymbol(a.orientation) + '</td>'
+        + '<td><div class="cp-annex-row-actions">';
       if (!deleted) {
-        html += '<a class="app-btn app-btn--secondary" href="' + editUrl + '" style="margin-right:6px;">Edit</a>';
+        html += '<a class="app-btn app-btn--secondary" href="' + editUrl + '">Edit</a>';
         if (canEdit) {
           html += '<button type="button" class="app-btn app-btn--secondary cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
             + 'data-annex-number="' + (a.annex_number || 0) + '" data-annex-suffix="' + (a.annex_suffix || '') + '" '
-            + 'data-short-title="' + escAttr(shortTitle) + '" style="margin-right:6px;">Rename Annex</button>'
+            + 'data-short-title="' + escAttr(shortTitle) + '" title="Rename Annex">Rename</button>'
             + '<button type="button" class="app-btn app-btn--secondary cp-annex-revert-btn" data-section-id="' + a.section_id + '" '
-            + 'data-title="' + escAttr(a.title || '') + '" style="margin-right:6px;">Revert</button>'
+            + 'data-title="' + escAttr(a.title || '') + '">Revert</button>'
             + '<button type="button" class="app-btn cp-annex-delete-btn" data-section-id="' + a.section_id + '" '
             + 'data-title="' + escAttr(a.title || '') + '" style="background:#b91c1c;border-color:#b91c1c;color:#fff;">Delete</button>';
         }
@@ -278,7 +348,7 @@ compliance_page_open(array(
       } else {
         html += '<span style="color:#94a3b8;">Deleted</span>';
       }
-      html += '</td></tr>';
+      html += '</div></td></tr>';
     });
     html += '</tbody></table>';
     listEl.innerHTML = html;

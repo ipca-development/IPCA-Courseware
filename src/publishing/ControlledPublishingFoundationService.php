@@ -464,6 +464,15 @@ final class ControlledPublishingFoundationService
         if ($previousLimit > 0 && $previousLimit < 300) {
             set_time_limit(300);
         }
+        // The frozen publication manifest includes rendered cover/template data,
+        // which uses released_at when no effective date is configured. Project
+        // the final release timestamp before pagination and persist that exact
+        // value so release cannot invalidate the page map it just approved.
+        $releaseAt = trim((string)($version['released_at'] ?? ''));
+        if ($releaseAt === '') {
+            $releaseAt = gmdate('Y-m-d H:i:s');
+        }
+        $version['released_at'] = $releaseAt;
         $generation = (new ControlledPublishingReaderService($this->pdo))
             ->ensureAnnexBookPageMapApproved($version, $actorUserId);
         $this->ensureAnnexBookReleaseBaseline($version, $generation, $actorUserId);
@@ -471,13 +480,14 @@ final class ControlledPublishingFoundationService
         $stmt = $this->pdo->prepare("
             UPDATE ipca_publishing_book_versions
             SET lifecycle_status = 'released',
-                released_at = CURRENT_TIMESTAMP,
+                released_at = :released_at,
                 released_by = :released_by,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = :id
               AND lifecycle_status <> 'released'
         ");
         $stmt->execute(array(
+            ':released_at' => $releaseAt,
             ':released_by' => $actorUserId,
             ':id' => $versionId,
         ));

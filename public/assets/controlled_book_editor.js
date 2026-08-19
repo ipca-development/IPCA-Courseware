@@ -8,6 +8,7 @@
   var initialSectionId = parseInt(root.getAttribute('data-section-id') || '0', 10);
   var apiBase = root.getAttribute('data-api-base') || '/admin/api/controlled_book_editor_api.php';
   var documentType = root.getAttribute('data-document-type') || 'manual';
+  var isAnnexBook = root.getAttribute('data-annex-book') === '1';
   var initialViewMode = root.getAttribute('data-initial-view') === 'paginated' ? 'paginated' : 'edit';
   var formSelectedBlockId = 0;
 
@@ -3530,6 +3531,7 @@
       state.headerPreviewTokens = res.header_preview_tokens || {};
       state.pageHeaderScope = res.page_header_scope || 'main';
       state.versionInfo = res.version || {};
+      if (state.versionInfo.is_annex_book) isAnnexBook = true;
       state.publicationFontCSS = res.publication_font_css || '';
       state.authoritativeEditorPageStartsEnabled = !!res.authoritative_editor_page_starts_enabled;
       if (!state.authoritativeEditorPageStartsEnabled) {
@@ -3690,7 +3692,7 @@
   function updateOutlineButton() {
     if (!editOutlineBtn) return;
     var status = String((state.versionInfo && state.versionInfo.lifecycle_status) || '');
-    var show = documentType !== 'form' && status !== 'released';
+    var show = documentType !== 'form' && !isAnnexBook && status !== 'released';
     editOutlineBtn.style.display = show ? '' : 'none';
     if (!show && state.outlineOpen) setOutlineMode(false);
   }
@@ -5487,7 +5489,7 @@
         toolbarPart0El.setAttribute('aria-hidden', 'true');
       }
     }
-    if (state.isCoverSection || isReleased) {
+    if (state.isCoverSection || (isReleased && !isAnnexBook)) {
       toolbarEl.style.display = 'none';
       hideAuxToolbars();
       return;
@@ -11612,7 +11614,7 @@
   }
 
   if (editOutlineBtn) {
-    if (documentType === 'form') editOutlineBtn.style.display = 'none';
+    if (documentType === 'form' || isAnnexBook) editOutlineBtn.style.display = 'none';
     editOutlineBtn.addEventListener('click', function () {
       if (state.outlineOpen) closeOutlinePanel();
       else openOutlinePanel();

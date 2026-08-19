@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsAnnexBookService.php';
 
 $user = compliance_require_access($pdo);
 $foundation = new ControlledPublishingFoundationService($pdo);
@@ -41,6 +42,7 @@ if ($version === null) {
     cw_footer();
     return;
 }
+$isAnnexBook = BooksManualsAnnexBookService::isAnnexBookVersion($version);
 
 if ($sectionId <= 0) {
     foreach (array('cover', 'part_1', 'main_content') as $key) {
@@ -78,11 +80,6 @@ compliance_page_open(array(
             'href' => '/admin/compliance/controlled_book_annexes.php?version_id=' . $versionId,
             'variant' => 'secondary',
         ),
-        array(
-            'label' => 'Governance',
-            'href' => '/admin/compliance/controlled_book_version.php?id=' . $versionId,
-            'variant' => 'secondary',
-        ),
     ),
 ));
 
@@ -91,7 +88,8 @@ compliance_page_open(array(
 
 <div class="cpb-editor-root" id="cpbEditorRoot"
      data-version-id="<?= (int)$versionId ?>"
-     data-section-id="<?= (int)$sectionId ?>">
+     data-section-id="<?= (int)$sectionId ?>"
+     data-annex-book="<?= $isAnnexBook ? '1' : '0' ?>">
   <div class="cpb-editor-shell">
     <aside class="cpb-tree-panel">
       <div class="cpb-tree-head">
@@ -102,7 +100,9 @@ compliance_page_open(array(
         <p style="padding:12px 16px;margin:0;font-size:12px;color:#94a3b8;">Loading outline…</p>
       </div>
       <div class="cpb-tree-actions">
+        <?php if (!$isAnnexBook): ?>
         <button type="button" id="cpbEditOutline" class="cpb-tree-outline-btn" title="Edit PART and MAIN chapter titles">Edit outline</button>
+        <?php endif; ?>
         <span id="cpbAddSubsection" class="cpb-tree-add" role="button" tabindex="0" style="display:none;">+ Add subsection</span>
       </div>
     </aside>
@@ -304,6 +304,7 @@ compliance_page_open(array(
   </div>
 </div>
 
+<?php if (!$isAnnexBook): ?>
 <div class="cpb-struct-overlay" id="cpbStructModal" hidden>
   <div class="cpb-struct-card" role="dialog" aria-modal="true" aria-labelledby="cpbStructTitle">
     <div class="cpb-struct-head">
@@ -321,6 +322,7 @@ compliance_page_open(array(
     </div>
   </div>
 </div>
+<?php endif; ?>
 
 <script src="/assets/controlled_book_editor.js?v=<?= h($jsVer) ?>"></script>
 <?php
