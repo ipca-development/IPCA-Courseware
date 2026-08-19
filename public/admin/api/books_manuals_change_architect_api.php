@@ -66,6 +66,57 @@ function architect_api_require_csrf(array $input): void
     }
 }
 
+function architect_api_progress_path(int $planId): string
+{
+    $directory = dirname(__DIR__, 3) . '/storage/manual_change_assistant/architect_progress';
+    if (!is_dir($directory) && !mkdir($directory, 0770, true) && !is_dir($directory)) {
+        throw new RuntimeException('Analysis progress storage is unavailable.');
+    }
+    return $directory . '/plan-' . $planId . '.json';
+}
+
+/** @param array<string,mixed> $progress */
+function architect_api_write_progress(int $planId, array $progress): void
+{
+    $path = architect_api_progress_path($planId);
+    $existing = array();
+    if (is_file($path)) {
+        $decoded = json_decode((string)file_get_contents($path), true);
+        $existing = is_array($decoded) ? $decoded : array();
+    }
+    $payload = array_merge($existing, $progress, array(
+        'plan_id' => $planId,
+        'updated_at' => gmdate(DATE_ATOM),
+    ));
+    $temporary = $path . '.tmp-' . bin2hex(random_bytes(4));
+    if (file_put_contents(
+        $temporary,
+        json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        LOCK_EX
+    ) === false || !rename($temporary, $path)) {
+        @unlink($temporary);
+        throw new RuntimeException('Analysis progress could not be recorded.');
+    }
+}
+
+/** @return array<string,mixed> */
+function architect_api_read_progress(int $planId): array
+{
+    $path = architect_api_progress_path($planId);
+    if (!is_file($path)) {
+        return array();
+    }
+    $decoded = json_decode((string)file_get_contents($path), true);
+    return is_array($decoded) ? $decoded : array();
+}
+
+function architect_api_progress_callback(int $planId): Closure
+{
+    return static function (array $progress) use ($planId): void {
+        architect_api_write_progress($planId, $progress);
+    };
+}
+
 function architect_api_extract_upload(string $path, string $name): string
 {
     $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
@@ -217,6 +268,13 @@ try {
                 $userId
             );
             $planId = (int)($plan['id'] ?? 0);
+            architect_api_write_progress($planId, array(
+                'percent' => 2,
+                'stage_key' => 'queued',
+                'label' => 'Preparing the controlled analysis',
+                'started_at' => gmdate(DATE_ATOM),
+            ));
+            $options['progress_callback'] = architect_api_progress_callback($planId);
             architect_api_finish_response(202, array(
                 'ok' => true,
                 'plan_id' => $planId,
@@ -252,6 +310,7 @@ try {
                 'message' => $status === 'failed'
                     ? (string)($plan['failure_message'] ?? 'Analysis failed.')
                     : '',
+                'progress' => architect_api_read_progress($planId),
                 'csrf_token' => architect_api_csrf(),
             ));
 
@@ -332,6 +391,23 @@ try {
                 'completed_at' => null,
                 'updated_by' => $userId,
             ));
+            architect_api_write_progress($planId, array(
+                'percent' => 2,
+                'stage_key' => 'queued',
+                'label' => 'Preparing the revised controlled analysis',
+                'started_at' => gmdate(DATE_ATOM),
+            ));
+            $reanalysisOptions = array(
+                'title' => (string)($plan['title'] ?? 'Manual Change Architect checkpoint'),
+                'objective' => (string)($plan['objective'] ?? $plan['change_request'] ?? ''),
+                'change_request' => (string)($plan['change_request'] ?? ''),
+                'review_feedback' => array(
+                    'affected_area' => $affectedArea,
+                    'correction' => $correction,
+                ),
+                'use_openai' => true,
+                'progress_callback' => architect_api_progress_callback($planId),
+            );
             architect_api_finish_response(202, array(
                 'ok' => true,
                 'plan_id' => $planId,
@@ -341,16 +417,7 @@ try {
             ignore_user_abort(true);
             @set_time_limit(300);
             try {
-                $architect->runCheckpoint($planId, $evidence, array(
-                    'title' => (string)($plan['title'] ?? 'Manual Change Architect checkpoint'),
-                    'objective' => (string)($plan['objective'] ?? $plan['change_request'] ?? ''),
-                    'change_request' => (string)($plan['change_request'] ?? ''),
-                    'review_feedback' => array(
-                        'affected_area' => $affectedArea,
-                        'correction' => $correction,
-                    ),
-                    'use_openai' => true,
-                ), $userId);
+                $architect->runCheckpoint($planId, $evidence, $reanalysisOptions, $userId);
             } catch (Throwable $analysisError) {
                 error_log(
                     'Manual Change Architect impact re-analysis failed for plan '

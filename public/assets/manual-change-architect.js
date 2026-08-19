@@ -287,11 +287,74 @@
   function setupPendingAnalysis() {
     if (root.dataset.analysisPending !== '1' || planId <= 0) return;
     var consecutiveErrors = 0;
+    var displayedPercent = 2;
+    var stageOrder = [
+      'understanding_change',
+      'reviewing_evidence',
+      'reviewing_manual',
+      'checking_references',
+      'checking_related_sections',
+      'mapping_coverage',
+      'building_recommendation',
+      'quality_check'
+    ];
+
+    function elapsedLabel(startedAt) {
+      var started = Date.parse(String(startedAt || ''));
+      if (!Number.isFinite(started)) return 'Analysis is running';
+      var seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+      if (seconds < 60) return 'Running for ' + seconds + ' seconds';
+      var minutes = Math.floor(seconds / 60);
+      return 'Running for ' + minutes + ' minute' + (minutes === 1 ? '' : 's')
+        + ' ' + (seconds % 60) + ' seconds';
+    }
+
+    function renderProgress(progress) {
+      progress = progress || {};
+      var percent = Math.max(displayedPercent, Math.min(100, Number(progress.percent || 2)));
+      displayedPercent = percent;
+      var fill = root.querySelector('[data-mcw-progress-fill]');
+      var bar = root.querySelector('[data-mcw-progress-bar]');
+      var percentNode = root.querySelector('[data-mcw-progress-percent]');
+      var label = root.querySelector('[data-mcw-progress-label]');
+      var elapsed = root.querySelector('[data-mcw-progress-elapsed]');
+      if (fill) fill.style.width = percent + '%';
+      if (bar) bar.setAttribute('aria-valuenow', String(percent));
+      if (percentNode) percentNode.textContent = Math.round(percent) + '%';
+      if (label && progress.label) label.textContent = String(progress.label);
+      if (elapsed) {
+        elapsed.textContent = elapsedLabel(progress.started_at)
+          + ' · this page will continue automatically when ready.';
+      }
+      var currentStage = String(progress.stage_key || 'queued');
+      var currentIndex = stageOrder.indexOf(currentStage);
+      root.querySelectorAll('[data-mcw-progress-step]').forEach(function (item) {
+        var index = stageOrder.indexOf(String(item.dataset.mcwProgressStep || ''));
+        var text = item.textContent.replace(/^[✓●○]\s*/, '');
+        item.classList.remove('is-complete', 'is-active');
+        if (currentStage === 'complete' || (currentIndex >= 0 && index < currentIndex)) {
+          item.classList.add('is-complete');
+          item.textContent = '✓ ' + text;
+        } else if (index === currentIndex) {
+          item.classList.add('is-active');
+          item.textContent = '● ' + text;
+        } else {
+          item.textContent = '○ ' + text;
+        }
+      });
+    }
+
     async function check() {
       try {
         var result = await request('analysis_status');
         consecutiveErrors = 0;
+        renderProgress(result.progress);
         if (result.complete) {
+          renderProgress(Object.assign({}, result.progress || {}, {
+            percent: 100,
+            stage_key: 'complete',
+            label: 'Amendment recommendation ready'
+          }));
           window.location.reload();
           return;
         }

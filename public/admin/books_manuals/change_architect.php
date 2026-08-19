@@ -279,15 +279,20 @@ books_manuals_page_open(array(
       <section class="mcw-step mcw-step--active" data-mcw-step="1" data-mcw-pending-analysis>
         <header><span class="mcw-step-number">1</span><div><h2>Change Request &amp; Sources</h2><p><?= h(mcw_text($report['title'] ?? '', 'Analyzing requested change')) ?> · <?= h((string)($manual['book_key'] ?? 'Manual')) ?> <?= h((string)($manual['version_label'] ?? '')) ?></p></div></header>
         <div class="mcw-analysis-progress">
-          <strong>Analyzing your change…</strong>
+          <div class="mcw-analysis-progress-heading"><strong>Analyzing your change…</strong><span data-mcw-progress-percent>2%</span></div>
+          <div class="mcw-analysis-progress-track" role="progressbar" aria-label="Manual change analysis progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="2" data-mcw-progress-bar><span style="width:2%" data-mcw-progress-fill></span></div>
+          <p class="mcw-analysis-current" data-mcw-progress-label>Preparing the controlled analysis</p>
           <ul>
-            <li class="is-complete">✓ Understanding requested change</li>
-            <li class="is-complete">✓ Reviewing supporting evidence</li>
-            <li class="is-complete">✓ Reviewing selected manual</li>
-            <li class="is-complete">✓ Checking related sections</li>
-            <li>● Building amendment recommendation</li>
+            <li data-mcw-progress-step="understanding_change">○ Understanding requested change</li>
+            <li data-mcw-progress-step="reviewing_evidence">○ Reviewing supporting evidence</li>
+            <li data-mcw-progress-step="reviewing_manual">○ Reviewing selected manual</li>
+            <li data-mcw-progress-step="checking_references">○ Checking legacy references</li>
+            <li data-mcw-progress-step="checking_related_sections">○ Checking related sections</li>
+            <li data-mcw-progress-step="mapping_coverage">○ Mapping requirements to manual sections</li>
+            <li data-mcw-progress-step="building_recommendation">○ Building amendment recommendation</li>
+            <li data-mcw-progress-step="quality_check">○ Running final coverage checks</li>
           </ul>
-          <p>This page will continue automatically when the recommendation is ready.</p>
+          <p class="mcw-analysis-elapsed" data-mcw-progress-elapsed>Started just now · this page will continue automatically when ready.</p>
         </div>
       </section>
     <?php elseif ($step1Complete): ?>
@@ -319,7 +324,8 @@ books_manuals_page_open(array(
             <label class="mcw-field"><span>Primary manual</span><select name="primary_version_id" required><option value="">Select a controlled revision</option><?php foreach ($versions as $version): ?><?php $versionPhase = (string)$version['lifecycle_status'] === 'in_review' ? 'Draft Review' : 'Draft'; ?><option value="<?= (int)$version['id'] ?>"><?= h((string)$version['book_key']) ?> <?= h((string)$version['version_label']) ?> — <?= h((string)$version['title']) ?> · <?= h($versionPhase) ?></option><?php endforeach; ?></select></label>
           </section>
           <div class="mcw-analysis-progress" data-mcw-analysis-progress hidden>
-            <strong>Analyzing your change…</strong>
+            <div class="mcw-analysis-progress-heading"><strong>Starting analysis…</strong><span>0%</span></div>
+            <div class="mcw-analysis-progress-track"><span style="width:0%"></span></div>
             <ul>
               <li data-progress-index="0">○ Understanding requested change</li>
               <li data-progress-index="1">○ Reviewing supporting evidence</li>

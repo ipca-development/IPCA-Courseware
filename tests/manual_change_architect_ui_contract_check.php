@@ -105,6 +105,17 @@ architect_ui_assert(
     str_contains($js, "request('analysis_status'") && str_contains($page, 'data-analysis-pending'),
     'Long-running analysis must progress by polling instead of holding the browser request open.'
 );
+architect_ui_assert(
+    str_contains($page, 'data-mcw-progress-bar')
+        && str_contains($page, 'data-mcw-progress-percent')
+        && str_contains($page, 'data-mcw-progress-label')
+        && str_contains($page, 'data-mcw-progress-elapsed')
+        && str_contains($js, 'renderProgress(result.progress)')
+        && str_contains($api, "'progress' => architect_api_read_progress")
+        && str_contains($api, 'architect_api_progress_callback')
+        && str_contains($architect, "'progress_callback'"),
+    'Long-running analysis must expose and render determinate server-side stage progress.'
+);
 architect_ui_assert(str_contains($js, "request('accept_impact_analysis'"), 'Impact acceptance is not connected to wizard progression.');
 architect_ui_assert(str_contains($api, "case 'analyze_change':"), 'Wizard analysis API is missing.');
 architect_ui_assert(

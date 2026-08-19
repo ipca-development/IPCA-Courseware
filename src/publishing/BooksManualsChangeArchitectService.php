@@ -108,6 +108,7 @@ final class BooksManualsChangeArchitectService
             'checkpoint_stage' => 2,
             'updated_by' => $actorUserId,
         ));
+        $this->progress($options, 5, 'understanding_change', 'Understanding requested change');
         $this->pdo->beginTransaction();
         try {
             $this->plans->clearCheckpointData($planId);
@@ -117,11 +118,13 @@ final class BooksManualsChangeArchitectService
             $intent = $this->buildChangeIntent($normalizedEvidence, $options, $runId);
             $intentId = $this->persistIntent($planId, $intent);
             $this->event($planId, 'CHANGE_INTENT_STRUCTURED', 2, array('intent_id' => $intentId));
+            $this->progress($options, 18, 'reviewing_evidence', 'Reviewing supporting evidence');
 
             // Stage 3: operational target state MUST precede manual analysis.
             $target = $this->buildOperationalTargetState($intent, $normalizedEvidence, $options, $runId);
             $targetIds = $this->persistTargetComponents($planId, $intentId, $target);
             $this->event($planId, 'TARGET_STATE_ESTABLISHED', 3, array('component_count' => count($targetIds)));
+            $this->progress($options, 30, 'reviewing_manual', 'Loading the complete controlled manual');
 
             // Only now may controlled publishing content be loaded.
             $hierarchy = $this->loadManualHierarchy($versionId);
@@ -133,11 +136,13 @@ final class BooksManualsChangeArchitectService
                 'manual_sections' => count($hierarchy['sections']),
                 'manual_blocks' => count($hierarchy['blocks']),
             ));
+            $this->progress($options, 43, 'reviewing_manual', 'Reviewing manual sections and management-system domains');
 
             // Stage 5: exact deterministic legacy scan and governed disposition.
             $legacyHits = $this->scanLegacyReferences($hierarchy, $intent, $target);
             $this->persistLegacyHits($planId, $intentId, $legacyHits);
             $this->event($planId, 'LEGACY_SCAN_COMPLETED', 5, array('hit_count' => count($legacyHits)));
+            $this->progress($options, 55, 'checking_references', 'Checking exact legacy references');
 
             // Stage 6: semantic discovery nominates candidates only.
             $semantic = $this->discoverSemanticCandidates($hierarchy, $intent, $target, $runId, $options);
@@ -146,11 +151,13 @@ final class BooksManualsChangeArchitectService
                 'semantic_candidates' => count($semantic),
                 'section_contexts' => count($contexts),
             ));
+            $this->progress($options, 67, 'checking_related_sections', 'Checking related sections and canonical context');
 
             // Stage 7: target-state coverage matrix.
             $coverage = $this->buildCoverageMatrix($target, $contexts, $legacyHits);
             $this->persistCoverage($planId, $intentId, $targetIds, $coverage);
             $this->event($planId, 'TARGET_COVERAGE_MAPPED', 7, array('cells' => count($coverage)));
+            $this->progress($options, 77, 'mapping_coverage', 'Mapping requirements to their correct manual homes');
 
             // Stage 8: explicit governed boundaries.
             $boundaries = $this->classifyBoundaries(
@@ -165,12 +172,14 @@ final class BooksManualsChangeArchitectService
             $this->event($planId, 'BOUNDARIES_CLASSIFIED', 8, array(
                 'classification_counts' => array_count_values(array_column($boundaries, 'classification')),
             ));
+            $this->progress($options, 86, 'building_recommendation', 'Separating amendments from preserved content');
 
             // Stage 9: section/process consolidation, still without wording.
             $consolidated = $this->consolidateImpacts($boundaries, $coverage, $target);
             $impactIds = $this->persistImpacts($planId, $consolidated);
             $this->persistImpactRelations($planId, $consolidated, $impactIds);
             $this->event($planId, 'IMPACTS_CONSOLIDATED', 9, array('impact_count' => count($impactIds)));
+            $this->progress($options, 94, 'building_recommendation', 'Building the amendment recommendation');
 
             // Stage 10: explicit minimality and completeness argument.
             $reasoning = $this->reasonMinimalityAndCompleteness(
@@ -184,6 +193,7 @@ final class BooksManualsChangeArchitectService
                 $domainReview
             );
             $this->event($planId, 'CHECKPOINT_REASONED', 10, $reasoning);
+            $this->progress($options, 98, 'quality_check', 'Completing minimality and coverage checks');
             $this->plans->updatePlan($planId, array(
                 'status' => (string)$reasoning['checkpoint_status'] === 'checkpoint_complete'
                     ? 'ready_for_review'
@@ -196,6 +206,7 @@ final class BooksManualsChangeArchitectService
                 'updated_by' => $actorUserId,
             ));
             $this->pdo->commit();
+            $this->progress($options, 100, 'complete', 'Amendment recommendation ready');
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -205,6 +216,7 @@ final class BooksManualsChangeArchitectService
                 'failure_message' => $e->getMessage(),
                 'updated_by' => $actorUserId,
             ));
+            $this->progress($options, 100, 'failed', 'Analysis could not be completed');
             throw $e;
         }
         return $this->getCompleteCheckpointReport($planId);
@@ -2724,6 +2736,29 @@ final class BooksManualsChangeArchitectService
             $position = mb_stripos($evidenceText, $term, $position + max(1, mb_strlen($term)));
         }
         return false;
+    }
+
+    /** @param array<string,mixed> $options */
+    private function progress(
+        array $options,
+        int $percent,
+        string $stageKey,
+        string $label
+    ): void {
+        $callback = $options['progress_callback'] ?? null;
+        if (!is_callable($callback)) {
+            return;
+        }
+        try {
+            $callback(array(
+                'percent' => max(0, min(100, $percent)),
+                'stage_key' => $stageKey,
+                'label' => $label,
+                'updated_at' => gmdate(DATE_ATOM),
+            ));
+        } catch (Throwable $e) {
+            error_log('Manual architect progress callback failed: ' . $e->getMessage());
+        }
     }
 
     private function event(int $planId, string $event, int $stage, array $payload): void

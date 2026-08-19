@@ -314,6 +314,58 @@
   font-size: 13px;
 }
 
+.mcw-analysis-progress-heading {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.mcw-analysis-progress-heading > span {
+  color: var(--mcw-blue);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.mcw-analysis-progress-track {
+  position: relative;
+  height: 12px;
+  margin-top: 13px;
+  overflow: hidden;
+  border: 1px solid #bed2e2;
+  border-radius: 999px;
+  background: #e7eef4;
+  box-shadow: inset 0 1px 2px rgba(16, 46, 80, .08);
+}
+
+.mcw-analysis-progress-track > span {
+  position: relative;
+  display: block;
+  min-width: 3px;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1769aa, #2187c5);
+  transition: width .65s ease;
+}
+
+.mcw-analysis-progress-track > span::after {
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent);
+  content: "";
+  animation: mcw-progress-scan 1.7s ease-in-out infinite;
+}
+
+.mcw-analysis-current {
+  margin: 9px 0 0 !important;
+  color: #355b78 !important;
+  font-size: 11px !important;
+  font-weight: 800;
+}
+
 .mcw-analysis-progress ul {
   display: grid;
   gap: 7px;
@@ -331,10 +383,24 @@
   color: var(--mcw-green);
 }
 
+.mcw-analysis-progress li.is-active {
+  color: var(--mcw-blue);
+  font-weight: 850;
+}
+
 .mcw-analysis-progress > p {
   margin: 14px 0 0;
   color: var(--mcw-muted);
   font-size: 10px;
+}
+
+.mcw-analysis-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes mcw-progress-scan {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(330%); }
 }
 
 .mcw-amendments {
