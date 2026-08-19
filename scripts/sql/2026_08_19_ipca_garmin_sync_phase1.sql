@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS ipca_garmin_sync_archive_files (
   object_uuid           CHAR(36) NOT NULL,
   sha256                CHAR(64) NOT NULL,
   byte_count            BIGINT UNSIGNED NOT NULL,
-  storage_path          VARCHAR(1024) NOT NULL,
+  storage_path          VARCHAR(512) NOT NULL,
   original_filename     VARCHAR(512) NOT NULL DEFAULT '',
   creator_organization_id BIGINT UNSIGNED NOT NULL,
   creator_device_id     BIGINT UNSIGNED NOT NULL,
