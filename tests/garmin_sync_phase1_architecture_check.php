@@ -9,9 +9,11 @@ $required = [
     'IPCA Garmin Sync/LocalIngestionStore.swift',
     'IPCA Garmin Sync/CopyAndSnapshotServices.swift',
     'IPCA Garmin Sync/UploadServices.swift',
+    'IPCA Garmin Sync/EnrollmentServices.swift',
     'IPCA Garmin Sync/ContentView.swift',
     'IPCA Garmin SyncTests/GarminSyncIngestionTests.swift',
     'IPCA Garmin SyncTests/GarminSyncUploadTests.swift',
+    'IPCA Garmin SyncTests/GarminSyncEnrollmentTests.swift',
     'HARDWARE_POC.md',
 ];
 
@@ -36,7 +38,11 @@ $assertions = [
     'security bookmark' => 'bookmarkData(',
     'chunk endpoint' => '/api/garmin-sync/upload_chunk.php',
     'finalize endpoint' => '/api/garmin-sync/finalize.php',
+    'enrollment endpoint' => '/api/garmin-sync/enroll.php',
     'Bearer authentication' => 'Bearer ',
+    'isolated enrollment keychain account' => 'garmin-sync-enrollment-credential',
+    'stable enrollment device ID' => 'garminSync.deviceID',
+    'production default server' => 'https://ipca.training',
     'stable upload ID' => 'uploadID',
     'indexed chunk resume' => 'receivedChunks',
     'multipart chunk field' => 'name=\"chunk\"',
@@ -65,6 +71,32 @@ foreach ($assertions as $label => $needle) {
 if (str_contains($sources, '/api/garmin-sync/uploads/')) {
     fwrite(STDERR, "Obsolete Garmin Sync REST route remains in app sources.\n");
     exit(1);
+}
+
+$settingsSource = file_get_contents($app . '/IPCA Garmin Sync/ContentView.swift') ?: '';
+foreach (['SecureField(', 'Bearer credential'] as $forbidden) {
+    if (str_contains($settingsSource, $forbidden)) {
+        fwrite(STDERR, "Operator-facing manual credential UI remains: {$forbidden}\n");
+        exit(1);
+    }
+}
+
+$enrollmentSource = file_get_contents($app . '/IPCA Garmin Sync/EnrollmentServices.swift') ?: '';
+if (str_contains($enrollmentSource, 'SecItemDelete')) {
+    fwrite(STDERR, "Enrollment must not delete any existing Keychain item.\n");
+    exit(1);
+}
+
+$viewModelSource = file_get_contents($app . '/IPCA Garmin Sync/SyncViewModel.swift') ?: '';
+foreach ([
+    'appendingPathComponent("IPCA Garmin Sync", isDirectory: true)',
+    'appendingPathComponent("Files", isDirectory: true)',
+    'appendingPathComponent("ingestion.sqlite")',
+] as $preservedPath) {
+    if (!str_contains($viewModelSource, $preservedPath)) {
+        fwrite(STDERR, "Preserved local data path changed: {$preservedPath}\n");
+        exit(1);
+    }
 }
 
 foreach (['DISCOVERED', 'COPYING', 'LOCAL_VERIFIED', 'WAITING_FOR_UPLOAD', 'UPLOADING', 'SERVER_VERIFIED', 'FAILED'] as $state) {

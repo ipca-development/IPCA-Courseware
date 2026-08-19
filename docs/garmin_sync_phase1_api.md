@@ -4,7 +4,21 @@ Phase 1 accepts opaque Garmin binaries into an isolated, append-only archive. It
 
 ## Authentication and errors
 
-All endpoints require the existing device credential as `Authorization: Bearer <token>`. Upload status is restricted to the owning organization and device. Known-hash results are restricted to objects for which the authenticated organization already has a verified receipt.
+Garmin Sync uses credentials dedicated to Garmin Sync. They are separate from CVR device credentials and cannot authenticate CVR endpoints.
+
+An administrator enrolls a device as follows:
+
+1. Open `/admin/garmin_sync_enrollment.php` and generate a 60-minute Garmin Sync code.
+2. The new device calls `POST /api/garmin-sync/enroll.php` once:
+
+   ```json
+   {"enrollment_code":"one-time-code","device_uuid":"550e8400-e29b-41d4-a716-446655440000","display_name":"Dispatch iPad"}
+   ```
+
+3. The response contains `credential` and `credential_uuid`. The plain credential is returned only by this exchange and must be stored securely by the client.
+4. The enrollment code is then consumed and cannot be reused.
+
+The enrollment endpoint is unauthenticated except for its one-time code. Every upload, hash, resume, finalize, and status request requires the resulting dedicated credential as `Authorization: Bearer <credential>`. Upload status is restricted to the owning organization and device. Known-hash results are restricted to objects for which the authenticated organization already has a verified receipt. Expired or revoked codes, credentials, and devices are rejected with stable `GARMIN_*` error codes.
 
 Errors are JSON:
 

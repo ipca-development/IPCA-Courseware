@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import UIKit
 
 @MainActor
 final class SyncViewModel: ObservableObject {
@@ -11,6 +12,22 @@ final class SyncViewModel: ObservableObject {
         case uploading
         case complete
         case failed(String)
+    }
+
+    enum EnrollmentStatus: Equatable {
+        case notEnrolled
+        case enrolling
+        case enrolled
+        case failed(String)
+
+        var displayText: String {
+            switch self {
+            case .notEnrolled: "Not enrolled"
+            case .enrolling: "Enrolling…"
+            case .enrolled: "Enrolled"
+            case .failed(let message): "Enrollment failed: \(message)"
+            }
+        }
     }
 
     @Published var step: WizardStep = .chooseCard
@@ -26,24 +43,44 @@ final class SyncViewModel: ObservableObject {
     @Published var captureErrors = 0
     @Published var uploadVerifiedFiles = 0
     @Published var uploadTotalFiles = 0
-    @Published var serverURL = UserDefaults.standard.string(forKey: "garminSync.serverURL") ?? ""
-    @Published var credential = SecureCredentialStore.load()
+    @Published var serverURL: String
+    @Published var enrollmentCode = ""
+    @Published var enrollmentStatus: EnrollmentStatus
 
     let store: LocalIngestionStore
-    private let access = ExternalStorageAccessService()
+    private let access: ExternalStorageAccessService
     private let privateDirectory: URL
+    private let defaults: UserDefaults
+    private let credentialStore: any GarminSyncCredentialStoring
+    private let enrollmentSession: URLSession
     private let logger = Logger(subsystem: "com.ipca.garmin-sync", category: "workflow")
     private var retryDestination: WizardStep = .chooseCard
 
-    init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("IPCA Garmin Sync", isDirectory: true)
+    init(
+        supportDirectory: URL? = nil,
+        defaults: UserDefaults = .standard,
+        credentialStore: any GarminSyncCredentialStoring = GarminSyncKeychainCredentialStore(),
+        enrollmentSession: URLSession = .shared
+    ) {
+        let support = supportDirectory ?? FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("IPCA Garmin Sync", isDirectory: true)
+        self.defaults = defaults
+        self.credentialStore = credentialStore
+        self.enrollmentSession = enrollmentSession
+        access = ExternalStorageAccessService(defaults: defaults)
         privateDirectory = support.appendingPathComponent("Files", isDirectory: true)
         store = try! LocalIngestionStore(databaseURL: support.appendingPathComponent("ingestion.sqlite"))
+        serverURL = defaults.string(forKey: "garminSync.serverURL") ?? "https://ipca.training"
+        enrollmentStatus = ((try? credentialStore.load()) ?? nil)?.isEmpty == false
+            ? .enrolled
+            : .notEnrolled
     }
 
     func recoverOnLaunch() async {
         do {
+            recoverEnrollmentStatus()
             try await store.recoverInterruptedWork(partialDirectory: privateDirectory)
             selectedFolder = try? access.restoreFolder()
             await refreshDebugData()
@@ -118,16 +155,18 @@ final class SyncViewModel: ObservableObject {
     }
 
     func synchronize() {
-        guard let baseURL = URL(string: serverURL), !credential.isEmpty else {
+        guard let baseURL = validatedServerURL() else {
             retryDestination = .readyToSynchronize
-            step = .failed("Enter a valid server URL and credential in Settings.")
+            step = .failed("Enter a valid server URL in Settings.")
             return
         }
-        guard saveSettings() else {
+        guard let credential = try? credentialStore.load(), !credential.isEmpty else {
             retryDestination = .readyToSynchronize
-            step = .failed("The credential could not be saved securely.")
+            enrollmentStatus = .notEnrolled
+            step = .failed("Enroll Garmin Sync in Settings before synchronizing.")
             return
         }
+        saveSettings()
         retryDestination = .readyToSynchronize
         step = .uploading
         let queue = UploadQueue(
@@ -165,12 +204,41 @@ final class SyncViewModel: ObservableObject {
 
     @discardableResult
     func saveSettings() -> Bool {
-        UserDefaults.standard.set(serverURL, forKey: "garminSync.serverURL")
-        do {
-            try SecureCredentialStore.save(credential)
-            return true
-        } catch {
-            return false
+        defaults.set(serverURL, forKey: "garminSync.serverURL")
+        return true
+    }
+
+    func enroll() {
+        let code = enrollmentCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty else {
+            enrollmentStatus = .failed("Enter the one-time enrollment code.")
+            return
+        }
+        guard let baseURL = validatedServerURL() else {
+            enrollmentStatus = .failed("Enter a valid server URL.")
+            return
+        }
+        saveSettings()
+        enrollmentStatus = .enrolling
+        let service = GarminSyncEnrollmentService(
+            baseURL: baseURL,
+            credentialStore: credentialStore,
+            session: enrollmentSession
+        )
+        let deviceUUID = persistentDeviceID()
+        let displayName = "IPCA Garmin Sync – \(UIDevice.current.name)"
+        Task {
+            do {
+                _ = try await service.enroll(
+                    code: code,
+                    deviceUUID: deviceUUID,
+                    displayName: displayName
+                )
+                enrollmentCode = ""
+                enrollmentStatus = .enrolled
+            } catch {
+                enrollmentStatus = .failed(error.localizedDescription)
+            }
         }
     }
 
@@ -181,9 +249,24 @@ final class SyncViewModel: ObservableObject {
 
     private func persistentDeviceID() -> String {
         let key = "garminSync.deviceID"
-        if let existing = UserDefaults.standard.string(forKey: key) { return existing }
+        if let existing = defaults.string(forKey: key) { return existing }
         let created = UUID().uuidString
-        UserDefaults.standard.set(created, forKey: key)
+        defaults.set(created, forKey: key)
         return created
+    }
+
+    private func validatedServerURL() -> URL? {
+        guard let components = URLComponents(string: serverURL),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              components.host != nil else {
+            return nil
+        }
+        return components.url
+    }
+
+    private func recoverEnrollmentStatus() {
+        enrollmentStatus = ((try? credentialStore.load()) ?? nil)?.isEmpty == false
+            ? .enrolled
+            : .notEnrolled
     }
 }

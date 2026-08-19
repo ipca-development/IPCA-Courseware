@@ -7,7 +7,7 @@ try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
         throw new GarminSyncUploadException('Method not allowed.', 'METHOD_NOT_ALLOWED', false, 405);
     }
-    $device = (new DeviceAuthService($pdo))->requireDevice();
+    $device = (new GarminSyncAuthService($pdo))->requireDevice();
     $result = (new GarminSyncUploadService($pdo))->status(
         $device,
         (string)($_GET['upload_uuid'] ?? '')

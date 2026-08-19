@@ -146,14 +146,20 @@ private struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Enrollment / Server") {
-                    TextField("https://example.org", text: $model.serverURL)
+                    TextField("https://ipca.training", text: $model.serverURL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
-                    SecureField("Bearer credential", text: $model.credential)
+                    TextField("One-time Garmin Sync enrollment code", text: $model.enrollmentCode)
                         .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
-                Section {
-                    Text("The credential is stored in Keychain and is never included in logs.")
+                Section("Enrollment Status") {
+                    Text(model.enrollmentStatus.displayText)
+                    Button("Enroll") { model.enroll() }
+                        .disabled(
+                            model.enrollmentCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || model.enrollmentStatus == .enrolling
+                        )
                 }
             }
             .navigationTitle("Settings")

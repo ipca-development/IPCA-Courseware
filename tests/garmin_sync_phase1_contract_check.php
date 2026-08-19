@@ -3,18 +3,25 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__);
 $migrationPath = $root . '/scripts/sql/2026_08_19_ipca_garmin_sync_phase1.sql';
+$authMigrationPath = $root . '/scripts/sql/2026_08_19_ipca_garmin_sync_device_auth.sql';
 $servicePath = $root . '/src/GarminSyncUploadService.php';
+$authServicePath = $root . '/src/GarminSyncAuthService.php';
 $apiDir = $root . '/public/api/garmin-sync';
 $docPath = $root . '/docs/garmin_sync_phase1_api.md';
+$adminPath = $root . '/public/admin/garmin_sync_enrollment.php';
 
 $required = array(
     $migrationPath,
+    $authMigrationPath,
     $servicePath,
+    $authServicePath,
     $apiDir . '/_bootstrap.php',
+    $apiDir . '/enroll.php',
     $apiDir . '/known_hashes.php',
     $apiDir . '/upload_chunk.php',
     $apiDir . '/finalize.php',
     $apiDir . '/status.php',
+    $adminPath,
     $docPath,
 );
 foreach ($required as $path) {
@@ -24,11 +31,11 @@ foreach ($required as $path) {
 }
 
 $migration = (string)file_get_contents($migrationPath);
+$authMigration = (string)file_get_contents($authMigrationPath);
 $service = (string)file_get_contents($servicePath);
-$api = implode("\n", array_map(
-    static fn(string $path): string => (string)file_get_contents($path),
-    array_slice($required, 2, 5)
-));
+$authService = (string)file_get_contents($authServicePath);
+$apiFiles = glob($apiDir . '/*.php') ?: array();
+$api = implode("\n", array_map(static fn(string $path): string => (string)file_get_contents($path), $apiFiles));
 
 check(
     'schema uses only isolated Garmin Sync tables',
@@ -54,10 +61,33 @@ check(
         && !preg_match('/GarminCsv|Cockpit|Reconstruction|AnalysisService/', $service)
 );
 check(
-    'API uses DeviceAuthService bearer authentication',
-    substr_count($api, 'DeviceAuthService') >= 4
+    'API uses dedicated Garmin Sync bearer authentication',
+    substr_count($api, 'GarminSyncAuthService') >= 5
+        && !str_contains($api, 'DeviceAuthService')
         && str_contains($api, "'error_code'")
         && str_contains($api, "'retryable'")
+);
+check(
+    'auth migration creates only three dedicated Garmin Sync tables',
+    preg_match_all('/CREATE TABLE IF NOT EXISTS ([a-z0-9_]+)/i', $authMigration, $authMatches) === 3
+        && $authMatches[1] === array(
+            'ipca_garmin_sync_devices',
+            'ipca_garmin_sync_device_enrollments',
+            'ipca_garmin_sync_device_credentials',
+        )
+        && !preg_match('/^\s*(?:ALTER|DROP|TRUNCATE|DELETE)\b/im', $authMigration)
+);
+check(
+    'Garmin authentication is independent from CVR authentication and storage',
+    !preg_match('/DeviceAuthService|ipca_cvr_/i', $api . "\n" . $authService . "\n" . $authMigration)
+        && str_contains($authService, 'GARMIN_ENROLLMENT_CODE_CONSUMED')
+        && str_contains($authService, 'GARMIN_AUTH_CREDENTIAL_REVOKED')
+);
+check(
+    'admin enrollment is protected and never issues a credential',
+    str_contains((string)file_get_contents($adminPath), 'cw_require_admin()')
+        && str_contains((string)file_get_contents($adminPath), 'hash_equals')
+        && !str_contains((string)file_get_contents($adminPath), 'exchangeEnrollmentCode')
 );
 
 if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
@@ -66,6 +96,7 @@ if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
 }
 
 require_once $servicePath;
+require_once $authServicePath;
 
 $pdo = new PDO('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -92,8 +123,127 @@ $pdo->exec(
        chunk_index INTEGER NOT NULL, byte_count INTEGER NOT NULL, chunk_sha256 TEXT NOT NULL,
        storage_name TEXT NOT NULL, received_at TEXT DEFAULT CURRENT_TIMESTAMP,
        created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE (upload_session_id, chunk_index)
+     );
+     CREATE TABLE ipca_garmin_sync_devices (
+       id INTEGER PRIMARY KEY AUTOINCREMENT, device_uuid TEXT NOT NULL UNIQUE,
+       organization_id INTEGER NOT NULL, display_name TEXT NOT NULL DEFAULT "",
+       active INTEGER NOT NULL DEFAULT 1, revoked_at TEXT, last_seen_at TEXT,
+       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+     );
+     CREATE TABLE ipca_garmin_sync_device_enrollments (
+       id INTEGER PRIMARY KEY AUTOINCREMENT, enrollment_uuid TEXT NOT NULL UNIQUE,
+       organization_id INTEGER NOT NULL, code_hash TEXT NOT NULL UNIQUE,
+       status TEXT NOT NULL DEFAULT "pending", expires_at TEXT NOT NULL,
+       consumed_at TEXT, revoked_at TEXT, created_by INTEGER NOT NULL,
+       created_at TEXT DEFAULT CURRENT_TIMESTAMP
+     );
+     CREATE TABLE ipca_garmin_sync_device_credentials (
+       id INTEGER PRIMARY KEY AUTOINCREMENT, credential_uuid TEXT NOT NULL UNIQUE,
+       device_id INTEGER NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+       expires_at TEXT, revoked_at TEXT, last_used_at TEXT,
+       created_at TEXT DEFAULT CURRENT_TIMESTAMP
      )'
 );
+
+$auth = new GarminSyncAuthService($pdo);
+$enrollment = $auth->createEnrollmentCode(3, 41, 60);
+$storedEnrollmentHash = (string)$pdo->query(
+    'SELECT code_hash FROM ipca_garmin_sync_device_enrollments LIMIT 1'
+)->fetchColumn();
+check(
+    'enrollment stores only a SHA-256 hash',
+    $storedEnrollmentHash === hash('sha256', $enrollment['enrollment_code'])
+        && $storedEnrollmentHash !== $enrollment['enrollment_code']
+);
+$credential = $auth->exchangeEnrollmentCode(
+    $enrollment['enrollment_code'],
+    '10000000-0000-4000-8000-000000000001',
+    'Contract test device'
+);
+check(
+    'enrollment returns one plain credential with organization-scoped device',
+    $credential['credential'] !== ''
+        && ($credential['device']['organization_id'] ?? 0) === 3
+        && (string)$pdo->query('SELECT token_hash FROM ipca_garmin_sync_device_credentials LIMIT 1')->fetchColumn()
+            === hash('sha256', $credential['credential'])
+);
+try {
+    $auth->exchangeEnrollmentCode(
+        $enrollment['enrollment_code'],
+        '10000000-0000-4000-8000-000000000002'
+    );
+    fail('consumed enrollment code unexpectedly reused');
+} catch (GarminSyncAuthException $error) {
+    check('enrollment code is single-use', $error->errorCode() === 'GARMIN_ENROLLMENT_CODE_CONSUMED');
+}
+$authenticated = $auth->authenticateBearerToken('Bearer ' . $credential['credential']);
+check(
+    'credential authentication updates device and credential use',
+    (int)$authenticated['id'] > 0
+        && (string)$pdo->query('SELECT last_seen_at FROM ipca_garmin_sync_devices LIMIT 1')->fetchColumn() !== ''
+        && (string)$pdo->query('SELECT last_used_at FROM ipca_garmin_sync_device_credentials LIMIT 1')->fetchColumn() !== ''
+);
+$pdo->exec("UPDATE ipca_garmin_sync_device_credentials SET revoked_at = '2026-01-01 00:00:00'");
+try {
+    $auth->authenticateBearerToken('Bearer ' . $credential['credential']);
+    fail('revoked credential unexpectedly authenticated');
+} catch (GarminSyncAuthException $error) {
+    check('revoked credential is rejected', $error->errorCode() === 'GARMIN_AUTH_CREDENTIAL_REVOKED');
+}
+
+$expiredEnrollment = $auth->createEnrollmentCode(3, 41, 60);
+$pdo->prepare('UPDATE ipca_garmin_sync_device_enrollments SET expires_at = ? WHERE enrollment_uuid = ?')
+    ->execute(array('2000-01-01 00:00:00', $expiredEnrollment['enrollment_uuid']));
+try {
+    $auth->exchangeEnrollmentCode(
+        $expiredEnrollment['enrollment_code'],
+        '10000000-0000-4000-8000-000000000003'
+    );
+    fail('expired enrollment code unexpectedly exchanged');
+} catch (GarminSyncAuthException $error) {
+    check('expired enrollment code is rejected', $error->errorCode() === 'GARMIN_ENROLLMENT_CODE_EXPIRED');
+}
+
+$revokedEnrollment = $auth->createEnrollmentCode(3, 41, 60);
+$pdo->prepare("UPDATE ipca_garmin_sync_device_enrollments SET status = 'revoked', revoked_at = ? WHERE enrollment_uuid = ?")
+    ->execute(array(gmdate('Y-m-d H:i:s'), $revokedEnrollment['enrollment_uuid']));
+try {
+    $auth->exchangeEnrollmentCode(
+        $revokedEnrollment['enrollment_code'],
+        '10000000-0000-4000-8000-000000000004'
+    );
+    fail('revoked enrollment code unexpectedly exchanged');
+} catch (GarminSyncAuthException $error) {
+    check('revoked enrollment code is rejected', $error->errorCode() === 'GARMIN_ENROLLMENT_CODE_REVOKED');
+}
+
+$expiryEnrollment = $auth->createEnrollmentCode(3, 41, 60);
+$expiryCredential = $auth->exchangeEnrollmentCode(
+    $expiryEnrollment['enrollment_code'],
+    '10000000-0000-4000-8000-000000000005'
+);
+$pdo->prepare('UPDATE ipca_garmin_sync_device_credentials SET expires_at = ? WHERE credential_uuid = ?')
+    ->execute(array('2000-01-01 00:00:00', $expiryCredential['credential_uuid']));
+try {
+    $auth->authenticateBearerToken('Bearer ' . $expiryCredential['credential']);
+    fail('expired credential unexpectedly authenticated');
+} catch (GarminSyncAuthException $error) {
+    check('expired credential is rejected', $error->errorCode() === 'GARMIN_AUTH_CREDENTIAL_EXPIRED');
+}
+
+$deviceEnrollment = $auth->createEnrollmentCode(3, 41, 60);
+$deviceCredential = $auth->exchangeEnrollmentCode(
+    $deviceEnrollment['enrollment_code'],
+    '10000000-0000-4000-8000-000000000006'
+);
+$pdo->prepare('UPDATE ipca_garmin_sync_devices SET revoked_at = ? WHERE id = ?')
+    ->execute(array(gmdate('Y-m-d H:i:s'), (int)$deviceCredential['device']['id']));
+try {
+    $auth->authenticateBearerToken('Bearer ' . $deviceCredential['credential']);
+    fail('revoked device unexpectedly authenticated');
+} catch (GarminSyncAuthException $error) {
+    check('revoked device is rejected', $error->errorCode() === 'GARMIN_AUTH_DEVICE_REVOKED');
+}
 
 $tempRoot = sys_get_temp_dir() . '/ipca-garmin-sync-contract-' . bin2hex(random_bytes(6));
 $serviceRuntime = new GarminSyncUploadService($pdo, $tempRoot);

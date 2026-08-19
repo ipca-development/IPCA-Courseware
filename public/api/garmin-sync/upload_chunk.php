@@ -4,7 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/_bootstrap.php';
 
 try {
-    $device = (new DeviceAuthService($pdo))->requireDevice();
+    $device = (new GarminSyncAuthService($pdo))->requireDevice();
     $service = new GarminSyncUploadService($pdo);
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
     if ($method === 'GET') {

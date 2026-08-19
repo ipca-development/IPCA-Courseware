@@ -7,7 +7,7 @@ try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
         throw new GarminSyncUploadException('Method not allowed.', 'METHOD_NOT_ALLOWED', false, 405);
     }
-    $device = (new DeviceAuthService($pdo))->requireDevice();
+    $device = (new GarminSyncAuthService($pdo))->requireDevice();
     $payload = garmin_sync_json_body();
     $hashes = $payload['sha256_list'] ?? array();
     if (!is_array($hashes)) {

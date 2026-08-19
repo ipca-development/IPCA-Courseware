@@ -164,4 +164,37 @@ final class GarminSyncIngestionTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
         XCTAssertEqual(recovered?.state, .discovered)
     }
+
+    func testOpeningExistingLedgerAndRecoveryPreserveCapturedDataAndPendingUploadIdentity() async throws {
+        let h = try harness()
+        defer { try? FileManager.default.removeItem(at: h.root) }
+        try write(42, to: h.card, content: "irreplaceable-captured-flight-data")
+        _ = try await h.service.capture(folder: h.card) { _ in }
+
+        let originalFiles = try await h.store.allFiles()
+        let original = try XCTUnwrap(originalFiles.first)
+        let localPath = try XCTUnwrap(original.localPath)
+        let capturedURL = URL(fileURLWithPath: localPath)
+        let capturedBytes = try Data(contentsOf: capturedURL)
+        try await h.store.updateState(id: original.id, state: .waitingForUpload)
+        let pendingFiles = try await h.store.allFiles()
+        let pending = try XCTUnwrap(pendingFiles.first)
+        let snapshotsBefore = try await h.store.snapshots()
+
+        let reopened = try LocalIngestionStore(
+            databaseURL: h.root.appendingPathComponent("ledger.sqlite")
+        )
+        try await reopened.recoverInterruptedWork(partialDirectory: h.local)
+
+        let recoveredFiles = try await reopened.allFiles()
+        let recovered = try XCTUnwrap(recoveredFiles.first)
+        XCTAssertEqual(try Data(contentsOf: capturedURL), capturedBytes)
+        XCTAssertEqual(recovered.id, pending.id)
+        XCTAssertEqual(recovered.uploadID, pending.uploadID)
+        XCTAssertEqual(recovered.state, .waitingForUpload)
+        XCTAssertEqual(recovered.uploadedBytes, pending.uploadedBytes)
+        XCTAssertEqual(recovered.localPath, localPath)
+        let snapshotsAfter = try await reopened.snapshots()
+        XCTAssertEqual(snapshotsAfter, snapshotsBefore)
+    }
 }

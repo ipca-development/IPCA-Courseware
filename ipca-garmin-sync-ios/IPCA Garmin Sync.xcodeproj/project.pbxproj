@@ -1,27 +1,30 @@
 // !$*UTF8*$!
 {
 	archiveVersion = 1;
-	classes = {};
+	classes = {
+	};
 	objectVersion = 56;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000000000000000000001 /* IPCA_Garmin_SyncApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001; };
-		A10000000000000000000002 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002; };
-		A10000000000000000000003 /* ExternalStorageServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003; };
-		A10000000000000000000004 /* LocalIngestionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004; };
-		A10000000000000000000005 /* CopyAndSnapshotServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005; };
-		A10000000000000000000006 /* UploadServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006; };
-		A10000000000000000000007 /* SyncViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007; };
-		A10000000000000000000008 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008; };
-		A10000000000000000000009 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A; };
-		A1000000000000000000000A /* GarminSyncIngestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B; };
-		A1000000000000000000000B /* GarminSyncUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C; };
-		A1000000000000000000000C /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D; };
+		A10000000000000000000001 /* IPCA_Garmin_SyncApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* IPCA_Garmin_SyncApp.swift */; };
+		A10000000000000000000002 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* Models.swift */; };
+		A10000000000000000000003 /* ExternalStorageServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* ExternalStorageServices.swift */; };
+		A10000000000000000000004 /* LocalIngestionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* LocalIngestionStore.swift */; };
+		A10000000000000000000005 /* CopyAndSnapshotServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* CopyAndSnapshotServices.swift */; };
+		A10000000000000000000006 /* UploadServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* UploadServices.swift */; };
+		A10000000000000000000007 /* SyncViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* SyncViewModel.swift */; };
+		A10000000000000000000008 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* ContentView.swift */; };
+		A10000000000000000000009 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* libsqlite3.tbd */; };
+		A1000000000000000000000A /* GarminSyncIngestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* GarminSyncIngestionTests.swift */; };
+		A1000000000000000000000B /* GarminSyncUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* GarminSyncUploadTests.swift */; };
+		A1000000000000000000000C /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* XCTest.framework */; };
+		A1000000000000000000000D /* EnrollmentServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* EnrollmentServices.swift */; };
+		A1000000000000000000000E /* GarminSyncEnrollmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* GarminSyncEnrollmentTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		A30000000000000000000001 = {
+		A30000000000000000000001 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = A90000000000000000000001 /* Project object */;
 			proxyType = 1;
@@ -40,25 +43,31 @@
 		A20000000000000000000007 /* SyncViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncViewModel.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A20000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A2000000000000000000000A /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
+		A2000000000000000000000A /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		A2000000000000000000000B /* GarminSyncIngestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSyncIngestionTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000000C /* GarminSyncUploadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSyncUploadTests.swift; sourceTree = "<group>"; };
 		A2000000000000000000000D /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
 		A2000000000000000000000E /* IPCA Garmin Sync.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "IPCA Garmin Sync.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000000000000000000000F /* IPCA Garmin SyncTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "IPCA Garmin SyncTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000010 /* EnrollmentServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentServices.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* GarminSyncEnrollmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GarminSyncEnrollmentTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A40000000000000000000001 = {
+		A40000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = (A10000000000000000000009 /* libsqlite3.tbd in Frameworks */,);
+			files = (
+				A10000000000000000000009 /* libsqlite3.tbd in Frameworks */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A40000000000000000000002 = {
+		A40000000000000000000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = (A1000000000000000000000C /* XCTest.framework in Frameworks */,);
+			files = (
+				A1000000000000000000000C /* XCTest.framework in Frameworks */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -77,28 +86,45 @@
 		A50000000000000000000002 /* IPCA Garmin Sync */ = {
 			isa = PBXGroup;
 			children = (
-				A20000000000000000000001, A20000000000000000000002, A20000000000000000000003,
-				A20000000000000000000004, A20000000000000000000005, A20000000000000000000006,
-				A20000000000000000000007, A20000000000000000000008, A20000000000000000000009,
+				A20000000000000000000001 /* IPCA_Garmin_SyncApp.swift */,
+				A20000000000000000000002 /* Models.swift */,
+				A20000000000000000000003 /* ExternalStorageServices.swift */,
+				A20000000000000000000004 /* LocalIngestionStore.swift */,
+				A20000000000000000000005 /* CopyAndSnapshotServices.swift */,
+				A20000000000000000000006 /* UploadServices.swift */,
+				A20000000000000000000010 /* EnrollmentServices.swift */,
+				A20000000000000000000007 /* SyncViewModel.swift */,
+				A20000000000000000000008 /* ContentView.swift */,
+				A20000000000000000000009 /* Info.plist */,
 			);
 			path = "IPCA Garmin Sync";
 			sourceTree = "<group>";
 		};
 		A50000000000000000000003 /* IPCA Garmin SyncTests */ = {
 			isa = PBXGroup;
-			children = (A2000000000000000000000B, A2000000000000000000000C,);
+			children = (
+				A2000000000000000000000B /* GarminSyncIngestionTests.swift */,
+				A2000000000000000000000C /* GarminSyncUploadTests.swift */,
+				A20000000000000000000011 /* GarminSyncEnrollmentTests.swift */,
+			);
 			path = "IPCA Garmin SyncTests";
 			sourceTree = "<group>";
 		};
 		A50000000000000000000004 /* Frameworks */ = {
 			isa = PBXGroup;
-			children = (A2000000000000000000000A, A2000000000000000000000D,);
+			children = (
+				A2000000000000000000000A /* libsqlite3.tbd */,
+				A2000000000000000000000D /* XCTest.framework */,
+			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		A50000000000000000000005 /* Products */ = {
 			isa = PBXGroup;
-			children = (A2000000000000000000000E, A2000000000000000000000F,);
+			children = (
+				A2000000000000000000000E /* IPCA Garmin Sync.app */,
+				A2000000000000000000000F /* IPCA Garmin SyncTests.xctest */,
+			);
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -107,24 +133,37 @@
 /* Begin PBXNativeTarget section */
 		A70000000000000000000001 /* IPCA Garmin Sync */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA0000000000000000000001;
-			buildPhases = (A60000000000000000000001, A40000000000000000000001, A60000000000000000000002,);
-			buildRules = ();
-			dependencies = ();
+			buildConfigurationList = AA0000000000000000000001 /* Build configuration list for PBXNativeTarget "IPCA Garmin Sync" */;
+			buildPhases = (
+				A60000000000000000000001 /* Sources */,
+				A40000000000000000000001 /* Frameworks */,
+				A60000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
 			name = "IPCA Garmin Sync";
 			productName = "IPCA Garmin Sync";
-			productReference = A2000000000000000000000E;
+			productReference = A2000000000000000000000E /* IPCA Garmin Sync.app */;
 			productType = "com.apple.product-type.application";
 		};
 		A70000000000000000000002 /* IPCA Garmin SyncTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA0000000000000000000002;
-			buildPhases = (A60000000000000000000003, A40000000000000000000002, A60000000000000000000004,);
-			buildRules = ();
-			dependencies = (A80000000000000000000001,);
+			buildConfigurationList = AA0000000000000000000002 /* Build configuration list for PBXNativeTarget "IPCA Garmin SyncTests" */;
+			buildPhases = (
+				A60000000000000000000003 /* Sources */,
+				A40000000000000000000002 /* Frameworks */,
+				A60000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A80000000000000000000001 /* PBXTargetDependency */,
+			);
 			name = "IPCA Garmin SyncTests";
 			productName = "IPCA Garmin SyncTests";
-			productReference = A2000000000000000000000F;
+			productReference = A2000000000000000000000F /* IPCA Garmin SyncTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
@@ -137,65 +176,220 @@
 				LastSwiftUpdateCheck = 1630;
 				LastUpgradeCheck = 1630;
 				TargetAttributes = {
-					A70000000000000000000001 = {CreatedOnToolsVersion = 16.3;};
-					A70000000000000000000002 = {CreatedOnToolsVersion = 16.3; TestTargetID = A70000000000000000000001;};
+					A70000000000000000000001 = {
+						CreatedOnToolsVersion = 16.3;
+					};
+					A70000000000000000000002 = {
+						CreatedOnToolsVersion = 16.3;
+						TestTargetID = A70000000000000000000001;
+					};
 				};
 			};
-			buildConfigurationList = AA0000000000000000000003;
+			buildConfigurationList = AA0000000000000000000003 /* Build configuration list for PBXProject "IPCA Garmin Sync" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
-			knownRegions = (en, Base);
+			knownRegions = (
+				en,
+				Base,
+			);
 			mainGroup = A50000000000000000000001;
-			productRefGroup = A50000000000000000000005;
+			productRefGroup = A50000000000000000000005 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (A70000000000000000000001, A70000000000000000000002,);
+			targets = (
+				A70000000000000000000001 /* IPCA Garmin Sync */,
+				A70000000000000000000002 /* IPCA Garmin SyncTests */,
+			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A60000000000000000000002 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
-		A60000000000000000000004 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
-/* End PBXResourcesBuildPhase section */
-
-/* Begin PBXSourcesBuildPhase section */
-		A60000000000000000000001 = {
-			isa = PBXSourcesBuildPhase;
+		A60000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000000000000000000001, A10000000000000000000002, A10000000000000000000003,
-				A10000000000000000000004, A10000000000000000000005, A10000000000000000000006,
-				A10000000000000000000007, A10000000000000000000008,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A60000000000000000000003 = {
+		A60000000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (A1000000000000000000000A, A1000000000000000000000B,);
+			files = (
+				A10000000000000000000001 /* IPCA_Garmin_SyncApp.swift in Sources */,
+				A10000000000000000000002 /* Models.swift in Sources */,
+				A10000000000000000000003 /* ExternalStorageServices.swift in Sources */,
+				A10000000000000000000004 /* LocalIngestionStore.swift in Sources */,
+				A10000000000000000000005 /* CopyAndSnapshotServices.swift in Sources */,
+				A10000000000000000000006 /* UploadServices.swift in Sources */,
+				A1000000000000000000000D /* EnrollmentServices.swift in Sources */,
+				A10000000000000000000007 /* SyncViewModel.swift in Sources */,
+				A10000000000000000000008 /* ContentView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A60000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000000A /* GarminSyncIngestionTests.swift in Sources */,
+				A1000000000000000000000B /* GarminSyncUploadTests.swift in Sources */,
+				A1000000000000000000000E /* GarminSyncEnrollmentTests.swift in Sources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		A80000000000000000000001 = {isa = PBXTargetDependency; target = A70000000000000000000001; targetProxy = A30000000000000000000001;};
+		A80000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A70000000000000000000001 /* IPCA Garmin Sync */;
+			targetProxy = A30000000000000000000001 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		AB0000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; ENABLE_STRICT_OBJC_MSGSEND = YES; GCC_C_LANGUAGE_STANDARD = gnu17; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0;}; name = Debug;};
-		AB0000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; ENABLE_STRICT_OBJC_MSGSEND = YES; GCC_C_LANGUAGE_STANDARD = gnu17; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 5.0;}; name = Release;};
-		AB0000000000000000000003 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_TESTABILITY = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "IPCA Garmin Sync/Info.plist"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.ipca.garmin-sync; PRODUCT_MODULE_NAME = IPCAGarminSync; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";}; name = Debug;};
-		AB0000000000000000000004 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = "IPCA Garmin Sync/Info.plist"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.ipca.garmin-sync; PRODUCT_MODULE_NAME = IPCAGarminSync; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";}; name = Release;};
-		AB0000000000000000000005 = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.ipca.garmin-sync.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IPCA Garmin Sync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IPCA Garmin Sync";}; name = Debug;};
-		AB0000000000000000000006 = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.ipca.garmin-sync.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IPCA Garmin Sync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IPCA Garmin Sync";}; name = Release;};
+		AB0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AB0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		AB0000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W9RY547Y4P;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "IPCA Garmin Sync/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ipca.garmin-sync";
+				PRODUCT_MODULE_NAME = IPCAGarminSync;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AB0000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W9RY547Y4P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "IPCA Garmin Sync/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ipca.garmin-sync";
+				PRODUCT_MODULE_NAME = IPCAGarminSync;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AB0000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ipca.garmin-sync.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IPCA Garmin Sync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IPCA Garmin Sync";
+			};
+			name = Debug;
+		};
+		AB0000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ipca.garmin-sync.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IPCA Garmin Sync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IPCA Garmin Sync";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA0000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (AB0000000000000000000003, AB0000000000000000000004,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
-		AA0000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (AB0000000000000000000005, AB0000000000000000000006,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
-		AA0000000000000000000003 = {isa = XCConfigurationList; buildConfigurations = (AB0000000000000000000001, AB0000000000000000000002,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		AA0000000000000000000001 /* Build configuration list for PBXNativeTarget "IPCA Garmin Sync" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB0000000000000000000003 /* Debug */,
+				AB0000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000002 /* Build configuration list for PBXNativeTarget "IPCA Garmin SyncTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB0000000000000000000005 /* Debug */,
+				AB0000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000003 /* Build configuration list for PBXProject "IPCA Garmin Sync" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB0000000000000000000001 /* Debug */,
+				AB0000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 	};
-	rootObject = A90000000000000000000001;
+	rootObject = A90000000000000000000001 /* Project object */;
 }

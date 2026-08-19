@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
-require_once __DIR__ . '/../../../src/DeviceAuthService.php';
+require_once __DIR__ . '/../../../src/GarminSyncAuthService.php';
 require_once __DIR__ . '/../../../src/GarminSyncUploadService.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -17,21 +17,20 @@ function garmin_sync_json(int $status, array $payload): void
 
 function garmin_sync_error(Throwable $error): void
 {
+    if ($error instanceof GarminSyncAuthException) {
+        garmin_sync_json($error->httpStatus(), array(
+            'ok' => false,
+            'error' => $error->getMessage(),
+            'error_code' => $error->errorCode(),
+            'retryable' => false,
+        ));
+    }
     if ($error instanceof GarminSyncUploadException) {
         garmin_sync_json($error->httpStatus(), array(
             'ok' => false,
             'error' => $error->getMessage(),
             'error_code' => $error->errorCode(),
             'retryable' => $error->retryable(),
-        ));
-    }
-    $message = strtolower($error->getMessage());
-    if (str_contains($message, 'token') || str_contains($message, 'credential') || str_contains($message, 'device')) {
-        garmin_sync_json(401, array(
-            'ok' => false,
-            'error' => 'Device authentication failed.',
-            'error_code' => 'DEVICE_AUTH_FAILED',
-            'retryable' => false,
         ));
     }
     garmin_sync_json(500, array(
