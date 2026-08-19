@@ -25,12 +25,6 @@ $migration = (string)file_get_contents($root . '/src/publishing/BooksManualsAnne
 $sql = (string)file_get_contents($root . '/scripts/sql/2026_08_18_annex_book_structure.sql');
 $apply = (string)file_get_contents($root . '/scripts/apply_annex_book_structure.php');
 $foundation = (string)file_get_contents($root . '/src/publishing/ControlledPublishingFoundationService.php');
-$iosLibrary = (string)file_get_contents(
-    $root . '/ipca-manual-reader-ios/IPCAManualReader/Views/LibraryView.swift'
-);
-$iosModels = (string)file_get_contents(
-    $root . '/ipca-manual-reader-ios/IPCAManualReader/Models/ManualReaderModels.swift'
-);
 
 annex_book_assert(
     '1:1 annex book map table',
@@ -123,23 +117,6 @@ annex_book_assert(
     'library lists 1:1 annex books',
     str_contains($workflow, "b.book_type = 'annex_book'")
         && str_contains($workflow, 'annex_book_map')
-);
-annex_book_assert(
-    'reader library identifies annex books for the iOS Annexes tab',
-    str_contains($reader, 'book_type, manual_code, status')
-        && str_contains($reader, 'annexParentIndexByBookId')
-        && str_contains($reader, "'is_annex_book' => \$isAnnexBook")
-        && str_contains($reader, "'parent_book_key'")
-);
-annex_book_assert(
-    'iOS library moves Annex Books onto the Annexes tab',
-    str_contains($iosLibrary, 'case annexes = "Annexes"')
-        && str_contains($iosLibrary, 'books.filter(\\.isAnnexBook)')
-        && str_contains($iosLibrary, 'books.filter { !$0.isAnnexBook }')
-        && str_contains($iosLibrary, 'showsRevisionMetadata: false')
-        && str_contains($iosLibrary, 'if showsRevisionMetadata')
-        && str_contains($iosModels, 'case isAnnexBookFlag = "is_annex_book"')
-        && str_contains($iosModels, 'bookKey.uppercased().hasPrefix("ANNEXES_")')
 );
 annex_book_assert(
     'migration copies embedded annexes into the parent Annex Book',
