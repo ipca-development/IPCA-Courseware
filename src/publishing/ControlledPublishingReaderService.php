@@ -1240,6 +1240,39 @@ final class ControlledPublishingReaderService
     }
 
     /**
+     * Return the style package frozen with an approved released page map.
+     * Draft/preview readers continue to use the current generated package.
+     *
+     * @param array<string,mixed> $version
+     * @param array<string,mixed> $paginateSource
+     * @return array<string,mixed>
+     */
+    public function readerPublicationPackage(array $version, array $paginateSource): array
+    {
+        if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+            $approval = $this->pageMapStore()->approvalMeta((int)($version['id'] ?? 0));
+            $generation = is_array($approval['generation'] ?? null)
+                ? $approval['generation']
+                : array();
+            $frozen = is_array($generation['publication_package'] ?? null)
+                ? $generation['publication_package']
+                : array();
+            $frozenStyleHash = (string)($generation['style_hash'] ?? '');
+            $frozenManifestHash = (string)($generation['manifest_hash'] ?? '');
+            if ((string)($approval['status'] ?? '') === 'approved'
+                && $frozen !== array()
+                && $frozenStyleHash !== ''
+                && $frozenManifestHash !== ''
+                && hash_equals($frozenStyleHash, (string)($frozen['css']['hash'] ?? ''))
+                && hash_equals($frozenManifestHash, (string)($frozen['manifest_hash'] ?? ''))) {
+                return $frozen;
+            }
+        }
+
+        return $this->paginationPublicationPackage($version, $paginateSource);
+    }
+
+    /**
      * @param list<array<string,mixed>> $sections
      * @return list<array<string,mixed>>
      */

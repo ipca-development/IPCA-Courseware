@@ -296,8 +296,7 @@ try {
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             $source = $reader->loadReaderPaginateSource($ctx['version']);
-            $publicationPackage = (new ControlledPublishingBookStyleManifestService($pdo))
-                ->buildPublicationPackage($ctx['version'], $source);
+            $publicationPackage = $reader->readerPublicationPackage($ctx['version'], $source);
             mr_json(200, array(
                 'ok' => true,
                 'book_key' => $bookKey,

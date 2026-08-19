@@ -14,8 +14,13 @@ $assert = static function (bool $condition, string $message) use (&$failures): v
 $pdo = new PDO('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+$pdo->exec('CREATE TABLE ipca_publishing_books (
+    id INTEGER PRIMARY KEY,
+    book_type TEXT NOT NULL
+)');
 $pdo->exec('CREATE TABLE ipca_publishing_book_versions (
     id INTEGER PRIMARY KEY,
+    book_id INTEGER NOT NULL,
     lifecycle_status TEXT NOT NULL,
     metadata_json TEXT NULL
 )');
@@ -82,8 +87,9 @@ $pdo->exec('CREATE TABLE ipca_publishing_reader_page_map_staging (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (book_version_id, layout_profile, generation_seq, lease_token, page_number)
 )');
-$pdo->exec("INSERT INTO ipca_publishing_book_versions (id, lifecycle_status, metadata_json)
-    VALUES (1, 'draft', '{}'), (2, 'draft', '{}'), (3, 'draft', '{}')");
+$pdo->exec("INSERT INTO ipca_publishing_books (id, book_type) VALUES (1, 'manual')");
+$pdo->exec("INSERT INTO ipca_publishing_book_versions (id, book_id, lifecycle_status, metadata_json)
+    VALUES (1, 1, 'draft', '{}'), (2, 1, 'draft', '{}'), (3, 1, 'draft', '{}')");
 
 $revision = 'a';
 $mode = 'success';

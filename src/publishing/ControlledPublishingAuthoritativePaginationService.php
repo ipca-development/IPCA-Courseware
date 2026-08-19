@@ -207,6 +207,10 @@ final class ControlledPublishingAuthoritativePaginationService
                     'source_hash' => hash('sha256', $sourceJson),
                     'style_hash' => (string)($package['css']['hash'] ?? hash('sha256', $css)),
                     'manifest_hash' => (string)($package['manifest_hash'] ?? ''),
+                    // Released readers must receive the exact style package
+                    // that produced these frozen pages, even after a later
+                    // deployment changes the CSS/manifest generator.
+                    'publication_package' => $package,
                     'layout_hash' => (string)($source['layout_hash'] ?? ''),
                     'manual_page_break_hash' => (string)($source['manual_page_breaks']['hash'] ?? ''),
                     'header_footer_hash' => hash(

@@ -138,6 +138,92 @@ final class ControlledPublishingReaderPageMapStore
         return count($pages);
     }
 
+    /**
+     * Administrative compatibility refresh for an already approved released
+     * publication. This does not authorize content editing; it atomically
+     * replaces the frozen rendering and keeps the map approved.
+     *
+     * @param list<array<string,mixed>> $pages
+     */
+    public function replaceApprovedReleasedPages(
+        int $bookVersionId,
+        string $layoutProfile,
+        string $layoutHash,
+        array $pages,
+        int $generatedByUserId,
+        array $generation
+    ): int {
+        $stmt = $this->pdo->prepare(
+            'SELECT lifecycle_status FROM ipca_publishing_book_versions WHERE id = ? LIMIT 1'
+        );
+        $stmt->execute(array($bookVersionId));
+        if ((string)$stmt->fetchColumn() !== 'released') {
+            throw new RuntimeException('Compatibility refresh requires a released version.');
+        }
+        $approval = $this->approvalMeta($bookVersionId);
+        if (!is_array($approval) || (string)($approval['status'] ?? '') !== 'approved') {
+            throw new RuntimeException('Compatibility refresh requires an approved page map.');
+        }
+        if ($pages === array()) {
+            throw new RuntimeException('Compatibility refresh generated no pages.');
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $this->deletePages($bookVersionId, $layoutProfile);
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ipca_publishing_reader_page_maps (
+                    book_version_id, layout_profile, layout_hash, page_number,
+                    section_id, stable_anchor, page_type,
+                    is_cover, is_section_start, is_major_section_start,
+                    page_html, thumbnail_html, metadata_json, generated_by_user_id
+                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            );
+            foreach ($pages as $page) {
+                $meta = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
+                $insert->execute(array(
+                    $bookVersionId,
+                    $layoutProfile,
+                    $layoutHash,
+                    (int)($page['page_number'] ?? 0),
+                    isset($page['section_id']) ? (int)$page['section_id'] : null,
+                    isset($page['stable_anchor']) ? (string)$page['stable_anchor'] : null,
+                    (string)($page['page_type'] ?? 'content'),
+                    !empty($page['is_cover']) ? 1 : 0,
+                    !empty($page['is_section_start']) ? 1 : 0,
+                    !empty($page['is_major_section_start']) ? 1 : 0,
+                    (string)($page['page_html'] ?? ''),
+                    isset($page['thumbnail_html']) ? (string)$page['thumbnail_html'] : null,
+                    json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    $generatedByUserId > 0 ? $generatedByUserId : null,
+                ));
+            }
+
+            $meta = $this->loadVersionMetadata($bookVersionId);
+            $meta[self::META_KEY] = array_merge($approval, array(
+                'status' => 'approved',
+                'layout_profile' => $layoutProfile,
+                'layout_hash' => $layoutHash,
+                'page_count' => count($pages),
+                'generation' => $generation,
+                'generated_at' => gmdate('Y-m-d H:i:s'),
+                'generated_by_user_id' => $generatedByUserId,
+                'approved_at' => gmdate('Y-m-d H:i:s'),
+                'approved_by_user_id' => $generatedByUserId,
+                'approval_basis' => 'released_publication_compatibility_refresh',
+            ));
+            $this->saveVersionMetadata($bookVersionId, $meta);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return count($pages);
+    }
+
     public function approve(int $bookVersionId, int $approvedByUserId, ?string $layoutProfile = null): array
     {
         $this->assertVersionMutable($bookVersionId);
