@@ -388,6 +388,84 @@ final class BooksManualsChangePlanService
     }
 
     /**
+     * Record the human decision governing one consolidated amendment area.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordImpactDecision(
+        int $planId,
+        int $impactId,
+        string $decision,
+        string $note,
+        int $actorUserId
+    ): array {
+        $decision = strtoupper(trim($decision));
+        if (!in_array($decision, array('ACCEPT', 'MODIFY', 'REJECT'), true)) {
+            throw new InvalidArgumentException('Unsupported amendment-area decision.');
+        }
+        $note = trim($note);
+        if ($actorUserId <= 0) {
+            throw new InvalidArgumentException('An accountable decision-maker is required.');
+        }
+        if ($decision !== 'ACCEPT' && mb_strlen($note) < 5) {
+            throw new InvalidArgumentException('Record a rationale for modification or rejection.');
+        }
+        $plan = $this->getPlan($planId);
+        if ((int)($plan['owner_id'] ?? 0) !== $actorUserId) {
+            throw new RuntimeException('Only the Change Plan owner can decide amendment areas.');
+        }
+        $impact = $this->row(
+            'SELECT * FROM ' . self::TABLES['impacts'] . ' WHERE id=? AND plan_id=? LIMIT 1',
+            array($impactId, $planId)
+        );
+        if ($impact === null) {
+            throw new RuntimeException('Amendment area not found in this Change Plan.');
+        }
+        $status = match ($decision) {
+            'ACCEPT' => 'approved',
+            'MODIFY' => 'validated',
+            'REJECT' => 'dismissed',
+        };
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ' . self::TABLES['impacts']
+                . ' SET status=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND plan_id=?'
+            )->execute(array($status, $impactId, $planId));
+            $eventId = $this->appendEvent(
+                $planId,
+                match ($decision) {
+                    'ACCEPT' => 'IMPACT_ACCEPTED',
+                    'MODIFY' => 'IMPACT_MODIFICATION_REQUESTED',
+                    'REJECT' => 'IMPACT_REJECTED',
+                },
+                10,
+                array(
+                    'impact_id' => $impactId,
+                    'impact_key' => (string)($impact['impact_key'] ?? ''),
+                    'section_number' => (string)($impact['section_number'] ?? ''),
+                    'decision' => $decision,
+                    'note' => $note,
+                ),
+                $actorUserId
+            );
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        return array(
+            'impact_id' => $impactId,
+            'decision' => $decision,
+            'status' => $status,
+            'note' => $note,
+            'event_id' => $eventId,
+        );
+    }
+
+    /**
      * Persist a node beneath a proposal after verifying plan ownership.
      *
      * @param array<string,mixed> $data

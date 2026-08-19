@@ -10,6 +10,10 @@ $serviceFile = __DIR__ . '/../../../src/publishing/BooksManualsChangeAssistantSe
 if (is_file($serviceFile)) {
     require_once $serviceFile;
 }
+$architectServiceFile = __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.php';
+if (is_file($architectServiceFile)) {
+    require_once $architectServiceFile;
+}
 
 $user = compliance_require_access($pdo);
 $csrf = (string)($_SESSION['books_manuals_ai_csrf'] ?? '');
@@ -24,6 +28,7 @@ $featureEnabled = false;
 $readinessMessage = '';
 $projects = array();
 $versions = array();
+$latestArchitectPlanId = 0;
 
 try {
     if (!class_exists('BooksManualsChangeAssistantService')) {
@@ -63,6 +68,15 @@ try {
         }
         unset($projectRow);
     }
+    if (class_exists('BooksManualsChangePlanService')) {
+        $architectPlans = new BooksManualsChangePlanService($pdo);
+        if ($architectPlans->tablesPresent()) {
+            $latestArchitectPlanId = (int)$pdo->query(
+                'SELECT id FROM ipca_manual_ai_architect_plans
+                 ORDER BY updated_at DESC,id DESC LIMIT 1'
+            )->fetchColumn();
+        }
+    }
 } catch (Throwable $e) {
     $readinessMessage = $e->getMessage();
 }
@@ -89,7 +103,14 @@ books_manuals_page_open(array(
         array('label' => 'Ready to apply', 'value' => $readyCount, 'tone' => $readyCount > 0 ? 'ok' : ''),
     ),
     'actions' => $featureEnabled
-        ? array(array('label' => 'New Change Project', 'modal' => 'bmca-create-project', 'icon' => 'plus'))
+        ? array_values(array_filter(array(
+            $latestArchitectPlanId > 0 ? array(
+                'label' => 'Open Manual Change Architect',
+                'href' => '/admin/books_manuals/change_architect.php?plan_id=' . $latestArchitectPlanId,
+                'variant' => 'secondary',
+            ) : null,
+            array('label' => 'New Change Project', 'modal' => 'bmca-create-project', 'icon' => 'plus'),
+        )))
         : array(),
 ));
 ?>
