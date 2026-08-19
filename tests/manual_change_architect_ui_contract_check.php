@@ -41,6 +41,11 @@ architect_ui_assert(!str_contains($css, '.mca-rail') && !str_contains($css, '.mc
 architect_ui_assert(str_contains($page, '$activeStep'), 'Future wizard steps are not progressively gated.');
 architect_ui_assert(str_contains($page, 'mcw-step--complete'), 'Completed-step summaries are missing.');
 architect_ui_assert(
+    str_contains($page, '$startNew') && str_contains($page, 'change_architect.php?new=1')
+        && str_contains($page, 'Start New Wizzard'),
+    'Users must be able to start a blank Change Plan without deleting the current plan.'
+);
+architect_ui_assert(
     str_contains($page, "v.lifecycle_status IN ('draft','in_review')"),
     'Primary-manual choices must be limited to Draft and Draft Review revisions.'
 );

@@ -47,6 +47,7 @@ if ($csrf === '') {
 
 $plans = new BooksManualsChangePlanService($pdo);
 $planId = max(0, (int)($_GET['plan_id'] ?? $_GET['id'] ?? 0));
+$startNew = (string)($_GET['new'] ?? '') === '1';
 $report = array();
 $manual = array();
 $versions = array();
@@ -55,7 +56,7 @@ try {
     if (!$plans->tablesPresent()) {
         throw new RuntimeException('The Manual Change Wizzard is not installed on this deployment.');
     }
-    if ($planId <= 0) {
+    if ($planId <= 0 && !$startNew) {
         $stmt = $pdo->prepare(
             'SELECT id FROM ipca_manual_ai_architect_plans
              WHERE owner_id=? ORDER BY updated_at DESC,id DESC LIMIT 1'
@@ -189,6 +190,13 @@ books_manuals_page_open(array(
 >
   <?php if ($loadError !== '' && $report === array()): ?>
     <div class="cmp-alert cmp-alert--error"><?= h($loadError) ?></div>
+  <?php endif; ?>
+
+  <?php if ($report !== array()): ?>
+    <div class="mcw-restart">
+      <span>The current Change Plan remains saved in its present state.</span>
+      <a class="app-btn app-btn--secondary" href="/admin/books_manuals/change_architect.php?new=1">Start New Wizzard</a>
+    </div>
   <?php endif; ?>
 
   <div class="mcw-steps">

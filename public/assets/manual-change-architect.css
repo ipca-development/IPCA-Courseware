@@ -37,6 +37,25 @@
   color: var(--mcw-navy);
 }
 
+.mcw-restart {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.mcw-restart span {
+  color: var(--mcw-muted);
+  font-size: 10px;
+}
+
+.mcw-restart .app-btn {
+  min-height: 34px;
+  padding: 0 13px;
+  font-size: 10px;
+}
+
 .mcw-steps {
   display: grid;
   gap: 16px;
@@ -709,6 +728,15 @@
 }
 
 @media (max-width: 720px) {
+  .mcw-restart {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mcw-restart span {
+    order: 2;
+  }
+
   .mcw-step--active {
     padding: 20px 16px 22px;
   }
