@@ -164,6 +164,7 @@ annex_book_assert(
         && str_contains($annexManager, 'cp-annex-column-resizer')
         && str_contains($annexManager, 'columnWidthStorageKey')
         && str_contains($annexManager, 'ipca.manageAnnexes.user.')
+        && str_contains($annexManager, 'grid-template-columns: repeat(4, minmax(0, 1fr))')
         && str_contains($annexManager, 'Reset columns')
 );
 annex_book_assert(

@@ -122,7 +122,7 @@ compliance_page_open(array(
   #cp-annex-manager .cp-annex-col-date { width: 104px; }
   #cp-annex-manager .cp-annex-col-type,
   #cp-annex-manager .cp-annex-col-orientation { width: 38px; }
-  #cp-annex-manager .cp-annex-col-actions { width: 176px; }
+  #cp-annex-manager .cp-annex-col-actions { width: 238px; }
   #cp-annex-manager .cp-annex-meta {
     white-space: nowrap;
     overflow-wrap: normal;
@@ -178,17 +178,17 @@ compliance_page_open(array(
   }
   #cp-annex-manager .cp-annex-row-actions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
     align-items: center;
   }
   #cp-annex-manager .cp-annex-row-actions .app-btn {
     width: 100%;
     min-height: 30px;
     height: 30px;
-    padding: 0 5px;
+    padding: 0 3px;
     margin: 0;
-    font-size: 11px;
+    font-size: 10px;
     line-height: 28px;
     text-align: center;
     white-space: nowrap;
@@ -376,8 +376,8 @@ compliance_page_open(array(
   var revertListEl = document.getElementById('cp-annex-revert-list');
   var revertSectionId = 0;
   var columnKeys = ['number', 'title', 'revision', 'date', 'type', 'orientation', 'actions'];
-  var columnMinimums = [34, 120, 48, 86, 32, 32, 132];
-  var columnWidthStorageKey = 'ipca.manageAnnexes.user.' + userId + '.columnWidths.v1';
+  var columnMinimums = [34, 120, 48, 86, 32, 32, 210];
+  var columnWidthStorageKey = 'ipca.manageAnnexes.user.' + userId + '.columnWidths.v2';
   var storedColumnRatios = loadColumnRatios();
 
   function setStatus(msg, tone) {
