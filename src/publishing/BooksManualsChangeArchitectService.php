@@ -297,7 +297,7 @@ final class BooksManualsChangeArchitectService
         ))[0] ?? array();
         $globalPreserved = array_values(array_filter(array_map(
             'strval',
-            (array)($intent['preserved_concepts_json'] ?? array())
+            (array)($intent['preserved_concepts_json'] ?? $intent['preserved_concepts'] ?? array())
         )));
 
         $areas = array();
@@ -314,7 +314,7 @@ final class BooksManualsChangeArchitectService
             }
             $evidence = is_array($impact['canonical_evidence_json'] ?? null)
                 ? $impact['canonical_evidence_json']
-                : array();
+                : (is_array($impact['canonical_evidence'] ?? null) ? $impact['canonical_evidence'] : array());
             $currentManual = is_array($evidence['current_manual'] ?? null)
                 ? $evidence['current_manual']
                 : array();
@@ -328,12 +328,30 @@ final class BooksManualsChangeArchitectService
             }
             $componentKeys = array_values(array_unique(array_filter(array_map(
                 'strval',
-                (array)($impact['target_component_keys_json'] ?? array_keys($coverageByKey))
+                (array)(
+                    $impact['target_component_keys_json']
+                    ?? $impact['target_component_keys']
+                    ?? array_keys($coverageByKey)
+                )
             ))));
             $concepts = array_values(array_filter(array_map(
                 'strval',
-                (array)($impact['target_concepts_json'] ?? array())
+                (array)($impact['target_concepts_json'] ?? $impact['target_state_concepts'] ?? array())
             )));
+            if ($componentKeys === array() && $concepts === array()) {
+                $relevanceContext = array(
+                    'title' => (string)($impact['section_title'] ?? ''),
+                    'complete_text' => $this->json($currentManual),
+                    'path' => array(),
+                );
+                foreach ($componentMap as $componentKey => $component) {
+                    if ($componentKey !== ''
+                        && is_array($component)
+                        && $this->componentSectionRelevant($component, $relevanceContext)) {
+                        $componentKeys[] = $componentKey;
+                    }
+                }
+            }
             if ($componentKeys === array() && $concepts === array()) {
                 $legacyOnlyImpactIds[] = (int)($impact['id'] ?? 0);
                 $legacyOnlySectionIds[] = (int)($impact['section_id'] ?? 0);
@@ -348,7 +366,7 @@ final class BooksManualsChangeArchitectService
             );
             $preserved = array_values(array_filter(array_map(
                 'strval',
-                (array)($impact['preserved_logic_json'] ?? array())
+                (array)($impact['preserved_logic_json'] ?? $impact['preserved_logic'] ?? array())
             )));
             if ($preserved === array()) {
                 $preserved = $this->relevantPreservedConcepts(
@@ -358,7 +376,7 @@ final class BooksManualsChangeArchitectService
                 );
             }
             $related = array();
-            foreach ((array)($impact['dependencies_json'] ?? array()) as $dependency) {
+            foreach ((array)($impact['dependencies_json'] ?? $impact['dependencies'] ?? array()) as $dependency) {
                 if (is_string($dependency) && trim($dependency) !== '') {
                     $related[] = trim($dependency);
                 } elseif (is_array($dependency)) {
@@ -409,26 +427,59 @@ final class BooksManualsChangeArchitectService
                     );
                 }
             }
+            $amendmentRows = $this->manualAmendmentRows(
+                $componentRows,
+                $sectionNumber,
+                $sectionTitle,
+                $treatment,
+                $currentManual
+            );
+            $narrative = $this->sectionReviewNarrative(
+                $sectionTitle,
+                $treatment,
+                $componentRows,
+                $currentManual
+            );
+            if ($treatment !== 'RESTRUCTURE') {
+                $preserved = array_values(array_filter(
+                    $preserved,
+                    fn(string $decision): bool =>
+                        $this->preservationSupportedByCanonical($decision, $currentManual)
+                ));
+            }
+            $preserved = array_values(array_unique(array_merge(
+                $preserved,
+                $this->canonicalPreservationDecisions($sectionTitle, $currentManual)
+            )));
+            $legacyConcepts = $this->legacyConcepts($evidence);
             $areas[] = array(
                 'impact_id' => $impactId,
+                'section_id' => (int)($impact['section_id'] ?? 0),
                 'section_number' => $sectionNumber,
                 'section_title' => $sectionTitle,
                 'treatment' => $treatment,
                 'is_primary_change' => false,
+                'why_affected' => $narrative['why_affected'],
+                'current_relevant_content' => array_values((array)(
+                    $currentManual['preview_subsections']
+                    ?? $currentManual['subsections']
+                    ?? array()
+                )),
+                'obsolete_or_inaccurate_content' => $legacyConcepts,
+                'proposed_amendment_summary' => $narrative['proposed_amendment_summary'],
+                'proposed_structure_items' => $amendmentRows,
+                'must_preserve' => array_slice($preserved, 0, 8),
+                'related_amendments' => array(),
+                'legacy_references' => $legacyConcepts,
+                'evidence_refs' => $this->evidenceReferences($evidence),
                 'concise_rationale' => $this->presentationText(
-                    (string)($impact['substantive_rationale'] ?? $impact['description'] ?? ''),
+                    $narrative['why_affected'],
                     520
                 ),
                 'current_manual' => $currentManual,
-                'amendment_components' => $this->manualAmendmentRows(
-                    $componentRows,
-                    $sectionNumber,
-                    $sectionTitle,
-                    $treatment,
-                    $currentManual
-                ),
-                'preserved_concepts' => array_slice(array_values(array_unique($preserved)), 0, 6),
-                'removed_or_obsolete_concepts' => $this->legacyConcepts($evidence),
+                'amendment_components' => $amendmentRows,
+                'preserved_concepts' => array_slice($preserved, 0, 8),
+                'removed_or_obsolete_concepts' => $legacyConcepts,
                 'dependencies' => array_slice(array_values(array_unique(array_filter($related))), 0, 4),
                 'proposed_hierarchy' => $proposedHierarchy,
                 'evidence_references' => $this->evidenceReferences($evidence),
@@ -449,10 +500,13 @@ final class BooksManualsChangeArchitectService
         }
         if ($primaryIndex !== null) {
             $areas[$primaryIndex]['is_primary_change'] = true;
+            $areas = $this->relatePresentationAreas($areas, $primaryIndex);
         }
+        $qualityGate = $this->validateImpactPresentation($areas);
         return array(
-            'schema' => 'ipca.manual-change-impact-presentation.v1',
+            'schema' => 'ipca.manual-change-impact-presentation.v2',
             'areas' => $areas,
+            'quality_gate' => $qualityGate,
             'legacy_only_impact_ids' => $legacyOnlyImpactIds,
             'legacy_only_section_ids' => array_values(array_unique(array_filter($legacyOnlySectionIds))),
             'no_change_areas' => array_values(array_filter(
@@ -2093,11 +2147,15 @@ final class BooksManualsChangeArchitectService
         if ($ids === array()) {
             return array();
         }
-        $stmt = $this->pdo->prepare(
-            'SELECT id,title,metadata_json FROM ipca_publishing_book_sections'
-            . ' WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
-        );
-        $stmt->execute($ids);
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT id,title,metadata_json FROM ipca_publishing_book_sections'
+                . ' WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
+            );
+            $stmt->execute($ids);
+        } catch (PDOException) {
+            return array();
+        }
         $identities = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $metadata = is_array($row['metadata_json'] ?? null)
@@ -2232,6 +2290,229 @@ final class BooksManualsChangeArchitectService
     }
 
     /**
+     * @param list<array<string,mixed>> $components
+     * @param array<string,mixed> $currentManual
+     * @return array{why_affected:string,proposed_amendment_summary:string}
+     */
+    private function sectionReviewNarrative(
+        string $sectionTitle,
+        string $treatment,
+        array $components,
+        array $currentManual
+    ): array {
+        $title = $this->normalize($sectionTitle);
+        $source = $this->normalize($this->json($currentManual));
+        $target = $this->normalize(implode(' ', array_map(
+            static fn(array $row): string =>
+                (string)($row['title'] ?? '') . ' ' . (string)($row['summary'] ?? ''),
+            $components
+        )));
+        $context = $title . ' ' . $source . ' ' . $target;
+        if ($treatment === 'RESTRUCTURE'
+            && preg_match('/\b(?:occurrence|safety report|investigation)\b/iu', $context) === 1) {
+            return array(
+                'why_affected' => 'The current reporting and investigation procedure does not represent the complete governed occurrence lifecycle required by the accepted change: reportability decisions, ECCAIRS submissions and follow-up, action control, effectiveness review, monitoring, escalation and authorized closure are not controlled as one end-to-end process.',
+                'proposed_amendment_summary' => 'Restructure the section as the primary occurrence-management procedure. Replace obsolete intake and reporting references, assign each lifecycle decision and record, integrate valid investigation logic, govern corrective and mitigating actions, add intermediate/final ECCAIRS follow-up, and make closure conditional on evidence, effectiveness and applicable authority follow-up.',
+            );
+        }
+        if (preg_match('/\bresponsibilit\w*\b/iu', $title) === 1) {
+            return array(
+                'why_affected' => 'The updated occurrence lifecycle assigns accountable decisions that the current responsibility section does not state explicitly, including reportability, ECCAIRS submission approval and follow-up, action oversight, effectiveness review, escalation and closure authorization.',
+                'proposed_amendment_summary' => 'Extend the accountable role’s duties to cover the occurrence lifecycle decisions and oversight introduced in the primary procedure, including reportability, authority communication, investigation and action governance, escalation and controlled closure. Retain unrelated valid SMS accountabilities.',
+            );
+        }
+        if (preg_match('/\brecord\w*\b/iu', $title) === 1) {
+            return array(
+                'why_affected' => 'The occurrence lifecycle creates controlled evidence that is not explicitly represented in the current record-control section, including reportability decisions, authority submissions and acknowledgements, investigation evidence, action evidence, effectiveness results, residual-risk acceptance and closure authorization.',
+                'proposed_amendment_summary' => 'Extend the controlled SMS record set to include occurrence intake, reportability decisions, ECCAIRS submissions and acknowledgements, investigation records, corrective and mitigating action evidence, effectiveness reviews, residual-risk decisions and closure authorization. Keep the existing valid access and retention controls.',
+            );
+        }
+        if (preg_match('/\b(?:performance|monitor|assurance|compliance)\w*\b/iu', $title) === 1) {
+            return array(
+                'why_affected' => 'The current monitoring framework does not yet use occurrence-lifecycle status and outcomes as explicit performance inputs, so overdue reports or actions, ECCAIRS follow-up, effectiveness results and closure performance could remain outside routine safety oversight.',
+                'proposed_amendment_summary' => 'Add occurrence-management inputs to safety-performance monitoring: reporting timeliness, reportability and authority follow-up status, overdue investigations and actions, effectiveness outcomes, escalation and closure performance. Preserve the existing occurrence-trend, overdue-action and safety-review practices.',
+            );
+        }
+        if (preg_match('/\b(?:training|competence)\w*\b/iu', $title) === 1) {
+            return array(
+                'why_affected' => 'The updated lifecycle introduces role-specific decisions and evidence duties for reporters, Safety Managers and Action Owners that are not covered by a general SMS-training statement alone.',
+                'proposed_amendment_summary' => 'Define role-appropriate initial and recurrent competence for occurrence reporting, reportability and ECCAIRS handling, investigation, action ownership, effectiveness review, escalation and closure. Retain the existing valid SMS induction and practical-training principles.',
+            );
+        }
+        $componentNames = array_slice(array_values(array_filter(array_map(
+            static fn(array $row): string => trim((string)($row['title'] ?? '')),
+            $components
+        ))), 0, 3);
+        $delta = $componentNames === array()
+            ? 'the evidenced operational controls'
+            : implode(', ', $componentNames);
+        return array(
+            'why_affected' => 'The canonical section does not fully govern the accepted target-state delta for '
+                . $delta . '; leaving it unchanged would make the manual incomplete or misleading for this process.',
+            'proposed_amendment_summary' => 'Specify the responsibilities, process controls, retained evidence and '
+                . 'governance needed for ' . $delta . ', while preserving canonical content outside that demonstrated delta.',
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $currentManual
+     * @return list<string>
+     */
+    private function canonicalPreservationDecisions(string $sectionTitle, array $currentManual): array
+    {
+        $title = $this->normalize($sectionTitle);
+        $source = $this->normalize($this->json($currentManual));
+        $candidates = match (true) {
+            preg_match('/\bresponsibilit\w*\b/iu', $title) === 1 => array(
+                array('/\bqualif\w*\b/iu', 'Existing qualification requirements'),
+                array('/\bsafety management system|\bsms\b/iu', 'Existing overall SMS accountability'),
+                array('/\b(?:hazard|risk management|risk assessment)\b/iu', 'Existing hazard and risk-management responsibilities'),
+                array('/\breview\w*.{0,40}\boccurrence|\boccurrence.{0,40}\breview/iu', 'Existing occurrence-review responsibility'),
+                array('/\bassign\w*.{0,30}\baction/iu', 'Existing action-assignment responsibility'),
+                array('/\baccountable manager\b/iu', 'Existing escalation to the Accountable Manager'),
+            ),
+            preg_match('/\brecord\w*\b/iu', $title) === 1 => array(
+                array('/\bdefinition.{0,40}\brecord|\brecord.{0,40}\bdefinition/iu', 'Existing definition and scope of controlled records'),
+                array('/\bretention|retain\w*.{0,30}\byear/iu', 'Existing record-retention requirements'),
+                array('/\baccess.{0,30}\brestrict|\brestrict\w*.{0,30}\baccess/iu', 'Existing record-access restrictions'),
+                array('/\b(?:electronic|cloud|digital)\b/iu', 'Existing electronic and cloud-storage allowance'),
+            ),
+            preg_match('/\b(?:performance|monitor|assurance|compliance)\w*\b/iu', $title) === 1 => array(
+                array('/\b(?:spo|spi|safety performance (?:objective|indicator))\b/iu', 'Existing safety-performance objective and indicator framework'),
+                array('/\b(?:maturity|continuous improvement)\b/iu', 'Existing SMS maturity and continuous-improvement model'),
+                array('/\b(?:review|monitor)\w*.{0,60}\bsafety performance|\bsafety performance.{0,60}\b(?:review|monitor)/iu', 'Existing safety-performance review principles'),
+                array('/\boccurrence trend/iu', 'Existing occurrence-trend monitoring'),
+                array('/\boverdue.{0,30}\b(?:action|corrective)/iu', 'Existing overdue-action monitoring'),
+                array('/\bsafety review meeting/iu', 'Existing safety-review meeting'),
+            ),
+            preg_match('/\b(?:training|competence)\w*\b/iu', $title) === 1 => array(
+                array('/\b(?:role|function|personnel|safety manager).{0,60}\b(?:training|competence|induction)|\b(?:training|competence|induction).{0,60}\b(?:role|function|personnel|safety manager)/iu', 'Existing role-appropriate SMS training principles'),
+                array('/\bsms induction/iu', 'Existing SMS induction'),
+                array('/\bpractical training/iu', 'Existing practical training for the Safety Manager'),
+                array('/\b(?:maintain|recurrent|continued).{0,40}\bcompetenc|\bcompetenc.{0,40}\b(?:maintain|recurrent|continued)/iu', 'Existing competence-maintenance requirements'),
+                array('/\btraining record|\brecord.{0,30}\btraining/iu', 'Existing training-record requirements'),
+            ),
+            preg_match('/\b(?:occurrence|safety report|investigation)\b/iu', $title . ' ' . $source) === 1 => array(
+                array('/\bmandatory\b.{0,50}\bvoluntary|\bvoluntary\b.{0,50}\bmandatory/iu', 'Mandatory and voluntary reporting principles'),
+                array('/\b(?:just culture|reporter protection|confidential)\b/iu', 'Reporter protection and just-culture principles'),
+                array('/\b(?:72.hour|seventy.two.hour|deadline)\b/iu', 'Applicable initial authority-reporting deadlines'),
+                array('/\binvestigat\w*\b/iu', 'Valid internal safety-investigation principles'),
+            ),
+            default => array(),
+        };
+        $preserved = array();
+        foreach ($candidates as [$pattern, $decision]) {
+            if (preg_match($pattern, $source) === 1) {
+                $preserved[] = $decision;
+            }
+        }
+        return $preserved;
+    }
+
+    /** @param array<string,mixed> $currentManual */
+    private function preservationSupportedByCanonical(string $decision, array $currentManual): bool
+    {
+        $decisionTokens = array_values(array_unique(array_filter(
+            preg_split('/\s+/u', $this->normalize($decision)) ?: array(),
+            static fn(string $token): bool => mb_strlen($token) >= 5
+                && !in_array($token, array('existing', 'principles', 'requirements'), true)
+        )));
+        if ($decisionTokens === array()) {
+            return false;
+        }
+        $source = $this->normalize($this->json($currentManual));
+        $matches = 0;
+        foreach ($decisionTokens as $token) {
+            if (str_contains($source, $token)) {
+                $matches++;
+            }
+        }
+        return $matches >= min(2, count($decisionTokens));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $areas
+     * @return list<array<string,mixed>>
+     */
+    private function relatePresentationAreas(array $areas, int $primaryIndex): array
+    {
+        $primary = $areas[$primaryIndex];
+        foreach ($areas as $index => $area) {
+            if ($index === $primaryIndex) {
+                continue;
+            }
+            $title = $this->normalize((string)$area['section_title']);
+            $relationship = match (true) {
+                preg_match('/\bresponsibilit\w*\b/iu', $title) === 1 =>
+                    'Assigns the accountable lifecycle decisions and oversight described in the primary procedure.',
+                preg_match('/\brecord\w*\b/iu', $title) === 1 =>
+                    'Retains the controlled evidence generated by the primary occurrence lifecycle.',
+                preg_match('/\b(?:performance|monitor|assurance|compliance)\w*\b/iu', $title) === 1 =>
+                    'Uses lifecycle status, timeliness and outcomes as safety-performance monitoring inputs.',
+                preg_match('/\b(?:training|competence)\w*\b/iu', $title) === 1 =>
+                    'Establishes competence for the roles that perform and govern the primary lifecycle.',
+                default => 'Supports a defined control required by the primary amended procedure.',
+            };
+            $areas[$index]['related_amendments'][] = array(
+                'section_number' => (string)$primary['section_number'],
+                'section_title' => (string)$primary['section_title'],
+                'relationship' => $relationship,
+            );
+            $areas[$primaryIndex]['related_amendments'][] = array(
+                'section_number' => (string)$area['section_number'],
+                'section_title' => (string)$area['section_title'],
+                'relationship' => $relationship,
+            );
+        }
+        return $areas;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $areas
+     * @return array{reviewable:bool,failures:list<array<string,string>>}
+     */
+    public function validateImpactPresentation(array $areas): array
+    {
+        $failures = array();
+        $whySeen = array();
+        foreach ($areas as $area) {
+            $section = trim((string)($area['section_number'] ?? ''));
+            $why = trim((string)($area['why_affected'] ?? ''));
+            $proposal = trim((string)($area['proposed_amendment_summary'] ?? ''));
+            $whyKey = $this->normalize($why);
+            if ($why === '' || str_contains($whyKey, 'demonstrably covers a target-state component')) {
+                $failures[] = array('code' => 'generic_why', 'section' => $section, 'message' => 'Explain the section-specific manual delta.');
+            }
+            if ($whyKey !== '') {
+                if (isset($whySeen[$whyKey])) {
+                    $failures[] = array('code' => 'duplicate_why', 'section' => $section, 'message' => 'The explanation duplicates another amendment area.');
+                }
+                $whySeen[$whyKey] = true;
+            }
+            if ($proposal === ''
+                || preg_match('/^(?:align|update|address|incorporate)\b.{0,140}$/iu', $proposal) === 1
+                || str_contains($this->normalize($proposal), 'amend this existing manual section only')) {
+                $failures[] = array('code' => 'vague_proposal', 'section' => $section, 'message' => 'State the substantive responsibilities, controls, records or structure to change.');
+            }
+            if ((array)($area['must_preserve'] ?? array()) === array()) {
+                $failures[] = array('code' => 'missing_preservation', 'section' => $section, 'message' => 'Record the supported canonical content that must survive the amendment.');
+            }
+            if (strtoupper((string)($area['treatment'] ?? '')) === 'RESTRUCTURE') {
+                $items = (array)($area['proposed_structure_items'] ?? array());
+                if (count($items) < 2) {
+                    $failures[] = array('code' => 'incomplete_structure', 'section' => $section, 'message' => 'Provide the complete proposed hierarchy for the restructure.');
+                }
+            } elseif (empty($area['is_primary_change']) && (array)($area['related_amendments'] ?? array()) === array()) {
+                $failures[] = array('code' => 'missing_relationship', 'section' => $section, 'message' => 'Explain how this supporting amendment relates to the primary process.');
+            }
+            if (preg_match('/\b(?:sql|api endpoint|json payload|php class|database table|source code|sha-?256)\b/iu', $proposal) === 1) {
+                $failures[] = array('code' => 'implementation_detail', 'section' => $section, 'message' => 'Remove implementation-level technical detail from the controlled-manual amendment.');
+            }
+        }
+        return array('reviewable' => $failures === array(), 'failures' => $failures);
+    }
+
+    /**
      * Project target-state evidence into concrete manual-level amendment
      * decisions. Internal target components are deliberately not returned.
      *
@@ -2311,13 +2592,22 @@ final class BooksManualsChangeArchitectService
                 ),
             );
             $rows = array();
+            $completeLifecycle = preg_match('/\b(?:occurrence|initial report)\b/iu', $componentText) === 1
+                && preg_match('/\breportability\b/iu', $componentText) === 1
+                && preg_match('/\becca?irs\b/iu', $componentText) === 1
+                && preg_match('/\binvestigat\w*\b/iu', $componentText) === 1
+                && preg_match('/\b(?:corrective(?: or mitigating)?|mitigating) actions?\b/iu', $componentText) === 1
+                && preg_match('/\beffectiveness\b/iu', $componentText) === 1
+                && preg_match('/\bclos(?:e|ed|ure)\b/iu', $componentText) === 1;
             foreach ($definitions as $definition) {
                 $sourceSupportsPreservation = in_array(
                     $definition['treatment'],
                     array('PRESERVE_REFINE', 'AMEND'),
                     true
                 ) && preg_match($definition['match'], $sourceText) === 1;
-                if (!$sourceSupportsPreservation && preg_match($definition['match'], $componentText) !== 1) {
+                if (!$completeLifecycle
+                    && !$sourceSupportsPreservation
+                    && preg_match($definition['match'], $componentText) !== 1) {
                     continue;
                 }
                 $rows[] = array(
@@ -2337,13 +2627,13 @@ final class BooksManualsChangeArchitectService
         $normalizedTitle = $this->normalize($sectionTitle);
         $summary = match (true) {
             preg_match('/\bresponsibilit\w*\b/iu', $normalizedTitle) === 1 =>
-                'Clarify accountable roles and decision authority for the updated process without changing unrelated responsibilities.',
+                'Add reportability, authority-submission, action-oversight, effectiveness, escalation and closure decision responsibilities for the updated occurrence lifecycle.',
             preg_match('/\brecord\w*\b/iu', $normalizedTitle) === 1 =>
-                'Extend controlled records and retention requirements to the new workflow, evidence and follow-up records.',
+                'Add reportability decisions, ECCAIRS submissions and acknowledgements, investigation/action evidence, effectiveness results, residual-risk decisions and closure authorization to the controlled record set.',
             preg_match('/\b(?:performance|monitor|assurance|compliance)\w*\b/iu', $normalizedTitle) === 1 =>
-                'Align monitoring, reconciliation and escalation controls with the updated operational process.',
+                'Monitor occurrence timeliness, authority follow-up, overdue investigations and actions, effectiveness outcomes, escalation and closure performance.',
             preg_match('/\b(?:training|competence)\w*\b/iu', $normalizedTitle) === 1 =>
-                'Add role-appropriate training and retained competence evidence before personnel perform the updated process.',
+                'Define initial and recurrent competence for reporters, Safety Managers and Action Owners before they perform their occurrence-lifecycle duties.',
             default =>
                 'Amend this existing manual section only for the demonstrated operational delta and preserve unrelated valid content.',
         };

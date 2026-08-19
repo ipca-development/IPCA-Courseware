@@ -67,4 +67,57 @@ foreach ($proposal['operation_primitives'] as $operation) {
     );
 }
 
+$readable = require __DIR__ . '/fixtures/manual_change_architect_sms_structure_readable.php';
+$presentationAreas = array();
+foreach ($readable['areas'] as $area) {
+    $currentRoot = (array)($area['current'][0] ?? array());
+    $futureRoot = (array)($area['future'][0] ?? array());
+    $presentationAreas[] = array(
+        'section_id' => (int)($area['source_section_id'] ?? 0),
+        'section_number' => (string)$area['section_number'],
+        'section_title' => (string)$area['section_title'],
+        'treatment' => (string)$area['treatment'],
+        'concise_rationale' => (string)($area['reasoning'] ?? 'Accepted impact rationale.'),
+        'dependencies' => (array)($area['dependencies'] ?? array()),
+        'current_manual' => array(
+            'context_hash' => $readable['source_fingerprint'],
+            'subsections' => array_map(
+                static fn(array $node): array => array(
+                    'number' => (string)$node['number'],
+                    'title' => (string)$node['title'],
+                ),
+                (array)($currentRoot['children'] ?? array())
+            ),
+        ),
+        'amendment_components' => array_map(
+            static fn(array $node): array => array(
+                'number' => (string)$node['number'],
+                'title' => (string)$node['title'],
+                'treatment' => (string)$node['action'] === 'ADD' ? 'ADD' : 'AMEND',
+                'summary' => (string)($node['purpose'] ?? 'Accepted structural treatment.'),
+            ),
+            (array)($futureRoot['children'] ?? array())
+        ),
+    );
+}
+$presentationProposal = $service->buildProposalFromImpactPresentation(
+    $readable['title'],
+    $readable['rationale'],
+    $readable['source_fingerprint'],
+    $presentationAreas
+);
+$presentationPrimary = array_values(array_filter(
+    $presentationProposal['areas'],
+    static fn(array $area): bool => $area['treatment'] === 'RESTRUCTURE'
+))[0] ?? array();
+structure_fixture_assert(
+    array_column((array)($presentationPrimary['future'][0]['children'] ?? array()), 'number')
+        === array('5.6.1', '5.6.2', '5.6.3', '5.6.4', '5.6.5', '5.6.6', '5.6.7', '5.6.8', '5.6.9'),
+    'Accepted Step 2 impacts did not produce the complete Step 3 hierarchy.'
+);
+structure_fixture_assert(
+    $presentationProposal['guardrails']['draft_wording_present'] === false,
+    'Step 2 to Step 3 structure generation introduced draft wording.'
+);
+
 echo "PASS: Manual Change Architect CURRENT vs FUTURE structure fixture\n";

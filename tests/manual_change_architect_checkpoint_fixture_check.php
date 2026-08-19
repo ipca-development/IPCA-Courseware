@@ -106,6 +106,107 @@ architect_fixture_assert(
     'Completeness reasoning did not pass.'
 );
 
+$presentationImpacts = array();
+foreach ($amendments as $index => $impact) {
+    $impact['id'] = $index + 1;
+    $impact['canonical_evidence_json'] = $impact['canonical_evidence'];
+    $impact['target_component_keys_json'] = $impact['target_component_keys'];
+    $impact['target_concepts_json'] = $impact['target_state_concepts'];
+    $impact['preserved_logic_json'] = $impact['preserved_logic'];
+    $impact['dependencies_json'] = $impact['dependencies'];
+    $presentationImpacts[] = $impact;
+}
+$presentationComponents = array_map(
+    static function (array $component): array {
+        $component['title'] = (string)($component['name'] ?? '');
+        $component['target_state'] = (string)($component['desired_state'] ?? '');
+        return $component;
+    },
+    $report['operational_target_state']['components']
+);
+$presentation = $service->buildImpactPresentation(array(
+    'impacts' => $presentationImpacts,
+    'target_components' => $presentationComponents,
+    'change_intents' => array($report['change_intent']),
+    'boundaries' => $report['boundaries'],
+    'legacy_hits' => $report['legacy_references'],
+    'coverage' => $report['coverage_matrix'],
+    'impact_dependencies' => array(),
+    'structure_nodes' => array(),
+));
+architect_fixture_assert(
+    $presentation['schema'] === 'ipca.manual-change-impact-presentation.v2',
+    'Step 2 did not emit the structured v2 review contract.'
+);
+architect_fixture_assert(
+    architect_fixture_numbers($presentation['areas']) === $expectedMustChange,
+    'Step 2 did not present the complete five-card SMS/ECCAIRS review.'
+);
+architect_fixture_assert(
+    $presentation['quality_gate']['reviewable'] === true,
+    'The gold-standard five-card review did not pass the deterministic quality gate: '
+        . json_encode($presentation['quality_gate']['failures'])
+);
+foreach ($presentation['areas'] as $area) {
+    foreach (array(
+        'why_affected', 'current_relevant_content', 'obsolete_or_inaccurate_content',
+        'proposed_amendment_summary', 'proposed_structure_items', 'must_preserve',
+        'related_amendments', 'legacy_references', 'evidence_refs',
+    ) as $field) {
+        architect_fixture_assert(
+            array_key_exists($field, $area),
+            "Step 2 area {$area['section_number']} is missing {$field}."
+        );
+    }
+}
+$presentationPrimary = array_values(array_filter(
+    $presentation['areas'],
+    static fn(array $area): bool => !empty($area['is_primary_change'])
+))[0] ?? array();
+architect_fixture_assert(
+    count((array)($presentationPrimary['proposed_structure_items'] ?? array())) === 9,
+    'The primary Step 2 restructure does not show the complete nine-node future hierarchy: '
+        . json_encode(array_column((array)($presentationPrimary['proposed_structure_items'] ?? array()), 'title'))
+);
+$rejectedQuality = $service->validateImpactPresentation(array(
+    array(
+        'section_number' => 'X.1',
+        'treatment' => 'RESTRUCTURE',
+        'is_primary_change' => true,
+        'why_affected' => 'The section demonstrably covers a target-state component that changes.',
+        'proposed_amendment_summary' => 'Align the section.',
+        'must_preserve' => array(),
+        'proposed_structure_items' => array(),
+        'related_amendments' => array(),
+    ),
+));
+$rejectedCodes = array_column($rejectedQuality['failures'], 'code');
+foreach (array('generic_why', 'vague_proposal', 'missing_preservation', 'incomplete_structure') as $code) {
+    architect_fixture_assert(
+        in_array($code, $rejectedCodes, true),
+        "The Step 2 quality gate did not reject {$code}."
+    );
+}
+if (getenv('IPCA_SHOW_STEP2_REVIEW') === '1') {
+    echo "\nSTEP 2 REVIEW OUTPUT\n";
+    foreach ($presentation['areas'] as $area) {
+        echo "\n{$area['section_number']} {$area['section_title']} — {$area['treatment']}\n";
+        echo "WHY: {$area['why_affected']}\n";
+        echo "PROPOSED: {$area['proposed_amendment_summary']}\n";
+        if ((array)$area['proposed_structure_items'] !== array()) {
+            echo "STRUCTURE/DECISIONS:\n";
+            foreach ($area['proposed_structure_items'] as $item) {
+                echo "  {$item['number']} {$item['title']} [{$item['treatment']}] — {$item['summary']}\n";
+            }
+        }
+        echo "PRESERVE: " . implode('; ', $area['must_preserve']) . "\n";
+        foreach ($area['related_amendments'] as $related) {
+            echo "RELATED: {$related['section_number']} {$related['section_title']} — {$related['relationship']}\n";
+        }
+    }
+    echo "\nQUALITY GATE: REVIEWABLE\n";
+}
+
 $structuralFixture = $fixture;
 $structuralFixture['manual']['sections'] = array_merge(
     array(

@@ -125,6 +125,9 @@ foreach ($impacts as $impactRow) {
     $impactById[(int)($impactRow['id'] ?? 0)] = $impactRow;
 }
 $impactPresentation = mcw_array($report['impact_presentation'] ?? array());
+$impactQualityGate = mcw_array($impactPresentation['quality_gate'] ?? array());
+$impactReviewable = !array_key_exists('reviewable', $impactQualityGate)
+    || !empty($impactQualityGate['reviewable']);
 $presentationAreas = array_values(array_filter(
     (array)($impactPresentation['areas'] ?? array()),
     'is_array'
@@ -194,6 +197,36 @@ $evidence = array_values(array_filter((array)($report['evidence'] ?? array()), '
 $structures = array_values(array_filter((array)($report['structure_proposals'] ?? array()), 'is_array'));
 $structure = $structures === array() ? array() : $structures[array_key_last($structures)];
 $structureNodes = array_values(array_filter((array)($report['structure_nodes'] ?? array()), 'is_array'));
+$displayStructureNodes = array_values(array_filter(
+    $structureNodes,
+    static fn(array $node): bool =>
+        (int)($node['structure_proposal_id'] ?? 0) === (int)($structure['id'] ?? 0)
+        && (int)($node['depth'] ?? 0) > 0
+));
+if ($displayStructureNodes === array()) {
+    $primaryArea = array_values(array_filter(
+        $presentationAreas,
+        static fn(array $area): bool =>
+            !empty($area['is_primary_change'])
+            || strtoupper((string)($area['treatment'] ?? '')) === 'RESTRUCTURE'
+    ))[0] ?? array();
+    foreach ((array)(
+        $primaryArea['proposed_structure_items']
+        ?? $primaryArea['amendment_components']
+        ?? array()
+    ) as $component) {
+        if (!is_array($component)) {
+            continue;
+        }
+        $displayStructureNodes[] = array(
+            'node_key' => (string)($component['number'] ?? ''),
+            'title' => (string)($component['title'] ?? ''),
+            'action' => strtoupper((string)($component['treatment'] ?? 'AMEND')) === 'ADD'
+                ? 'ADD'
+                : 'MERGE',
+        );
+    }
+}
 $drafts = array_values(array_filter((array)($report['drafts'] ?? array()), 'is_array'));
 $draft = $drafts === array() ? array() : $drafts[array_key_last($drafts)];
 $draftPayload = mcw_array($draft['draft_payload_json'] ?? array());
@@ -378,11 +411,11 @@ books_manuals_page_open(array(
 
                 <section class="mcw-impact-section">
                   <h4>Why this section is affected</h4>
-                  <p><?= h(mcw_text($area['concise_rationale'] ?? '', 'This section requires amendment to support the requested change.')) ?></p>
+                  <p><?= h(mcw_text($area['why_affected'] ?? $area['concise_rationale'] ?? '', 'This analysis requires section-specific refinement.')) ?></p>
                 </section>
 
                 <section class="mcw-impact-section mcw-current-manual">
-                  <h4>Current manual <small>Canonical source</small></h4>
+                  <h4><?= strtoupper((string)($area['treatment'] ?? '')) === 'RESTRUCTURE' ? 'Current manual structure & relevant content' : 'Current manual' ?> <small>Canonical source</small></h4>
                   <?php if ($previewSubsections !== array()): ?>
                     <?php if ((array)($currentManual['legacy_phrases'] ?? array()) !== array()): ?><div class="mcw-legacy-phrases"><?php foreach ((array)$currentManual['legacy_phrases'] as $phrase): ?><span>legacy · <?= h((string)$phrase) ?></span><?php endforeach; ?></div><?php endif; ?>
                     <div class="mcw-source-preview">
@@ -407,9 +440,10 @@ books_manuals_page_open(array(
                 <div class="mcw-change-flow" aria-hidden="true"><span>↓</span></div>
 
                 <section class="mcw-impact-section mcw-proposed-change">
-                  <h4>Proposed change <small>Architect recommendation</small></h4>
+                  <h4><?= strtoupper((string)($area['treatment'] ?? '')) === 'RESTRUCTURE' ? 'Proposed structure' : 'Proposed change' ?> <small>Architect recommendation</small></h4>
+                  <p class="mcw-amendment-specification"><?= h(mcw_text($area['proposed_amendment_summary'] ?? '', 'The amendment specification requires refinement.')) ?></p>
                   <div class="mcw-component-list">
-                    <?php foreach ((array)($area['amendment_components'] ?? array()) as $component): ?>
+                    <?php foreach ((array)($area['proposed_structure_items'] ?? $area['amendment_components'] ?? array()) as $component): ?>
                       <?php if (!is_array($component)) { continue; } ?>
                       <article class="mcw-component">
                         <span class="mcw-component-mark" aria-hidden="true"><?= h(mcw_treatment_icon((string)($component['treatment'] ?? 'AMEND'))) ?></span>
@@ -421,15 +455,15 @@ books_manuals_page_open(array(
 
                 <section class="mcw-impact-section mcw-preserved">
                   <h4>Preserved <small>What will remain unchanged</small></h4>
-                  <?php if ((array)($area['preserved_concepts'] ?? array()) !== array()): ?>
-                    <ul class="mcw-preserved-list"><?php foreach ((array)$area['preserved_concepts'] as $concept): ?><li><?= h((string)$concept) ?></li><?php endforeach; ?></ul>
-                  <?php else: ?><p>No section-specific preservation decision was recorded.</p><?php endif; ?>
+                  <?php if ((array)($area['must_preserve'] ?? $area['preserved_concepts'] ?? array()) !== array()): ?>
+                    <ul class="mcw-preserved-list"><?php foreach ((array)($area['must_preserve'] ?? $area['preserved_concepts']) as $concept): ?><li><?= h((string)$concept) ?></li><?php endforeach; ?></ul>
+                  <?php else: ?><p>The quality gate requires a section-specific preservation decision before acceptance.</p><?php endif; ?>
                 </section>
 
-                <?php if ((array)($area['dependencies'] ?? array()) !== array()): ?>
+                <?php if ((array)($area['related_amendments'] ?? array()) !== array()): ?>
                   <section class="mcw-impact-section mcw-impact-section--compact">
                     <h4>Related amendments</h4>
-                    <div class="mcw-related-sections"><?php foreach ((array)$area['dependencies'] as $dependency): ?><?php $dependency = trim((string)$dependency); ?><a href="#<?= h($areaAnchorByLabel[$dependency] ?? 'mcw-impact-' . $impactId) ?>"><?= h($dependency) ?></a><?php endforeach; ?></div>
+                    <div class="mcw-related-sections"><?php foreach ((array)$area['related_amendments'] as $related): ?><?php if (!is_array($related)) { continue; } ?><?php $relatedLabel = trim((string)($related['section_number'] ?? '') . ' ' . (string)($related['section_title'] ?? '')); ?><a href="#<?= h($areaAnchorByLabel[$relatedLabel] ?? 'mcw-impact-' . $impactId) ?>"><strong><?= h($relatedLabel) ?></strong><span><?= h((string)($related['relationship'] ?? 'Related controlled amendment.')) ?></span></a><?php endforeach; ?></div>
                   </section>
                 <?php endif; ?>
 
@@ -445,13 +479,14 @@ books_manuals_page_open(array(
           <details class="mcw-secondary-review"><summary>Reviewed — no change required (<?= count($preserved) ?>)</summary><div class="mcw-secondary-rows"><?php foreach ($preserved as $row): ?><article><strong><?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? 'Manual section'))) ?></strong><span class="mcw-mini-treatment">✓ Preserve</span><p><?= h((string)$row['rationale']) ?></p></article><?php endforeach; ?></div></details>
           <details class="mcw-secondary-review"><summary>Other legacy references found (<?= count($legacyReviewRows) ?>)</summary><div><p>These references belong to other workflows and remain available for separate governed review.</p><?php foreach ($legacyReviewRows as $hit): ?><article class="mcw-legacy-row"><strong><?= h($sectionLabels[(int)($hit['section_id'] ?? 0)] ?? 'Related manual section') ?></strong><span><?= h((string)$hit['legacy_identity']) ?></span><span class="mcw-mini-treatment">! Review separately</span><p><strong>Reason:</strong> <?= h((string)($hit['disposition_justification'] ?? 'This reference is outside the primary operational change.')) ?></p></article><?php endforeach; ?></div></details>
           <details class="mcw-secondary-review mcw-technical-analysis"><summary><span>Technical Analysis &amp; Coverage<small>Whole-manual review complete · <?= count((array)($impactPresentation['analysis_details']['target_components'] ?? array())) ?> target-state components · <?= count((array)($impactPresentation['analysis_details']['coverage'] ?? array())) ?> coverage decisions</small></span><span>View details</span></summary><div><p>The target-state model, complete coverage matrix, deterministic legacy scan, preservation boundaries, dependencies and canonical provenance remain retained in the Change Plan audit record.</p><?php foreach ($outOfScope as $row): ?><p><strong>Out of scope:</strong> <?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? ''))) ?></p><?php endforeach; ?><?php foreach ($reviewSeparately as $row): ?><p><strong>Review separately:</strong> <?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? ''))) ?></p><?php endforeach; ?></div></details>
+          <?php if (!$impactReviewable): ?><section class="mcw-quality-gate"><h3>Impact analysis needs refinement</h3><p>Acceptance is unavailable until the Architect resolves these review-quality checks.</p><ul><?php foreach ((array)($impactQualityGate['failures'] ?? array()) as $failure): ?><?php if (!is_array($failure)) { continue; } ?><li><strong><?= h((string)($failure['section'] ?? 'Overall')) ?></strong> — <?= h((string)($failure['message'] ?? 'Review contract incomplete.')) ?></li><?php endforeach; ?></ul></section><?php endif; ?>
           <section class="mcw-change-request-panel" data-mcw-impact-feedback hidden>
             <div><h3>What should the Architect reconsider?</h3><p>Describe the correction. The Architect will re-analyze the impact and prepare a revised recommendation.</p></div>
             <label class="mcw-field"><span>Affected area</span><select data-mcw-feedback-area><option value="">General / overall analysis</option><?php foreach ($presentationAreas as $area): ?><option value="<?= (int)$area['impact_id'] ?>"><?= h(trim((string)$area['section_number'] . ' ' . (string)$area['section_title'])) ?></option><?php endforeach; ?></select></label>
             <label class="mcw-field"><span>Correction</span><textarea rows="7" maxlength="10000" data-mcw-feedback-text placeholder="Section 5.7 should remain unchanged because…&#10;&#10;The analysis appears to have missed the Safety Manager responsibility for…"></textarea></label>
             <div class="mcw-change-request-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-cancel-impact-feedback>Cancel</button><button class="app-btn app-btn--primary" type="button" data-mcw-reanalyze-impact>Re-analyze Impact</button></div>
           </section>
-          <div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-request-impact-changes>Request Changes</button><button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-accept-impacts <?= $isOwner ? '' : 'disabled' ?>>Accept Impact Analysis &amp; Continue</button></div>
+          <div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-request-impact-changes>Request Changes</button><button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-accept-impacts <?= $isOwner && $impactReviewable ? '' : 'disabled' ?>>Accept Impact Analysis &amp; Continue</button></div>
         </section>
       <?php endif; ?>
     <?php endif; ?>
@@ -464,7 +499,7 @@ books_manuals_page_open(array(
           <header><span class="mcw-step-number">3</span><div><h2>Proposed Manual Structure</h2><p>The primary structural change is Section 5.6. The other affected sections retain their existing hierarchy.</p></div></header>
           <div class="mcw-structure">
             <section><span class="mcw-kicker">Current</span><h3>Section 5.6</h3><ol><li>Mandatory Occurrence Reporting</li><li>Voluntary Occurrence Reporting</li><li>Exchange of Information</li><li>Occurrence Reporting Scheme</li><li>E-Occurrence Report</li><li>Internal Safety Investigation</li></ol></section>
-            <section><span class="mcw-kicker">Proposed</span><h3>Section 5.6</h3><ol><?php foreach ($structureNodes as $node): ?><li class="is-<?= h(strtolower((string)($node['action'] ?? 'preserve'))) ?>"><?= h((string)$node['title']) ?></li><?php endforeach; ?></ol></section>
+            <section><span class="mcw-kicker">Proposed</span><h3>Section 5.6</h3><ol><?php foreach ($displayStructureNodes as $node): ?><li class="is-<?= h(strtolower((string)($node['action'] ?? 'preserve'))) ?>"><?php if (mcw_text($node['node_key'] ?? '') !== ''): ?><strong><?= h((string)$node['node_key']) ?></strong> <?php endif; ?><?= h((string)$node['title']) ?></li><?php endforeach; ?></ol></section>
           </div>
           <button class="app-btn app-btn--secondary" type="button" data-mcw-modify-structure>Modify</button>
           <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-accept-structure>Accept Structure &amp; Continue</button>

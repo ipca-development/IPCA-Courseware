@@ -101,6 +101,119 @@ final class BooksManualsChangeStructureService
         return $proposal;
     }
 
+    /**
+     * Build the Step 3 proposal from the human-reviewed Step 2 contract.
+     * This remains structure-only and contains no draft manual wording.
+     *
+     * @param list<array<string,mixed>> $areas
+     * @return array<string,mixed>
+     */
+    public function buildProposalFromImpactPresentation(
+        string $title,
+        string $rationale,
+        string $sourceFingerprint,
+        array $areas
+    ): array {
+        $structureAreas = array();
+        foreach ($areas as $area) {
+            $sectionNumber = trim((string)($area['section_number'] ?? ''));
+            $sectionTitle = trim((string)($area['section_title'] ?? ''));
+            $treatment = strtoupper(trim((string)($area['treatment'] ?? '')));
+            if ($sectionNumber === '' || $sectionTitle === ''
+                || !in_array($treatment, array('AMEND', 'RESTRUCTURE'), true)) {
+                continue;
+            }
+            $currentManual = is_array($area['current_manual'] ?? null)
+                ? $area['current_manual']
+                : array();
+            $currentChildren = array();
+            foreach ((array)($currentManual['subsections'] ?? array()) as $subsection) {
+                if (!is_array($subsection)) {
+                    continue;
+                }
+                $number = trim((string)($subsection['number'] ?? ''));
+                $childTitle = trim((string)($subsection['title'] ?? ''));
+                if ($number === '' || $childTitle === ''
+                    || ($number === $sectionNumber && $childTitle === $sectionTitle)) {
+                    continue;
+                }
+                $currentChildren[] = array(
+                    'number' => $number,
+                    'title' => $childTitle,
+                    'action' => 'PRESERVE',
+                );
+            }
+            $current = array(array(
+                'number' => $sectionNumber,
+                'title' => $sectionTitle,
+                'action' => 'PRESERVE',
+                'children' => $currentChildren,
+            ));
+            $futureChildren = $currentChildren;
+            if ($treatment === 'RESTRUCTURE') {
+                $futureChildren = array();
+                foreach ((array)(
+                    $area['proposed_structure_items']
+                    ?? $area['amendment_components']
+                    ?? array()
+                ) as $component) {
+                    if (!is_array($component)) {
+                        continue;
+                    }
+                    $number = trim((string)($component['number'] ?? ''));
+                    $componentTitle = trim((string)($component['title'] ?? ''));
+                    if ($number === '' || $componentTitle === '') {
+                        continue;
+                    }
+                    $componentTreatment = strtoupper((string)($component['treatment'] ?? 'AMEND'));
+                    $futureChildren[] = array(
+                        'number' => $number,
+                        'title' => $componentTitle,
+                        'action' => match ($componentTreatment) {
+                            'ADD' => 'ADD',
+                            'REMOVE', 'REMOVE_OBSOLETE' => 'REMOVE',
+                            'PRESERVE' => 'PRESERVE',
+                            default => 'MERGE',
+                        },
+                        'purpose' => trim((string)($component['summary'] ?? '')),
+                    );
+                }
+                if ($futureChildren === array()) {
+                    throw new RuntimeException(
+                        'The primary restructure has no proposed hierarchy to present in Step 3.'
+                    );
+                }
+            }
+            $future = array(array(
+                'number' => $sectionNumber,
+                'title' => $sectionTitle,
+                'action' => 'PRESERVE',
+                'purpose' => $treatment === 'RESTRUCTURE'
+                    ? 'Primary governed process structure accepted for detailed review.'
+                    : 'Existing hierarchy remains unchanged.',
+                'children' => $futureChildren,
+            ));
+            $structureAreas[] = array(
+                'section_number' => $sectionNumber,
+                'section_title' => $sectionTitle,
+                'source_section_id' => (int)($area['section_id'] ?? 0),
+                'source_content_fingerprint' => (string)($currentManual['context_hash'] ?? $sourceFingerprint),
+                'treatment' => $treatment,
+                'human_accepted' => true,
+                'current' => $current,
+                'future' => $future,
+                'dependencies' => array_values((array)($area['dependencies'] ?? array())),
+                'reasoning' => trim((string)($area['concise_rationale'] ?? '')),
+            );
+        }
+        return $this->buildProposal(
+            $title,
+            $rationale,
+            $sourceFingerprint,
+            $structureAreas
+        );
+    }
+
     /** @param array<string,mixed> $proposal */
     public function persistProposal(int $planId, array $proposal, int $actorUserId): int
     {

@@ -559,6 +559,13 @@
   border-color: #cedfeb;
 }
 
+.mcw-amendment-specification {
+  margin: 0 0 13px;
+  color: #273c4d;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .mcw-preserved {
   background: #f6fbf8;
   border-color: #cfe4d9;
@@ -733,6 +740,8 @@
 }
 
 .mcw-related-sections a {
+  display: grid;
+  gap: 2px;
   padding: 5px 8px;
   border-radius: 6px;
   color: #286b9b;
@@ -742,8 +751,34 @@
   text-decoration: none;
 }
 
+.mcw-related-sections a span {
+  padding: 0;
+  color: #5b7183;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 500;
+}
+
 .mcw-related-sections a:hover {
   text-decoration: underline;
+}
+
+.mcw-quality-gate {
+  margin-top: 18px;
+  padding: 15px 17px;
+  border: 1px solid #e1b875;
+  border-radius: 9px;
+  background: #fff9ee;
+}
+
+.mcw-quality-gate h3,
+.mcw-quality-gate p {
+  margin: 0 0 7px;
+}
+
+.mcw-quality-gate ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
 }
 
 .mcw-impact-hierarchy {

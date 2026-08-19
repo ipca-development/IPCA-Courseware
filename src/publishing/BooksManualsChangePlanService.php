@@ -475,7 +475,11 @@ final class BooksManualsChangePlanService
     }
 
     /** @return array{accepted_count:int,stage:string} */
-    public function acceptImpactAnalysis(int $planId, int $actorUserId): array
+    public function acceptImpactAnalysis(
+        int $planId,
+        int $actorUserId,
+        ?callable $afterApproval = null
+    ): array
     {
         $this->assertPlanOwner($planId, $actorUserId);
         $stmt = $this->pdo->prepare(
@@ -501,8 +505,12 @@ final class BooksManualsChangePlanService
             );
             $update->execute(array($planId));
             $this->updatePlan($planId, array('stage' => 'structure', 'updated_by' => $actorUserId));
+            $continuation = $afterApproval !== null
+                ? (array)$afterApproval($rows)
+                : array();
             $this->appendEvent($planId, 'IMPACT_ANALYSIS_ACCEPTED', 10, array(
                 'impact_ids' => array_map('intval', array_column($rows, 'id')),
+                'continuation' => $continuation,
             ), $actorUserId);
             $this->pdo->commit();
         } catch (Throwable $e) {
@@ -511,7 +519,10 @@ final class BooksManualsChangePlanService
             }
             throw $e;
         }
-        return array('accepted_count' => count($rows), 'stage' => 'structure');
+        return array_merge(
+            array('accepted_count' => count($rows), 'stage' => 'structure'),
+            $continuation ?? array()
+        );
     }
 
     /** @return array{proposal_id:int,node_count:int,stage:string} */

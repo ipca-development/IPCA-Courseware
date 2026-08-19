@@ -17,6 +17,7 @@ $js = file_get_contents($root . '/public/assets/manual-change-architect.js');
 $api = file_get_contents($root . '/public/admin/api/books_manuals_change_architect_api.php');
 $plans = file_get_contents($root . '/src/publishing/BooksManualsChangePlanService.php');
 $architect = file_get_contents($root . '/src/publishing/BooksManualsChangeArchitectService.php');
+$structureService = file_get_contents($root . '/src/publishing/BooksManualsChangeStructureService.php');
 $seed = file_get_contents($root . '/scripts/seed_manual_change_architect_sms_ecairs.php');
 $library = file_get_contents($root . '/public/admin/books_manuals/index.php');
 
@@ -77,8 +78,13 @@ architect_ui_assert(
     'Step 2 must not flatten Architect output into equal-width prose columns.'
 );
 architect_ui_assert(
-    str_contains((string)$architect, 'ipca.manual-change-impact-presentation.v1')
-        && str_contains((string)$architect, 'amendment_components')
+    str_contains((string)$architect, 'ipca.manual-change-impact-presentation.v2')
+        && str_contains((string)$architect, "'why_affected'")
+        && str_contains((string)$architect, "'proposed_amendment_summary'")
+        && str_contains((string)$architect, "'proposed_structure_items'")
+        && str_contains((string)$architect, "'must_preserve'")
+        && str_contains((string)$architect, "'related_amendments'")
+        && str_contains((string)$architect, "'quality_gate'")
         && str_contains((string)$architect, 'current_manual')
         && str_contains((string)$architect, 'canonicalReviewContexts(')
         && str_contains((string)$architect, 'manualAmendmentRows(')
@@ -117,6 +123,12 @@ architect_ui_assert(
     'Long-running analysis must expose and render determinate server-side stage progress.'
 );
 architect_ui_assert(str_contains($js, "request('accept_impact_analysis'"), 'Impact acceptance is not connected to wizard progression.');
+architect_ui_assert(
+    str_contains($page, '$impactReviewable')
+        && str_contains($page, 'Impact analysis needs refinement')
+        && str_contains($api, "empty(\$qualityGate['reviewable'])"),
+    'The Step 2 quality gate must disable and reject acceptance of incomplete review output.'
+);
 architect_ui_assert(str_contains($api, "case 'analyze_change':"), 'Wizard analysis API is missing.');
 architect_ui_assert(
     str_contains($api, 'architect_api_finish_response(202')
@@ -127,6 +139,13 @@ architect_ui_assert(
 architect_ui_assert(!str_contains($api, 'BooksManualsChangeAssistantService'), 'Architect API must remain separate from the legacy Change Assistant.');
 architect_ui_assert(str_contains($plans, 'recordImpactDecision('), 'Governed impact decision persistence is missing.');
 architect_ui_assert(str_contains($plans, 'acceptImpactAnalysis('), 'Governed wizard progression is missing.');
+architect_ui_assert(
+    str_contains($api, 'architect_api_ensure_structure(')
+        && str_contains((string)$structureService, 'buildProposalFromImpactPresentation(')
+        && str_contains($page, '$displayStructureNodes')
+        && str_contains($page, '$primaryArea[\'proposed_structure_items\']'),
+    'Accepting Step 2 must prepare and display the governed Step 3 structure proposal.'
+);
 architect_ui_assert(str_contains((string)$seed, 'SMS / ECCAIRS Occurrence Lifecycle'), 'Real SMS/ECCAIRS seed plan is missing.');
 foreach (array('confidence percentage', 'candidate retrieval', 'canonical hashes', 'data-mca-inspector') as $forbidden) {
     architect_ui_assert(!str_contains($page, $forbidden), "Wizard exposes forbidden dashboard detail: {$forbidden}.");

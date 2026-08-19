@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeArchitectService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeStructureService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -117,6 +118,49 @@ function architect_api_progress_callback(int $planId): Closure
     };
 }
 
+function architect_api_ensure_structure(
+    int $planId,
+    int $actorUserId,
+    BooksManualsChangePlanService $plans,
+    BooksManualsChangeArchitectService $architect,
+    BooksManualsChangeStructureService $structures
+): int {
+    $report = $architect->getCompleteCheckpointReport($planId);
+    $proposals = array_values(array_filter(
+        (array)($report['structure_proposals'] ?? array()),
+        'is_array'
+    ));
+    if ($proposals !== array()) {
+        $latest = $proposals[array_key_last($proposals)];
+        $proposalId = (int)($latest['id'] ?? 0);
+        foreach ((array)($report['structure_nodes'] ?? array()) as $node) {
+            if (is_array($node) && (int)($node['structure_proposal_id'] ?? 0) === $proposalId) {
+                return $proposalId;
+            }
+        }
+    }
+    $plan = $plans->getPlan($planId);
+    $sourceFingerprint = trim((string)($plan['source_fingerprint'] ?? ''));
+    if (preg_match('/^[a-f0-9]{64}$/', $sourceFingerprint) !== 1) {
+        $sourceFingerprint = hash('sha256', json_encode(array(
+            'plan_id' => $planId,
+            'primary_version_id' => $plans->primaryVersionId($plan),
+            'source_fingerprint' => $sourceFingerprint,
+        ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+    $areas = array_values(array_filter(
+        (array)($report['impact_presentation']['areas'] ?? array()),
+        'is_array'
+    ));
+    $proposal = $structures->buildProposalFromImpactPresentation(
+        'Proposed manual structure for ' . (string)($plan['title'] ?? 'accepted impacts'),
+        'Translate the accepted amendment architecture into one controlled future hierarchy without drafting manual wording.',
+        $sourceFingerprint,
+        $areas
+    );
+    return $structures->persistProposal($planId, $proposal, $actorUserId);
+}
+
 function architect_api_extract_upload(string $path, string $name): string
 {
     $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
@@ -212,6 +256,7 @@ $user = compliance_require_access($pdo);
 $userId = (int)($user['id'] ?? 0);
 $plans = new BooksManualsChangePlanService($pdo);
 $architect = new BooksManualsChangeArchitectService($pdo, $plans);
+$structures = new BooksManualsChangeStructureService($pdo, $plans);
 
 try {
     if (!$plans->tablesPresent()) {
@@ -427,20 +472,60 @@ try {
             exit;
 
         case 'accept_impact_analysis':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $impactReport = $architect->getCompleteCheckpointReport($planId);
+            $qualityGate = (array)($impactReport['impact_presentation']['quality_gate'] ?? array());
+            if (empty($qualityGate['reviewable'])) {
+                $messages = array_values(array_filter(array_map(
+                    static fn(mixed $failure): string => is_array($failure)
+                        ? trim((string)($failure['section'] ?? '') . ' ' . (string)($failure['message'] ?? ''))
+                        : '',
+                    (array)($qualityGate['failures'] ?? array())
+                )));
+                throw new RuntimeException(
+                    'Impact analysis is not reviewable yet'
+                    . ($messages === array() ? '.' : ': ' . implode('; ', $messages))
+                );
+            }
             architect_api_json(200, array(
                 'ok' => true,
                 'result' => $plans->acceptImpactAnalysis(
-                    (int)($input['plan_id'] ?? 0),
-                    $userId
+                    $planId,
+                    $userId,
+                    static function () use (
+                        $planId,
+                        $userId,
+                        $plans,
+                        $architect,
+                        $structures
+                    ): array {
+                        return array(
+                            'structure_proposal_id' => architect_api_ensure_structure(
+                                $planId,
+                                $userId,
+                                $plans,
+                                $architect,
+                                $structures
+                            ),
+                        );
+                    }
                 ),
                 'csrf_token' => architect_api_csrf(),
             ));
 
         case 'accept_structure':
+            $planId = (int)($input['plan_id'] ?? 0);
+            architect_api_ensure_structure(
+                $planId,
+                $userId,
+                $plans,
+                $architect,
+                $structures
+            );
             architect_api_json(200, array(
                 'ok' => true,
                 'result' => $plans->acceptStructure(
-                    (int)($input['plan_id'] ?? 0),
+                    $planId,
                     $userId
                 ),
                 'csrf_token' => architect_api_csrf(),
