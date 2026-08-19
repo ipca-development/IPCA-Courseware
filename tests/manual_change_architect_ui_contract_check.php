@@ -27,7 +27,7 @@ foreach (array(
     'Supporting evidence — optional',
     'Manual(s) to review',
     'Analyze Change',
-    'What should actually be amended?',
+    'Review Proposed Manual Changes',
     'Accept Impact Analysis &amp; Continue',
     'Proposed Manual Structure',
     'Proposed Manual Amendments',
@@ -58,10 +58,16 @@ architect_ui_assert(
 );
 architect_ui_assert(str_contains($page, 'data-mcw-accept-impacts'), 'Single impact-analysis continuation action is missing.');
 foreach (array(
-    'Why this changes',
-    'Proposed amendment',
-    'What remains unchanged',
-    'Related sections',
+    'Why this section is affected',
+    'Current manual',
+    'Canonical source',
+    'Proposed change',
+    'Architect recommendation',
+    'What will remain unchanged',
+    'Related amendments',
+    'View complete current section',
+    'View evidence / analysis',
+    'Flag this section',
     'Request Changes',
 ) as $stepTwoLabel) {
     architect_ui_assert(str_contains($page, $stepTwoLabel), "Structured Step 2 label {$stepTwoLabel} is missing.");
@@ -73,11 +79,26 @@ architect_ui_assert(
 architect_ui_assert(
     str_contains((string)$architect, 'ipca.manual-change-impact-presentation.v1')
         && str_contains((string)$architect, 'amendment_components')
+        && str_contains((string)$architect, 'current_manual')
+        && str_contains((string)$architect, 'canonicalReviewContexts(')
+        && str_contains((string)$architect, 'manualAmendmentRows(')
         && str_contains((string)$architect, 'buildImpactPresentation('),
     'Architect reasoning must expose a deterministic structured presentation projection.'
 );
-architect_ui_assert(str_contains($page, 'data-mcw-impact-decision="MODIFY"'), 'Governed Modify control is missing.');
-architect_ui_assert(str_contains($page, 'data-mcw-impact-decision="REJECT"'), 'Governed Reject control is missing.');
+architect_ui_assert(
+    !str_contains($page, 'data-mcw-impact-decision="MODIFY"')
+        && !str_contains($page, 'data-mcw-impact-decision="REJECT"')
+        && !str_contains($page, 'Decision note'),
+    'Step 2 must not force per-card Modify, Reject or Decision Note work.'
+);
+architect_ui_assert(
+    str_contains($page, 'What should the Architect reconsider?')
+        && str_contains($page, 'General / overall analysis')
+        && str_contains($page, 'Re-analyze Impact')
+        && str_contains($js, "request('request_impact_changes'")
+        && str_contains($api, "case 'request_impact_changes':"),
+    'Governed global impact correction and re-analysis is missing.'
+);
 architect_ui_assert(str_contains($page, '/admin/api/books_manuals_change_architect_api.php'), 'Architect workspace is not isolated behind its own API.');
 architect_ui_assert(str_contains($js, "request('analyze_change'"), 'Analyze Change is not connected to the Architect.');
 architect_ui_assert(
@@ -85,7 +106,6 @@ architect_ui_assert(
     'Long-running analysis must progress by polling instead of holding the browser request open.'
 );
 architect_ui_assert(str_contains($js, "request('accept_impact_analysis'"), 'Impact acceptance is not connected to wizard progression.');
-architect_ui_assert(str_contains($api, "case 'impact_decision':"), 'Architect impact decision API is missing.');
 architect_ui_assert(str_contains($api, "case 'analyze_change':"), 'Wizard analysis API is missing.');
 architect_ui_assert(
     str_contains($api, 'architect_api_finish_response(202')
@@ -100,5 +120,10 @@ architect_ui_assert(str_contains((string)$seed, 'SMS / ECCAIRS Occurrence Lifecy
 foreach (array('confidence percentage', 'candidate retrieval', 'canonical hashes', 'data-mca-inspector') as $forbidden) {
     architect_ui_assert(!str_contains($page, $forbidden), "Wizard exposes forbidden dashboard detail: {$forbidden}.");
 }
+architect_ui_assert(
+    !str_contains($architect, "'section_title' => 'New target-state content'")
+        && !str_contains($architect, "'impact_key' => 'new-target-state-content'"),
+    'Unplaced target-state concepts must not become a synthetic manual amendment area.'
+);
 
 echo "PASS: Manual Change Wizzard vertical workflow contract\n";

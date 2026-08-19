@@ -27,6 +27,28 @@ function mcw_text(mixed $value, string $fallback = ''): string
     return $value !== '' ? $value : $fallback;
 }
 
+function mcw_treatment_icon(string $treatment): string
+{
+    return match (strtoupper($treatment)) {
+        'PRESERVE', 'PRESERVE_REFINE' => '✓',
+        'ADD' => '+',
+        'REMOVE', 'REMOVE_OBSOLETE', 'REPLACE' => '−',
+        'RESTRUCTURE' => '↕',
+        'REVIEW_SEPARATELY' => '!',
+        default => '✎',
+    };
+}
+
+function mcw_treatment_label(string $treatment): string
+{
+    return match (strtoupper($treatment)) {
+        'PRESERVE_REFINE' => 'PRESERVE / REFINE',
+        'REMOVE', 'REMOVE_OBSOLETE', 'REPLACE' => 'REMOVE OBSOLETE',
+        'REVIEW_SEPARATELY' => 'REVIEW SEPARATELY',
+        default => strtoupper($treatment),
+    };
+}
+
 /** @param list<array<string,mixed>> $rows @return list<array<string,mixed>> */
 function mcw_boundaries(array $rows, string $classification): array
 {
@@ -107,6 +129,18 @@ $presentationAreas = array_values(array_filter(
     (array)($impactPresentation['areas'] ?? array()),
     'is_array'
 ));
+usort($presentationAreas, static fn(array $a, array $b): int =>
+    strnatcasecmp((string)($a['section_number'] ?? ''), (string)($b['section_number'] ?? ''))
+);
+$restructureCount = count(array_filter(
+    $presentationAreas,
+    static fn(array $area): bool => strtoupper((string)($area['treatment'] ?? '')) === 'RESTRUCTURE'
+));
+$areaAnchorByLabel = array();
+foreach ($presentationAreas as $area) {
+    $label = trim((string)($area['section_number'] ?? '') . ' ' . (string)($area['section_title'] ?? ''));
+    $areaAnchorByLabel[$label] = 'mcw-impact-' . (int)($area['impact_id'] ?? 0);
+}
 $amendments = array_values(array_filter(
     $impacts,
     static fn(array $impact): bool => in_array(
@@ -186,10 +220,9 @@ $reviewPayload = mcw_array($review['review_payload_json'] ?? array());
 $operations = array_values(array_filter((array)($report['operations'] ?? array()), 'is_array'));
 $operation = $operations === array() ? array() : $operations[array_key_last($operations)];
 
-$step1Complete = $report !== array() && $impacts !== array();
 $analysisPending = $report !== array()
-    && $impacts === array()
     && in_array((string)($report['status'] ?? ''), array('active', 'analyzing'), true);
+$step1Complete = $report !== array() && $impacts !== array() && !$analysisPending;
 $step2Complete = $amendments !== array() && !in_array(
     false,
     array_map(static fn(array $impact): bool => (string)($impact['status'] ?? '') === 'approved', $amendments),
@@ -308,76 +341,110 @@ books_manuals_page_open(array(
         </details>
       <?php elseif ($activeStep === 2): ?>
         <section class="mcw-step mcw-step--active" data-mcw-step="2">
-          <header><span class="mcw-step-number">2</span><div><h2>What should actually be amended?</h2><p>I reviewed <?= h((string)($manual['book_key'] ?? 'the manual')) ?> <?= h((string)($manual['version_label'] ?? '')) ?> and identified <?= count($presentationAreas) ?> areas that should be amended.</p></div></header>
+          <header><span class="mcw-step-number">2</span><div><h2>Review Proposed Manual Changes</h2><p>The Architect reviewed the selected manual against your change request and identified the sections below that should be amended. For each section, compare the current manual with the recommended change. If the overall analysis is correct, continue. If anything is missing, unnecessary or incorrect, request changes.</p></div></header>
+          <div class="mcw-impact-summary" aria-label="Impact analysis summary">
+            <span><strong><?= count($presentationAreas) ?></strong> sections require amendment</span>
+            <span><strong><?= $restructureCount ?></strong> primary procedure<?= $restructureCount === 1 ? '' : 's' ?> require<?= $restructureCount === 1 ? 's' : '' ?> restructuring</span>
+            <span><strong><?= count($legacyReviewRows) ?></strong> legacy references found outside this change</span>
+          </div>
           <div class="mcw-amendments">
             <?php foreach ($presentationAreas as $area): ?>
               <?php
                 $impactId = (int)($area['impact_id'] ?? 0);
                 $impact = $impactById[$impactId] ?? array();
                 $primary = !empty($area['is_primary_change']);
+                $currentManual = mcw_array($area['current_manual'] ?? array());
+                $previewSubsections = array_values(array_filter(
+                    (array)($currentManual['preview_subsections'] ?? array()),
+                    'is_array'
+                ));
+                $allSubsections = array_values(array_filter(
+                    (array)($currentManual['subsections'] ?? array()),
+                    'is_array'
+                ));
                 $sectionHeading = trim(
                     (string)($area['section_number'] ?? '') . ' '
                     . (string)($area['section_title'] ?? 'Manual section')
                 );
               ?>
-              <article class="mcw-amendment <?= $primary ? 'is-primary' : '' ?>">
-                <div class="mcw-amendment-heading"><div><h3><?= h($sectionHeading) ?></h3><span class="mcw-treatment"><?= h((string)$area['treatment']) ?></span><?php if ($primary): ?><span class="mcw-primary-label">Primary change</span><?php endif; ?></div><span class="mcw-impact-status is-<?= h((string)($impact['status'] ?? 'proposed')) ?>" data-mcw-impact-status="<?= $impactId ?>"><?= h(ucfirst((string)($impact['status'] ?? 'proposed'))) ?></span></div>
+              <article class="mcw-amendment <?= $primary ? 'is-primary' : '' ?>" id="mcw-impact-<?= $impactId ?>">
+                <div class="mcw-amendment-heading"><div><span class="mcw-section-number"><?= h((string)($area['section_number'] ?? '')) ?></span><h3><?= h((string)($area['section_title'] ?? 'Manual section')) ?></h3><span class="mcw-treatment"><?= h(mcw_treatment_icon((string)$area['treatment']) . ' ' . mcw_treatment_label((string)$area['treatment'])) ?></span><?php if ($primary): ?><span class="mcw-primary-label">Primary change</span><?php endif; ?></div></div>
 
                 <section class="mcw-impact-section">
-                  <h4>Why this changes</h4>
+                  <h4>Why this section is affected</h4>
                   <p><?= h(mcw_text($area['concise_rationale'] ?? '', 'This section requires amendment to support the requested change.')) ?></p>
                 </section>
 
-                <section class="mcw-impact-section">
-                  <h4>Proposed amendment</h4>
+                <section class="mcw-impact-section mcw-current-manual">
+                  <h4>Current manual <small>Canonical source</small></h4>
+                  <?php if ($previewSubsections !== array()): ?>
+                    <?php if ((array)($currentManual['legacy_phrases'] ?? array()) !== array()): ?><div class="mcw-legacy-phrases"><?php foreach ((array)$currentManual['legacy_phrases'] as $phrase): ?><span>legacy · <?= h((string)$phrase) ?></span><?php endforeach; ?></div><?php endif; ?>
+                    <div class="mcw-source-preview">
+                      <?php foreach ($previewSubsections as $subsection): ?>
+                        <article class="mcw-source-subsection">
+                          <h5><span><?= h((string)($subsection['number'] ?? '')) ?></span><?= h((string)($subsection['title'] ?? '')) ?></h5>
+                          <?php foreach (array_slice(array_values(array_filter((array)($subsection['paragraphs'] ?? array()), 'is_string')), 0, 2) as $paragraph): ?><p>“<?= h(mb_strimwidth(trim($paragraph), 0, 520, '…')) ?>”</p><?php endforeach; ?>
+                        </article>
+                      <?php endforeach; ?>
+                    </div>
+                    <?php if (count($allSubsections) > count($previewSubsections)): ?>
+                      <details class="mcw-current-complete">
+                        <summary>View complete current section</summary>
+                        <div><?php foreach ($allSubsections as $subsection): ?><article class="mcw-source-subsection"><h5><span><?= h((string)($subsection['number'] ?? '')) ?></span><?= h((string)($subsection['title'] ?? '')) ?></h5><?php foreach ((array)($subsection['paragraphs'] ?? array()) as $paragraph): ?><p><?= h((string)$paragraph) ?></p><?php endforeach; ?></article><?php endforeach; ?></div>
+                      </details>
+                    <?php endif; ?>
+                  <?php else: ?>
+                    <p class="mcw-source-unavailable">This saved analysis predates the canonical source projection. Request re-analysis to rebuild it from the controlled manual.</p>
+                  <?php endif; ?>
+                </section>
+
+                <div class="mcw-change-flow" aria-hidden="true"><span>↓</span></div>
+
+                <section class="mcw-impact-section mcw-proposed-change">
+                  <h4>Proposed change <small>Architect recommendation</small></h4>
                   <div class="mcw-component-list">
                     <?php foreach ((array)($area['amendment_components'] ?? array()) as $component): ?>
                       <?php if (!is_array($component)) { continue; } ?>
                       <article class="mcw-component">
-                        <span class="mcw-component-mark" aria-hidden="true"><?= strtoupper((string)($component['treatment'] ?? 'AMEND')) === 'PRESERVE' ? '✓' : (strtoupper((string)($component['treatment'] ?? 'AMEND')) === 'ADD' ? '+' : '✎') ?></span>
-                        <div><h5><?= h((string)($component['title'] ?? 'Amendment component')) ?></h5><span class="mcw-mini-treatment"><?= h((string)($component['treatment'] ?? 'AMEND')) ?></span><p><?= h((string)($component['summary'] ?? '')) ?></p></div>
+                        <span class="mcw-component-mark" aria-hidden="true"><?= h(mcw_treatment_icon((string)($component['treatment'] ?? 'AMEND'))) ?></span>
+                        <div><h5><?php if (mcw_text($component['number'] ?? '') !== ''): ?><span><?= h((string)$component['number']) ?></span><?php endif; ?><?= h((string)($component['title'] ?? 'Manual amendment')) ?></h5><span class="mcw-mini-treatment"><?= h(mcw_treatment_label((string)($component['treatment'] ?? 'AMEND'))) ?></span><p><?= h((string)($component['summary'] ?? '')) ?></p></div>
                       </article>
                     <?php endforeach; ?>
                   </div>
                 </section>
 
-                <?php if ((array)($area['proposed_hierarchy'] ?? array()) !== array()): ?>
-                  <section class="mcw-impact-section">
-                    <h4>Proposed organization</h4>
-                    <ol class="mcw-impact-hierarchy"><?php foreach ((array)$area['proposed_hierarchy'] as $node): ?><?php if (!is_array($node)) { continue; } ?><li style="--mcw-depth:<?= max(0, (int)($node['depth'] ?? 0)) ?>"><span><strong><?= h((string)($node['number'] ?? '')) ?></strong> <?= h((string)($node['title'] ?? '')) ?></span><span class="mcw-mini-treatment"><?= h((string)($node['treatment'] ?? 'PRESERVE')) ?></span></li><?php endforeach; ?></ol>
-                  </section>
-                <?php endif; ?>
-
-                <?php if ((array)($area['preserved_concepts'] ?? array()) !== array()): ?>
-                  <section class="mcw-impact-section">
-                    <h4>What remains unchanged</h4>
+                <section class="mcw-impact-section mcw-preserved">
+                  <h4>Preserved <small>What will remain unchanged</small></h4>
+                  <?php if ((array)($area['preserved_concepts'] ?? array()) !== array()): ?>
                     <ul class="mcw-preserved-list"><?php foreach ((array)$area['preserved_concepts'] as $concept): ?><li><?= h((string)$concept) ?></li><?php endforeach; ?></ul>
-                  </section>
-                <?php endif; ?>
+                  <?php else: ?><p>No section-specific preservation decision was recorded.</p><?php endif; ?>
+                </section>
 
                 <?php if ((array)($area['dependencies'] ?? array()) !== array()): ?>
                   <section class="mcw-impact-section mcw-impact-section--compact">
-                    <h4>Related sections</h4>
-                    <div class="mcw-related-sections"><?php foreach ((array)$area['dependencies'] as $dependency): ?><span><?= h((string)$dependency) ?></span><?php endforeach; ?></div>
+                    <h4>Related amendments</h4>
+                    <div class="mcw-related-sections"><?php foreach ((array)$area['dependencies'] as $dependency): ?><?php $dependency = trim((string)$dependency); ?><a href="#<?= h($areaAnchorByLabel[$dependency] ?? 'mcw-impact-' . $impactId) ?>"><?= h($dependency) ?></a><?php endforeach; ?></div>
                   </section>
                 <?php endif; ?>
 
                 <details class="mcw-impact-details">
-                  <summary>View source context and decision controls</summary>
-                  <p><strong>Current source context:</strong> <?= h(mcw_text($impact['current_state_summary'] ?? '', 'The complete source section was reviewed.')) ?></p>
+                  <summary>View evidence / analysis</summary>
+                  <p><strong>Architect rationale:</strong> <?= h(mcw_text($impact['substantive_rationale'] ?? '', 'The complete canonical section was reviewed.')) ?></p>
                   <?php if ((array)($area['removed_or_obsolete_concepts'] ?? array()) !== array()): ?><p><strong>Legacy concepts:</strong> <?= h(implode(' · ', array_map('strval', (array)$area['removed_or_obsolete_concepts']))) ?></p><?php endif; ?>
-                  <label class="mcw-field"><span>Decision note</span><textarea rows="3" data-mcw-impact-note="<?= $impactId ?>" placeholder="Required when modifying or rejecting."></textarea></label>
-                  <div class="mcw-secondary-actions">
-                    <button class="app-btn app-btn--secondary" type="button" data-mcw-impact-decision="MODIFY" data-impact-id="<?= $impactId ?>" <?= $isOwner ? '' : 'disabled' ?>>Modify</button>
-                    <button class="app-btn app-btn--danger" type="button" data-mcw-impact-decision="REJECT" data-impact-id="<?= $impactId ?>" <?= $isOwner ? '' : 'disabled' ?>>Reject</button>
-                  </div>
                 </details>
+                <button class="mcw-flag-section" type="button" data-mcw-flag-impact="<?= $impactId ?>">Flag this section</button>
               </article>
             <?php endforeach; ?>
           </div>
-          <details class="mcw-secondary-review"><summary>Reviewed — no change required (<?= count($preserved) ?>)</summary><div class="mcw-secondary-rows"><?php foreach ($preserved as $row): ?><article><strong><?= h((string)$row['subject_reference']) ?></strong><span class="mcw-mini-treatment">Preserve</span><p><?= h((string)$row['rationale']) ?></p></article><?php endforeach; ?></div></details>
-          <details class="mcw-secondary-review"><summary>Other legacy references found (<?= count($legacyReviewRows) ?>)</summary><div><p>These references were identified during the whole-manual review but are outside the accepted amendment scope.</p><?php foreach ($legacyReviewRows as $hit): ?><article class="mcw-legacy-row"><strong><?= h($sectionLabels[(int)($hit['section_id'] ?? 0)] ?? 'Related manual section') ?></strong><span><?= h((string)$hit['legacy_identity']) ?></span><span class="mcw-mini-treatment"><?= h(str_replace('_', ' ', (string)$hit['disposition'])) ?></span><p><?= h((string)($hit['disposition_justification'] ?? '')) ?></p></article><?php endforeach; ?></div></details>
-          <details class="mcw-secondary-review"><summary>View Analysis Details</summary><div><p>The operational target state, coverage matrix, deterministic legacy scan, preservation boundaries, dependencies and canonical evidence remain retained in the Change Plan audit record.</p><p><strong>Target-state components:</strong> <?= count((array)($impactPresentation['analysis_details']['target_components'] ?? array())) ?></p><p><strong>Coverage records:</strong> <?= count((array)($impactPresentation['analysis_details']['coverage'] ?? array())) ?></p><?php foreach ($outOfScope as $row): ?><p><strong>Out of scope:</strong> <?= h((string)$row['subject_reference']) ?></p><?php endforeach; ?><?php foreach ($reviewSeparately as $row): ?><p><strong>Review separately:</strong> <?= h((string)$row['subject_reference']) ?></p><?php endforeach; ?></div></details>
+          <details class="mcw-secondary-review"><summary>Reviewed — no change required (<?= count($preserved) ?>)</summary><div class="mcw-secondary-rows"><?php foreach ($preserved as $row): ?><article><strong><?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? 'Manual section'))) ?></strong><span class="mcw-mini-treatment">✓ Preserve</span><p><?= h((string)$row['rationale']) ?></p></article><?php endforeach; ?></div></details>
+          <details class="mcw-secondary-review"><summary>Other legacy references found (<?= count($legacyReviewRows) ?>)</summary><div><p>These references belong to other workflows and remain available for separate governed review.</p><?php foreach ($legacyReviewRows as $hit): ?><article class="mcw-legacy-row"><strong><?= h($sectionLabels[(int)($hit['section_id'] ?? 0)] ?? 'Related manual section') ?></strong><span><?= h((string)$hit['legacy_identity']) ?></span><span class="mcw-mini-treatment">! Review separately</span><p><strong>Reason:</strong> <?= h((string)($hit['disposition_justification'] ?? 'This reference is outside the primary operational change.')) ?></p></article><?php endforeach; ?></div></details>
+          <details class="mcw-secondary-review mcw-technical-analysis"><summary><span>Technical Analysis &amp; Coverage<small>Whole-manual review complete · <?= count((array)($impactPresentation['analysis_details']['target_components'] ?? array())) ?> target-state components · <?= count((array)($impactPresentation['analysis_details']['coverage'] ?? array())) ?> coverage decisions</small></span><span>View details</span></summary><div><p>The target-state model, complete coverage matrix, deterministic legacy scan, preservation boundaries, dependencies and canonical provenance remain retained in the Change Plan audit record.</p><?php foreach ($outOfScope as $row): ?><p><strong>Out of scope:</strong> <?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? ''))) ?></p><?php endforeach; ?><?php foreach ($reviewSeparately as $row): ?><p><strong>Review separately:</strong> <?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? ''))) ?></p><?php endforeach; ?></div></details>
+          <section class="mcw-change-request-panel" data-mcw-impact-feedback hidden>
+            <div><h3>What should the Architect reconsider?</h3><p>Describe the correction. The Architect will re-analyze the impact and prepare a revised recommendation.</p></div>
+            <label class="mcw-field"><span>Affected area</span><select data-mcw-feedback-area><option value="">General / overall analysis</option><?php foreach ($presentationAreas as $area): ?><option value="<?= (int)$area['impact_id'] ?>"><?= h(trim((string)$area['section_number'] . ' ' . (string)$area['section_title'])) ?></option><?php endforeach; ?></select></label>
+            <label class="mcw-field"><span>Correction</span><textarea rows="7" maxlength="10000" data-mcw-feedback-text placeholder="Section 5.7 should remain unchanged because…&#10;&#10;The analysis appears to have missed the Safety Manager responsibility for…"></textarea></label>
+            <div class="mcw-change-request-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-cancel-impact-feedback>Cancel</button><button class="app-btn app-btn--primary" type="button" data-mcw-reanalyze-impact>Re-analyze Impact</button></div>
+          </section>
           <div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-request-impact-changes>Request Changes</button><button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-accept-impacts <?= $isOwner ? '' : 'disabled' ?>>Accept Impact Analysis &amp; Continue</button></div>
         </section>
       <?php endif; ?>

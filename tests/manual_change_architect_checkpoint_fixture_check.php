@@ -106,4 +106,50 @@ architect_fixture_assert(
     'Completeness reasoning did not pass.'
 );
 
+$structuralFixture = $fixture;
+$structuralFixture['manual']['sections'] = array_merge(
+    array(
+        array(
+            'id' => 201,
+            'number' => '0.4',
+            'title' => 'Highlight of Changes',
+            'section_key' => 'highlights',
+            'section_type' => 'highlights',
+            'is_system_managed' => true,
+            'is_generated' => true,
+            'text' => 'Revision summary: remove Pipedrive and introduce the updated occurrence workflow.',
+        ),
+        array(
+            'id' => 202,
+            'number' => '2.0',
+            'title' => 'Scope of the Safety Management Manual',
+            'parent_number' => '2',
+            'parent_title' => 'Safety Management System',
+            'text' => 'This manual describes safety management, occurrence reporting, investigation and monitoring.',
+        ),
+        array(
+            'id' => 203,
+            'number' => '5',
+            'title' => 'Safety Risk Management',
+            'parent_number' => '5',
+            'parent_title' => 'Safety Management System',
+            'text' => 'Safety risk management includes occurrence review, investigation, corrective action and monitoring.',
+        ),
+    ),
+    $fixture['manual']['sections']
+);
+$structuralReport = $service->runFixtureCheckpoint($structuralFixture);
+$structuralMustChange = architect_fixture_numbers($structuralReport['must_change']);
+architect_fixture_assert(
+    $structuralMustChange === $expectedMustChange,
+    'System-managed, scope and chapter-container surfaces must not displace procedural amendment homes.'
+);
+$structuralAmendments = architect_fixture_numbers($structuralReport['what_should_actually_be_amended']);
+foreach (array('0.4', '2.0', '5') as $forbiddenStructuralArea) {
+    architect_fixture_assert(
+        !in_array($forbiddenStructuralArea, $structuralAmendments, true),
+        "Structural surface {$forbiddenStructuralArea} became a false amendment."
+    );
+}
+
 echo "PASS: Manual Change Architect SMS/ECCAIRS checkpoint fixture\n";

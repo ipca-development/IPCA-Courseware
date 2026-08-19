@@ -197,6 +197,15 @@ final class BooksManualsChangePlanService
         }
     }
 
+    public function clearPostImpactData(int $planId): void
+    {
+        foreach (array(
+            'operations', 'reviews', 'drafts', 'structure_nodes', 'structure_proposals',
+        ) as $collection) {
+            $this->deletePlanRows($collection, $planId);
+        }
+    }
+
     /**
      * @param array<string,mixed> $payload
      */

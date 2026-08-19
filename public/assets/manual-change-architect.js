@@ -148,45 +148,55 @@
   }
 
   function setupImpactDecisions() {
+    var panel = root.querySelector('[data-mcw-impact-feedback]');
+    var areaSelect = root.querySelector('[data-mcw-feedback-area]');
+    var feedbackText = root.querySelector('[data-mcw-feedback-text]');
+
+    function showFeedback(impactId) {
+      if (!panel) return;
+      panel.hidden = false;
+      if (areaSelect) areaSelect.value = impactId ? String(impactId) : '';
+      panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (feedbackText) window.setTimeout(function () { feedbackText.focus(); }, 350);
+    }
+
     root.addEventListener('click', async function (event) {
-      var decisionButton = event.target.closest('[data-mcw-impact-decision]');
-      if (decisionButton) {
-        var impactId = Number(decisionButton.dataset.impactId || 0);
-        var decision = String(decisionButton.dataset.mcwImpactDecision || '');
-        var note = String((root.querySelector('[data-mcw-impact-note="' + impactId + '"]') || {}).value || '').trim();
-        if (note.length < 5) {
-          toast('Record a short rationale before modifying or rejecting this area.', true);
-          return;
-        }
-        busy(decisionButton, true, 'Saving…');
-        try {
-          var result = await request('impact_decision', {
-            impact_id: impactId,
-            decision: decision,
-            note: note
-          });
-          var status = root.querySelector('[data-mcw-impact-status="' + impactId + '"]');
-          if (status) {
-            status.textContent = result.result.status === 'dismissed' ? 'Rejected' : 'Modify';
-            status.className = 'mcw-impact-status is-' + result.result.status;
-          }
-          toast(decision === 'REJECT' ? 'Amendment area rejected.' : 'Modification request recorded.');
-        } catch (error) {
-          toast(error.message, true);
-        } finally {
-          busy(decisionButton, false);
-        }
+      var flagButton = event.target.closest('[data-mcw-flag-impact]');
+      if (flagButton) {
+        showFeedback(Number(flagButton.dataset.mcwFlagImpact || 0));
         return;
       }
 
       var requestChanges = event.target.closest('[data-mcw-request-impact-changes]');
       if (requestChanges) {
-        var firstDetails = root.querySelector('.mcw-impact-details');
-        if (firstDetails) {
-          firstDetails.open = true;
-          firstDetails.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          var note = firstDetails.querySelector('textarea');
-          if (note) window.setTimeout(function () { note.focus(); }, 350);
+        showFeedback(0);
+        return;
+      }
+
+      var cancelFeedback = event.target.closest('[data-mcw-cancel-impact-feedback]');
+      if (cancelFeedback) {
+        if (panel) panel.hidden = true;
+        return;
+      }
+
+      var reanalyze = event.target.closest('[data-mcw-reanalyze-impact]');
+      if (reanalyze) {
+        var correction = String((feedbackText || {}).value || '').trim();
+        if (correction.length < 10) {
+          toast('Describe what the Architect should reconsider.', true);
+          return;
+        }
+        busy(reanalyze, true, 'Starting Re-analysis…');
+        try {
+          await request('request_impact_changes', {
+            impact_id: Number((areaSelect || {}).value || 0),
+            correction: correction
+          });
+          toast('Correction recorded. Re-analyzing the impact…');
+          window.setTimeout(function () { window.location.reload(); }, 350);
+        } catch (error) {
+          toast(error.message, true);
+          busy(reanalyze, false);
         }
         return;
       }

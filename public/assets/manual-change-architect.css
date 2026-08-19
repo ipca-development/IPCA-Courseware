@@ -342,8 +342,29 @@
   gap: 12px;
 }
 
+.mcw-impact-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -6px 0 18px 57px;
+}
+
+.mcw-impact-summary span {
+  padding: 7px 10px;
+  border: 1px solid #dbe5ed;
+  border-radius: 7px;
+  color: #566c80;
+  background: #f8fafc;
+  font-size: 10px;
+}
+
+.mcw-impact-summary strong {
+  color: var(--mcw-navy);
+  font-size: 12px;
+}
+
 .mcw-amendment {
-  padding: 18px 19px;
+  padding: 21px 22px;
   border: 1px solid var(--mcw-line);
   border-radius: 11px;
   background: #fff;
@@ -372,6 +393,14 @@
   width: 100%;
   margin: 0 0 3px;
   font-size: 16px;
+}
+
+.mcw-section-number {
+  width: 100%;
+  color: var(--mcw-blue);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .05em;
 }
 
 .mcw-treatment,
@@ -424,6 +453,15 @@
   text-transform: uppercase;
 }
 
+.mcw-impact-section > h4 small {
+  margin-left: 7px;
+  color: #8292a2;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .02em;
+  text-transform: none;
+}
+
 .mcw-impact-section > p {
   max-width: 760px;
   margin: 0;
@@ -434,6 +472,113 @@
 
 .mcw-component-list {
   border-top: 1px solid #dbe4ec;
+}
+
+.mcw-current-manual,
+.mcw-proposed-change,
+.mcw-preserved {
+  padding: 15px 16px;
+  border: 1px solid #dce4eb;
+  border-radius: 9px;
+}
+
+.mcw-current-manual {
+  background: #fcfbf7;
+  border-color: #e5dfd1;
+}
+
+.mcw-proposed-change {
+  margin-top: 0;
+  background: #f7fbfe;
+  border-color: #cedfeb;
+}
+
+.mcw-preserved {
+  background: #f6fbf8;
+  border-color: #cfe4d9;
+}
+
+.mcw-source-preview {
+  display: grid;
+  gap: 12px;
+}
+
+.mcw-source-subsection {
+  padding-left: 11px;
+  border-left: 2px solid #cfc8b8;
+}
+
+.mcw-source-subsection h5 {
+  margin: 0 0 5px;
+  color: #253e53;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.mcw-source-subsection h5 span,
+.mcw-component h5 span {
+  margin-right: 6px;
+  color: var(--mcw-blue);
+  font-weight: 900;
+}
+
+.mcw-source-subsection p {
+  margin: 4px 0 0;
+  color: #526476;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 10.5px;
+  line-height: 1.58;
+}
+
+.mcw-legacy-phrases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 11px;
+}
+
+.mcw-legacy-phrases span {
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: #85511f;
+  background: #fff1d8;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.mcw-current-complete {
+  margin-top: 12px;
+  border-top: 1px solid #e1dbcf;
+}
+
+.mcw-current-complete > summary {
+  padding-top: 10px;
+  color: var(--mcw-blue);
+  font-size: 9.5px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.mcw-current-complete > div {
+  display: grid;
+  gap: 14px;
+  margin-top: 13px;
+}
+
+.mcw-source-unavailable {
+  margin: 0;
+  color: #7f6836;
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.mcw-change-flow {
+  display: grid;
+  height: 24px;
+  place-items: center;
+  color: #7390a6;
+  font-size: 16px;
+  font-weight: 900;
 }
 
 .mcw-component {
@@ -521,6 +666,20 @@
   font-size: 9px;
 }
 
+.mcw-related-sections a {
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: #286b9b;
+  background: #eff6fb;
+  font-size: 9px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.mcw-related-sections a:hover {
+  text-decoration: underline;
+}
+
 .mcw-impact-hierarchy {
   display: grid;
   gap: 2px;
@@ -568,6 +727,17 @@
   margin-top: 12px;
 }
 
+.mcw-flag-section {
+  margin-top: 11px;
+  padding: 0;
+  border: 0;
+  color: #7a5a20;
+  background: transparent;
+  font-size: 9.5px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
 .mcw-secondary-actions {
   display: flex;
   flex-wrap: wrap;
@@ -595,6 +765,24 @@
   font-weight: 850;
   cursor: pointer;
   list-style: none;
+}
+
+.mcw-technical-analysis > summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mcw-technical-analysis > summary span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.mcw-technical-analysis > summary small {
+  color: #718294;
+  font-size: 9px;
+  font-weight: 550;
 }
 
 .mcw-secondary-review > div {
@@ -651,6 +839,37 @@
 
 .mcw-step-actions .mcw-primary-action {
   margin-top: 0;
+}
+
+.mcw-change-request-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 19px;
+  border: 1px solid #d7c58f;
+  border-radius: 10px;
+  background: #fffaf0;
+}
+
+.mcw-change-request-panel[hidden] {
+  display: none;
+}
+
+.mcw-change-request-panel h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.mcw-change-request-panel p {
+  margin: 0;
+  color: #6b6a62;
+  font-size: 10.5px;
+}
+
+.mcw-change-request-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .mcw-structure {
@@ -889,6 +1108,14 @@
     padding: 20px 16px 22px;
   }
 
+  .mcw-impact-summary {
+    margin-left: 0;
+  }
+
+  .mcw-amendment {
+    padding: 18px 15px;
+  }
+
   .mcw-amendment dl,
   .mcw-structure,
   .mcw-apply-summary {
@@ -901,6 +1128,11 @@
   }
 
   .mcw-step-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .mcw-change-request-actions {
     align-items: stretch;
     flex-direction: column-reverse;
   }

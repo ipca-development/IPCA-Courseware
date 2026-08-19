@@ -268,6 +268,97 @@ try {
                 'csrf_token' => architect_api_csrf(),
             ));
 
+        case 'request_impact_changes':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $impactId = max(0, (int)($input['impact_id'] ?? 0));
+            $correction = trim((string)($input['correction'] ?? ''));
+            if (mb_strlen($correction) < 10 || mb_strlen($correction) > 10000) {
+                throw new InvalidArgumentException('Describe the requested correction in 10 to 10,000 characters.');
+            }
+            $plan = $plans->getPlan($planId);
+            if ((int)($plan['owner_id'] ?? 0) !== $userId) {
+                throw new RuntimeException('Only the Change Plan owner can request re-analysis.');
+            }
+            $report = $architect->getCompleteCheckpointReport($planId);
+            $affectedArea = 'General / overall analysis';
+            if ($impactId > 0) {
+                $matchedImpact = null;
+                foreach ((array)($report['impacts'] ?? array()) as $impact) {
+                    if (is_array($impact) && (int)($impact['id'] ?? 0) === $impactId) {
+                        $matchedImpact = $impact;
+                        break;
+                    }
+                }
+                if (!is_array($matchedImpact)) {
+                    throw new InvalidArgumentException('The selected amendment area does not belong to this Change Plan.');
+                }
+                $affectedArea = trim(
+                    (string)($matchedImpact['section_number'] ?? '') . ' '
+                    . (string)($matchedImpact['section_title'] ?? 'Manual section')
+                );
+            }
+            $evidence = array();
+            foreach ((array)($report['evidence'] ?? array()) as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $text = trim((string)($item['content_text'] ?? $item['evidence_text'] ?? $item['excerpt'] ?? ''));
+                if ($text === '') {
+                    continue;
+                }
+                $evidence[] = array(
+                    'title' => (string)($item['title'] ?? 'Supporting evidence'),
+                    'reference_code' => (string)($item['reference_code'] ?? ''),
+                    'text' => $text,
+                );
+            }
+            $evidence[] = array(
+                'title' => 'Governed human impact-review feedback',
+                'reference_code' => 'IMPACT-REVIEW-FEEDBACK-' . gmdate('YmdHis'),
+                'text' => "Affected area: {$affectedArea}\n\nCorrection requested by the accountable reviewer:\n{$correction}",
+            );
+            $plans->appendEvent($planId, 'IMPACT_CHANGES_REQUESTED', 10, array(
+                'impact_id' => $impactId > 0 ? $impactId : null,
+                'affected_area' => $affectedArea,
+                'correction' => $correction,
+                'correction_sha256' => hash('sha256', $correction),
+            ), $userId);
+            $plans->clearPostImpactData($planId);
+            $plans->updatePlan($planId, array(
+                'status' => 'analyzing',
+                'stage' => 'impact',
+                'checkpoint_stage' => 2,
+                'failure_message' => null,
+                'completed_at' => null,
+                'updated_by' => $userId,
+            ));
+            architect_api_finish_response(202, array(
+                'ok' => true,
+                'plan_id' => $planId,
+                'status' => 'analyzing',
+                'csrf_token' => architect_api_csrf(),
+            ));
+            ignore_user_abort(true);
+            @set_time_limit(300);
+            try {
+                $architect->runCheckpoint($planId, $evidence, array(
+                    'title' => (string)($plan['title'] ?? 'Manual Change Architect checkpoint'),
+                    'objective' => (string)($plan['objective'] ?? $plan['change_request'] ?? ''),
+                    'change_request' => (string)($plan['change_request'] ?? ''),
+                    'review_feedback' => array(
+                        'affected_area' => $affectedArea,
+                        'correction' => $correction,
+                    ),
+                    'use_openai' => true,
+                ), $userId);
+            } catch (Throwable $analysisError) {
+                error_log(
+                    'Manual Change Architect impact re-analysis failed for plan '
+                    . $planId . ': ' . $analysisError->getMessage()
+                );
+            }
+            exit;
+
         case 'accept_impact_analysis':
             architect_api_json(200, array(
                 'ok' => true,
