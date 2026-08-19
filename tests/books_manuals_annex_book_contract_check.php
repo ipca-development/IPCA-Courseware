@@ -161,6 +161,10 @@ annex_book_assert(
         && str_contains($annexManager, 'cp-annex-col-date')
         && str_contains($annexManager, 'overflow-wrap: normal')
         && str_contains($annexManager, '@container (max-width: 560px)')
+        && str_contains($annexManager, 'cp-annex-column-resizer')
+        && str_contains($annexManager, 'columnWidthStorageKey')
+        && str_contains($annexManager, 'ipca.manageAnnexes.user.')
+        && str_contains($annexManager, 'Reset columns')
 );
 annex_book_assert(
     'Annex Editor keeps editable toolbars and omits outline controls',

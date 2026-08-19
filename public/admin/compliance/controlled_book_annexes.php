@@ -43,6 +43,7 @@ if ($version === null) {
 $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookVersion($version);
 $isReleased = (string)($version['lifecycle_status'] ?? '') === 'released';
 $canEdit = !$isReleased || $isAnnexBook;
+$userId = (int)($user['id'] ?? 0);
 $bookLabel = (string)$version['book_key'] . ' ' . (string)$version['version_label'];
 
 cw_header('Compliance · Annexes · ' . $bookLabel);
@@ -72,10 +73,13 @@ compliance_page_open(array(
   <p style="margin:0 0 16px;font-size:13px;color:#64748b;">
     Edit opens the annex in the editor. Rename changes the title and number. Revert restores a previous stored version. Delete hides the annex from the register without removing its content.
   </p>
-  <label style="display:flex;gap:8px;align-items:center;margin:0 0 12px;font-size:13px;">
-    <input type="checkbox" id="cp-annex-show-deleted">
-    <span>Show deleted annexes</span>
-  </label>
+  <div class="cp-annex-list-controls">
+    <label>
+      <input type="checkbox" id="cp-annex-show-deleted">
+      <span>Show deleted annexes</span>
+    </label>
+    <button type="button" class="cmp-btn-secondary" id="cp-annex-reset-columns">Reset columns</button>
+  </div>
   <div id="cp-annex-list" style="margin-bottom:20px;font-size:13px;color:#334155;">Loading annexes…</div>
   <?php if (!$canEdit): ?>
     <p style="margin:0;color:#b45309;">This version is released and cannot be edited.</p>
@@ -84,6 +88,24 @@ compliance_page_open(array(
 </section>
 <style>
   #cp-annex-list { container-type: inline-size; }
+  #cp-annex-manager .cp-annex-list-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0 0 12px;
+    font-size: 13px;
+  }
+  #cp-annex-manager .cp-annex-list-controls label {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  #cp-annex-manager #cp-annex-reset-columns {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
   #cp-annex-manager .cp-annex-list-table {
     width: 100%;
     border-collapse: collapse;
@@ -111,6 +133,35 @@ compliance_page_open(array(
   #cp-annex-manager .cp-annex-icon-heading {
     padding-left: 2px;
     padding-right: 2px;
+  }
+  #cp-annex-manager .cp-annex-list-table th { position: relative; }
+  #cp-annex-manager .cp-annex-column-resizer {
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    right: -4px;
+    bottom: 0;
+    width: 9px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  #cp-annex-manager .cp-annex-column-resizer::after {
+    content: "";
+    position: absolute;
+    top: 25%;
+    bottom: 25%;
+    left: 4px;
+    width: 1px;
+    background: #cbd5e1;
+  }
+  #cp-annex-manager .cp-annex-column-resizer:hover::after,
+  #cp-annex-manager .cp-annex-column-resizer:focus-visible::after {
+    width: 2px;
+    background: #2563eb;
+  }
+  body.cp-annex-column-resizing {
+    cursor: col-resize;
+    user-select: none;
   }
   #cp-annex-manager .cp-annex-symbol {
     display: inline-flex;
@@ -160,6 +211,7 @@ compliance_page_open(array(
     #cp-annex-manager .cp-annex-list-table thead {
       display: none;
     }
+    #cp-annex-manager .cp-annex-column-resizer { display: none; }
     #cp-annex-manager .cp-annex-list-table tr {
       display: grid;
       grid-template-columns: 42px minmax(0, 1fr) 38px 38px;
@@ -309,6 +361,7 @@ compliance_page_open(array(
 <script>
 (function () {
   var versionId = <?= (int)$versionId ?>;
+  var userId = <?= (int)$userId ?>;
   var canEdit = <?= $canEdit ? 'true' : 'false' ?>;
   var apiUrl = '/admin/api/controlled_book_annex_api.php';
   var listEl = document.getElementById('cp-annex-list');
@@ -319,8 +372,13 @@ compliance_page_open(array(
   var imageWrap = document.getElementById('cp-annex-upload-image');
   var docxWrap = document.getElementById('cp-annex-upload-docx');
   var showDeletedEl = document.getElementById('cp-annex-show-deleted');
+  var resetColumnsBtn = document.getElementById('cp-annex-reset-columns');
   var revertListEl = document.getElementById('cp-annex-revert-list');
   var revertSectionId = 0;
+  var columnKeys = ['number', 'title', 'revision', 'date', 'type', 'orientation', 'actions'];
+  var columnMinimums = [34, 120, 48, 86, 32, 32, 132];
+  var columnWidthStorageKey = 'ipca.manageAnnexes.user.' + userId + '.columnWidths.v1';
+  var storedColumnRatios = loadColumnRatios();
 
   function setStatus(msg, tone) {
     if (!statusEl) return;
@@ -365,6 +423,118 @@ compliance_page_open(array(
     return '<span class="cp-annex-symbol" role="img" aria-label="' + label + '" title="' + label + '"><svg viewBox="0 0 24 24" aria-hidden="true">' + rect + '</svg></span>';
   }
 
+  function columnResizeHandle(index, label) {
+    return '<span class="cp-annex-column-resizer" data-column-boundary="' + index + '" '
+      + 'role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize ' + label + ' column"></span>';
+  }
+
+  function loadColumnRatios() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(columnWidthStorageKey) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function applyStoredColumnRatios(table) {
+    var cols = table ? table.querySelectorAll('col[data-column-key]') : [];
+    var valid = cols.length === columnKeys.length && columnKeys.every(function (key) {
+      return Number(storedColumnRatios[key]) > 0;
+    });
+    if (!valid) return;
+    var total = columnKeys.reduce(function (sum, key) {
+      return sum + Number(storedColumnRatios[key]);
+    }, 0);
+    if (!(total > 0)) return;
+    Array.prototype.forEach.call(cols, function (col, index) {
+      col.style.width = ((Number(storedColumnRatios[columnKeys[index]]) / total) * 100).toFixed(4) + '%';
+    });
+  }
+
+  function saveColumnRatios(table) {
+    var headers = table ? table.querySelectorAll('thead th') : [];
+    var tableWidth = table ? table.getBoundingClientRect().width : 0;
+    if (headers.length !== columnKeys.length || !(tableWidth > 0)) return;
+    var ratios = {};
+    Array.prototype.forEach.call(headers, function (header, index) {
+      ratios[columnKeys[index]] = header.getBoundingClientRect().width / tableWidth;
+    });
+    storedColumnRatios = ratios;
+    try {
+      localStorage.setItem(columnWidthStorageKey, JSON.stringify(ratios));
+    } catch (e) {
+      // The table remains adjustable when browser storage is unavailable.
+    }
+  }
+
+  function captureColumnPixels(table) {
+    var headers = table.querySelectorAll('thead th');
+    var cols = table.querySelectorAll('col[data-column-key]');
+    var widths = [];
+    Array.prototype.forEach.call(headers, function (header, index) {
+      var width = header.getBoundingClientRect().width;
+      widths.push(width);
+      if (cols[index]) cols[index].style.width = width.toFixed(2) + 'px';
+    });
+    return { cols: cols, widths: widths };
+  }
+
+  function wireColumnResizers(table) {
+    if (!table) return;
+    applyStoredColumnRatios(table);
+    table.querySelectorAll('.cp-annex-column-resizer').forEach(function (handle) {
+      var index = parseInt(handle.getAttribute('data-column-boundary') || '-1', 10);
+      if (index < 0 || index >= columnKeys.length - 1) return;
+
+      handle.addEventListener('pointerdown', function (event) {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        var captured = captureColumnPixels(table);
+        var startX = event.clientX;
+        var leftStart = captured.widths[index];
+        var rightStart = captured.widths[index + 1];
+        var minDelta = columnMinimums[index] - leftStart;
+        var maxDelta = rightStart - columnMinimums[index + 1];
+        document.body.classList.add('cp-annex-column-resizing');
+
+        function move(moveEvent) {
+          var delta = Math.max(minDelta, Math.min(maxDelta, moveEvent.clientX - startX));
+          captured.cols[index].style.width = (leftStart + delta).toFixed(2) + 'px';
+          captured.cols[index + 1].style.width = (rightStart - delta).toFixed(2) + 'px';
+        }
+
+        function stop() {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', stop);
+          window.removeEventListener('pointercancel', stop);
+          document.body.classList.remove('cp-annex-column-resizing');
+          saveColumnRatios(table);
+          applyStoredColumnRatios(table);
+        }
+
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', stop);
+        window.addEventListener('pointercancel', stop);
+      });
+
+      handle.addEventListener('keydown', function (event) {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        var captured = captureColumnPixels(table);
+        var requested = event.key === 'ArrowLeft' ? -8 : 8;
+        var delta = Math.max(
+          columnMinimums[index] - captured.widths[index],
+          Math.min(captured.widths[index + 1] - columnMinimums[index + 1], requested)
+        );
+        captured.cols[index].style.width = (captured.widths[index] + delta).toFixed(2) + 'px';
+        captured.cols[index + 1].style.width = (captured.widths[index + 1] - delta).toFixed(2) + 'px';
+        saveColumnRatios(table);
+        applyStoredColumnRatios(table);
+      });
+    });
+  }
+
   function renderList(annexes) {
     if (!listEl) return;
     if (!annexes || !annexes.length) {
@@ -376,11 +546,17 @@ compliance_page_open(array(
     var pageHeading = '<span class="cp-annex-symbol" role="img" aria-label="Page orientation" title="Page orientation">'
       + '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.25" y="2.75" width="11.5" height="18.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span>';
     var html = '<table class="cp-annex-list-table"><colgroup>'
-      + '<col class="cp-annex-col-number"><col><col class="cp-annex-col-revision"><col class="cp-annex-col-date">'
-      + '<col class="cp-annex-col-type"><col class="cp-annex-col-orientation"><col class="cp-annex-col-actions">'
+      + '<col class="cp-annex-col-number" data-column-key="number"><col data-column-key="title">'
+      + '<col class="cp-annex-col-revision" data-column-key="revision"><col class="cp-annex-col-date" data-column-key="date">'
+      + '<col class="cp-annex-col-type" data-column-key="type"><col class="cp-annex-col-orientation" data-column-key="orientation">'
+      + '<col class="cp-annex-col-actions" data-column-key="actions">'
       + '</colgroup><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0;">'
-      + '<th class="cp-annex-meta">Nr</th><th>Title</th><th class="cp-annex-meta">Rev</th><th class="cp-annex-meta">Date</th>'
-      + '<th class="cp-annex-icon-heading">' + typeHeading + '</th><th class="cp-annex-icon-heading">' + pageHeading + '</th>'
+      + '<th class="cp-annex-meta">Nr' + columnResizeHandle(0, 'number') + '</th>'
+      + '<th>Title' + columnResizeHandle(1, 'title') + '</th>'
+      + '<th class="cp-annex-meta">Rev' + columnResizeHandle(2, 'revision') + '</th>'
+      + '<th class="cp-annex-meta">Date' + columnResizeHandle(3, 'date') + '</th>'
+      + '<th class="cp-annex-icon-heading">' + typeHeading + columnResizeHandle(4, 'content type') + '</th>'
+      + '<th class="cp-annex-icon-heading">' + pageHeading + columnResizeHandle(5, 'orientation') + '</th>'
       + '<th class="cp-annex-meta">Actions</th></tr></thead><tbody>';
     annexes.forEach(function (a) {
       var num = a.annex_display_number || String(a.annex_number || 0).padStart(2, '0');
@@ -416,6 +592,7 @@ compliance_page_open(array(
     });
     html += '</tbody></table>';
     listEl.innerHTML = html;
+    wireColumnResizers(listEl.querySelector('.cp-annex-list-table'));
 
     listEl.querySelectorAll('.cp-annex-edit-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -636,6 +813,18 @@ compliance_page_open(array(
     editCancelBtn.addEventListener('click', function () { closeModal('cp-annex-rename-modal'); });
   }
   if (showDeletedEl) showDeletedEl.addEventListener('change', loadList);
+  if (resetColumnsBtn) {
+    resetColumnsBtn.addEventListener('click', function () {
+      storedColumnRatios = {};
+      try {
+        localStorage.removeItem(columnWidthStorageKey);
+      } catch (e) {
+        // Reset still applies to the current page when storage is unavailable.
+      }
+      setStatus('Column widths reset.');
+      loadList();
+    });
+  }
 
   loadList();
 })();
