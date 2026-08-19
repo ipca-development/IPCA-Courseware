@@ -419,6 +419,55 @@ trait CoursewareProgressionV2RemoteTrait
         ];
     }
 
+    /**
+     * Polled by the course page and auth page. Digits are never included.
+     *
+     * @return array<string,mixed>
+     */
+    public function getRemoteProgressTestHandoff(int $studentId, int $cohortId, int $lessonId): array
+    {
+        ptr_ensure_tables($this->pdo);
+        $ptUrl = '/student/progress_test_v4.php?cohort_id=' . $cohortId . '&lesson_id=' . $lessonId;
+        $courseUrl = '/student/course.php?cohort_id=' . $cohortId
+            . '&lesson_id=' . $lessonId
+            . '&pt_remote_auth=1'
+            . '#progress-test-lesson-' . $lessonId;
+
+        $open = $this->ptr_get_open_attempt($studentId, $cohortId, $lessonId);
+        $prepared = $open !== null && pt_prep_attempt_is_prepared($open, $this->pdo);
+
+        $auth = $this->ptr_get_active_remote_auth($studentId, $cohortId, $lessonId);
+        $authStatus = $auth ? (string)$auth['status'] : '';
+        $codeReady = $auth !== null
+            && $authStatus === 'AUTHENTICATED'
+            && !empty($auth['verification_code_hash']);
+        $hasAppCode = false;
+        $codeViewed = false;
+        if ($codeReady) {
+            try {
+                $handoff = (new RemoteSessionAppCodeService($this->pdo))->handoffForAuthorization(
+                    $studentId,
+                    'progress_test',
+                    (int)$auth['id']
+                );
+                $hasAppCode = !empty($handoff['exists']);
+                $codeViewed = !empty($handoff['viewed']);
+            } catch (Throwable) {
+            }
+        }
+
+        return [
+            'ok' => true,
+            'auth_status' => $authStatus,
+            'code_ready' => $codeReady,
+            'code_viewed' => $codeViewed,
+            'open_code_entry' => $codeReady && (!$hasAppCode || $codeViewed),
+            'prepared' => $prepared,
+            'start_test_url' => $prepared ? $ptUrl : '',
+            'course_url' => $courseUrl,
+        ];
+    }
+
     public function requestRemoteProgressTestAuthorization(int $studentId, int $cohortId, int $lessonId): array
     {
         ptr_ensure_tables($this->pdo);

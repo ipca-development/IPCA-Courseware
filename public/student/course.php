@@ -2092,7 +2092,11 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 
                       <td class="td-center">
                         <?php if (!empty($lx['progress_test_prep']['show_bar'])): ?>
-                          <div class="summary-compact pt-prep-status" data-test-id="<?= (int)($lx['progress_test_prep']['attempt_id'] ?? 0) ?>">
+                          <div class="summary-compact pt-prep-status"
+                            data-test-id="<?= (int)($lx['progress_test_prep']['attempt_id'] ?? 0) ?>"
+                            data-cohort-id="<?= (int)$cohortId ?>"
+                            data-lesson-id="<?= (int)$lx['lesson_id'] ?>"
+                            data-pt-url="<?= h($lx['progress_test_url'] ?? '') ?>">
                             <div class="summary-head"><?= h($lx['progress_test_prep']['sub']) ?></div>
                             <div class="summary-bar-shell">
                               <div class="summary-bar-fill <?= h($lx['progress_test_prep']['class']) ?>" style="width:<?= (int)$lx['progress_test_prep']['pct'] ?>%;"></div>
@@ -2123,7 +2127,10 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
                           <?php elseif ($ptBtnMode === 'remote_auth_pending'): ?>
                             <span class="action-btn remote disabled" title="<?= h($ptBtnMessage) ?>"><?= h($testLabel) ?></span>
                           <?php elseif ($testHref !== ''): ?>
-                            <a class="action-btn <?= h($testBtnClass) ?>" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
+                            <a class="action-btn <?= h($testBtnClass) ?>"
+                              href="<?= h($testHref) ?>"
+                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"
+                              data-pt-start="<?= $ptBtnMode === 'remote_start' ? '1' : '0' ?>"><?= h($testLabel) ?></a>
                           <?php else: ?>
                             <span class="action-btn disabled" title="<?= h($ptBtnMessage) ?>"><?= h($testLabel) ?></span>
                           <?php endif; ?>
@@ -2169,6 +2176,39 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 })();
 
 (function () {
+  window.IPCARemoteProgressTest = window.IPCARemoteProgressTest || {};
+  window.IPCARemoteProgressTest.markAutostart = function (cohortId, lessonId) {
+    try {
+      sessionStorage.setItem('pt_remote_autostart', JSON.stringify({
+        cohort_id: cohortId,
+        lesson_id: lessonId,
+        ts: Date.now()
+      }));
+    } catch (e) {}
+  };
+  window.IPCARemoteProgressTest.peekAutostartLesson = function () {
+    try {
+      var raw = sessionStorage.getItem('pt_remote_autostart');
+      if (!raw) return 0;
+      var data = JSON.parse(raw);
+      if (!data || Date.now() - (parseInt(data.ts, 10) || 0) > 30 * 60 * 1000) {
+        sessionStorage.removeItem('pt_remote_autostart');
+        return 0;
+      }
+      return parseInt(data.lesson_id, 10) || 0;
+    } catch (e) {
+      return 0;
+    }
+  };
+  window.IPCARemoteProgressTest.consumeAutostart = function (lessonId) {
+    var pending = window.IPCARemoteProgressTest.peekAutostartLesson();
+    if (pending <= 0 || pending !== lessonId) return false;
+    try { sessionStorage.removeItem('pt_remote_autostart'); } catch (e) {}
+    return true;
+  };
+})();
+
+(function () {
   var remoteAuthReloading = false;
 
   function redirectCourseForRemoteAuth(cohortId, lessonId) {
@@ -2186,7 +2226,9 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
   }
 
   function handleRemoteAuthComplete(data) {
-    if (!data || data.type !== 'remote_progress_test_authenticated') return;
+    if (!data) return;
+    var type = String(data.type || '');
+    if (type !== 'remote_progress_test_authenticated' && type !== 'remote_progress_test_code_viewed') return;
     try {
       localStorage.removeItem('pt_remote_auth_refresh');
     } catch (e) {}
@@ -2197,7 +2239,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
   }
 
   window.addEventListener('message', function (ev) {
-    if (!ev || !ev.data || ev.data.type !== 'remote_progress_test_authenticated') return;
+    if (!ev || !ev.data) return;
     if (ev.origin !== window.location.origin) return;
     handleRemoteAuthComplete(ev.data);
   });
@@ -2225,7 +2267,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
       var raw = localStorage.getItem('pt_remote_auth_refresh');
       if (!raw) return;
       var data = JSON.parse(raw);
-      if (!data || data.type !== 'remote_progress_test_authenticated') return;
+      if (!data || (data.type !== 'remote_progress_test_authenticated' && data.type !== 'remote_progress_test_code_viewed')) return;
       if (Date.now() - (parseInt(data.ts, 10) || 0) > 30 * 60 * 1000) {
         localStorage.removeItem('pt_remote_auth_refresh');
         return;
@@ -2233,6 +2275,74 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
       handleRemoteAuthComplete(data);
     } catch (e) {}
   })();
+
+  var handoffPollTimer = null;
+  var handoffPollKey = '';
+
+  function rememberRemoteHandoffWatch(cohortId, lessonId) {
+    try {
+      sessionStorage.setItem('pt_remote_auth_watch', JSON.stringify({
+        cohort_id: cohortId,
+        lesson_id: lessonId,
+        ts: Date.now()
+      }));
+    } catch (e) {}
+  }
+
+  function pollRemoteHandoff(cohortId, lessonId) {
+    if (cohortId <= 0 || lessonId <= 0) return;
+    var key = cohortId + ':' + lessonId;
+    if (handoffPollKey === key && handoffPollTimer) return;
+    handoffPollKey = key;
+    rememberRemoteHandoffWatch(cohortId, lessonId);
+    if (handoffPollTimer) window.clearInterval(handoffPollTimer);
+
+    function tick() {
+      if (remoteAuthReloading) return;
+      fetch('/student/api/progress_test_remote_status.php?cohort_id=' + encodeURIComponent(String(cohortId))
+        + '&lesson_id=' + encodeURIComponent(String(lessonId)), {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store'
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (j) {
+          if (!j || !j.ok || remoteAuthReloading) return;
+          if (j.start_test_url && window.IPCARemoteProgressTest && window.IPCARemoteProgressTest.consumeAutostart(lessonId)) {
+            remoteAuthReloading = true;
+            window.location.replace(String(j.start_test_url));
+            return;
+          }
+          if (j.open_code_entry) {
+            var params = new URLSearchParams(window.location.search || '');
+            if (params.get('pt_remote_auth') === '1') return;
+            redirectCourseForRemoteAuth(cohortId, lessonId);
+          }
+        })
+        .catch(function () {});
+    }
+
+    tick();
+    handoffPollTimer = window.setInterval(tick, 1500);
+  }
+
+  try {
+    var startParams = new URLSearchParams(window.location.search || '');
+    if (startParams.get('pt_remote_auth') !== '1') {
+      var watchRaw = sessionStorage.getItem('pt_remote_auth_watch');
+      if (watchRaw) {
+        var watch = JSON.parse(watchRaw);
+        if (watch && Date.now() - (parseInt(watch.ts, 10) || 0) <= 30 * 60 * 1000) {
+          pollRemoteHandoff(parseInt(watch.cohort_id, 10) || 0, parseInt(watch.lesson_id, 10) || 0);
+        } else {
+          sessionStorage.removeItem('pt_remote_auth_watch');
+        }
+      }
+    }
+  } catch (e) {}
+
+  window.IPCARemoteProgressTest = window.IPCARemoteProgressTest || {};
+  window.IPCARemoteProgressTest.watchHandoff = pollRemoteHandoff;
 })();
 
 (function () {
@@ -2282,6 +2392,12 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
         applyPrepDisplay(node, j.display);
 
         if (j.prepared || String(j.status || '') === 'ready') {
+          var lessonId = parseInt(node.getAttribute('data-lesson-id') || '0', 10);
+          var startUrl = String(node.getAttribute('data-pt-url') || '');
+          if (window.IPCARemoteProgressTest && window.IPCARemoteProgressTest.consumeAutostart(lessonId) && startUrl) {
+            window.location.replace(startUrl);
+            return;
+          }
           window.location.reload();
         }
       })
@@ -2302,7 +2418,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 <div id="courseRemoteCodeModal" class="course-remote-modal-overlay" aria-hidden="true">
   <div class="course-remote-modal" role="dialog" aria-modal="true" aria-labelledby="courseRemoteCodeTitle">
     <h3 id="courseRemoteCodeTitle">Enter Progress Test Code</h3>
-    <p>Enter the six-digit code from the remote authentication page. After verification, questions and audio are prepared on <strong>this course page</strong> — the same flow as on-site <strong>Prepare Progress Test</strong>. You open the test only once preparation finishes.</p>
+    <p>Enter the six-digit code from the <strong>IPCA app</strong>. After verification, this page prepares the test and opens it for you.</p>
     <input id="courseRemoteCodeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
     <div id="courseRemoteCodeError" class="course-remote-modal-error"></div>
     <div class="course-remote-modal-actions">
@@ -2403,8 +2519,11 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
           if (j.open_auth_in_browser && j.auth_url) {
             var opened = openRemoteAuthSession(String(j.auth_url));
             showRemoteRequestToast(j.message || 'Complete photo and password verification, then check the IPCA app for your Progress Test Code.');
-            if (opened === 'new_tab') {
-              window.setTimeout(function () { window.location.reload(); }, 400);
+            if (window.IPCARemoteProgressTest && window.IPCARemoteProgressTest.watchHandoff) {
+              window.IPCARemoteProgressTest.watchHandoff(cohortId, lessonId);
+            }
+            if (opened === 'same_tab') {
+              return;
             }
             return;
           }
@@ -2531,6 +2650,9 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
         });
       })
       .then(function (j) {
+        if (window.IPCARemoteProgressTest && window.IPCARemoteProgressTest.markAutostart) {
+          window.IPCARemoteProgressTest.markAutostart(ctx.cohortId, ctx.lessonId);
+        }
         closeRemoteModal();
         window.location.replace(courseLessonUrl(ctx.cohortId, ctx.lessonId, {
           pt_code_verified: 1,
@@ -2646,10 +2768,21 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     window.setTimeout(function () {
       openRemoteCodeModal(target.cohortId, target.lessonId);
       stripRemoteAuthQueryParams();
+      try { sessionStorage.removeItem('pt_remote_auth_watch'); } catch (e) {}
     }, 150);
   }
 
   maybeAutoOpenRemoteCodeModal();
+
+  (function autoStartPreparedRemoteTest() {
+    var lessonId = window.IPCARemoteProgressTest ? window.IPCARemoteProgressTest.peekAutostartLesson() : 0;
+    if (lessonId <= 0) return;
+    var link = document.querySelector('a.action-btn[data-pt-start="1"][data-lesson-id="' + lessonId + '"]');
+    if (!link || !link.href) return;
+    if (window.IPCARemoteProgressTest.consumeAutostart(lessonId)) {
+      window.location.replace(link.href);
+    }
+  })();
 })();
 </script>
 

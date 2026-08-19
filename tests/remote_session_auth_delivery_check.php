@@ -99,9 +99,17 @@ rsa_delivery_assert(
 $service->markViewed(41, (string)$stored['code_uuid']);
 $after = $service->publicEnvelope(41, (string)$stored['code_uuid']);
 rsa_delivery_assert('viewed app code omits digits', ($after['code'] ?? '') === '' && !empty($after['viewed']));
+$handoff = $service->handoffForAuthorization(41, 'progress_test', 9);
+rsa_delivery_assert('viewed app code is ready for website handoff', !empty($handoff['exists']) && !empty($handoff['viewed']));
 
 $browserMessage = rsa_browser_auth_message('progress_test', false);
 rsa_delivery_assert('browser prompt tells the student to check the app', str_contains($browserMessage, 'Check the app'));
+
+$authJs = (string)file_get_contents($root . '/public/student/progress_test_auth.php');
+rsa_delivery_assert('auth page waits for I have written it down', str_contains($authJs, 'watchAppCodeHandoff') && str_contains($authJs, 'open_code_entry'));
+rsa_delivery_assert('course page polls remote status after app confirmation', str_contains($courseJs, 'progress_test_remote_status.php') && str_contains($courseJs, 'open_code_entry'));
+rsa_delivery_assert('course page does not reload before the app confirms the code', !str_contains($courseJs, "window.setTimeout(function () { window.location.reload(); }, 400);"));
+rsa_delivery_assert('remote status API exists', is_file($root . '/public/student/api/progress_test_remote_status.php'));
 
 if ($failures) {
     fwrite(STDERR, "\n" . count($failures) . " check(s) failed.\n");

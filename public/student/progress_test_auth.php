@@ -118,7 +118,7 @@ cw_header('Remote Progress Test Authentication');
     <div class="ptr-sub">
       <?php if ($pageError === ''): ?>
         Confirm your identity for <strong><?= h($lessonTitle) ?></strong> in <?= h($courseTitle) ?>.
-        Take a live photo and enter your account password. Your Progress Test Code will appear once verification succeeds.
+        Take a live photo and enter your account password. Your Progress Test Code will appear in the IPCA app once verification succeeds.
       <?php else: ?>
         Secure authentication for your remote progress test request.
       <?php endif; ?>
@@ -131,7 +131,32 @@ cw_header('Remote Progress Test Authentication');
       </div>
     <?php elseif ($pageInfo !== ''): ?>
       <div class="ptr-info"><?= h($pageInfo) ?></div>
-      <div class="ptr-muted">Switch back to your <strong>existing course page tab</strong>, click <strong>Enter Progress Test Code</strong>, and type the code you copied. You can close this window.</div>
+      <div class="ptr-muted" id="ptrAuthenticatedFollowup">If you already wrote the code down in the IPCA app, this page will continue automatically. Otherwise open the app, tap <strong>I've written it down</strong>, and wait here.</div>
+      <script>
+      (function () {
+        var cohortId = <?= (int)$cohortId ?>;
+        var lessonId = <?= (int)$lessonId ?>;
+        var redirected = false;
+        function tick() {
+          if (redirected || cohortId <= 0 || lessonId <= 0) return;
+          fetch('/student/api/progress_test_remote_status.php?cohort_id=' + encodeURIComponent(String(cohortId))
+            + '&lesson_id=' + encodeURIComponent(String(lessonId)), {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store'
+          })
+            .then(function (res) { return res.json(); })
+            .then(function (j) {
+              if (!j || !j.ok || redirected || !j.open_code_entry) return;
+              redirected = true;
+              window.location.replace(j.course_url);
+            })
+            .catch(function () {});
+        }
+        tick();
+        window.setInterval(tick, 1500);
+      })();
+      </script>
     <?php else: ?>
       <div id="ptrFormBlock">
         <label class="ptr-label" for="ptrPassword">Account password</label>
@@ -154,9 +179,10 @@ cw_header('Remote Progress Test Authentication');
           <strong>Enter Progress Test Code</strong>, paste the code, then wait on the course page while your test is prepared.
         </div>
         <div class="ptr-warn" id="ptrAppCodeWarn" style="display:none;">
-          Your Progress Test Code was sent to the <strong>IPCA app</strong>. Check the app, write the code down, then enter it on your course page.
+          Your Progress Test Code is in the <strong>IPCA app</strong>. Write it down, then tap <strong>I've written it down</strong>.
+          This page will continue to the enter-code screen automatically.
         </div>
-        <div class="ptr-code-box">
+        <div class="ptr-code-box" id="ptrCodeBox">
           <div class="ptr-muted" style="margin-top:0;">Your Progress Test Code</div>
           <div class="ptr-code" id="ptrCodeValue"></div>
         </div>
@@ -164,7 +190,7 @@ cw_header('Remote Progress Test Authentication');
           <button type="button" class="ptr-btn primary" id="ptrCopyBtn">Copy code</button>
         </div>
         <div class="ptr-copy-ok" id="ptrCopyOk">Code copied. You can close this window and return to your course page tab.</div>
-        <div class="ptr-muted">Question generation starts only after you enter this code on the course page — the same preparation flow as on-site <strong>Prepare Progress Test</strong>.</div>
+        <div class="ptr-muted" id="ptrCodeFollowup">Question generation starts only after you enter this code on the course page — the same preparation flow as on-site <strong>Prepare Progress Test</strong>.</div>
       </div>
     <?php endif; ?>
   </div>
@@ -239,16 +265,22 @@ cw_header('Remote Progress Test Authentication');
         var pageWarn = document.getElementById('ptrCodeWarn');
         var appWarn = document.getElementById('ptrAppCodeWarn');
         var copyBtn = document.getElementById('ptrCopyBtn');
+        var codeBox = document.getElementById('ptrCodeBox');
+        var followup = document.getElementById('ptrCodeFollowup');
         if (showOnPage) {
           document.getElementById('ptrCodeValue').textContent = String(j.progress_test_code || '');
           if (pageWarn) pageWarn.style.display = '';
           if (appWarn) appWarn.style.display = 'none';
           if (copyBtn) copyBtn.style.display = '';
+          if (codeBox) codeBox.style.display = '';
+          if (followup) followup.style.display = '';
         } else {
-          document.getElementById('ptrCodeValue').textContent = 'In app';
+          document.getElementById('ptrCodeValue').textContent = '';
           if (pageWarn) pageWarn.style.display = 'none';
           if (appWarn) appWarn.style.display = 'block';
           if (copyBtn) copyBtn.style.display = 'none';
+          if (codeBox) codeBox.style.display = 'none';
+          if (followup) followup.style.display = 'none';
         }
         if (video.srcObject) {
           video.srcObject.getTracks().forEach(function (t) { t.stop(); });
@@ -260,9 +292,10 @@ cw_header('Remote Progress Test Authentication');
             ts: Date.now()
           }));
         } catch (e) {}
-        (function notifyCourseTabRemoteAuthComplete() {
+        function notifyCourseTab(type) {
+          if (!type) return;
           var payload = {
-            type: 'remote_progress_test_authenticated',
+            type: type,
             cohort_id: <?= (int)$cohortId ?>,
             lesson_id: <?= (int)$lessonId ?>,
             ts: Date.now()
@@ -282,13 +315,52 @@ cw_header('Remote Progress Test Authentication');
               window.opener.postMessage(payload, window.location.origin);
             } catch (e) {}
           }
-        })();
+        }
+        if (showOnPage) {
+          notifyCourseTab('remote_progress_test_authenticated');
+        } else {
+          watchAppCodeHandoff(notifyCourseTab);
+        }
       })
       .catch(function (e) {
         submitBtn.disabled = false;
         showError(e.message || 'Verification failed.');
       });
   });
+
+  function watchAppCodeHandoff(notifyCourseTab) {
+    var cohortId = <?= (int)$cohortId ?>;
+    var lessonId = <?= (int)$lessonId ?>;
+    var redirected = false;
+    var courseUrl = <?= json_encode(
+        '/student/course.php?cohort_id=' . (int)$cohortId
+        . '&lesson_id=' . (int)$lessonId
+        . '&pt_remote_auth=1#progress-test-lesson-' . (int)$lessonId,
+        JSON_UNESCAPED_SLASHES
+    ) ?>;
+    function tick() {
+      if (redirected) return;
+      fetch('/student/api/progress_test_remote_status.php?cohort_id=' + encodeURIComponent(String(cohortId))
+        + '&lesson_id=' + encodeURIComponent(String(lessonId)), {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store'
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (j) {
+          if (!j || !j.ok || redirected) return;
+          if (!j.open_code_entry) return;
+          redirected = true;
+          if (typeof notifyCourseTab === 'function') {
+            notifyCourseTab('remote_progress_test_code_viewed');
+          }
+          window.location.replace(j.course_url || courseUrl);
+        })
+        .catch(function () {});
+    }
+    tick();
+    window.setInterval(tick, 1500);
+  }
 
   function copyProgressTestCode(code) {
     if (!code) return Promise.reject(new Error('No code'));

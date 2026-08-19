@@ -149,6 +149,39 @@ final class RemoteSessionAppCodeService
         return $items;
     }
 
+    /**
+     * Website handoff after the student taps "I've written it down".
+     * Never returns the six digits.
+     *
+     * @return array{exists:bool,viewed:bool}
+     */
+    public function handoffForAuthorization(int $userId, string $kind, int $authorizationId): array
+    {
+        if ($userId < 1 || $authorizationId < 1) {
+            return array('exists' => false, 'viewed' => false);
+        }
+        $kind = strtolower(trim($kind));
+        if (!in_array($kind, array('progress_test', 'mock_oral'), true)) {
+            $kind = 'progress_test';
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT viewed_at_utc
+             FROM ipca_remote_session_codes
+             WHERE user_id = ? AND kind = ? AND authorization_id = ?
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $stmt->execute(array($userId, $kind, $authorizationId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return array('exists' => false, 'viewed' => false);
+        }
+        return array(
+            'exists' => true,
+            'viewed' => trim((string)($row['viewed_at_utc'] ?? '')) !== '',
+        );
+    }
+
     private function ensureTable(): void
     {
         $driver = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
