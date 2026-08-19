@@ -272,6 +272,7 @@ final class ControlledPublishingAnnexService
     {
         $version = $this->requireDraftVersion($versionId);
         $this->ensureAnnexInfrastructure($versionId, $actorUserId);
+        $this->repairStaleAnnexSectionKeys($versionId);
 
         $title = trim((string)($input['title'] ?? ''));
         if ($title === '') {
@@ -918,6 +919,7 @@ final class ControlledPublishingAnnexService
     public function updateAnnexIdentity(int $versionId, int $sectionId, array $input, ?int $actorUserId = null): array
     {
         $this->requireDraftVersion($versionId);
+        $this->repairStaleAnnexSectionKeys($versionId);
         $section = $this->sections->getSection($versionId, $sectionId);
         if ($section === null || !$this->isAnnexContentSection($section)) {
             throw new RuntimeException('Annex section not found.');
@@ -1021,6 +1023,45 @@ final class ControlledPublishingAnnexService
             'annex_display_number' => self::formatAnnexDisplayNumber($number, $suffix),
             'title' => $navTitle,
         );
+    }
+
+    /**
+     * Older imports could retain a section key from the source Annex number
+     * after their metadata and title were corrected. Move only unambiguous,
+     * unoccupied stale keys so they cannot reserve another Annex identity.
+     */
+    private function repairStaleAnnexSectionKeys(int $versionId): void
+    {
+        $parentId = $this->sectionIdByKey($versionId, self::PARENT_SECTION_KEY);
+        $parent = $this->sections->getSection($versionId, $parentId);
+        if ($parent === null) {
+            return;
+        }
+        foreach ($this->listAnnexSections($versionId, true) as $annexSection) {
+            $sectionId = (int)($annexSection['id'] ?? 0);
+            $number = $this->annexNumberFromSection($annexSection);
+            $suffix = $this->annexSuffixFromSection($annexSection);
+            if ($sectionId <= 0 || $number <= 0) {
+                continue;
+            }
+            $expectedKey = $this->annexSectionKey($number, $suffix);
+            if ((string)($annexSection['section_key'] ?? '') === $expectedKey) {
+                continue;
+            }
+            $occupantId = $this->sectionIdByKey($versionId, $expectedKey);
+            if ($occupantId > 0 && $occupantId !== $sectionId) {
+                continue;
+            }
+            $stableAnchor = $this->childAnchor(
+                (string)($parent['stable_anchor'] ?? self::PARENT_SECTION_KEY),
+                $expectedKey
+            );
+            $this->pdo->prepare(
+                'UPDATE ipca_publishing_book_sections
+                    SET section_key = ?, stable_anchor = ?, updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ? AND book_version_id = ?'
+            )->execute(array($expectedKey, $stableAnchor, $sectionId, $versionId));
+        }
     }
 
     /**

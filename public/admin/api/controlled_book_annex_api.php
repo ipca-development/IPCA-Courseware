@@ -12,6 +12,8 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleSe
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingLepService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingDocxImportService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsAnnexBookService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -20,6 +22,32 @@ function cp_annex_json(int $code, array $payload): void
     http_response_code($code);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
+}
+
+function cp_annex_refresh_published_reader(
+    ControlledPublishingReaderService $reader,
+    int $versionId,
+    int $uid,
+    string $mutationKind
+): void {
+    $version = $reader->resolveVersionById($versionId);
+    if (!is_array($version)
+        || (string)($version['lifecycle_status'] ?? '') !== 'released'
+        || !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
+        return;
+    }
+    try {
+        $reader->ensureLivePageMap(
+            $versionId,
+            $uid,
+            array(
+                'mutation_kind' => $mutationKind,
+                'layout_impact' => 'global',
+            )
+        );
+    } catch (Throwable $e) {
+        error_log('Published Annex identity refresh could not be queued: ' . $e->getMessage());
+    }
 }
 
 $user = compliance_require_access($pdo);
@@ -43,6 +71,7 @@ $docxImport = new ControlledPublishingDocxImportService(
     $lepSvc
 );
 $annexSvc = new ControlledPublishingAnnexService($pdo, $foundation, $sections, $blocks, $docxImport);
+$reader = new ControlledPublishingReaderService($pdo);
 
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? '');
 
@@ -138,6 +167,7 @@ try {
         );
 
         $result = $annexSvc->updateAnnexIdentity($versionId, $sectionId, $input, $uid);
+        cp_annex_refresh_published_reader($reader, $versionId, $uid, 'annex_identity_update');
         cp_annex_json(200, array(
             'ok' => true,
             'annex' => $result,

@@ -156,6 +156,13 @@ annex_book_assert(
         && str_contains($annex, 'function captureAnnexSnapshot')
 );
 annex_book_assert(
+    'Annex renaming repairs stale imported section keys',
+    str_contains($annex, 'function repairStaleAnnexSectionKeys')
+        && substr_count($annex, '$this->repairStaleAnnexSectionKeys($versionId)') >= 2
+        && str_contains($annexApi, 'cp_annex_refresh_published_reader')
+        && str_contains($annexApi, "'annex_identity_update'")
+);
+annex_book_assert(
     'Manage Annexes uses compact actions and content symbols',
     str_contains($annexManager, 'cp-annex-list-table')
         && str_contains($annexManager, 'cp-annex-row-actions')
