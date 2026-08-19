@@ -179,6 +179,18 @@
         return;
       }
 
+      var requestChanges = event.target.closest('[data-mcw-request-impact-changes]');
+      if (requestChanges) {
+        var firstDetails = root.querySelector('.mcw-impact-details');
+        if (firstDetails) {
+          firstDetails.open = true;
+          firstDetails.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          var note = firstDetails.querySelector('textarea');
+          if (note) window.setTimeout(function () { note.focus(); }, 350);
+        }
+        return;
+      }
+
       var acceptAll = event.target.closest('[data-mcw-accept-impacts]');
       if (!acceptAll) return;
       busy(acceptAll, true, 'Accepting…');

@@ -16,6 +16,7 @@ $css = file_get_contents($root . '/public/assets/manual-change-architect.css');
 $js = file_get_contents($root . '/public/assets/manual-change-architect.js');
 $api = file_get_contents($root . '/public/admin/api/books_manuals_change_architect_api.php');
 $plans = file_get_contents($root . '/src/publishing/BooksManualsChangePlanService.php');
+$architect = file_get_contents($root . '/src/publishing/BooksManualsChangeArchitectService.php');
 $seed = file_get_contents($root . '/scripts/seed_manual_change_architect_sms_ecairs.php');
 $library = file_get_contents($root . '/public/admin/books_manuals/index.php');
 
@@ -56,6 +57,25 @@ architect_ui_assert(
     'Annex Books must not appear in the primary-manual selector.'
 );
 architect_ui_assert(str_contains($page, 'data-mcw-accept-impacts'), 'Single impact-analysis continuation action is missing.');
+foreach (array(
+    'Why this changes',
+    'Proposed amendment',
+    'What remains unchanged',
+    'Related sections',
+    'Request Changes',
+) as $stepTwoLabel) {
+    architect_ui_assert(str_contains($page, $stepTwoLabel), "Structured Step 2 label {$stepTwoLabel} is missing.");
+}
+architect_ui_assert(
+    !str_contains($page, '<dt>What changes</dt>') && !str_contains($page, '<dt>What stays</dt>'),
+    'Step 2 must not flatten Architect output into equal-width prose columns.'
+);
+architect_ui_assert(
+    str_contains((string)$architect, 'ipca.manual-change-impact-presentation.v1')
+        && str_contains((string)$architect, 'amendment_components')
+        && str_contains((string)$architect, 'buildImpactPresentation('),
+    'Architect reasoning must expose a deterministic structured presentation projection.'
+);
 architect_ui_assert(str_contains($page, 'data-mcw-impact-decision="MODIFY"'), 'Governed Modify control is missing.');
 architect_ui_assert(str_contains($page, 'data-mcw-impact-decision="REJECT"'), 'Governed Reject control is missing.');
 architect_ui_assert(str_contains($page, '/admin/api/books_manuals_change_architect_api.php'), 'Architect workspace is not isolated behind its own API.');

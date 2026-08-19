@@ -244,7 +244,208 @@ final class BooksManualsChangeArchitectService
             'publishing_content_mutated' => false,
             'drafting_or_proposals_generated' => false,
         );
+        $report['impact_presentation'] = $this->buildImpactPresentation($report);
         return $report;
+    }
+
+    /**
+     * Build a deterministic human-review projection without changing or
+     * discarding the authoritative Architect reasoning.
+     *
+     * @param array<string,mixed> $report
+     * @return array<string,mixed>
+     */
+    public function buildImpactPresentation(array $report): array
+    {
+        $components = array_values(array_filter(
+            (array)($report['target_components'] ?? array()),
+            'is_array'
+        ));
+        $componentMap = array();
+        foreach ($components as $component) {
+            $componentMap[(string)($component['component_key'] ?? '')] = $component;
+        }
+        $impacts = array_values(array_filter((array)($report['impacts'] ?? array()), 'is_array'));
+        $impactById = array();
+        foreach ($impacts as $impact) {
+            $impactById[(int)($impact['id'] ?? 0)] = $impact;
+        }
+        $sectionIdentities = $this->presentationSectionIdentities($impacts);
+        $relations = array_values(array_filter(
+            (array)($report['impact_dependencies'] ?? array()),
+            'is_array'
+        ));
+        $hierarchy = array_values(array_filter(
+            (array)($report['structure_nodes'] ?? array()),
+            'is_array'
+        ));
+        $intent = array_values(array_filter(
+            (array)($report['change_intents'] ?? array()),
+            'is_array'
+        ))[0] ?? array();
+        $globalPreserved = array_values(array_filter(array_map(
+            'strval',
+            (array)($intent['preserved_concepts_json'] ?? array())
+        )));
+
+        $areas = array();
+        $legacyOnlyImpactIds = array();
+        $legacyOnlySectionIds = array();
+        foreach ($impacts as $impact) {
+            $treatment = strtoupper((string)($impact['treatment'] ?? 'AMEND'));
+            if (!in_array(
+                $treatment,
+                array('AMEND', 'REPLACE', 'RESTRUCTURE', 'ADD', 'REMOVE_OBSOLETE'),
+                true
+            )) {
+                continue;
+            }
+            $evidence = is_array($impact['canonical_evidence_json'] ?? null)
+                ? $impact['canonical_evidence_json']
+                : array();
+            $coverageByKey = array();
+            foreach ((array)($evidence['coverage'] ?? array()) as $cell) {
+                if (!is_array($cell)) {
+                    continue;
+                }
+                $coverageByKey[(string)($cell['component_key'] ?? '')] =
+                    (string)($cell['coverage_status'] ?? '');
+            }
+            $componentKeys = array_values(array_unique(array_filter(array_map(
+                'strval',
+                (array)($impact['target_component_keys_json'] ?? array_keys($coverageByKey))
+            ))));
+            $concepts = array_values(array_filter(array_map(
+                'strval',
+                (array)($impact['target_concepts_json'] ?? array())
+            )));
+            if ($componentKeys === array() && $concepts === array()) {
+                $legacyOnlyImpactIds[] = (int)($impact['id'] ?? 0);
+                $legacyOnlySectionIds[] = (int)($impact['section_id'] ?? 0);
+                continue;
+            }
+            $componentRows = $this->presentationComponents(
+                $componentKeys,
+                $concepts,
+                $componentMap,
+                $coverageByKey,
+                $treatment
+            );
+            $preserved = array_values(array_filter(array_map(
+                'strval',
+                (array)($impact['preserved_logic_json'] ?? array())
+            )));
+            if ($preserved === array()) {
+                $preserved = $this->relevantPreservedConcepts(
+                    $globalPreserved,
+                    (string)($impact['section_title'] ?? ''),
+                    $componentRows
+                );
+            }
+            $related = array();
+            foreach ((array)($impact['dependencies_json'] ?? array()) as $dependency) {
+                if (is_string($dependency) && trim($dependency) !== '') {
+                    $related[] = trim($dependency);
+                } elseif (is_array($dependency)) {
+                    $reference = trim((string)(
+                        $dependency['section_reference']
+                        ?? $dependency['section_number']
+                        ?? $dependency['title']
+                        ?? ''
+                    ));
+                    if ($reference !== '') {
+                        $related[] = $reference;
+                    }
+                }
+            }
+            $impactId = (int)($impact['id'] ?? 0);
+            $sectionIdentity = $sectionIdentities[(int)($impact['section_id'] ?? 0)] ?? array();
+            $sectionNumber = trim((string)($impact['section_number'] ?? ''));
+            if ($sectionNumber === '') {
+                $sectionNumber = (string)($sectionIdentity['section_number'] ?? '');
+            }
+            $sectionTitle = trim((string)($impact['section_title'] ?? ''));
+            if ($sectionTitle === '') {
+                $sectionTitle = (string)($sectionIdentity['section_title'] ?? 'Manual section');
+            }
+            foreach ($relations as $relation) {
+                $otherId = null;
+                if ((int)($relation['impact_id'] ?? $relation['source_impact_id'] ?? 0) === $impactId) {
+                    $otherId = (int)($relation['depends_on_impact_id'] ?? $relation['target_impact_id'] ?? 0);
+                } elseif ((int)($relation['depends_on_impact_id'] ?? $relation['target_impact_id'] ?? 0) === $impactId) {
+                    $otherId = (int)($relation['impact_id'] ?? $relation['source_impact_id'] ?? 0);
+                }
+                $other = $impactById[$otherId ?? 0] ?? null;
+                if (is_array($other)) {
+                    $related[] = trim(
+                        (string)($other['section_number'] ?? '') . ' '
+                        . (string)($other['section_title'] ?? '')
+                    );
+                }
+            }
+            $proposedHierarchy = array();
+            if ($treatment === 'RESTRUCTURE') {
+                foreach ($hierarchy as $node) {
+                    $proposedHierarchy[] = array(
+                        'number' => (string)($node['node_key'] ?? ''),
+                        'title' => (string)($node['title'] ?? ''),
+                        'treatment' => strtoupper((string)($node['action'] ?? 'PRESERVE')),
+                        'depth' => (int)($node['depth'] ?? 0),
+                    );
+                }
+            }
+            $areas[] = array(
+                'impact_id' => $impactId,
+                'section_number' => $sectionNumber,
+                'section_title' => $sectionTitle,
+                'treatment' => $treatment,
+                'is_primary_change' => false,
+                'concise_rationale' => $this->presentationText(
+                    (string)($impact['substantive_rationale'] ?? $impact['description'] ?? ''),
+                    520
+                ),
+                'amendment_components' => $componentRows,
+                'preserved_concepts' => array_slice(array_values(array_unique($preserved)), 0, 6),
+                'removed_or_obsolete_concepts' => $this->legacyConcepts($evidence),
+                'dependencies' => array_slice(array_values(array_unique(array_filter($related))), 0, 4),
+                'proposed_hierarchy' => $proposedHierarchy,
+                'evidence_references' => $this->evidenceReferences($evidence),
+            );
+        }
+        $primaryIndex = null;
+        $largestComponentCount = -1;
+        foreach ($areas as $index => $area) {
+            if ($area['treatment'] === 'RESTRUCTURE' || $area['section_number'] === '5.6') {
+                $primaryIndex = $index;
+                break;
+            }
+            $count = count($area['amendment_components']);
+            if ($count > $largestComponentCount) {
+                $largestComponentCount = $count;
+                $primaryIndex = $index;
+            }
+        }
+        if ($primaryIndex !== null) {
+            $areas[$primaryIndex]['is_primary_change'] = true;
+        }
+        return array(
+            'schema' => 'ipca.manual-change-impact-presentation.v1',
+            'areas' => $areas,
+            'legacy_only_impact_ids' => $legacyOnlyImpactIds,
+            'legacy_only_section_ids' => array_values(array_unique(array_filter($legacyOnlySectionIds))),
+            'no_change_areas' => array_values(array_filter(
+                (array)($report['boundaries'] ?? array()),
+                static fn(mixed $row): bool => is_array($row)
+                    && strtoupper((string)($row['classification'] ?? '')) === self::MUST_PRESERVE
+            )),
+            'analysis_details' => array(
+                'target_components' => $report['target_components'] ?? array(),
+                'coverage' => $report['coverage'] ?? array(),
+                'legacy_hits' => $report['legacy_hits'] ?? array(),
+                'boundaries' => $report['boundaries'] ?? array(),
+                'impact_dependencies' => $report['impact_dependencies'] ?? array(),
+            ),
+        );
     }
 
     /**
@@ -1798,6 +1999,226 @@ final class BooksManualsChangeArchitectService
         } catch (Throwable $loggingError) {
             error_log('Manual architect AI provenance logging failed: ' . $loggingError->getMessage());
         }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $impacts
+     * @return array<int,array{section_number:string,section_title:string}>
+     */
+    private function presentationSectionIdentities(array $impacts): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(
+            static fn(array $impact): int => (int)($impact['section_id'] ?? 0),
+            $impacts
+        ))));
+        if ($ids === array()) {
+            return array();
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT id,title,metadata_json FROM ipca_publishing_book_sections'
+            . ' WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
+        );
+        $stmt->execute($ids);
+        $identities = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $metadata = is_array($row['metadata_json'] ?? null)
+                ? $row['metadata_json']
+                : json_decode((string)($row['metadata_json'] ?? ''), true);
+            $metadata = is_array($metadata) ? $metadata : array();
+            $number = trim((string)($metadata['chapter_number'] ?? ''));
+            if ($number === '') {
+                $label = trim((string)($metadata['nav_label'] ?? ''));
+                if (preg_match('/^([0-9]+(?:\.[0-9]+)*)\b/u', $label, $match) === 1) {
+                    $number = (string)$match[1];
+                }
+            }
+            $identities[(int)$row['id']] = array(
+                'section_number' => $number,
+                'section_title' => (string)($row['title'] ?? ''),
+            );
+        }
+        return $identities;
+    }
+
+    /**
+     * @param list<string> $componentKeys
+     * @param list<string> $concepts
+     * @param array<string,array<string,mixed>> $componentMap
+     * @param array<string,string> $coverageByKey
+     * @return list<array<string,mixed>>
+     */
+    private function presentationComponents(
+        array $componentKeys,
+        array $concepts,
+        array $componentMap,
+        array $coverageByKey,
+        string $impactTreatment
+    ): array {
+        $priority = array(
+            'process.reporting_intake',
+            'process.reportability_assessment',
+            'process.eccairs_initial',
+            'process.investigation_actions',
+            'process.eccairs_followup',
+            'process.closure',
+            'process.compliance_monitoring',
+            'process.training',
+            'role.safety_manager',
+            'role.action_owner',
+            'control.workflow_gates',
+            'control.eccairs_evidence',
+            'control.followup_log',
+            'control.deadline_monitoring',
+            'records.occurrence_record',
+            'records.eccairs_log',
+            'records.training',
+            'records.monitoring',
+            'interface.ipca_sms',
+            'interface.eccairs',
+            'transition.followup_automation',
+            'transition.training_enablement',
+            'process.occurrence_lifecycle',
+            'outcome.operating_model',
+            'interface.manual_system_boundary',
+            'transition.current_to_target',
+        );
+        $rank = array_flip($priority);
+        usort($componentKeys, static function (string $left, string $right) use ($rank): int {
+            return ($rank[$left] ?? 999) <=> ($rank[$right] ?? 999);
+        });
+        if (count($componentKeys) > 5) {
+            $componentKeys = array_values(array_filter(
+                $componentKeys,
+                static fn(string $key): bool => !in_array($key, array(
+                    'outcome.operating_model',
+                    'process.occurrence_lifecycle',
+                    'interface.manual_system_boundary',
+                    'transition.current_to_target',
+                ), true)
+            ));
+        }
+        $rows = array();
+        foreach (array_slice($componentKeys, 0, 9) as $key) {
+            $component = $componentMap[$key] ?? array();
+            if ($component === array()) {
+                continue;
+            }
+            $coverage = strtoupper((string)($coverageByKey[$key] ?? ''));
+            $treatment = match ($coverage) {
+                'PRESERVED_COVERED' => 'PRESERVE',
+                'ADD_CONTENT' => 'ADD',
+                'REVIEW_REQUIRED' => 'REFINE',
+                default => $impactTreatment === 'ADD' ? 'ADD' : 'AMEND',
+            };
+            $rows[] = array(
+                'component_key' => $key,
+                'title' => (string)($component['title'] ?? ucwords(str_replace(array('.', '_'), ' ', $key))),
+                'treatment' => $treatment,
+                'summary' => $this->presentationText(
+                    (string)(
+                        $component['manual_level_expression']
+                        ?? $component['target_state']
+                        ?? $component['desired_state']
+                        ?? ''
+                    ),
+                    330
+                ),
+                'target_subsection' => null,
+                'preserved_concepts' => array(),
+                'removed_or_obsolete_concepts' => array(),
+                'dependencies' => (array)($component['dependencies_json'] ?? array()),
+                'proposed_hierarchy' => array(),
+                'evidence_references' => (array)($component['source_evidence_json'] ?? array()),
+            );
+        }
+        if ($rows !== array()) {
+            return $rows;
+        }
+        foreach (array_slice($concepts, 0, 8) as $concept) {
+            $title = $this->presentationText($concept, 72);
+            $rows[] = array(
+                'component_key' => '',
+                'title' => $title,
+                'treatment' => $impactTreatment === 'ADD' ? 'ADD' : 'AMEND',
+                'summary' => 'Update this controlled section to address ' . lcfirst(rtrim($title, '.')) . '.',
+                'target_subsection' => null,
+                'preserved_concepts' => array(),
+                'removed_or_obsolete_concepts' => array(),
+                'dependencies' => array(),
+                'proposed_hierarchy' => array(),
+                'evidence_references' => array(),
+            );
+        }
+        return $rows;
+    }
+
+    /**
+     * @param list<string> $concepts
+     * @param list<array<string,mixed>> $components
+     * @return list<string>
+     */
+    private function relevantPreservedConcepts(
+        array $concepts,
+        string $sectionTitle,
+        array $components
+    ): array {
+        if ($concepts === array()) {
+            return array();
+        }
+        $context = $this->normalize($sectionTitle . ' ' . implode(' ', array_map(
+            static fn(array $component): string => (string)($component['title'] ?? ''),
+            $components
+        )));
+        $matches = array_values(array_filter($concepts, function (string $concept) use ($context): bool {
+            foreach (preg_split('/\s+/u', $this->normalize($concept)) ?: array() as $token) {
+                if (mb_strlen($token) >= 6 && str_contains($context, $token)) {
+                    return true;
+                }
+            }
+            return false;
+        }));
+        return array_slice($matches, 0, 6);
+    }
+
+    private function presentationText(string $text, int $limit): string
+    {
+        $text = trim((string)(preg_replace('/\s+/u', ' ', $text) ?? $text));
+        if ($text === '' || mb_strlen($text) <= $limit) {
+            return $text;
+        }
+        return rtrim(mb_strimwidth($text, 0, $limit, '…'));
+    }
+
+    /** @param array<string,mixed> $evidence @return list<string> */
+    private function legacyConcepts(array $evidence): array
+    {
+        $values = array();
+        foreach ((array)($evidence['legacy_hits'] ?? array()) as $hit) {
+            if (!is_array($hit)) {
+                continue;
+            }
+            $value = trim((string)($hit['legacy_identity'] ?? $hit['matched_text'] ?? ''));
+            if ($value !== '') {
+                $values[] = $value;
+            }
+        }
+        return array_values(array_unique($values));
+    }
+
+    /** @param array<string,mixed> $evidence @return list<string> */
+    private function evidenceReferences(array $evidence): array
+    {
+        $references = array();
+        foreach ((array)($evidence['legacy_hits'] ?? array()) as $hit) {
+            if (!is_array($hit)) {
+                continue;
+            }
+            $reference = trim((string)($hit['stable_anchor'] ?? $hit['context_excerpt'] ?? ''));
+            if ($reference !== '') {
+                $references[] = $reference;
+            }
+        }
+        return array_slice(array_values(array_unique($references)), 0, 8);
     }
 
     private function useOpenAi(array $options): bool
