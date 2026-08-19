@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS ipca_safety_report_flight_links (
   CONSTRAINT fk_safety_report_flight_report FOREIGN KEY (report_id)
     REFERENCES ipca_safety_reports(id) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT fk_safety_report_flight_slot FOREIGN KEY (schedule_slot_id)
-    REFERENCES ipca_flight_schedule_slots(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    REFERENCES ipca_flight_schedule_slots(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT fk_safety_report_flight_dispatch FOREIGN KEY (dispatch_id)
     REFERENCES ipca_cvr_dispatches(id) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT fk_safety_report_flight_session FOREIGN KEY (flight_session_id)
