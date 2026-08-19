@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsAnnexBookService.php';
 
 $user = compliance_require_access($pdo);
 $versionId = isset($_GET['version_id']) ? (int)$_GET['version_id'] : 0;
@@ -39,104 +40,126 @@ if ($version === null) {
     return;
 }
 
+$isAnnexBook = BooksManualsAnnexBookService::isAnnexBookVersion($version);
 $isReleased = (string)($version['lifecycle_status'] ?? '') === 'released';
+$canEdit = !$isReleased || $isAnnexBook;
 $bookLabel = (string)$version['book_key'] . ' ' . (string)$version['version_label'];
 
 cw_header('Compliance · Annexes · ' . $bookLabel);
 
 compliance_page_open(array(
     'overline' => 'Compliance · Controlled publishing',
-    'title' => 'Import & manage annexes',
-    'description' => 'Add annexes as images (styled forms) or editable DOCX tables. Choose portrait or landscape per annex.',
+    'title' => 'Manage annexes',
+    'description' => 'Add, rename, revert, or remove annexes. The Annex Register updates automatically.',
     'back' => array(
-        'href' => '/admin/compliance/controlled_book_version.php?id=' . $versionId,
+        'href' => $isAnnexBook
+            ? '/admin/books_manuals/annexes.php'
+            : '/admin/compliance/controlled_book_version.php?id=' . $versionId,
         'label' => $bookLabel,
     ),
-    'actions' => array(
-        array(
-            'label' => 'Open editor',
-            'href' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId,
+    'actions' => $canEdit
+        ? array(array(
+            'label' => '+ New Annex',
+            'modal' => 'cp-annex-create-modal',
             'variant' => 'primary',
-        ),
-    ),
+        ))
+        : array(),
 ));
 
 ?>
 <section class="cmp-card" id="cp-annex-manager">
   <h2 style="margin:0 0 8px;">Annex list</h2>
-  <p style="margin:0 0 16px;font-size:13px;color:#64748b;">The Annex Register and Highlight of Changes pages in the editor are updated automatically. Delete an annex here to hide it from the register and editor without removing its content.</p>
+  <p style="margin:0 0 16px;font-size:13px;color:#64748b;">
+    Edit opens the annex in the editor. Rename changes the title and number. Revert restores a previous stored version. Delete hides the annex from the register without removing its content.
+  </p>
   <label style="display:flex;gap:8px;align-items:center;margin:0 0 12px;font-size:13px;">
     <input type="checkbox" id="cp-annex-show-deleted">
     <span>Show deleted annexes</span>
   </label>
   <div id="cp-annex-list" style="margin-bottom:20px;font-size:13px;color:#334155;">Loading annexes…</div>
-
-  <?php if ($isReleased): ?>
+  <?php if (!$canEdit): ?>
     <p style="margin:0;color:#b45309;">This version is released and cannot be edited.</p>
-  <?php else: ?>
-    <h3 style="margin:24px 0 12px;font-size:15px;">Add annex</h3>
-    <form id="cp-annex-form" enctype="multipart/form-data" style="display:grid;gap:12px;max-width:720px;">
-      <input type="hidden" name="version_id" value="<?= (int)$versionId ?>">
-      <label style="display:grid;gap:6px;">
-        <span style="font-size:13px;font-weight:600;">Annex title</span>
-        <input type="text" name="title" required placeholder="e.g. Checklist C172SP" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
-      </label>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+  <?php endif; ?>
+  <div id="cp-annex-status" style="margin-top:16px;font-size:13px;color:#334155;"></div>
+</section>
+
+<?php if ($canEdit): ?>
+<dialog class="compliance-modal" id="cp-annex-create-modal">
+  <div class="compliance-modal__panel">
+    <div class="compliance-modal__header">
+      <h2 class="compliance-modal__title">New Annex</h2>
+      <button type="button" class="compliance-modal__close cmp-btn-secondary" data-compliance-modal-close aria-label="Close">&times;</button>
+    </div>
+    <form id="cp-annex-form" enctype="multipart/form-data">
+      <div class="compliance-modal__body" style="display:grid;gap:12px;">
+        <input type="hidden" name="version_id" value="<?= (int)$versionId ?>">
         <label style="display:grid;gap:6px;">
-          <span style="font-size:13px;font-weight:600;">Annex number (optional)</span>
-          <input type="number" name="annex_number" min="1" placeholder="Auto" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+          <span style="font-size:13px;font-weight:600;">Annex title</span>
+          <input type="text" name="title" required placeholder="e.g. Checklist C172SP" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Annex number (optional)</span>
+            <input type="number" name="annex_number" min="1" placeholder="Auto" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+          </label>
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Suffix (optional)</span>
+            <input type="text" name="annex_suffix" maxlength="1" placeholder="a, b, c…" pattern="[a-zA-Z]?" title="Single letter when multiple annexes share the same number" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+          </label>
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Revision</span>
+            <input type="text" name="revision" value="1.0" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+          </label>
+        </div>
+        <p style="margin:-4px 0 0;font-size:12px;color:#64748b;">Use letter suffixes for shared numbers (e.g. <strong>02a</strong>, <strong>02b</strong>). Leave suffix blank to auto-assign the next letter.</p>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;">
+          <input type="checkbox" name="use_letter_suffix" value="1" checked>
+          <span>Use letter suffix for this annex (02a, not plain 02)</span>
         </label>
         <label style="display:grid;gap:6px;">
-          <span style="font-size:13px;font-weight:600;">Suffix (optional)</span>
-          <input type="text" name="annex_suffix" maxlength="1" placeholder="a, b, c…" pattern="[a-zA-Z]?" title="Single letter when multiple annexes share the same number" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+          <span style="font-size:13px;font-weight:600;">Revision date</span>
+          <input type="date" name="revision_date" value="<?= h(date('Y-m-d')) ?>" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
         </label>
-        <label style="display:grid;gap:6px;">
-          <span style="font-size:13px;font-weight:600;">Revision</span>
-          <input type="text" name="revision" value="1.0" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
-        </label>
+        <fieldset style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin:0;">
+          <legend style="font-size:13px;font-weight:600;padding:0 6px;">Content type</legend>
+          <label style="display:block;margin-bottom:6px;font-size:13px;"><input type="radio" name="content_mode" value="empty" checked> Empty (build in editor)</label>
+          <label style="display:block;margin-bottom:6px;font-size:13px;"><input type="radio" name="content_mode" value="image"> Image (styled form — OCR stored for compliance mapping)</label>
+          <label style="display:block;font-size:13px;"><input type="radio" name="content_mode" value="docx"> Word DOCX (editable tables)</label>
+        </fieldset>
+        <fieldset style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin:0;">
+          <legend style="font-size:13px;font-weight:600;padding:0 6px;">Page orientation</legend>
+          <label style="margin-right:16px;font-size:13px;"><input type="radio" name="orientation" value="portrait" checked> Portrait</label>
+          <label style="font-size:13px;"><input type="radio" name="orientation" value="landscape"> Landscape</label>
+        </fieldset>
+        <div id="cp-annex-upload-image" style="display:none;">
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Image file (PNG, JPG, WEBP)</span>
+            <input type="file" name="image" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+          </label>
+        </div>
+        <div id="cp-annex-upload-docx" style="display:none;">
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Word document (.docx)</span>
+            <input type="file" name="docx" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+          </label>
+        </div>
       </div>
-      <p style="margin:-4px 0 0;font-size:12px;color:#64748b;">Use letter suffixes for shared numbers (e.g. <strong>02a</strong>, <strong>02b</strong>, <strong>02c</strong>). Leave suffix blank to auto-assign the next letter.</p>
-      <label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px;">
-        <input type="checkbox" name="use_letter_suffix" value="1" checked>
-        <span>Use letter suffix for this annex (02a, not plain 02)</span>
-      </label>
-      <label style="display:grid;gap:6px;">
-        <span style="font-size:13px;font-weight:600;">Revision date</span>
-        <input type="date" name="revision_date" value="<?= h(date('Y-m-d')) ?>" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
-      </label>
-      <fieldset style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin:0;">
-        <legend style="font-size:13px;font-weight:600;padding:0 6px;">Content type</legend>
-        <label style="display:block;margin-bottom:6px;font-size:13px;"><input type="radio" name="content_mode" value="empty" checked> Empty (build in editor)</label>
-        <label style="display:block;margin-bottom:6px;font-size:13px;"><input type="radio" name="content_mode" value="image"> Image (styled form — OCR stored for compliance mapping)</label>
-        <label style="display:block;font-size:13px;"><input type="radio" name="content_mode" value="docx"> Word DOCX (editable tables)</label>
-      </fieldset>
-      <fieldset style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin:0;">
-        <legend style="font-size:13px;font-weight:600;padding:0 6px;">Page orientation</legend>
-        <label style="margin-right:16px;font-size:13px;"><input type="radio" name="orientation" value="portrait" checked> Portrait</label>
-        <label style="font-size:13px;"><input type="radio" name="orientation" value="landscape"> Landscape</label>
-      </fieldset>
-      <div id="cp-annex-upload-image" style="display:none;">
-        <label style="display:grid;gap:6px;">
-          <span style="font-size:13px;font-weight:600;">Image file (PNG, JPG, WEBP)</span>
-          <input type="file" name="image" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
-        </label>
-      </div>
-      <div id="cp-annex-upload-docx" style="display:none;">
-        <label style="display:grid;gap:6px;">
-          <span style="font-size:13px;font-weight:600;">Word document (.docx)</span>
-          <input type="file" name="docx" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
-        </label>
-      </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <div class="compliance-modal__footer">
+        <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
         <button type="submit">Create annex</button>
-        <button type="button" id="cp-annex-refresh-btn" class="cmp-btn cmp-btn--secondary">Refresh list</button>
       </div>
     </form>
-    <div id="cp-annex-status" style="margin-top:16px;font-size:13px;color:#334155;"></div>
+  </div>
+</dialog>
 
-    <div id="cp-annex-edit-panel" hidden style="margin-top:20px;padding:16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;max-width:720px;">
-      <h3 style="margin:0 0 12px;font-size:15px;">Edit annex</h3>
-      <form id="cp-annex-edit-form" style="display:grid;gap:12px;">
+<dialog class="compliance-modal" id="cp-annex-rename-modal">
+  <div class="compliance-modal__panel">
+    <div class="compliance-modal__header">
+      <h2 class="compliance-modal__title">Rename Annex</h2>
+      <button type="button" class="compliance-modal__close cmp-btn-secondary" data-compliance-modal-close aria-label="Close">&times;</button>
+    </div>
+    <form id="cp-annex-edit-form">
+      <div class="compliance-modal__body" style="display:grid;gap:12px;">
         <input type="hidden" name="section_id" value="">
         <label style="display:grid;gap:6px;">
           <span style="font-size:13px;font-weight:600;">Annex name / title</span>
@@ -152,39 +175,63 @@ compliance_page_open(array(
             <input type="text" name="annex_suffix" maxlength="1" placeholder="a, b, c…" pattern="[a-zA-Z]?" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
           </label>
         </div>
-        <p style="margin:0;font-size:12px;color:#64748b;">Example: number <strong>2</strong> + suffix <strong>a</strong> → displayed as <strong>02a</strong>. Use suffix letters when several annexes share one base number.</p>
-        <label style="display:grid;gap:6px;">
-          <span style="font-size:13px;font-weight:600;">Revision date</span>
-          <input type="date" name="revision_date" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
-        </label>
-        <div style="display:flex;gap:10px;">
-          <button type="submit">Save</button>
-          <button type="button" id="cp-annex-edit-cancel" class="cmp-btn cmp-btn--secondary">Cancel</button>
-        </div>
-      </form>
+        <p style="margin:0;font-size:12px;color:#64748b;">Example: number <strong>2</strong> + suffix <strong>a</strong> → displayed as <strong>02a</strong>.</p>
+      </div>
+      <div class="compliance-modal__footer">
+        <button type="button" class="cmp-btn-secondary" data-compliance-modal-close id="cp-annex-edit-cancel">Cancel</button>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog class="compliance-modal" id="cp-annex-revert-modal">
+  <div class="compliance-modal__panel">
+    <div class="compliance-modal__header">
+      <h2 class="compliance-modal__title">Revert Annex</h2>
+      <button type="button" class="compliance-modal__close cmp-btn-secondary" data-compliance-modal-close aria-label="Close">&times;</button>
     </div>
-  <?php endif; ?>
-</section>
+    <div class="compliance-modal__body">
+      <p style="margin:0 0 12px;font-size:13px;color:#64748b;">Choose a stored revision to restore. The current content is kept in the revision log.</p>
+      <div id="cp-annex-revert-list">Loading revisions…</div>
+    </div>
+    <div class="compliance-modal__footer">
+      <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Close</button>
+    </div>
+  </div>
+</dialog>
+<?php endif; ?>
 
 <script>
 (function () {
   var versionId = <?= (int)$versionId ?>;
-  var isReleased = <?= $isReleased ? 'true' : 'false' ?>;
+  var canEdit = <?= $canEdit ? 'true' : 'false' ?>;
   var apiUrl = '/admin/api/controlled_book_annex_api.php';
   var listEl = document.getElementById('cp-annex-list');
   var statusEl = document.getElementById('cp-annex-status');
   var form = document.getElementById('cp-annex-form');
-  var editPanel = document.getElementById('cp-annex-edit-panel');
   var editForm = document.getElementById('cp-annex-edit-form');
   var editCancelBtn = document.getElementById('cp-annex-edit-cancel');
   var imageWrap = document.getElementById('cp-annex-upload-image');
   var docxWrap = document.getElementById('cp-annex-upload-docx');
   var showDeletedEl = document.getElementById('cp-annex-show-deleted');
+  var revertListEl = document.getElementById('cp-annex-revert-list');
+  var revertSectionId = 0;
 
   function setStatus(msg, tone) {
     if (!statusEl) return;
     statusEl.textContent = msg || '';
     statusEl.style.color = tone === 'error' ? '#b45309' : '#334155';
+  }
+
+  function openModal(id) {
+    var dialog = document.getElementById(id);
+    if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
+  }
+
+  function closeModal(id) {
+    var dialog = document.getElementById(id);
+    if (dialog && typeof dialog.close === 'function') dialog.close();
   }
 
   function syncUploadFields() {
@@ -197,7 +244,7 @@ compliance_page_open(array(
   function renderList(annexes) {
     if (!listEl) return;
     if (!annexes || !annexes.length) {
-      listEl.innerHTML = '<p style="margin:0;color:#64748b;">No annexes yet. Use the form below to add one.</p>';
+      listEl.innerHTML = '<p style="margin:0;color:#64748b;">No annexes yet. Use + New Annex to add one.</p>';
       return;
     }
     var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0;">'
@@ -216,18 +263,18 @@ compliance_page_open(array(
         + '<td style="padding:8px 6px;vertical-align:top;">' + (a.content_mode || '') + ' / ' + (a.orientation || 'portrait') + '</td>'
         + '<td style="padding:8px 6px;vertical-align:top;white-space:nowrap;">';
       if (!deleted) {
-        html += '<a href="' + editUrl + '">Open</a>';
-        if (!isReleased) {
-          html += ' · <button type="button" class="cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
+        html += '<a class="app-btn app-btn--secondary" href="' + editUrl + '" style="margin-right:6px;">Edit</a>';
+        if (canEdit) {
+          html += '<button type="button" class="app-btn app-btn--secondary cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
             + 'data-annex-number="' + (a.annex_number || 0) + '" data-annex-suffix="' + (a.annex_suffix || '') + '" '
-            + 'data-revision-date="' + escAttr(a.revision_date || '') + '" '
-            + 'data-short-title="' + escAttr(shortTitle) + '" style="background:none;border:none;padding:0;color:#2563eb;cursor:pointer;font:inherit;">Edit</button>'
-            + ' · <button type="button" class="cp-annex-delete-btn" data-section-id="' + a.section_id + '" '
-            + 'data-title="' + escAttr(a.title || '') + '" style="background:none;border:none;padding:0;color:#b91c1c;cursor:pointer;font:inherit;">Delete</button>';
+            + 'data-short-title="' + escAttr(shortTitle) + '" style="margin-right:6px;">Rename Annex</button>'
+            + '<button type="button" class="app-btn app-btn--secondary cp-annex-revert-btn" data-section-id="' + a.section_id + '" '
+            + 'data-title="' + escAttr(a.title || '') + '" style="margin-right:6px;">Revert</button>'
+            + '<button type="button" class="app-btn cp-annex-delete-btn" data-section-id="' + a.section_id + '" '
+            + 'data-title="' + escAttr(a.title || '') + '" style="background:#b91c1c;border-color:#b91c1c;color:#fff;">Delete</button>';
         }
-      } else if (!isReleased) {
-        html += '<button type="button" class="cp-annex-restore-btn" data-section-id="' + a.section_id + '" '
-          + 'style="background:none;border:none;padding:0;color:#2563eb;cursor:pointer;font:inherit;">Restore</button>';
+      } else if (canEdit) {
+        html += '<button type="button" class="app-btn app-btn--secondary cp-annex-restore-btn" data-section-id="' + a.section_id + '">Restore</button>';
       } else {
         html += '<span style="color:#94a3b8;">Deleted</span>';
       }
@@ -243,8 +290,12 @@ compliance_page_open(array(
           annex_number: parseInt(btn.getAttribute('data-annex-number') || '0', 10),
           annex_suffix: btn.getAttribute('data-annex-suffix') || '',
           annex_short_title: btn.getAttribute('data-short-title') || '',
-          revision_date: btn.getAttribute('data-revision-date') || '',
         });
+      });
+    });
+    listEl.querySelectorAll('.cp-annex-revert-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openRevertDialog(parseInt(btn.getAttribute('data-section-id') || '0', 10));
       });
     });
     listEl.querySelectorAll('.cp-annex-delete-btn').forEach(function (btn) {
@@ -274,19 +325,79 @@ compliance_page_open(array(
   }
 
   function openEditDialog(annex) {
-    if (!editPanel || !editForm) return;
+    if (!editForm) return;
     editForm.querySelector('input[name="section_id"]').value = String(annex.section_id || '');
     editForm.querySelector('input[name="title"]').value = annex.annex_short_title || '';
     editForm.querySelector('input[name="annex_number"]').value = String(annex.annex_number || '');
     editForm.querySelector('input[name="annex_suffix"]').value = annex.annex_suffix || '';
-    var dateInput = editForm.querySelector('input[name="revision_date"]');
-    if (dateInput) dateInput.value = annex.revision_date || '';
-    editPanel.hidden = false;
-    editPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    openModal('cp-annex-rename-modal');
   }
 
-  function closeEditDialog() {
-    if (editPanel) editPanel.hidden = true;
+  function openRevertDialog(sectionId) {
+    revertSectionId = sectionId;
+    if (revertListEl) revertListEl.textContent = 'Loading revisions…';
+    openModal('cp-annex-revert-modal');
+    fetch(apiUrl + '?action=revisions&version_id=' + versionId + '&section_id=' + sectionId, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Could not load revisions.');
+        renderRevisions(res.revisions || []);
+      })
+      .catch(function (e) {
+        if (revertListEl) revertListEl.textContent = e.message || 'Could not load revisions.';
+      });
+  }
+
+  function renderRevisions(revisions) {
+    if (!revertListEl) return;
+    if (!revisions.length) {
+      revertListEl.innerHTML = '<p style="margin:0;color:#64748b;">No stored revisions yet.</p>';
+      return;
+    }
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="text-align:left;border-bottom:1px solid #e2e8f0;">'
+      + '<th style="padding:8px 6px;">Revision</th><th>Date</th><th>By</th><th>Source</th><th></th></tr></thead><tbody>';
+    revisions.forEach(function (rev) {
+      html += '<tr style="border-bottom:1px solid #f1f5f9;">'
+        + '<td style="padding:8px 6px;">' + (rev.revision_to || '') + '</td>'
+        + '<td style="padding:8px 6px;">' + (rev.revision_date || '') + '</td>'
+        + '<td style="padding:8px 6px;">' + (rev.actor_name || '') + '</td>'
+        + '<td style="padding:8px 6px;">' + (rev.source || '') + (rev.has_snapshot ? '' : ' <span style="color:#b45309;">(no snapshot)</span>') + '</td>'
+        + '<td style="padding:8px 6px;">';
+      if (rev.has_snapshot) {
+        html += '<button type="button" class="app-btn app-btn--primary cp-annex-revert-apply" data-revision-id="' + rev.id + '">Restore this version</button>';
+      } else {
+        html += '<span style="color:#94a3b8;">Unavailable</span>';
+      }
+      html += '</td></tr>';
+    });
+    html += '</tbody></table>';
+    revertListEl.innerHTML = html;
+    revertListEl.querySelectorAll('.cp-annex-revert-apply').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var revisionId = parseInt(btn.getAttribute('data-revision-id') || '0', 10);
+        if (!revisionId || !revertSectionId) return;
+        if (!window.confirm('Restore this stored annex version? Current content will remain in the revision log.')) {
+          return;
+        }
+        var fd = new FormData();
+        fd.set('action', 'revert');
+        fd.set('version_id', String(versionId));
+        fd.set('section_id', String(revertSectionId));
+        fd.set('revision_id', String(revisionId));
+        setStatus('Reverting annex…');
+        fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (!res.ok) throw new Error(res.error || 'Revert failed');
+            setStatus('Annex reverted.');
+            closeModal('cp-annex-revert-modal');
+            loadList();
+          })
+          .catch(function (e) {
+            setStatus(e.message || 'Revert failed', 'error');
+          });
+      });
+    });
   }
 
   function postAnnexAction(action, sectionId, pendingMsg, successMsg) {
@@ -333,7 +444,8 @@ compliance_page_open(array(
       setStatus('Creating annex…');
       var fd = new FormData(form);
       fd.set('action', 'create');
-      if (!form.querySelector('input[name="use_letter_suffix"]')?.checked) {
+      var letterSuffix = form.querySelector('input[name="use_letter_suffix"]');
+      if (!letterSuffix || !letterSuffix.checked) {
         fd.set('use_letter_suffix', '0');
       }
       fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
@@ -341,6 +453,7 @@ compliance_page_open(array(
         .then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Create failed');
           setStatus('Annex created.');
+          closeModal('cp-annex-create-modal');
           if (res.editor_url) {
             window.location.href = res.editor_url;
           } else {
@@ -371,15 +484,13 @@ compliance_page_open(array(
       fd.set('title', title);
       fd.set('annex_number', String(number));
       fd.set('annex_suffix', suffix);
-      var revisionDate = (editForm.querySelector('input[name="revision_date"]') || {}).value || '';
-      if (revisionDate) fd.set('revision_date', revisionDate);
       setStatus('Saving annex…');
       fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (res) {
           if (!res.ok) throw new Error(res.error || 'Update failed');
           setStatus('Annex updated: ' + (res.annex && res.annex.title ? res.annex.title : 'saved') + '.');
-          closeEditDialog();
+          closeModal('cp-annex-rename-modal');
           loadList();
         })
         .catch(function (e) {
@@ -387,11 +498,10 @@ compliance_page_open(array(
         });
     });
   }
-  if (editCancelBtn) editCancelBtn.addEventListener('click', closeEditDialog);
+  if (editCancelBtn) {
+    editCancelBtn.addEventListener('click', function () { closeModal('cp-annex-rename-modal'); });
+  }
   if (showDeletedEl) showDeletedEl.addEventListener('change', loadList);
-
-  var refreshBtn = document.getElementById('cp-annex-refresh-btn');
-  if (refreshBtn) refreshBtn.addEventListener('click', loadList);
 
   loadList();
 })();

@@ -137,5 +137,36 @@ annex_book_assert(
         && !str_contains($editorApi, 'soft_delete')
         && !str_contains($editorApi, 'restoreAnnex')
 );
+annex_book_assert(
+    'manage annexes uses hero New Annex plus rename and revert modals',
+    str_contains($annexManager, '+ New Annex')
+        && str_contains($annexManager, 'cp-annex-create-modal')
+        && str_contains($annexManager, 'cp-annex-rename-modal')
+        && str_contains($annexManager, 'cp-annex-revert-modal')
+        && str_contains($annexManager, 'Rename Annex')
+        && str_contains($annexManager, 'action=revisions')
+        && str_contains($annexApi, "action === 'revisions'")
+        && str_contains($annexApi, "action === 'revert'")
+        && str_contains($annex, 'function revertAnnexToRevision')
+        && str_contains($annex, 'function captureAnnexSnapshot')
+);
+annex_book_assert(
+    'annex revision snapshots are additive',
+    str_contains($sql, 'ipca_publishing_annex_revisions')
+        && str_contains((string)file_get_contents($root . '/scripts/sql/2026_08_18_annex_revision_snapshots.sql'), 'snapshot_json')
+        && str_contains($apply, '2026_08_18_annex_revision_snapshots.sql')
+        && str_contains($annex, "'revert'")
+);
+annex_book_assert(
+    'Annex Books publish or unpublish without the manual review cycle',
+    str_contains($workflow, 'function transitionAnnexBook')
+        && str_contains($workflow, "'action' => 'publish_annex'")
+        && str_contains($workflow, "'action' => 'unpublish_annex'")
+        && str_contains($workflow, "return \$status === 'released' ? 'PUBLISHED' : 'NOT PUBLISHED'")
+        && str_contains($foundation, 'function releaseAnnexBookVersion')
+        && str_contains($annexBook, 'function allowsReleasedEdits')
+        && str_contains($annexPage, 'name="action" value="transition"')
+        && str_contains($annexPage, 'lifecycle_action')
+);
 
 echo "Books & Manuals Annex Book contracts: PASS\n";

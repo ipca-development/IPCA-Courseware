@@ -165,6 +165,29 @@ try {
         cp_annex_json(200, array('ok' => true, 'annex' => $result));
     }
 
+    if ($action === 'revisions') {
+        $versionId = (int)($_GET['version_id'] ?? $_POST['version_id'] ?? 0);
+        $sectionId = (int)($_GET['section_id'] ?? $_POST['section_id'] ?? 0);
+        if ($versionId <= 0 || $sectionId <= 0) {
+            cp_annex_json(400, array('ok' => false, 'error' => 'version_id and section_id required'));
+        }
+        cp_annex_json(200, array(
+            'ok' => true,
+            'revisions' => $annexSvc->listAnnexRevisions($versionId, $sectionId),
+        ));
+    }
+
+    if ($action === 'revert') {
+        $versionId = (int)($_POST['version_id'] ?? 0);
+        $sectionId = (int)($_POST['section_id'] ?? 0);
+        $revisionId = (int)($_POST['revision_id'] ?? 0);
+        if ($versionId <= 0 || $sectionId <= 0 || $revisionId <= 0) {
+            cp_annex_json(400, array('ok' => false, 'error' => 'version_id, section_id and revision_id required'));
+        }
+        $result = $annexSvc->revertAnnexToRevision($versionId, $sectionId, $revisionId, $uid);
+        cp_annex_json(200, array('ok' => true, 'annex' => $result));
+    }
+
     if ($action === 'reimport') {
         $versionId = (int)($_POST['version_id'] ?? 0);
         $sectionId = (int)($_POST['section_id'] ?? 0);

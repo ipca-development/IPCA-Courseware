@@ -523,7 +523,8 @@ function cp_editor_is_part0_structured_section(array $section): bool
 
 function cp_editor_is_section_editable(array $version, array $section): bool
 {
-    if ((string)$version['lifecycle_status'] === 'released') {
+    if ((string)$version['lifecycle_status'] === 'released'
+        && !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
         return false;
     }
     if (!empty($section['allow_author_blocks'])) {

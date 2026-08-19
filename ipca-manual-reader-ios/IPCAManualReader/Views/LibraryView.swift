@@ -115,10 +115,10 @@ struct LibraryView: View {
             .tag(LibraryDestination.library)
 
             NavigationStack {
-                destinationContent(.categories, isPhone: true, availableWidth: UIScreen.main.bounds.width)
+                destinationContent(.annexes, isPhone: true, availableWidth: UIScreen.main.bounds.width)
             }
-            .tabItem { Label("Categories", systemImage: "square.grid.2x2") }
-            .tag(LibraryDestination.categories)
+            .tabItem { Label("Annexes", systemImage: "doc.on.doc") }
+            .tag(LibraryDestination.annexes)
 
             NavigationStack {
                 destinationContent(.downloads, isPhone: true, availableWidth: UIScreen.main.bounds.width)
@@ -216,7 +216,7 @@ struct LibraryView: View {
 private enum LibraryDestination: String, CaseIterable, Identifiable {
     case home = "Home"
     case library = "My Library"
-    case categories = "Categories"
+    case annexes = "Annexes"
     case downloads = "Downloads"
     case bookmarks = "Bookmarks"
     case personalNotes = "Personal Notes"
@@ -230,7 +230,7 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
         switch self {
         case .home: "house"
         case .library: "books.vertical"
-        case .categories: "square.grid.2x2"
+        case .annexes: "doc.on.doc"
         case .downloads: "arrow.down.to.line"
         case .bookmarks: "bookmark"
         case .personalNotes: "note.text"
@@ -298,7 +298,7 @@ private struct LibrarySidebar: View {
 
     private var primaryItems: [LibraryDestination] {
         var items: [LibraryDestination] = [
-            .home, .library, .categories, .downloads, .bookmarks, .personalNotes,
+            .home, .library, .annexes, .downloads, .bookmarks, .personalNotes,
         ]
         if canReviewManuals { items.append(.reviewerNotes) }
         items.append(.help)
@@ -449,7 +449,7 @@ private struct LibraryContentView: View {
         switch destination {
         case .home: "Home"
         case .downloads: "Downloads"
-        case .categories: "Categories"
+        case .annexes: "Annexes"
         case .bookmarks: "Bookmarks"
         case .personalNotes: "Personal Notes"
         default: "My Library"
@@ -459,15 +459,26 @@ private struct LibraryContentView: View {
     private var subtitle: String {
         switch destination {
         case .downloads: "Manuals available without an internet connection."
-        case .categories: "Browse the manuals available to your account."
+        case .annexes: "Annex books for the manuals available to your account."
         case .bookmarks: "Return to manuals containing your saved bookmarks."
         case .personalNotes: "Review your personal notes, grouped by manual."
         default: "All manuals and books, always at your fingertips."
         }
     }
 
+    private var destinationBooks: [LibraryBook] {
+        switch destination {
+        case .annexes:
+            return books.filter { $0.isAnnexBook && !$0.isDraftPreview }
+        case .bookmarks, .personalNotes, .reviewerNotes, .help, .more:
+            return books
+        default:
+            return books.filter { !$0.isAnnexBook }
+        }
+    }
+
     private var visibleBooks: [LibraryBook] {
-        books.filter { book in
+        destinationBooks.filter { book in
             if destination == .downloads && !downloads.status(for: book).isAvailableOffline {
                 return false
             }
@@ -475,7 +486,7 @@ private struct LibraryContentView: View {
                 && ManualReaderSessionStore.shared.bookmarks(for: book.bookKey).isEmpty {
                 return false
             }
-            if let selectedCategory, book.category != selectedCategory {
+            if destination != .annexes, let selectedCategory, book.category != selectedCategory {
                 return false
             }
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -509,7 +520,7 @@ private struct LibraryContentView: View {
     }
 
     private var availableCategories: [(ManualCategory, Int)] {
-        let grouped = Dictionary(grouping: books, by: \.category)
+        let grouped = Dictionary(grouping: books.filter { !$0.isAnnexBook }, by: \.category)
         return grouped
             .map { ($0.key, $0.value.count) }
             .sorted { $0.0.id.localizedStandardCompare($1.0.id) == .orderedAscending }
@@ -533,11 +544,15 @@ private struct LibraryContentView: View {
                         Button("Retry", action: onRetry)
                     }
                     .frame(maxWidth: .infinity, minHeight: 280)
-                } else if books.isEmpty {
+                } else if destinationBooks.isEmpty {
                     ContentUnavailableView(
-                        "No Manuals",
-                        systemImage: "books.vertical",
-                        description: Text("Manuals available to your account will appear here.")
+                        destination == .annexes ? "No Annexes" : "No Manuals",
+                        systemImage: destination == .annexes ? "doc.on.doc" : "books.vertical",
+                        description: Text(
+                            destination == .annexes
+                                ? "Annex books available to your account will appear here."
+                                : "Manuals available to your account will appear here."
+                        )
                     )
                     .frame(maxWidth: .infinity, minHeight: 280)
                 } else if visibleBooks.isEmpty {
@@ -558,11 +573,12 @@ private struct LibraryContentView: View {
                                 cardWidth: coverWidth,
                                 baseURL: baseURL,
                                 showsProgress: true,
+                                showsRevisionMetadata: destination != .annexes,
                                 onSelect: onSelectBook
                             )
                         }
 
-                        if !availableCategories.isEmpty {
+                        if destination != .annexes && !availableCategories.isEmpty {
                             CategoriesSection(
                                 categories: availableCategories,
                                 selectedCategory: $selectedCategory,
@@ -571,15 +587,28 @@ private struct LibraryContentView: View {
                             )
                         }
 
-                        ForEach(categoryGroups, id: \.0.id) { category, categoryBooks in
+                        if destination == .annexes {
                             ManualShelf(
-                                title: category.title,
-                                books: categoryBooks,
+                                title: "Annexes",
+                                books: visibleBooks,
                                 cardWidth: coverWidth,
                                 baseURL: baseURL,
                                 showsProgress: false,
+                                showsRevisionMetadata: false,
                                 onSelect: onSelectBook
                             )
+                        } else {
+                            ForEach(categoryGroups, id: \.0.id) { category, categoryBooks in
+                                ManualShelf(
+                                    title: category.title,
+                                    books: categoryBooks,
+                                    cardWidth: coverWidth,
+                                    baseURL: baseURL,
+                                    showsProgress: false,
+                                    showsRevisionMetadata: true,
+                                    onSelect: onSelectBook
+                                )
+                            }
                         }
                     }
                 }
@@ -717,6 +746,7 @@ private struct ManualShelf: View {
     let cardWidth: CGFloat
     let baseURL: URL?
     let showsProgress: Bool
+    var showsRevisionMetadata: Bool = true
     let onSelect: (LibraryBook) -> Void
 
     var body: some View {
@@ -739,6 +769,7 @@ private struct ManualShelf: View {
                             baseURL: baseURL,
                             width: cardWidth,
                             showsProgress: showsProgress,
+                            showsRevisionMetadata: showsRevisionMetadata,
                             onSelect: { onSelect(book) }
                         )
                     }
@@ -763,6 +794,7 @@ private struct ManualShelf: View {
                                 baseURL: baseURL,
                                 width: 138,
                                 showsProgress: showsProgress,
+                                showsRevisionMetadata: showsRevisionMetadata,
                                 onSelect: {
                                     showsAll = false
                                     Task { @MainActor in
@@ -794,6 +826,7 @@ private struct ManualCoverCard: View {
     let baseURL: URL?
     let width: CGFloat
     let showsProgress: Bool
+    var showsRevisionMetadata: Bool = true
     let onSelect: () -> Void
 
     private var resolvedCoverURL: URL? {
@@ -829,20 +862,22 @@ private struct ManualCoverCard: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Open \(book.displayTitle)")
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(book.lifecycleBadgeLabel)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(book.lifecycleBadgeColor.opacity(0.94))
-                    )
-                Text("Revision \(book.versionLabel)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(IPCAReaderTheme.navy)
-                    .lineLimit(1)
+            if showsRevisionMetadata {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(book.lifecycleBadgeLabel)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(book.lifecycleBadgeColor.opacity(0.94))
+                        )
+                    Text("Revision \(book.versionLabel)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(IPCAReaderTheme.navy)
+                        .lineLimit(1)
+                }
             }
 
             HStack(spacing: 8) {

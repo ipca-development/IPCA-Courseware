@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
+require_once __DIR__ . '/BooksManualsAnnexBookService.php';
 
 final class BooksManualsWorkflowService
 {
@@ -129,8 +130,13 @@ final class BooksManualsWorkflowService
                 $identity = $this->syncUpdateIdentity((int)$row['version_id']);
                 $row = array_merge($row, $identity);
             }
-            $row['phase_label'] = self::phaseLabel((string)($row['lifecycle_status'] ?? 'draft'));
-            $row['phase_tone'] = self::phaseTone((string)($row['lifecycle_status'] ?? 'draft'));
+            $status = (string)($row['lifecycle_status'] ?? 'draft');
+            $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookVersion($row)
+                || BooksManualsAnnexBookService::isAnnexBookType((string)($row['book_type'] ?? ''));
+            $row['is_annex_book'] = $isAnnexBook;
+            $row['phase_label'] = $isAnnexBook ? self::annexPhaseLabel($status) : self::phaseLabel($status);
+            $row['phase_tone'] = $isAnnexBook ? self::annexPhaseTone($status) : self::phaseTone($status);
+            $row['actions'] = $isAnnexBook ? self::annexActionsFor($status) : self::actionsFor($status);
         }
         unset($row);
         return $rows;
@@ -148,9 +154,17 @@ final class BooksManualsWorkflowService
         $profile = $this->profile((int)$version['book_id']);
         $identity = $this->syncUpdateIdentity($versionId);
         $version = array_merge($version, $profile, $identity);
-        $version['phase_label'] = self::phaseLabel((string)$version['lifecycle_status']);
-        $version['phase_tone'] = self::phaseTone((string)$version['lifecycle_status']);
-        $version['actions'] = self::actionsFor((string)$version['lifecycle_status']);
+        $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookVersion($version);
+        $version['is_annex_book'] = $isAnnexBook;
+        $version['phase_label'] = $isAnnexBook
+            ? self::annexPhaseLabel((string)$version['lifecycle_status'])
+            : self::phaseLabel((string)$version['lifecycle_status']);
+        $version['phase_tone'] = $isAnnexBook
+            ? self::annexPhaseTone((string)$version['lifecycle_status'])
+            : self::phaseTone((string)$version['lifecycle_status']);
+        $version['actions'] = $isAnnexBook
+            ? self::annexActionsFor((string)$version['lifecycle_status'])
+            : self::actionsFor((string)$version['lifecycle_status']);
         $version['audiences'] = $this->audiences($versionId);
         $version['reviewers'] = $this->bookReviewers((int)$version['book_id']);
         $version['latest_audit'] = $this->latestAudit($versionId);
@@ -262,6 +276,9 @@ final class BooksManualsWorkflowService
         $source = $this->foundation->getVersion($releasedVersionId);
         if ($source === null || (string)$source['lifecycle_status'] !== 'released') {
             throw new RuntimeException('Only an approved manual can create a revision.');
+        }
+        if (BooksManualsAnnexBookService::isAnnexBookVersion($source)) {
+            throw new RuntimeException('Annex Books are published or unpublished. They do not use the manual revision cycle.');
         }
         $label = $this->foundation->suggestNextVersionLabel((string)$source['version_label']);
         $created = $this->foundation->createNextDraftVersion($releasedVersionId, $label, $actorUserId);
@@ -427,6 +444,9 @@ final class BooksManualsWorkflowService
         $version = $this->foundation->getVersion($versionId);
         if ($version === null) {
             throw new RuntimeException('Manual version not found.');
+        }
+        if (BooksManualsAnnexBookService::isAnnexBookVersion($version)) {
+            return $this->transitionAnnexBook($version, $action, $actorUserId, $note);
         }
         $from = (string)$version['lifecycle_status'];
         $to = self::TRANSITIONS[$from][$action] ?? null;
@@ -740,6 +760,63 @@ final class BooksManualsWorkflowService
             ),
             default => array(),
         };
+    }
+
+    public static function annexPhaseLabel(string $status): string
+    {
+        return $status === 'released' ? 'PUBLISHED' : 'NOT PUBLISHED';
+    }
+
+    public static function annexPhaseTone(string $status): string
+    {
+        return $status === 'released' ? 'approved' : 'neutral';
+    }
+
+    /**
+     * @return list<array{action:string,label:string,tone:string}>
+     */
+    public static function annexActionsFor(string $status): array
+    {
+        if ($status === 'released') {
+            return array(
+                array('action' => 'unpublish_annex', 'label' => 'Unpublish', 'tone' => 'secondary'),
+            );
+        }
+        return array(
+            array('action' => 'publish_annex', 'label' => 'Publish', 'tone' => 'primary'),
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $version
+     */
+    private function transitionAnnexBook(
+        array $version,
+        string $action,
+        int $actorUserId,
+        ?string $note
+    ): string {
+        $versionId = (int)$version['id'];
+        $from = (string)$version['lifecycle_status'];
+        if ($action === 'publish_annex') {
+            if ($from === 'released') {
+                throw new RuntimeException('This Annex Book is already published.');
+            }
+            $this->foundation->releaseAnnexBookVersion($versionId, $actorUserId);
+            $this->recordEvent($versionId, $from, 'released', $action, $note, $actorUserId);
+            $this->syncUpdateIdentity($versionId);
+            return 'released';
+        }
+        if ($action === 'unpublish_annex') {
+            if ($from !== 'released') {
+                throw new RuntimeException('Only a published Annex Book can be unpublished.');
+            }
+            $this->foundation->reopenVersionToDraft($versionId, $actorUserId);
+            $this->recordEvent($versionId, $from, 'draft', $action, $note, $actorUserId);
+            $this->syncUpdateIdentity($versionId);
+            return 'draft';
+        }
+        throw new RuntimeException('Annex Books can only be Published or Unpublished.');
     }
 
     /**

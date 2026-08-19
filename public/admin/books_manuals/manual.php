@@ -36,14 +36,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException('Manual version not found.');
         }
         if ($action === 'transition') {
-            $workflow->transition(
+            $to = $workflow->transition(
                 $versionId,
                 (string)($_POST['lifecycle_action'] ?? ''),
                 $actorId,
                 trim((string)($_POST['note'] ?? '')) ?: null
             );
-            bm_manual_flash('success', 'Lifecycle phase updated.');
+            bm_manual_flash(
+                'success',
+                !empty($detail['is_annex_book'])
+                    ? ($to === 'released'
+                        ? 'Annex Book published. It is now visible in the iOS reader.'
+                        : 'Annex Book unpublished. It is hidden from the iOS reader.')
+                    : 'Lifecycle phase updated.'
+            );
         } elseif ($action === 'save_profile') {
+            if (!empty($detail['is_annex_book'])) {
+                throw new RuntimeException('Annex Books do not use the manual review settings.');
+            }
             $workflow->saveProfile(
                 (int)$detail['book_id'],
                 (string)($_POST['manual_type'] ?? ''),
@@ -54,6 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             bm_manual_flash('success', 'Manual settings saved.');
         } elseif ($action === 'create_revision') {
+            if (!empty($detail['is_annex_book'])) {
+                throw new RuntimeException('Annex Books do not use the manual revision cycle.');
+            }
             $created = $workflow->createRevision($versionId, $actorId);
             bm_manual_flash('success', 'Revision ' . (string)$created['version_label'] . ' created in Draft.');
             redirect('/admin/books_manuals/manual.php?version_id=' . (int)$created['version_id']);
@@ -75,21 +88,31 @@ if ($detail === null) {
 $flash = $_SESSION['books_manuals_manual_flash'] ?? null;
 unset($_SESSION['books_manuals_manual_flash']);
 $lifecycle = (string)$detail['lifecycle_status'];
+$isAnnexBook = !empty($detail['is_annex_book']);
 $approvalRoute = (string)($detail['approval_route'] ?? 'internal');
 $audit = is_array($detail['latest_audit'] ?? null) ? $detail['latest_audit'] : null;
 
 cw_header('Books & Manuals · ' . (string)$detail['book_key']);
 books_manuals_page_open(array(
     'title' => (string)$detail['book_title'],
-    'description' => (string)$detail['book_key'] . ' · Revision ' . (string)$detail['version_label'],
-    'back' => array('href' => '/admin/books_manuals/index.php', 'label' => 'IPCA Library'),
+    'description' => $isAnnexBook
+        ? (string)$detail['book_key'] . ' · Annex Book'
+        : (string)$detail['book_key'] . ' · Revision ' . (string)$detail['version_label'],
+    'back' => $isAnnexBook
+        ? array('href' => '/admin/books_manuals/annexes.php', 'label' => 'Annexes')
+        : array('href' => '/admin/books_manuals/index.php', 'label' => 'IPCA Library'),
     'flash' => is_array($flash) ? $flash : null,
-    'stats' => array(
-        array('label' => 'Phase', 'value' => (string)$detail['phase_label']),
-        array('label' => 'Update identity', 'value' => (string)$detail['update_code']),
-        array('label' => 'Audit', 'value' => strtoupper((string)($audit['status'] ?? 'not run'))),
-    ),
-    'actions' => in_array($lifecycle, array('draft', 'in_review'), true)
+    'stats' => $isAnnexBook
+        ? array(
+            array('label' => 'Status', 'value' => (string)$detail['phase_label']),
+            array('label' => 'Page map', 'value' => $detail['page_map_hash'] ? 'Ready' : 'Not generated'),
+        )
+        : array(
+            array('label' => 'Phase', 'value' => (string)$detail['phase_label']),
+            array('label' => 'Update identity', 'value' => (string)$detail['update_code']),
+            array('label' => 'Audit', 'value' => strtoupper((string)($audit['status'] ?? 'not run'))),
+        ),
+    'actions' => ($isAnnexBook || in_array($lifecycle, array('draft', 'in_review'), true))
         ? array(array(
             'label' => 'Open Editor',
             'href' => '/admin/compliance/controlled_book_editor.php?version_id=' . $versionId,
@@ -108,7 +131,22 @@ books_manuals_page_open(array(
       <dt>Page map</dt><dd><?= h($detail['page_map_hash'] ? substr((string)$detail['page_map_hash'], 0, 16) . '…' : 'Not generated') ?></dd>
       <dt>Manifest</dt><dd><?= h($detail['manifest_hash'] ? substr((string)$detail['manifest_hash'], 0, 16) . '…' : 'Not generated') ?></dd>
     </dl>
-    <?php if ($lifecycle === 'released'): ?>
+    <?php if ($isAnnexBook): ?>
+      <p style="font-size:13px;color:#64748b;">Annex Books are Published or not Published. They skip the manual review cycle and stay editable after publish.</p>
+      <div class="bm-actions">
+        <?php foreach ((array)$detail['actions'] as $action): ?>
+          <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+            <input type="hidden" name="version_id" value="<?= $versionId ?>">
+            <input type="hidden" name="action" value="transition">
+            <input type="hidden" name="lifecycle_action" value="<?= h((string)$action['action']) ?>">
+            <button class="app-btn app-btn--<?= $action['tone'] === 'primary' ? 'primary' : 'secondary' ?>" type="submit">
+              <?= h((string)$action['label']) ?>
+            </button>
+          </form>
+        <?php endforeach; ?>
+      </div>
+    <?php elseif ($lifecycle === 'released'): ?>
       <form method="post">
         <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
         <input type="hidden" name="version_id" value="<?= $versionId ?>">
@@ -140,6 +178,7 @@ books_manuals_page_open(array(
     <?php endif; ?>
   </section>
 
+  <?php if (!$isAnnexBook): ?>
   <section class="cmp-card">
     <h2 style="margin-top:0;">Compliance audit</h2>
     <?php if ($audit === null): ?>
@@ -158,8 +197,10 @@ books_manuals_page_open(array(
       <a href="/admin/compliance/books_manuals_audits.php?version_id=<?= $versionId ?>">Open Compliance audit</a>
     </p>
   </section>
+  <?php endif; ?>
 </div>
 
+<?php if (!$isAnnexBook): ?>
 <section class="cmp-card" style="margin-top:18px;">
   <h2 style="margin-top:0;">Manual settings</h2>
   <form method="post" class="bm-form-grid">
@@ -193,6 +234,7 @@ books_manuals_page_open(array(
     Reviewer assignments and approved-reader policy are managed from the IPCA Library settings modal.
   </p>
 </section>
+<?php endif; ?>
 
 <?php
 compliance_page_close();

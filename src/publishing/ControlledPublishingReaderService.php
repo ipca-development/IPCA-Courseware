@@ -72,23 +72,34 @@ final class ControlledPublishingReaderService
     public function listActiveLibrary(?int $userId, bool $includeDraftPreview): array
     {
         $stmt = $this->pdo->query("
-            SELECT id, book_key, title, manual_code, status
+            SELECT id, book_key, title, book_type, manual_code, status
             FROM ipca_publishing_books
             WHERE status = 'active'
             ORDER BY book_key
         ");
         $books = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         $library = array();
+        $annexParents = $this->annexParentIndexByBookId();
 
         foreach ($books as $book) {
             try {
                 $bookKey = (string)($book['book_key'] ?? '');
                 $released = $this->resolveLatestReleasedVersion($bookKey);
                 if ($released !== null) {
-                    $library[] = $this->buildLibraryEntry($book, $released, $userId, false);
+                    $library[] = $this->buildLibraryEntry(
+                        $book,
+                        $released,
+                        $userId,
+                        false,
+                        $annexParents
+                    );
                 }
 
-                if (!$includeDraftPreview) {
+                $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookType(
+                    (string)($book['book_type'] ?? '')
+                ) || (string)($book['book_type'] ?? '') === BooksManualsAnnexBookService::LEGACY_BOOK_TYPE
+                    || isset($annexParents[(int)($book['id'] ?? 0)]);
+                if (!$includeDraftPreview || $isAnnexBook) {
                     continue;
                 }
 
@@ -100,7 +111,13 @@ final class ControlledPublishingReaderService
                     continue;
                 }
 
-                $library[] = $this->buildLibraryEntry($book, $draft, $userId, true);
+                $library[] = $this->buildLibraryEntry(
+                    $book,
+                    $draft,
+                    $userId,
+                    true,
+                    $annexParents
+                );
             } catch (Throwable $e) {
                 error_log('listActiveLibrary skipped book: ' . $e->getMessage());
             }
@@ -110,13 +127,54 @@ final class ControlledPublishingReaderService
     }
 
     /**
+     * @return array<int, array{parent_book_id:int, parent_book_key:string}>
+     */
+    private function annexParentIndexByBookId(): array
+    {
+        try {
+            $stmt = $this->pdo->query("
+                SELECT
+                  m.annex_book_id,
+                  m.parent_book_id,
+                  parent.book_key AS parent_book_key
+                FROM ipca_publishing_annex_book_map m
+                INNER JOIN ipca_publishing_books parent ON parent.id = m.parent_book_id
+                WHERE m.status = 'active'
+            ");
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            $index = array();
+            foreach ($rows as $row) {
+                $index[(int)$row['annex_book_id']] = array(
+                    'parent_book_id' => (int)$row['parent_book_id'],
+                    'parent_book_key' => (string)$row['parent_book_key'],
+                );
+            }
+            return $index;
+        } catch (Throwable) {
+            return array();
+        }
+    }
+
+    /**
      * @param array<string,mixed> $book
      * @param array<string,mixed> $version
+     * @param array<int, array{parent_book_id:int, parent_book_key:string}> $annexParents
      * @return array<string,mixed>
      */
-    private function buildLibraryEntry(array $book, array $version, ?int $userId, bool $isPreview): array
-    {
+    private function buildLibraryEntry(
+        array $book,
+        array $version,
+        ?int $userId,
+        bool $isPreview,
+        array $annexParents = array()
+    ): array {
         $bookKey = (string)($book['book_key'] ?? '');
+        $bookId = (int)($book['id'] ?? 0);
+        $bookType = (string)($book['book_type'] ?? '');
+        $parent = $annexParents[$bookId] ?? null;
+        $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookType($bookType)
+            || $bookType === BooksManualsAnnexBookService::LEGACY_BOOK_TYPE
+            || is_array($parent);
         $cover = $this->cover()->resolveCoverForVersion($version);
         $progress = (!$isPreview && $userId !== null && $userId > 0)
             ? $this->getReadingProgress($userId, $bookKey)
@@ -142,9 +200,10 @@ final class ControlledPublishingReaderService
         }
 
         return array(
-            'book_id' => (int)($book['id'] ?? 0),
+            'book_id' => $bookId,
             'book_key' => $bookKey,
             'book_title' => (string)($book['title'] ?? ''),
+            'book_type' => $bookType,
             'manual_code' => (string)($book['manual_code'] ?? ''),
             'version_id' => (int)($version['id'] ?? 0),
             'version_label' => (string)($version['version_label'] ?? ''),
@@ -152,6 +211,9 @@ final class ControlledPublishingReaderService
             'released_at' => $version['released_at'] ?? null,
             'lifecycle_status' => $lifecycle,
             'is_preview' => $isPreview,
+            'is_annex_book' => $isAnnexBook,
+            'parent_book_id' => is_array($parent) ? (int)$parent['parent_book_id'] : null,
+            'parent_book_key' => is_array($parent) ? (string)$parent['parent_book_key'] : null,
             'cover_url' => $cover['cover_url'],
             'cover_image_url' => $cover['cover_image_url'],
             'cover_page_thumbnail_url' => '/student/api/manual_reader_cover_thumbnail.php?book='

@@ -12,6 +12,7 @@ require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
 require_once __DIR__ . '/ControlledPublishingLepService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/ControlledPublishingCrossRefAnnex.php';
+require_once __DIR__ . '/BooksManualsAnnexBookService.php';
 
 /**
  * Annex register, per-annex sections, import (image / DOCX), and revision metadata.
@@ -1152,7 +1153,7 @@ final class ControlledPublishingAnnexService
             return null;
         }
 
-        $allowed = array('create', 'content_update', 'reimport', 'identity', 'migrate', 'delete', 'restore');
+        $allowed = array('create', 'content_update', 'reimport', 'identity', 'migrate', 'delete', 'restore', 'revert');
         if (!in_array($source, $allowed, true)) {
             $source = 'content_update';
         }
@@ -1179,12 +1180,12 @@ final class ControlledPublishingAnnexService
         $shouldInsert = $this->revisionTablePresent()
             && ($bumpRevision || $source !== 'content_update');
         if ($shouldInsert) {
-            $this->pdo->prepare(
-                'INSERT INTO ipca_publishing_annex_revisions
-                  (book_version_id, section_id, annex_key, revision_from, revision_to,
-                   revision_date, actor_user_id, actor_name, source, note)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            )->execute(array(
+            $fresh = $this->sections->getSection($versionId, $sectionId);
+            $snapshot = $this->captureAnnexSnapshot(is_array($fresh) ? $fresh : $section);
+            $columns = 'book_version_id, section_id, annex_key, revision_from, revision_to,
+                   revision_date, actor_user_id, actor_name, source, note';
+            $placeholders = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
+            $values = array(
                 $versionId,
                 $sectionId,
                 (string)($section['section_key'] ?? ''),
@@ -1195,7 +1196,15 @@ final class ControlledPublishingAnnexService
                 $actorName,
                 $source,
                 $note,
-            ));
+            );
+            if ($this->revisionSnapshotColumnPresent()) {
+                $columns .= ', snapshot_json';
+                $placeholders .= ', ?';
+                $values[] = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            }
+            $this->pdo->prepare(
+                "INSERT INTO ipca_publishing_annex_revisions ({$columns}) VALUES ({$placeholders})"
+            )->execute($values);
         }
 
         return array(
@@ -1276,6 +1285,216 @@ final class ControlledPublishingAnnexService
 
         $fresh = $this->sections->getSection($versionId, $sectionId);
         return $this->describeAnnex(is_array($fresh) ? $fresh : $section);
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public function listAnnexRevisions(int $versionId, int $sectionId): array
+    {
+        if (!$this->revisionTablePresent()) {
+            return array();
+        }
+        $section = $this->sections->getSection($versionId, $sectionId);
+        if ($section === null || !$this->isAnnexContentSection($section)) {
+            throw new RuntimeException('Annex section not found.');
+        }
+        $hasSnapshot = $this->revisionSnapshotColumnPresent();
+        $sql = 'SELECT id, annex_key, revision_from, revision_to, revision_date,
+                       actor_name, source, note, created_at'
+            . ($hasSnapshot ? ', snapshot_json' : '')
+            . ' FROM ipca_publishing_annex_revisions
+               WHERE book_version_id = ? AND section_id = ?
+               ORDER BY id DESC';
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(array($versionId, $sectionId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $out = array();
+        foreach ($rows as $row) {
+            $snapshot = null;
+            if ($hasSnapshot && isset($row['snapshot_json'])) {
+                $decoded = json_decode((string)$row['snapshot_json'], true);
+                $snapshot = is_array($decoded) ? $decoded : null;
+            }
+            $out[] = array(
+                'id' => (int)$row['id'],
+                'annex_key' => (string)$row['annex_key'],
+                'revision_from' => $row['revision_from'],
+                'revision_to' => (string)$row['revision_to'],
+                'revision_date' => (string)$row['revision_date'],
+                'actor_name' => (string)$row['actor_name'],
+                'source' => (string)$row['source'],
+                'note' => $row['note'],
+                'created_at' => (string)$row['created_at'],
+                'has_snapshot' => is_array($snapshot)
+                    && isset($snapshot['section'], $snapshot['blocks']),
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function revertAnnexToRevision(
+        int $versionId,
+        int $sectionId,
+        int $revisionId,
+        ?int $actorUserId = null
+    ): array {
+        $this->requireDraftVersion($versionId);
+        if (!$this->revisionTablePresent() || !$this->revisionSnapshotColumnPresent()) {
+            throw new RuntimeException('Install the annex revision snapshot migration before reverting.');
+        }
+        $section = $this->sections->getSection($versionId, $sectionId);
+        if ($section === null || !$this->isAnnexContentSection($section)) {
+            throw new RuntimeException('Annex section not found.');
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM ipca_publishing_annex_revisions
+             WHERE id = ? AND book_version_id = ? AND section_id = ? LIMIT 1'
+        );
+        $stmt->execute(array($revisionId, $versionId, $sectionId));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new RuntimeException('Annex revision not found.');
+        }
+        $snapshot = json_decode((string)($row['snapshot_json'] ?? ''), true);
+        if (!is_array($snapshot) || !isset($snapshot['section'], $snapshot['blocks'])) {
+            throw new RuntimeException('That revision has no stored content to restore.');
+        }
+        $this->restoreAnnexSnapshot($versionId, $sectionId, $snapshot, $actorUserId);
+        $this->recordAnnexRevision(
+            $versionId,
+            $sectionId,
+            'revert',
+            $actorUserId,
+            true,
+            'Reverted to revision ' . (string)($row['revision_to'] ?? $revisionId)
+        );
+        $this->regenerateRegister($versionId, $actorUserId);
+        $fresh = $this->sections->getSection($versionId, $sectionId);
+        return $this->describeAnnex(is_array($fresh) ? $fresh : $section);
+    }
+
+    /**
+     * @param array<string,mixed> $section
+     * @return array{section:array<string,mixed>,blocks:list<array<string,mixed>>}
+     */
+    private function captureAnnexSnapshot(array $section): array
+    {
+        $meta = $this->decodeMeta($section);
+        $blocks = array();
+        foreach ($this->blocks->listSectionBlocks((int)$section['id']) as $block) {
+            $payload = $block['payload_json'] ?? array();
+            if (is_string($payload)) {
+                $decoded = json_decode($payload, true);
+                $payload = is_array($decoded) ? $decoded : array();
+            }
+            $blocks[] = array(
+                'block_key' => (string)($block['block_key'] ?? ''),
+                'stable_anchor' => (string)($block['stable_anchor'] ?? ''),
+                'block_type' => (string)($block['block_type'] ?? ''),
+                'sort_order' => (int)($block['sort_order'] ?? 0),
+                'payload' => is_array($payload) ? $payload : array(),
+                'content_hash' => (string)($block['content_hash'] ?? ''),
+                'is_system_managed' => (int)($block['is_system_managed'] ?? 0),
+            );
+        }
+        return array(
+            'section' => array(
+                'title' => (string)($section['title'] ?? ''),
+                'section_key' => (string)($section['section_key'] ?? ''),
+                'sort_order' => (int)($section['sort_order'] ?? 0),
+                'metadata' => $meta,
+            ),
+            'blocks' => $blocks,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $snapshot
+     */
+    private function restoreAnnexSnapshot(
+        int $versionId,
+        int $sectionId,
+        array $snapshot,
+        ?int $actorUserId
+    ): void {
+        $sectionSnap = is_array($snapshot['section'] ?? null) ? $snapshot['section'] : array();
+        $title = trim((string)($sectionSnap['title'] ?? ''));
+        $metadata = $sectionSnap['metadata'] ?? $sectionSnap['metadata_json'] ?? array();
+        if (is_string($metadata)) {
+            $decoded = json_decode($metadata, true);
+            $metadata = is_array($decoded) ? $decoded : array();
+        }
+        if (!is_array($metadata)) {
+            $metadata = array();
+        }
+        $this->pdo->prepare(
+            'UPDATE ipca_publishing_book_sections
+             SET title = ?, metadata_json = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND book_version_id = ?'
+        )->execute(array(
+            $title !== '' ? $title : 'Annex',
+            json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            $sectionId,
+            $versionId,
+        ));
+
+        $this->pdo->prepare(
+            'DELETE FROM ipca_publishing_book_blocks WHERE section_id = ? AND book_version_id = ?'
+        )->execute(array($sectionId, $versionId));
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO ipca_publishing_book_blocks
+              (book_version_id, section_id, block_key, stable_anchor, block_type,
+               sort_order, payload_json, content_hash, is_system_managed, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $blocks = is_array($snapshot['blocks'] ?? null) ? $snapshot['blocks'] : array();
+        foreach ($blocks as $index => $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            $payload = $block['payload'] ?? $block['payload_json'] ?? array();
+            if (is_string($payload)) {
+                $decoded = json_decode($payload, true);
+                $payload = is_array($decoded) ? $decoded : array();
+            }
+            if (!is_array($payload)) {
+                $payload = array();
+            }
+            $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $insert->execute(array(
+                $versionId,
+                $sectionId,
+                (string)($block['block_key'] ?? ('annex-block-' . str_pad((string)($index + 1), 4, '0', STR_PAD_LEFT))),
+                (string)($block['stable_anchor'] ?? ''),
+                (string)($block['block_type'] ?? 'paragraph'),
+                (int)($block['sort_order'] ?? (($index + 1) * 10)),
+                $payloadJson,
+                (string)($block['content_hash'] ?? hash('sha256', (string)$payloadJson)),
+                (int)($block['is_system_managed'] ?? 0),
+                $actorUserId,
+                $actorUserId,
+            ));
+        }
+    }
+
+    private function revisionSnapshotColumnPresent(): bool
+    {
+        static $present = null;
+        if ($present !== null) {
+            return $present;
+        }
+        try {
+            $stmt = $this->pdo->query("SHOW COLUMNS FROM ipca_publishing_annex_revisions LIKE 'snapshot_json'");
+            $present = (bool)$stmt->fetchColumn();
+        } catch (Throwable) {
+            $present = false;
+        }
+        return $present;
     }
 
     private function sameDayContentRevisionExists(int $sectionId, ?int $actorUserId): bool
@@ -1594,7 +1813,8 @@ final class ControlledPublishingAnnexService
         if ($version === null) {
             throw new RuntimeException('Book version not found.');
         }
-        if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+        if ((string)($version['lifecycle_status'] ?? '') === 'released'
+            && !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
             throw new RuntimeException('Released versions cannot be edited.');
         }
         return $version;

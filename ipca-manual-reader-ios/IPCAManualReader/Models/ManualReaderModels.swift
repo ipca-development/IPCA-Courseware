@@ -42,6 +42,7 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     var bookId: Int
     var bookKey: String
     var bookTitle: String
+    var bookType: String?
     var manualCode: String
     var versionId: Int
     var versionLabel: String
@@ -49,6 +50,9 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     var releasedAt: String?
     var lifecycleStatus: String?
     var isPreview: Bool?
+    var isAnnexBookFlag: Bool?
+    var parentBookId: Int?
+    var parentBookKey: String?
     var coverUrl: String?
     var coverImageUrl: String?
     var coverPageThumbnailUrl: String?
@@ -67,6 +71,7 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         case bookId = "book_id"
         case bookKey = "book_key"
         case bookTitle = "book_title"
+        case bookType = "book_type"
         case manualCode = "manual_code"
         case versionId = "version_id"
         case versionLabel = "version_label"
@@ -74,6 +79,9 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         case releasedAt = "released_at"
         case lifecycleStatus = "lifecycle_status"
         case isPreview = "is_preview"
+        case isAnnexBookFlag = "is_annex_book"
+        case parentBookId = "parent_book_id"
+        case parentBookKey = "parent_book_key"
         case coverUrl = "cover_url"
         case coverImageUrl = "cover_image_url"
         case coverPageThumbnailUrl = "cover_page_thumbnail_url"
@@ -90,6 +98,17 @@ struct LibraryBook: Codable, Identifiable, Hashable {
     var displayTitle: String {
         if bookTitle.isEmpty { return bookKey }
         return bookTitle
+    }
+
+    var isAnnexBook: Bool {
+        if isAnnexBookFlag == true {
+            return true
+        }
+        let type = bookType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if type == "annex_book" || type == "annex" {
+            return true
+        }
+        return bookKey.uppercased().hasPrefix("ANNEXES_")
     }
 
     var isDraftPreview: Bool {

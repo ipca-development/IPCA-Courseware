@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingHtmlSanitizer.php';
 require_once __DIR__ . '/ControlledPublishingBookStyleService.php';
+require_once __DIR__ . '/BooksManualsAnnexBookService.php';
 
 /**
  * Controlled publishing block CRUD for the document-style editor.
@@ -27,6 +28,7 @@ final class ControlledPublishingBlockService
               COALESCE(ts.allow_author_blocks, 1) AS allow_author_blocks,
               bv.lifecycle_status,
               b.book_key,
+              b.book_type,
               bv.version_label
             FROM ipca_publishing_book_sections s
             INNER JOIN ipca_publishing_book_versions bv ON bv.id = s.book_version_id
@@ -254,16 +256,18 @@ final class ControlledPublishingBlockService
             return;
         }
         $stmt = $this->pdo->prepare("
-            SELECT b.id, b.book_version_id, bv.lifecycle_status
+            SELECT b.id, b.book_version_id, bv.lifecycle_status, bk.book_type
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_versions bv ON bv.id = b.book_version_id
+            INNER JOIN ipca_publishing_books bk ON bk.id = bv.book_id
             WHERE b.section_id = :section_id
         ");
         $stmt->execute(array(':section_id' => $sectionId));
         $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         $existingIds = array();
         foreach ($existing as $row) {
-            if ((string)$row['lifecycle_status'] === 'released') {
+            if ((string)$row['lifecycle_status'] === 'released'
+                && !BooksManualsAnnexBookService::allowsReleasedEdits($row)) {
                 throw new RuntimeException('Released versions cannot be edited.');
             }
             $existingIds[(int)$row['id']] = true;
@@ -313,7 +317,8 @@ final class ControlledPublishingBlockService
         if ($section === null) {
             throw new RuntimeException('Section not found for this version.');
         }
-        if ((string)$section['lifecycle_status'] === 'released') {
+        if ((string)$section['lifecycle_status'] === 'released'
+            && !BooksManualsAnnexBookService::allowsReleasedEdits($section)) {
             throw new RuntimeException('Released versions cannot be edited.');
         }
         if (empty($section['allow_author_blocks'])) {
@@ -334,10 +339,12 @@ final class ControlledPublishingBlockService
               s.parent_section_id,
               s.stable_anchor AS section_stable_anchor,
               COALESCE(ts.allow_author_blocks, 0) AS template_allow_blocks,
-              bv.lifecycle_status
+              bv.lifecycle_status,
+              bk.book_type
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
             INNER JOIN ipca_publishing_book_versions bv ON bv.id = b.book_version_id
+            INNER JOIN ipca_publishing_books bk ON bk.id = bv.book_id
             LEFT JOIN ipca_publishing_book_template_sections ts ON ts.id = s.template_section_id
             WHERE b.id = :id
             LIMIT 1
@@ -347,7 +354,8 @@ final class ControlledPublishingBlockService
         if (!is_array($block)) {
             throw new RuntimeException('Block not found.');
         }
-        if ((string)$block['lifecycle_status'] === 'released') {
+        if ((string)$block['lifecycle_status'] === 'released'
+            && !BooksManualsAnnexBookService::allowsReleasedEdits($block)) {
             throw new RuntimeException('Released versions cannot be edited.');
         }
         $allow = !empty($block['template_allow_blocks']) || !empty($block['parent_section_id']);

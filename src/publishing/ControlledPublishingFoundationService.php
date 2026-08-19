@@ -439,6 +439,40 @@ final class ControlledPublishingFoundationService
     }
 
     /**
+     * Annex Books skip source-set and baseline gates. Page Preview must still be approved.
+     */
+    public function releaseAnnexBookVersion(int $versionId, ?int $actorUserId = null): void
+    {
+        require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+        $version = $this->getVersion($versionId);
+        if ($version === null) {
+            throw new RuntimeException('Book version not found.');
+        }
+        if (!BooksManualsAnnexBookService::isAnnexBookVersion($version)) {
+            throw new RuntimeException('Only Annex Books can use Annex Book publish.');
+        }
+        (new ControlledPublishingReaderService($this->pdo))
+            ->assertAuthoritativePageMapReadyForRelease($version);
+
+        $stmt = $this->pdo->prepare("
+            UPDATE ipca_publishing_book_versions
+            SET lifecycle_status = 'released',
+                released_at = CURRENT_TIMESTAMP,
+                released_by = :released_by,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+              AND lifecycle_status <> 'released'
+        ");
+        $stmt->execute(array(
+            ':released_by' => $actorUserId,
+            ':id' => $versionId,
+        ));
+        if ($stmt->rowCount() === 0) {
+            throw new RuntimeException('Annex Book could not be published.');
+        }
+    }
+
+    /**
      * Reopen a released version for editing without creating a new version label.
      */
     public function reopenVersionToDraft(int $versionId, ?int $actorUserId = null): void

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+
 /**
  * Section tree and nested subsection management for the book editor.
  */
@@ -81,7 +83,8 @@ final class ControlledPublishingSectionService
         if ($version === null) {
             throw new RuntimeException('Book version not found.');
         }
-        if ((string)$version['lifecycle_status'] === 'released') {
+        if ((string)$version['lifecycle_status'] === 'released'
+            && !BooksManualsAnnexBookService::allowsReleasedEdits($version)) {
             throw new RuntimeException('Released versions cannot be edited.');
         }
 
@@ -176,7 +179,7 @@ final class ControlledPublishingSectionService
     private function getVersionRow(int $versionId): ?array
     {
         $stmt = $this->pdo->prepare("
-            SELECT bv.*, b.book_key, b.title AS book_title
+            SELECT bv.*, b.book_key, b.title AS book_title, b.book_type
             FROM ipca_publishing_book_versions bv
             INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
             WHERE bv.id = :id

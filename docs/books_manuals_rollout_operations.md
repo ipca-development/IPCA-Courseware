@@ -6,7 +6,7 @@
 2. Apply `scripts/sql/2026_08_18_books_manuals_workflow.sql`.
 3. Apply `scripts/sql/2026_08_18_books_manuals_library_ux.sql`.
 4. Apply `scripts/sql/2026_08_18_books_manuals_compliance_overrides.sql`.
-5. Apply `scripts/sql/2026_08_18_annex_book_structure.sql` (`php scripts/apply_annex_book_structure.php`).
+5. Apply `scripts/sql/2026_08_18_annex_book_structure.sql` and `scripts/sql/2026_08_18_annex_revision_snapshots.sql` (`php scripts/apply_annex_book_structure.php`).
 6. Run:
    - `php tests/books_manuals_protected_boundary_check.php`
    - `php tests/books_manuals_workflow_contract_check.php`
@@ -42,7 +42,12 @@ Each parent manual (OM, OMM, TM_GEN, …) has one Annex Book with a locked outli
 3. The annexes — edited in the existing online editor, including landscape and multi-page annexes.
 
 Per-annex revision, date and actor are written to `ipca_publishing_annex_revisions` on
-create, reimport, identity change, and content update.
+create, reimport, identity change, and content update. Later revisions also store a
+content snapshot so an annex can be reverted from Manage annexes.
+
+Annex Books skip the four-phase manual review. They are **Published** (`released`) or
+**not Published** (`draft`). Publish still requires an approved page map. Published
+annex books stay editable in admin; the iOS Annexes tab lists only published annex books.
 
 ## Annex migration gate
 

@@ -80,20 +80,23 @@ if (!function_exists('compliance_page_open')) {
                 $href = (string)($action['href'] ?? '');
                 $modal = (string)($action['modal'] ?? '');
                 $icon = (string)($action['icon'] ?? '');
+                $variant = (string)($action['variant'] ?? 'secondary');
                 $svg = $icon !== '' ? compliance_ui_icon($icon) : '';
+                $btnClass = 'cmp-hero-action compliance-hero__action compliance-btn compliance-btn--'
+                    . ($variant === 'primary' ? 'primary' : 'secondary');
 
                 if ($href !== '') {
-                    echo '<a class="cmp-hero-action compliance-hero__action compliance-btn compliance-btn--secondary" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '">';
+                    echo '<a class="' . $btnClass . '" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '">';
                     echo $svg;
                     echo '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
                     echo '</a>';
                 } elseif ($modal !== '') {
-                    echo '<button type="button" class="cmp-hero-action compliance-hero__action compliance-btn compliance-btn--secondary" data-compliance-modal-open="' . htmlspecialchars($modal, ENT_QUOTES, 'UTF-8') . '">';
+                    echo '<button type="button" class="' . $btnClass . '" data-compliance-modal-open="' . htmlspecialchars($modal, ENT_QUOTES, 'UTF-8') . '">';
                     echo $svg;
                     echo '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
                     echo '</button>';
                 } else {
-                    echo '<button type="button" class="cmp-hero-action compliance-hero__action compliance-btn compliance-btn--secondary">';
+                    echo '<button type="button" class="' . $btnClass . '">';
                     echo $svg;
                     echo '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
                     echo '</button>';

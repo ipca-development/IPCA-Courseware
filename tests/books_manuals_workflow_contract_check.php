@@ -53,6 +53,7 @@ $editorApi = (string)file_get_contents($root . '/public/admin/api/controlled_boo
 $editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
 $nav = (string)file_get_contents($root . '/src/nav/admin.php');
 $libraryPage = (string)file_get_contents($root . '/public/admin/books_manuals/index.php');
+$manualPage = (string)file_get_contents($root . '/public/admin/books_manuals/manual.php');
 $bookReader = (string)file_get_contents($root . '/public/admin/books_manuals/reader.php');
 $changeAssistant = (string)file_get_contents(
     $root . '/src/publishing/BooksManualsChangeAssistantService.php'
@@ -213,6 +214,32 @@ bm_contract_assert(
         && str_contains($iosLibrary, 'case "in_review": "Draft Review"')
         && str_contains($iosLibrary, '.font(.system(size: 9, weight: .bold))')
         && str_contains($iosLibrary, 'Text("Revision \(book.versionLabel)")')
+);
+bm_contract_assert(
+    'iOS Annexes tab lists annex books without revision chrome',
+    str_contains($iosModels, 'case isAnnexBookFlag = "is_annex_book"')
+        && str_contains($iosModels, 'var isAnnexBook: Bool')
+        && str_contains($iosLibrary, 'case annexes = "Annexes"')
+        && str_contains($iosLibrary, 'Label("Annexes", systemImage: "doc.on.doc")')
+        && str_contains($iosLibrary, 'showsRevisionMetadata: false')
+        && str_contains($iosLibrary, 'if showsRevisionMetadata')
+        && str_contains($readerService, "'is_annex_book' => \$isAnnexBook")
+);
+bm_contract_assert(
+    'iOS Annexes tab lists only published annex books',
+    str_contains($iosLibrary, 'books.filter { $0.isAnnexBook && !$0.isDraftPreview }')
+        && str_contains($readerService, 'if (!$includeDraftPreview || $isAnnexBook)')
+);
+bm_contract_assert(
+    'Annex Books skip the four-phase review and publish or unpublish',
+    str_contains($workflow, 'function transitionAnnexBook')
+        && str_contains($workflow, 'publish_annex')
+        && str_contains($workflow, 'unpublish_annex')
+        && str_contains($workflow, "Annex Books can only be Published or Unpublished.")
+        && str_contains($foundation, 'function releaseAnnexBookVersion')
+        && str_contains($annexBook, 'function allowsReleasedEdits')
+        && str_contains($manualPage, 'Annex Books are Published or not Published')
+        && str_contains($manualPage, 'if (!$isAnnexBook)')
 );
 bm_contract_assert(
     'iOS reviewer notes stay disabled for released manuals',

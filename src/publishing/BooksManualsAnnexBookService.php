@@ -44,7 +44,18 @@ final class BooksManualsAnnexBookService
      */
     public static function isAnnexBookVersion(array $version): bool
     {
-        return self::isAnnexBookType((string)($version['book_type'] ?? ''));
+        return self::isAnnexBookType((string)($version['book_type'] ?? ''))
+            || (string)($version['book_type'] ?? '') === self::LEGACY_BOOK_TYPE;
+    }
+
+    /**
+     * Annex Books skip the manual review cycle. Released means Published.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function allowsReleasedEdits(array $row): bool
+    {
+        return self::isAnnexBookVersion($row);
     }
 
     public static function annexBookKey(string $parentBookKey): string

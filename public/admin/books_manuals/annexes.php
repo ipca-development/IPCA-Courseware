@@ -25,20 +25,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!hash_equals($csrf, (string)($_POST['csrf_token'] ?? ''))) {
             throw new RuntimeException('The form expired. Reload and try again.');
         }
-        if ((string)($_POST['action'] ?? '') !== 'ensure_annex_book') {
-            throw new RuntimeException('Unknown Annexes action.');
+        $action = (string)($_POST['action'] ?? '');
+        if ($action === 'ensure_annex_book') {
+            $created = $annexBooks->ensureAnnexBookForParent(
+                (int)($_POST['parent_book_id'] ?? 0),
+                $actorId
+            );
+            $_SESSION['books_manuals_annex_flash'] = array(
+                'type' => 'success',
+                'message' => !empty($created['created'])
+                    ? 'Annex Book created with Cover, Annex Register and annexes.'
+                    : 'Opened the existing Annex Book for this manual.',
+            );
+            redirect('/admin/compliance/controlled_book_editor.php?version_id=' . (int)$created['version_id']);
         }
-        $created = $annexBooks->ensureAnnexBookForParent(
-            (int)($_POST['parent_book_id'] ?? 0),
-            $actorId
-        );
-        $_SESSION['books_manuals_annex_flash'] = array(
-            'type' => 'success',
-            'message' => !empty($created['created'])
-                ? 'Annex Book created with Cover, Annex Register and annexes.'
-                : 'Opened the existing Annex Book for this manual.',
-        );
-        redirect('/admin/compliance/controlled_book_editor.php?version_id=' . (int)$created['version_id']);
+        if ($action === 'transition') {
+            $to = $workflow->transition(
+                (int)($_POST['version_id'] ?? 0),
+                (string)($_POST['lifecycle_action'] ?? ''),
+                $actorId,
+                trim((string)($_POST['note'] ?? '')) ?: null
+            );
+            $_SESSION['books_manuals_annex_flash'] = array(
+                'type' => 'success',
+                'message' => $to === 'released'
+                    ? 'Annex Book published. It is now visible in the iOS reader.'
+                    : 'Annex Book unpublished. It is hidden from the iOS reader.',
+            );
+            redirect('/admin/books_manuals/annexes.php');
+        }
+        throw new RuntimeException('Unknown Annexes action.');
     } catch (Throwable $e) {
         $_SESSION['books_manuals_annex_flash'] = array(
             'type' => 'error',
@@ -128,6 +144,17 @@ books_manuals_page_open(array(
               <a class="app-btn app-btn--primary" href="/admin/compliance/controlled_book_editor.php?version_id=<?= (int)$row['version_id'] ?>">Edit</a>
               <a class="app-btn app-btn--secondary" href="/admin/compliance/controlled_book_annexes.php?version_id=<?= (int)$row['version_id'] ?>">Manage annexes</a>
               <a class="app-btn app-btn--secondary" href="/admin/books_manuals/manual.php?version_id=<?= (int)$row['version_id'] ?>">Settings</a>
+              <?php foreach ((array)($row['actions'] ?? array()) as $lifecycleAction): ?>
+                <form method="post" style="display:inline;">
+                  <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                  <input type="hidden" name="action" value="transition">
+                  <input type="hidden" name="version_id" value="<?= (int)$row['version_id'] ?>">
+                  <input type="hidden" name="lifecycle_action" value="<?= h((string)$lifecycleAction['action']) ?>">
+                  <button class="app-btn app-btn--<?= ($lifecycleAction['tone'] ?? '') === 'primary' ? 'primary' : 'secondary' ?>" type="submit">
+                    <?= h((string)$lifecycleAction['label']) ?>
+                  </button>
+                </form>
+              <?php endforeach; ?>
             <?php endif; ?>
           </div>
         </div>
