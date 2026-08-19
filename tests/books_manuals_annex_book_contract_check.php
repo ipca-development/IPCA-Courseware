@@ -95,6 +95,10 @@ annex_book_assert(
     'editor records annex revisions without changing the annex editor UI',
     str_contains($editorApi, 'cp_editor_touch_annex_revision')
         && str_contains($editorApi, 'cp_editor_sync_annex_cover_from_parent')
+        && str_contains($editorApi, "function cp_editor_handle_create_block(\n    PDO \$pdo,")
+        && str_contains($editorApi, "function cp_editor_handle_update_block(\n    PDO \$pdo,")
+        && str_contains($editorApi, 'cp_editor_handle_create_block($pdo,')
+        && str_contains($editorApi, "cp_editor_handle_update_block(\n                \$pdo,")
 );
 annex_book_assert(
     'Annex Book editor nav is cover then annexes only',

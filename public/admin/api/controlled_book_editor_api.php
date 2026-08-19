@@ -289,10 +289,11 @@ try {
             cp_editor_handle_detect_rich_text($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $richTextSvc, $uid, 'annex_refs');
             break;
         case 'create_block':
-            cp_editor_handle_create_block($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $annexSvc, $sections, $uid);
+            cp_editor_handle_create_block($pdo, $foundation, $blocks, $renderer, $styleSvc, $numberSvc, $annexSvc, $sections, $uid);
             break;
         case 'update_block':
             cp_editor_handle_update_block(
+                $pdo,
                 $blocks,
                 $renderer,
                 $styleSvc,
@@ -2622,6 +2623,7 @@ function cp_editor_decode_version_meta(array $version): array
 }
 
 function cp_editor_handle_create_block(
+    PDO $pdo,
     ControlledPublishingFoundationService $foundation,
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
@@ -2684,6 +2686,7 @@ function cp_editor_handle_create_block(
 }
 
 function cp_editor_handle_update_block(
+    PDO $pdo,
     ControlledPublishingBlockService $blocks,
     ControlledPublishingBookRenderer $renderer,
     ControlledPublishingBookStyleService $styleSvc,
