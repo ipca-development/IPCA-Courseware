@@ -37,6 +37,13 @@ try {
     throw new SafetyException('validation_error', 'Unknown report action.', 400);
 } catch (SafetyException $e) {
     SafetyHttp::fail($e);
-} catch (Throwable) {
+} catch (CommunicationException $e) {
+    SafetyHttp::json($e->httpStatus, array(
+        'ok' => false,
+        'error' => $e->getMessage(),
+        'error_code' => $e->errorCode,
+    ));
+} catch (Throwable $e) {
+    error_log('safety.reports.error ' . $e::class . ': ' . $e->getMessage());
     SafetyHttp::json(500, array('ok' => false, 'error' => 'Server error', 'error_code' => 'server_error'));
 }

@@ -69,6 +69,11 @@ $checks = array(
         && str_contains($intake, "'reference'")
         && str_contains($anonymousService, "'receipt_id'")
         && str_contains($anonymousService, "'receipt_secret'"),
+    'ISO-8601 event times are normalized before MySQL INSERT' =>
+        str_contains($support, 'function nullableUtc')
+        && str_contains($support, "format('Y-m-d H:i:s.v')")
+        && str_contains($intake, 'SafetySupport::nullableUtc(')
+        && str_contains($anonymousService, 'SafetySupport::nullableUtc('),
     'communication bootstrap advertises safety capabilities' =>
         str_contains($capabilities, "'safety_reporting_enabled'")
         && str_contains($capabilities, "'anonymous_reporting_enabled'"),

@@ -168,6 +168,38 @@ final class SafetySupport
         }
         return $value;
     }
+
+    /**
+     * Normalize app ISO-8601 and website datetime-local values to MySQL DATETIME(3) UTC.
+     * Strict MySQL rejects values such as 2026-08-18T23:11:03Z on INSERT.
+     *
+     * @param mixed $value
+     */
+    public static function nullableUtc(mixed $value, string $field = 'event date'): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $value = trim(str_replace("\0", '', (string)$value));
+        if ($value === '') {
+            return null;
+        }
+        if (strlen($value) > 64) {
+            throw new SafetyException('validation_error', $field . ' is invalid.', 400);
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $value) === 1) {
+            $value .= ':00';
+        }
+        $hasTimezone = preg_match('/(Z|[+-]\d{2}:?\d{2})$/i', $value) === 1;
+        try {
+            $date = $hasTimezone
+                ? new DateTimeImmutable($value)
+                : new DateTimeImmutable($value, new DateTimeZone('UTC'));
+        } catch (Throwable) {
+            throw new SafetyException('validation_error', $field . ' is invalid.', 400);
+        }
+        return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s.v');
+    }
 }
 
 final class SafetyRateLimitService

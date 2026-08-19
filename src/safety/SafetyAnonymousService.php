@@ -32,7 +32,7 @@ final class SafetyAnonymousService
             50000,
             'narrative'
         );
-        $eventAt = $input['event_at_utc'] ?? $input['occurred_at_utc'] ?? null;
+        $eventAt = SafetySupport::nullableUtc($input['event_at_utc'] ?? $input['occurred_at_utc'] ?? null);
         $location = $input['location_text'] ?? $input['location'] ?? null;
         $requestHash = SafetySupport::digest(SafetySupport::json(array(
             $title, $narrative, $eventAt, $location,
@@ -73,7 +73,7 @@ final class SafetyAnonymousService
                 $this->nullable($input['category'] ?? null, 64),
                 $title,
                 $narrative,
-                $this->nullable($eventAt, 64),
+                $eventAt,
                 $this->nullable($location, 255),
                 $this->nullable($input['aircraft_registration'] ?? null, 32),
                 $this->nullable($input['immediate_action'] ?? null, 12000),

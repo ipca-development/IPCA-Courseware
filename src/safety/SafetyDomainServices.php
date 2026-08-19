@@ -42,7 +42,7 @@ final class SafetyReportabilityService extends SafetyDomainService
         )->execute(array(
             $org, $uuid, $reportId,
             $type === null || trim($type) === '' ? null : SafetySupport::cleanText($type, 96, 'occurrence_type'),
-            $occurredAtUtc
+            SafetySupport::nullableUtc($occurredAtUtc)
         ));
         $id = (int)$this->pdo->lastInsertId();
         $this->events->append($org, 'occurrence', $id, 'occurrence.created',

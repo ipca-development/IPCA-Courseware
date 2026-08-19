@@ -29,7 +29,7 @@ final class SafetyIntakeService
             50000,
             'narrative'
         );
-        $eventAt = $input['event_at_utc'] ?? $input['occurred_at_utc'] ?? null;
+        $eventAt = SafetySupport::nullableUtc($input['event_at_utc'] ?? $input['occurred_at_utc'] ?? null);
         $location = $input['location_text'] ?? $input['location'] ?? null;
         $confidentiality = in_array(($input['confidentiality'] ?? ''), array('standard', 'restricted'), true)
             ? (string)$input['confidentiality'] : 'standard';
@@ -63,7 +63,7 @@ final class SafetyIntakeService
                 $this->nullableText($input['category'] ?? null, 64),
                 $title,
                 $narrative,
-                $this->nullableText($eventAt),
+                $eventAt,
                 $this->nullableText($location, 255),
                 $this->nullableText($input['aircraft_registration'] ?? null, 32),
                 $this->nullableText($input['immediate_action'] ?? null, 12000),
@@ -144,7 +144,7 @@ final class SafetyIntakeService
             $title,
             $narrative,
             array_key_exists('event_at_utc', $input) || array_key_exists('occurred_at_utc', $input)
-                ? $this->nullableText($input['event_at_utc'] ?? $input['occurred_at_utc']) : $row['event_at_utc'],
+                ? SafetySupport::nullableUtc($input['event_at_utc'] ?? $input['occurred_at_utc']) : $row['event_at_utc'],
             array_key_exists('location_text', $input) || array_key_exists('location', $input)
                 ? $this->nullableText($input['location_text'] ?? $input['location'], 255) : $row['location_text'],
             array_key_exists('aircraft_registration', $input)
