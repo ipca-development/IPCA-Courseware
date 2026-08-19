@@ -16,7 +16,12 @@ final class CommunicationAuthService
      * @param array<string,mixed> $deviceInput
      * @return array<string,mixed>
      */
-    public function login(string $email, string $password, array $deviceInput): array
+    public function login(
+        string $email,
+        string $password,
+        array $deviceInput,
+        bool $requireMessagingCapability = true
+    ): array
     {
         $email = strtolower(trim($email));
         if ($email === '' || $password === '') {
@@ -36,7 +41,9 @@ final class CommunicationAuthService
             throw new CommunicationException('account_ineligible', CommunicationSupport::ineligibleReason($user), 403);
         }
 
-        $this->config->requireMessaging();
+        if ($requireMessagingCapability) {
+            $this->config->requireMessaging();
+        }
 
         $device = $this->upsertDevice((int)$user['id'], $deviceInput);
         $token = $this->issueCredential((int)$device['id']);
@@ -84,6 +91,7 @@ final class CommunicationAuthService
               c.revoked_at_utc AS credential_revoked_at_utc,
               d.device_uuid,
               d.user_id,
+              d.organization_id,
               d.platform,
               d.model,
               d.os_version,
@@ -133,6 +141,7 @@ final class CommunicationAuthService
                 'id' => (int)$row['device_id'],
                 'device_uuid' => (string)$row['device_uuid'],
                 'user_id' => (int)$row['user_id'],
+                'organization_id' => (int)($row['organization_id'] ?? 1),
                 'platform' => (string)$row['platform'],
                 'model' => (string)$row['model'],
                 'os_version' => (string)$row['os_version'],
@@ -296,6 +305,7 @@ final class CommunicationAuthService
     {
         return array(
             'device_uuid' => (string)$device['device_uuid'],
+            'organization_id' => (int)($device['organization_id'] ?? 1),
             'platform' => (string)$device['platform'],
             'model' => (string)($device['model'] ?? ''),
             'app_version' => (string)($device['app_version'] ?? ''),

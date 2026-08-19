@@ -46,13 +46,14 @@ final class FlightScheduleService
         ?string $fromDate = null,
         ?string $toDate = null,
         ?int $aircraftId = null,
-        bool $deriveOperationalCompletion = true
+        bool $deriveOperationalCompletion = true,
+        ?int $organizationId = null,
+        ?int $participantUserId = null
     ): array
     {
         $operationalToday = new DateTimeImmutable('today', new DateTimeZone('America/Los_Angeles'));
         $fromDate = $this->date($fromDate ?: $operationalToday->modify('-1 day')->format('Y-m-d'));
         $toDate = $this->date($toDate ?: $operationalToday->modify('+15 days')->format('Y-m-d'));
-        $this->reconcileUnlinkedCompletedDispatches($fromDate, $toDate);
         $sql = "
             SELECT s.*, a.registration AS aircraft_registration,
                    COALESCE(NULLIF(s.mission_code, ''), m.code, '') AS resolved_mission_code,
@@ -121,6 +122,18 @@ final class FlightScheduleService
         if (($aircraftId ?? 0) > 0) {
             $sql .= ' AND s.aircraft_id = ?';
             $params[] = $aircraftId;
+        }
+        if (($organizationId ?? 0) > 0) {
+            $sql .= ' AND s.organization_id = ?';
+            $params[] = $organizationId;
+        }
+        if (($participantUserId ?? 0) > 0) {
+            $sql .= ' AND EXISTS (
+                SELECT 1 FROM ipca_flight_schedule_crew visible_crew
+                 WHERE visible_crew.schedule_slot_id = s.id
+                   AND visible_crew.user_id = ?
+            )';
+            $params[] = $participantUserId;
         }
         $sql .= ' ORDER BY s.scheduled_start_time ASC, s.id ASC';
         $statement = $this->pdo->prepare($sql);
@@ -280,6 +293,7 @@ final class FlightScheduleService
         }
         $airportChain = $this->normalizeAirportChain($values);
         $this->assertReservationScopedCrew($values, $crew, count($airportChain) - 1);
+        $this->assertCrewComposition($reservationType, $crew);
         $departure = $airportChain[0];
         $destination = $airportChain[count($airportChain) - 1];
         $status = strtolower(trim((string)($values['status'] ?? 'scheduled')));
@@ -296,13 +310,35 @@ final class FlightScheduleService
 
         $this->pdo->beginTransaction();
         try {
-            $existing = $this->pdo->prepare('SELECT id, claimed_dispatch_uuid FROM ipca_flight_schedule_slots WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE');
+            $existing = $this->pdo->prepare(
+                'SELECT id, status, claimed_dispatch_uuid, updated_at FROM ipca_flight_schedule_slots'
+                . ' WHERE scheduler_record_id = ? LIMIT 1' . $this->lockClause()
+            );
             $existing->execute(array($recordId));
             $row = $existing->fetch(PDO::FETCH_ASSOC);
             if (is_array($row) && trim((string)($row['claimed_dispatch_uuid'] ?? '')) !== '') {
                 throw new RuntimeException('A claimed schedule slot cannot be edited.');
             }
-            $overlapWarnings = $this->resourceConflictWarnings(
+            if (is_array($row) && strtolower((string)($row['status'] ?? '')) !== 'scheduled') {
+                throw new RuntimeException('A locked reservation cannot be edited.');
+            }
+            if (is_array($row) && trim((string)($values['expected_updated_at'] ?? '')) !== '') {
+                $this->assertExpectedUpdatedAt($row, (string)$values['expected_updated_at']);
+            }
+            $existingCrewUserIds = array();
+            if (is_array($row)) {
+                $existingCrewStatement = $this->pdo->prepare(
+                    'SELECT user_id FROM ipca_flight_schedule_crew'
+                    . ' WHERE schedule_slot_id = ? AND user_id IS NOT NULL'
+                );
+                $existingCrewStatement->execute(array((int)$row['id']));
+                $existingCrewUserIds = array_map(
+                    'intval',
+                    $existingCrewStatement->fetchAll(PDO::FETCH_COLUMN) ?: array()
+                );
+            }
+            $this->assertCrewUsersEligible($crew, $existingCrewUserIds);
+            $overlapWarningDetails = $this->resourceConflictAssessments(
                 $recordId,
                 $aircraftId,
                 $cohortId,
@@ -313,6 +349,7 @@ final class FlightScheduleService
                 $start,
                 $end
             );
+            $overlapWarnings = array_column($overlapWarningDetails, 'message');
             $isCreate = !is_array($row);
             $dutyInput = array(
                 'organization_id' => $this->requireOrganizationIdForCreate($values, $missionId),
@@ -441,6 +478,7 @@ final class FlightScheduleService
         return array(
             'scheduler_record_id' => $recordId,
             'warnings' => $overlapWarnings,
+            'warning_details' => $overlapWarningDetails,
         );
     }
 
@@ -592,7 +630,7 @@ final class FlightScheduleService
         try {
             $existingStatement = $this->pdo->prepare(
                 'SELECT * FROM ipca_flight_schedule_slots
-                 WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE'
+                 WHERE scheduler_record_id = ? LIMIT 1' . $this->lockClause()
             );
             $existingStatement->execute(array($recordId));
             $existing = $existingStatement->fetch(PDO::FETCH_ASSOC);
@@ -732,12 +770,32 @@ final class FlightScheduleService
         if (substr($start, 0, 10) !== $scheduledDate || strtotime($end) <= strtotime($start)) {
             throw new RuntimeException('A valid same-date schedule start and end are required.');
         }
+        $routeSupplied = array_key_exists('legs', $payload);
+        $routeLegs = $routeSupplied && is_array($payload['legs'])
+            ? array_values(array_filter($payload['legs'], static fn($leg): bool => is_array($leg)))
+            : array();
+        usort($routeLegs, static fn(array $a, array $b): int =>
+            ((int)($a['sequence_number'] ?? 0)) <=> ((int)($b['sequence_number'] ?? 0))
+        );
+        $airportChain = array();
+        foreach ($routeLegs as $index => $leg) {
+            $origin = $this->airport($leg['origin_airport'] ?? '');
+            $destination = $this->airport($leg['destination_airport'] ?? '');
+            if ($origin === '' || $destination === ''
+                || ($index > 0 && end($airportChain) !== $origin)) {
+                throw new RuntimeException('Informative route legs must form one continuous airport chain.');
+            }
+            if ($index === 0) {
+                $airportChain[] = $origin;
+            }
+            $airportChain[] = $destination;
+        }
 
         $this->pdo->beginTransaction();
         try {
             $statement = $this->pdo->prepare(
                 'SELECT * FROM ipca_flight_schedule_slots
-                 WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE'
+                 WHERE scheduler_record_id = ? LIMIT 1' . $this->lockClause()
             );
             $statement->execute(array($recordId));
             $slot = $statement->fetch(PDO::FETCH_ASSOC);
@@ -824,7 +882,7 @@ final class FlightScheduleService
     ): array {
         $statement = $this->pdo->prepare(
             'SELECT * FROM ipca_operational_reservation_legs
-             WHERE reservation_uuid = ? ORDER BY sequence_number ASC FOR UPDATE'
+             WHERE reservation_uuid = ? ORDER BY sequence_number ASC' . $this->lockClause()
         );
         $statement->execute(array($reservationUuid));
         $existing = array();
@@ -872,6 +930,11 @@ final class FlightScheduleService
                 "UPDATE ipca_operational_reservation_legs SET status = 'cancelled' WHERE id = ?"
             )->execute(array((int)$leg['id']));
         }
+        return array(
+            'reservation_uuid' => $reservationUuid,
+            'airport_chain' => $airportChain,
+            'leg_count' => $legCount,
+        );
     }
 
     /**
@@ -925,7 +988,8 @@ final class FlightScheduleService
         $this->pdo->beginTransaction();
         try {
             $oldStatement = $this->pdo->prepare(
-                'SELECT * FROM ipca_flight_schedule_slots WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE'
+                'SELECT * FROM ipca_flight_schedule_slots WHERE scheduler_record_id = ? LIMIT 1'
+                . $this->lockClause()
             );
             $oldStatement->execute(array($oldId));
             $old = $oldStatement->fetch(PDO::FETCH_ASSOC);
@@ -947,7 +1011,8 @@ final class FlightScheduleService
             }
 
             $newStatement = $this->pdo->prepare(
-                'SELECT * FROM ipca_flight_schedule_slots WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE'
+                'SELECT * FROM ipca_flight_schedule_slots WHERE scheduler_record_id = ? LIMIT 1'
+                . $this->lockClause()
             );
             $newStatement->execute(array($newId));
             $existingNew = $newStatement->fetch(PDO::FETCH_ASSOC);
@@ -1155,7 +1220,8 @@ final class FlightScheduleService
         string $scheduledEndTime,
         ?int $actorUserId = null,
         ?string $expectedUpdatedAt = null,
-        ?int $aircraftId = null
+        ?int $aircraftId = null,
+        bool $preciseConcurrency = false
     ): array {
         $schedulerRecordId = strtolower(trim($schedulerRecordId));
         if (!$this->isUuid($schedulerRecordId)) {
@@ -1172,7 +1238,7 @@ final class FlightScheduleService
             $statement = $this->pdo->prepare(
                 'SELECT id, aircraft_id, cohort_id, status, claimed_dispatch_uuid, updated_at'
                 . ' FROM ipca_flight_schedule_slots'
-                . ' WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE'
+                . ' WHERE scheduler_record_id = ? LIMIT 1' . $this->lockClause()
             );
             $statement->execute(array($schedulerRecordId));
             $slot = $statement->fetch(PDO::FETCH_ASSOC);
@@ -1184,9 +1250,13 @@ final class FlightScheduleService
                 throw new RuntimeException('A reservation cannot move after Dispatch is activated.');
             }
             if ($expectedUpdatedAt !== null && trim($expectedUpdatedAt) !== '') {
-                $expected = str_replace('T', ' ', trim($expectedUpdatedAt));
-                if (substr((string)($slot['updated_at'] ?? ''), 0, 19) !== substr($expected, 0, 19)) {
-                    throw new RuntimeException('This reservation changed in another session. Reload the schedule and try again.');
+                if ($preciseConcurrency) {
+                    $this->assertExpectedUpdatedAt($slot, $expectedUpdatedAt);
+                } else {
+                    $expected = str_replace('T', ' ', trim($expectedUpdatedAt));
+                    if (substr((string)($slot['updated_at'] ?? ''), 0, 19) !== substr($expected, 0, 19)) {
+                        throw new RuntimeException('This reservation changed in another session. Reload the schedule and try again.');
+                    }
                 }
             }
             $targetAircraftId = $aircraftId !== null && $aircraftId > 0
@@ -1216,7 +1286,7 @@ final class FlightScheduleService
                 . ' WHERE schedule_slot_id = ? AND user_id IS NOT NULL'
             );
             $crewStatement->execute(array((int)$slot['id']));
-            $overlapWarnings = $this->resourceConflictWarnings(
+            $overlapWarningDetails = $this->resourceConflictAssessments(
                 $schedulerRecordId,
                 $targetAircraftId,
                 (int)($slot['cohort_id'] ?? 0) ?: null,
@@ -1224,6 +1294,7 @@ final class FlightScheduleService
                 $start,
                 $end
             );
+            $overlapWarnings = array_column($overlapWarningDetails, 'message');
             $this->pdo->prepare(
                 'UPDATE ipca_flight_schedule_slots'
                 . ' SET scheduled_date = ?, scheduled_start_time = ?, scheduled_end_time = ?, aircraft_id = ?, updated_by = ?'
@@ -1246,10 +1317,15 @@ final class FlightScheduleService
         return array(
             'scheduler_record_id' => $schedulerRecordId,
             'warnings' => $overlapWarnings,
+            'warning_details' => $overlapWarningDetails,
         );
     }
 
-    public function cancelSlot(string $schedulerRecordId, ?int $actorUserId = null): void
+    public function cancelSlot(
+        string $schedulerRecordId,
+        ?int $actorUserId = null,
+        ?string $expectedUpdatedAt = null
+    ): void
     {
         $schedulerRecordId = strtolower(trim($schedulerRecordId));
         if (!$this->isUuid($schedulerRecordId)) {
@@ -1258,8 +1334,8 @@ final class FlightScheduleService
         $this->pdo->beginTransaction();
         try {
             $statement = $this->pdo->prepare(
-                'SELECT id, claimed_dispatch_uuid FROM ipca_flight_schedule_slots'
-                . ' WHERE scheduler_record_id = ? LIMIT 1 FOR UPDATE'
+                'SELECT id, status, claimed_dispatch_uuid, updated_at FROM ipca_flight_schedule_slots'
+                . ' WHERE scheduler_record_id = ? LIMIT 1' . $this->lockClause()
             );
             $statement->execute(array($schedulerRecordId));
             $slot = $statement->fetch(PDO::FETCH_ASSOC);
@@ -1269,9 +1345,16 @@ final class FlightScheduleService
             if (trim((string)($slot['claimed_dispatch_uuid'] ?? '')) !== '') {
                 throw new RuntimeException('A claimed schedule slot cannot be cancelled.');
             }
+            if (strtolower((string)($slot['status'] ?? '')) !== 'scheduled') {
+                throw new RuntimeException('A locked reservation cannot be cancelled.');
+            }
+            if ($expectedUpdatedAt !== null && trim($expectedUpdatedAt) !== '') {
+                $this->assertExpectedUpdatedAt($slot, $expectedUpdatedAt);
+            }
             $this->pdo->prepare(
                 "UPDATE ipca_flight_schedule_slots SET status = 'cancelled', updated_by = ? WHERE id = ?"
             )->execute(array($actorUserId, (int)$slot['id']));
+            $this->identityWrite()->cancelReservationIfPresent($schedulerRecordId);
             $this->pdo->commit();
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
@@ -1279,6 +1362,11 @@ final class FlightScheduleService
             }
             throw $e;
         }
+    }
+
+    public function reconcileUnlinkedCompletedDispatchesForRange(string $fromDate, string $toDate): void
+    {
+        $this->reconcileUnlinkedCompletedDispatches($this->date($fromDate), $this->date($toDate));
     }
 
     private function reconcileUnlinkedCompletedDispatches(string $fromDate, string $toDate): void
@@ -2052,6 +2140,36 @@ final class FlightScheduleService
     }
 
     /**
+     * Existing production semantics are advisory: overlapping resources are
+     * returned as structured warnings and do not block a reservation.
+     *
+     * @param list<int> $crewUserIds
+     * @return list<array<string,mixed>>
+     */
+    public function assessResourceConflicts(
+        string $recordId,
+        int $aircraftId,
+        ?int $cohortId,
+        array $crewUserIds,
+        string $start,
+        string $end
+    ): array {
+        $recordId = strtolower(trim($recordId));
+        if ($recordId === '') {
+            $recordId = '00000000-0000-0000-0000-000000000000';
+        }
+        return $this->resourceConflictAssessments(
+            $recordId,
+            $aircraftId,
+            $cohortId,
+            array_values(array_unique(array_filter(array_map('intval', $crewUserIds)))),
+            $this->timestamp($start, 'scheduled start'),
+            $this->timestamp($end, 'scheduled end'),
+            false
+        );
+    }
+
+    /**
      * @param list<int> $crewUserIds
      * @return list<string>
      */
@@ -2063,7 +2181,27 @@ final class FlightScheduleService
         string $start,
         string $end
     ): array {
+        return array_column(
+            $this->resourceConflictAssessments($recordId, $aircraftId, $cohortId, $crewUserIds, $start, $end),
+            'message'
+        );
+    }
+
+    /**
+     * @param list<int> $crewUserIds
+     * @return list<array<string,mixed>>
+     */
+    private function resourceConflictAssessments(
+        string $recordId,
+        int $aircraftId,
+        ?int $cohortId,
+        array $crewUserIds,
+        string $start,
+        string $end,
+        bool $lockRows = true
+    ): array {
         $warnings = array();
+        $lockClause = $lockRows ? $this->lockClause() : '';
         $aircraftConflict = $this->pdo->prepare(
             "SELECT scheduler_record_id FROM ipca_flight_schedule_slots
              WHERE scheduler_record_id <> ?
@@ -2071,11 +2209,18 @@ final class FlightScheduleService
                AND status IN ('scheduled', 'claimed')
                AND scheduled_start_time < ?
                AND scheduled_end_time > ?
-             LIMIT 1 FOR UPDATE"
+             LIMIT 1" . $lockClause
         );
         $aircraftConflict->execute(array($recordId, $aircraftId, $end, $start));
-        if ($aircraftConflict->fetchColumn() !== false) {
-            $warnings[] = 'The selected aircraft is already reserved during this time.';
+        $aircraftConflictId = $aircraftConflict->fetchColumn();
+        if ($aircraftConflictId !== false) {
+            $warnings[] = array(
+                'code' => 'aircraft_overlap',
+                'resource_type' => 'aircraft',
+                'resource_id' => $aircraftId,
+                'message' => 'The selected aircraft is already reserved during this time.',
+                'conflicting_reservation_uuid' => (string)$aircraftConflictId,
+            );
         }
 
         if ($cohortId !== null) {
@@ -2086,18 +2231,25 @@ final class FlightScheduleService
                    AND status IN ('scheduled', 'claimed')
                    AND scheduled_start_time < ?
                    AND scheduled_end_time > ?
-                 LIMIT 1 FOR UPDATE"
+                 LIMIT 1" . $lockClause
             );
             $cohortConflict->execute(array($recordId, $cohortId, $end, $start));
-            if ($cohortConflict->fetchColumn() !== false) {
-                $warnings[] = 'The selected cohort already has a reservation during this time.';
+            $cohortConflictId = $cohortConflict->fetchColumn();
+            if ($cohortConflictId !== false) {
+                $warnings[] = array(
+                    'code' => 'cohort_overlap',
+                    'resource_type' => 'cohort',
+                    'resource_id' => $cohortId,
+                    'message' => 'The selected cohort already has a reservation during this time.',
+                    'conflicting_reservation_uuid' => (string)$cohortConflictId,
+                );
             }
         }
 
         if ($crewUserIds !== array()) {
             $placeholders = implode(',', array_fill(0, count($crewUserIds), '?'));
             $crewConflict = $this->pdo->prepare(
-                "SELECT c.user_id
+                "SELECT c.user_id, s.scheduler_record_id
                  FROM ipca_flight_schedule_crew c
                  INNER JOIN ipca_flight_schedule_slots s ON s.id = c.schedule_slot_id
                  WHERE s.scheduler_record_id <> ?
@@ -2105,11 +2257,18 @@ final class FlightScheduleService
                    AND s.status IN ('scheduled', 'claimed')
                    AND s.scheduled_start_time < ?
                    AND s.scheduled_end_time > ?
-                 LIMIT 1 FOR UPDATE"
+                 LIMIT 1" . $lockClause
             );
             $crewConflict->execute(array_merge(array($recordId), $crewUserIds, array($end, $start)));
-            if ($crewConflict->fetchColumn() !== false) {
-                $warnings[] = 'A selected crew member is already reserved during this time.';
+            $crewConflictRow = $crewConflict->fetch(PDO::FETCH_ASSOC);
+            if (is_array($crewConflictRow)) {
+                $warnings[] = array(
+                    'code' => 'crew_overlap',
+                    'resource_type' => 'user',
+                    'resource_id' => (int)$crewConflictRow['user_id'],
+                    'message' => 'A selected crew member is already reserved during this time.',
+                    'conflicting_reservation_uuid' => (string)$crewConflictRow['scheduler_record_id'],
+                );
             }
         }
         return $warnings;
@@ -2210,6 +2369,100 @@ final class FlightScheduleService
         // Preserve intentional scheduling/validation RuntimeExceptions.
         // PDOException and other technical failures are sanitized for the UI.
         return $e instanceof RuntimeException && !($e instanceof PDOException);
+    }
+
+    /**
+     * Newly assigned people must be active and unexpired. Existing historical
+     * participants may remain on an edited reservation until explicitly changed.
+     *
+     * @param list<array<string,mixed>> $crew
+     * @param list<int> $existingCrewUserIds
+     */
+    public function assertCrewUsersEligible(array $crew, array $existingCrewUserIds = array()): void
+    {
+        $userIds = array_values(array_unique(array_filter(array_map(
+            static fn(array $member): int => (int)($member['user_id'] ?? $member['person_id'] ?? 0),
+            $crew
+        ))));
+        if ($userIds === array()) {
+            return;
+        }
+        $existing = array_fill_keys(array_map('intval', $existingCrewUserIds), true);
+        $idsToValidate = array_values(array_filter(
+            $userIds,
+            static fn(int $id): bool => !isset($existing[$id])
+        ));
+        if ($idsToValidate === array()) {
+            return;
+        }
+        $placeholders = implode(',', array_fill(0, count($idsToValidate), '?'));
+        $statement = $this->pdo->prepare(
+            "SELECT id, status, account_valid_until FROM users WHERE id IN ($placeholders)"
+        );
+        $statement->execute($idsToValidate);
+        $eligible = array();
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $user) {
+            $status = strtolower(trim((string)($user['status'] ?? '')));
+            $validUntil = trim((string)($user['account_valid_until'] ?? ''));
+            $validUntilTimestamp = $validUntil === '' ? null : strtotime($validUntil . ' UTC');
+            $notExpired = $validUntil === ''
+                || ($validUntilTimestamp !== false && $validUntilTimestamp >= time());
+            if ($status === 'active' && $notExpired) {
+                $eligible[(int)$user['id']] = true;
+            }
+        }
+        foreach ($idsToValidate as $userId) {
+            if (!isset($eligible[$userId])) {
+                throw new RuntimeException('Every newly assigned crew member must use an active, eligible user account.');
+            }
+        }
+    }
+
+    /** @param list<array<string,mixed>> $crew */
+    private function assertCrewComposition(string $reservationType, array $crew): void
+    {
+        $seen = array();
+        $primaryCustomers = 0;
+        $picCount = 0;
+        foreach ($crew as $member) {
+            $userId = (int)($member['user_id'] ?? $member['person_id'] ?? 0);
+            $name = trim((string)($member['person_name'] ?? ''));
+            $role = strtolower(trim((string)($member['role'] ?? '')));
+            if ($userId <= 0 && $name === '' && $role === '') {
+                continue;
+            }
+            if ($userId <= 0 || $name === '' || $role === '') {
+                throw new RuntimeException('Every crew position must use a valid user account and role.');
+            }
+            if (isset($seen[$userId])) {
+                throw new RuntimeException('Each crew position must use a different user account.');
+            }
+            $seen[$userId] = true;
+            $primaryCustomers += !empty($member['is_primary_customer']) ? 1 : 0;
+            $picCount += !empty($member['is_pic']) ? 1 : 0;
+        }
+        if ($primaryCustomers !== 1) {
+            throw new RuntimeException('Select exactly one primary customer for the reservation.');
+        }
+        if ($reservationType === 'flight_training' && ($picCount < 1 || $picCount > 2)) {
+            throw new RuntimeException('Select one or two pilots logging PIC for flight training.');
+        }
+    }
+
+    /** @param array<string,mixed> $row */
+    private function assertExpectedUpdatedAt(array $row, string $expectedUpdatedAt): void
+    {
+        $expected = str_replace('T', ' ', trim($expectedUpdatedAt));
+        $actual = str_replace('T', ' ', trim((string)($row['updated_at'] ?? '')));
+        $precision = str_contains($expected, '.') && str_contains($actual, '.') ? 23 : 19;
+        if (substr($actual, 0, $precision) !== substr($expected, 0, $precision)) {
+            throw new RuntimeException('This reservation changed in another session. Reload the schedule and try again.');
+        }
+    }
+
+    private function lockClause(): string
+    {
+        return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite' ? '' : ' FOR UPDATE';
     }
 
     private function date(string $value): string

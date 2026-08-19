@@ -1,0 +1,407 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B10000000000000000000001 /* IPCASchedulingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* IPCASchedulingApp.swift */; };
+		B10000000000000000000002 /* SchedulerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* SchedulerModels.swift */; };
+		B10000000000000000000003 /* SchedulerAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* SchedulerAPIClient.swift */; };
+		B10000000000000000000004 /* SchedulerServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* SchedulerServices.swift */; };
+		B10000000000000000000005 /* SchedulerFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* SchedulerFixtures.swift */; };
+		B10000000000000000000006 /* SchedulingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* SchedulingSession.swift */; };
+		B10000000000000000000007 /* IPCATheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* IPCATheme.swift */; };
+		B10000000000000000000008 /* SchedulerComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* SchedulerComponents.swift */; };
+		B10000000000000000000009 /* RootShellViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* RootShellViews.swift */; };
+		B1000000000000000000000A /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* TodayView.swift */; };
+		B1000000000000000000000B /* ScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000B /* ScheduleView.swift */; };
+		B1000000000000000000000C /* FilterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* FilterSheet.swift */; };
+		B1000000000000000000000D /* DetailMoreViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000D /* DetailMoreViews.swift */; };
+		B1000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000E /* Assets.xcassets */; };
+		B1000000000000000000000F /* SchedulerPhase2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000F /* SchedulerPhase2Tests.swift */; };
+		B10000000000000000000010 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* XCTest.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B30000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B90000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B70000000000000000000001;
+			remoteInfo = IPCAScheduling;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		B20000000000000000000001 /* IPCASchedulingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCASchedulingApp.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* SchedulerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerModels.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* SchedulerAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerAPIClient.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* SchedulerServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerServices.swift; sourceTree = "<group>"; };
+		B20000000000000000000005 /* SchedulerFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerFixtures.swift; sourceTree = "<group>"; };
+		B20000000000000000000006 /* SchedulingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulingSession.swift; sourceTree = "<group>"; };
+		B20000000000000000000007 /* IPCATheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCATheme.swift; sourceTree = "<group>"; };
+		B20000000000000000000008 /* SchedulerComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerComponents.swift; sourceTree = "<group>"; };
+		B20000000000000000000009 /* RootShellViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootShellViews.swift; sourceTree = "<group>"; };
+		B2000000000000000000000A /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		B2000000000000000000000B /* ScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleView.swift; sourceTree = "<group>"; };
+		B2000000000000000000000C /* FilterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterSheet.swift; sourceTree = "<group>"; };
+		B2000000000000000000000D /* DetailMoreViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailMoreViews.swift; sourceTree = "<group>"; };
+		B2000000000000000000000E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B2000000000000000000000F /* SchedulerPhase2Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerPhase2Tests.swift; sourceTree = "<group>"; };
+		B20000000000000000000010 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		B20000000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20000000000000000000012 /* IPCAScheduling.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IPCAScheduling.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000013 /* IPCASchedulingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = IPCASchedulingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B40000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B40000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000010 /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B50000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				B50000000000000000000002 /* IPCAScheduling */,
+				B50000000000000000000003 /* IPCASchedulingTests */,
+				B50000000000000000000004 /* Frameworks */,
+				B50000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B50000000000000000000002 /* IPCAScheduling */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* IPCASchedulingApp.swift */,
+				B20000000000000000000002 /* SchedulerModels.swift */,
+				B20000000000000000000003 /* SchedulerAPIClient.swift */,
+				B20000000000000000000004 /* SchedulerServices.swift */,
+				B20000000000000000000005 /* SchedulerFixtures.swift */,
+				B20000000000000000000006 /* SchedulingSession.swift */,
+				B20000000000000000000007 /* IPCATheme.swift */,
+				B20000000000000000000008 /* SchedulerComponents.swift */,
+				B20000000000000000000009 /* RootShellViews.swift */,
+				B2000000000000000000000A /* TodayView.swift */,
+				B2000000000000000000000B /* ScheduleView.swift */,
+				B2000000000000000000000C /* FilterSheet.swift */,
+				B2000000000000000000000D /* DetailMoreViews.swift */,
+				B2000000000000000000000E /* Assets.xcassets */,
+				B20000000000000000000011 /* Info.plist */,
+			);
+			path = IPCAScheduling;
+			sourceTree = "<group>";
+		};
+		B50000000000000000000003 /* IPCASchedulingTests */ = {
+			isa = PBXGroup;
+			children = (
+				B2000000000000000000000F /* SchedulerPhase2Tests.swift */,
+			);
+			path = IPCASchedulingTests;
+			sourceTree = "<group>";
+		};
+		B50000000000000000000004 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000010 /* XCTest.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B50000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000012 /* IPCAScheduling.app */,
+				B20000000000000000000013 /* IPCASchedulingTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B70000000000000000000001 /* IPCAScheduling */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BA0000000000000000000001 /* Build configuration list for PBXNativeTarget "IPCAScheduling" */;
+			buildPhases = (
+				B60000000000000000000001 /* Sources */,
+				B40000000000000000000001 /* Frameworks */,
+				B60000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = IPCAScheduling;
+			productName = IPCAScheduling;
+			productReference = B20000000000000000000012 /* IPCAScheduling.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B70000000000000000000002 /* IPCASchedulingTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BA0000000000000000000002 /* Build configuration list for PBXNativeTarget "IPCASchedulingTests" */;
+			buildPhases = (
+				B60000000000000000000003 /* Sources */,
+				B40000000000000000000002 /* Frameworks */,
+				B60000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B80000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = IPCASchedulingTests;
+			productName = IPCASchedulingTests;
+			productReference = B20000000000000000000013 /* IPCASchedulingTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B90000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1630;
+				LastUpgradeCheck = 1630;
+				TargetAttributes = {
+					B70000000000000000000001 = {
+						CreatedOnToolsVersion = 16.3;
+					};
+					B70000000000000000000002 = {
+						CreatedOnToolsVersion = 16.3;
+						TestTargetID = B70000000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = BA0000000000000000000003 /* Build configuration list for PBXProject "IPCAScheduling" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B50000000000000000000001;
+			productRefGroup = B50000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B70000000000000000000001 /* IPCAScheduling */,
+				B70000000000000000000002 /* IPCASchedulingTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B60000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1000000000000000000000E /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B60000000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* IPCASchedulingApp.swift in Sources */,
+				B10000000000000000000002 /* SchedulerModels.swift in Sources */,
+				B10000000000000000000003 /* SchedulerAPIClient.swift in Sources */,
+				B10000000000000000000004 /* SchedulerServices.swift in Sources */,
+				B10000000000000000000005 /* SchedulerFixtures.swift in Sources */,
+				B10000000000000000000006 /* SchedulingSession.swift in Sources */,
+				B10000000000000000000007 /* IPCATheme.swift in Sources */,
+				B10000000000000000000008 /* SchedulerComponents.swift in Sources */,
+				B10000000000000000000009 /* RootShellViews.swift in Sources */,
+				B1000000000000000000000A /* TodayView.swift in Sources */,
+				B1000000000000000000000B /* ScheduleView.swift in Sources */,
+				B1000000000000000000000C /* FilterSheet.swift in Sources */,
+				B1000000000000000000000D /* DetailMoreViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B60000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1000000000000000000000F /* SchedulerPhase2Tests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B80000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B70000000000000000000001 /* IPCAScheduling */;
+			targetProxy = B30000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		BB0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		BB0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		BB0000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W9RY547Y4P;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = IPCAScheduling/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.scheduling;
+				PRODUCT_MODULE_NAME = IPCAScheduling;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		BB0000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W9RY547Y4P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = IPCAScheduling/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.scheduling;
+				PRODUCT_MODULE_NAME = IPCAScheduling;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		BB0000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.scheduling.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IPCAScheduling.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IPCAScheduling";
+			};
+			name = Debug;
+		};
+		BB0000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ipca.scheduling.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/IPCAScheduling.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/IPCAScheduling";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BA0000000000000000000001 /* Build configuration list for PBXNativeTarget "IPCAScheduling" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0000000000000000000003 /* Debug */,
+				BB0000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BA0000000000000000000002 /* Build configuration list for PBXNativeTarget "IPCASchedulingTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0000000000000000000005 /* Debug */,
+				BB0000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BA0000000000000000000003 /* Build configuration list for PBXProject "IPCAScheduling" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB0000000000000000000001 /* Debug */,
+				BB0000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B90000000000000000000001 /* Project object */;
+}

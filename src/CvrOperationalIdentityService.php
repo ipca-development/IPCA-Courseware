@@ -749,6 +749,40 @@ final class CvrOperationalIdentityService
     }
 
     /**
+     * Cancel canonical reservation state without deleting route or evidence.
+     * Returns false when this legacy slot has no canonical identity row.
+     */
+    public function cancelReservationIfPresent(string $reservationUuid): bool
+    {
+        $reservationUuid = self::normalizeUuid($reservationUuid, 'reservation_uuid');
+        try {
+            $reservation = $this->findReservationByUuid($reservationUuid);
+        } catch (PDOException $e) {
+            $missingTable = in_array((string)$e->getCode(), array('42S02', 'HY000'), true)
+                && str_contains(strtolower($e->getMessage()), 'ipca_operational_reservations');
+            if ($missingTable) {
+                return false;
+            }
+            throw $e;
+        }
+        if (!is_array($reservation)) {
+            return false;
+        }
+        $this->pdo->prepare(
+            "UPDATE ipca_operational_reservation_legs
+                SET status = 'cancelled'
+              WHERE reservation_uuid = ?
+                AND status <> 'cancelled'"
+        )->execute(array($reservationUuid));
+        $this->pdo->prepare(
+            "UPDATE ipca_operational_reservations
+                SET status = 'cancelled'
+              WHERE reservation_uuid = ?"
+        )->execute(array($reservationUuid));
+        return true;
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     public function findLegByUuid(string $legUuid): ?array
