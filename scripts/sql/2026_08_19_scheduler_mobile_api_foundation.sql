@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS ipca_scheduler_api_mutations (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  actor_user_id BIGINT UNSIGNED NOT NULL,
+  actor_user_id INT NOT NULL,
   organization_id BIGINT UNSIGNED NOT NULL,
   idempotency_key VARCHAR(128) NOT NULL,
   request_sha256 CHAR(64) NOT NULL,

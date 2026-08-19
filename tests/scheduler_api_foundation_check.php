@@ -514,6 +514,7 @@ $migration = file_get_contents(
 $checks['migration stores mutation receipts without a parallel schedule table'] =
     str_contains($migration, 'ipca_scheduler_api_mutations')
     && str_contains($migration, 'BIGINT UNSIGNED NOT NULL')
+    && str_contains($migration, 'actor_user_id INT NOT NULL')
     && str_contains($migration, 'reservation_uuid')
     && !str_contains($migration, 'CREATE TABLE IF NOT EXISTS ipca_scheduler_reservations');
 
