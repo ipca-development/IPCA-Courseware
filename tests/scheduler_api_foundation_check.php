@@ -7,7 +7,18 @@ require_once __DIR__ . '/../src/FlightScheduleService.php';
 require_once __DIR__ . '/../src/scheduler/SchedulerApiService.php';
 require_once __DIR__ . '/../src/scheduler/SchedulerVisibilityService.php';
 
-$pdo = new PDO('sqlite::memory:');
+final class SchedulerCountingPdo extends PDO
+{
+    public int $preparedStatementCount = 0;
+
+    public function prepare(string $query, array $options = array()): PDOStatement|false
+    {
+        $this->preparedStatementCount++;
+        return parent::prepare($query, $options);
+    }
+}
+
+$pdo = new SchedulerCountingPdo('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 $pdo->exec("CREATE TABLE users (
@@ -339,6 +350,45 @@ $checks['aircraft and crew overlap remain allowed structured warnings'] =
     && array_reduce($warningDetails, static fn(bool $ok, array $warning): bool =>
         $ok && !empty($warning['conflicting_reservation_uuid']), true);
 
+// Range enrichment uses the same half-open/status semantics in a bounded batch.
+$rangeOverlapA = '41000000-0000-4000-8000-000000000001';
+$rangeOverlapB = '41000000-0000-4000-8000-000000000002';
+$rangeTouching = '41000000-0000-4000-8000-000000000003';
+$rangeCancelled = '41000000-0000-4000-8000-000000000004';
+$pdo->exec("INSERT INTO ipca_aircraft_devices
+ (id, registration, display_name, aircraft_type, home_airport, active)
+ VALUES (70, 'N70TEST', 'Overlap Aircraft', 'Test Type', 'KPSP', 1)");
+$pdo->exec("INSERT INTO cohorts (id, name) VALUES (70, 'Overlap Cohort')");
+$pdo->exec("INSERT INTO ipca_flight_schedule_slots
+ (scheduler_record_id, organization_id, scheduled_date, scheduled_start_time, scheduled_end_time,
+  aircraft_id, cohort_id, status)
+ VALUES
+ ('$rangeOverlapA', 1, '2026-08-24', '2026-08-24 10:00:00', '2026-08-24 12:00:00', 70, 70, 'scheduled'),
+ ('$rangeOverlapB', 1, '2026-08-24', '2026-08-24 11:00:00', '2026-08-24 13:00:00', 70, 70, 'claimed'),
+ ('$rangeTouching', 1, '2026-08-24', '2026-08-24 13:00:00', '2026-08-24 14:00:00', 70, 70, 'scheduled'),
+ ('$rangeCancelled', 1, '2026-08-24', '2026-08-24 11:15:00', '2026-08-24 11:30:00', 70, 70, 'cancelled')");
+$pdo->exec("INSERT INTO ipca_flight_schedule_crew
+ (schedule_slot_id, user_id, person_name_snapshot, crew_role)
+ SELECT id, 2, 'Student', 'student'
+   FROM ipca_flight_schedule_slots
+  WHERE scheduler_record_id IN ('$rangeOverlapA', '$rangeOverlapB', '$rangeTouching', '$rangeCancelled')");
+
+$manyRecordIds = array($rangeOverlapA, $rangeOverlapB, $rangeTouching);
+for ($index = 1; $index <= 100; $index++) {
+    $manyRecordIds[] = sprintf('49000000-0000-4000-8000-%012d', $index);
+}
+$prepareCountBeforeBatch = $pdo->preparedStatementCount;
+$batchedWarningMap = $flight->assessResourceConflictsForReservations($manyRecordIds);
+$batchPrepareCount = $pdo->preparedStatementCount - $prepareCountBeforeBatch;
+$batchedCodesA = array_column($batchedWarningMap[$rangeOverlapA] ?? array(), 'code');
+$checks['batched overlap projection preserves canonical warning semantics'] =
+    $batchedCodesA === array('aircraft_overlap', 'cohort_overlap', 'crew_overlap')
+    && ($batchedWarningMap[$rangeTouching] ?? null) === array()
+    && ($batchedWarningMap[$rangeOverlapA][0]['conflicting_reservation_uuid'] ?? '') === $rangeOverlapB;
+$checks['overlap projection query count is bounded rather than per reservation'] =
+    count($manyRecordIds) === 103
+    && $batchPrepareCount === 3;
+
 // Reads no longer invoke operational reconciliation.
 $pdo->exec("INSERT INTO ipca_cvr_dispatches
  (id, dispatch_uuid, workflow_flight_record_uuid, scheduler_record_id, status, aircraft_id,
@@ -363,6 +413,29 @@ $checks['normal listSlots reads are side-effect free'] =
 
 // Time contract preserves naive operational-local values across PST/PDT and DST boundaries.
 $api = new SchedulerApiService($pdo);
+$rangeResponse = $api->scheduleRange(
+    array(
+        'user' => array('id' => 1, 'role' => 'admin'),
+        'device' => array('organization_id' => 1),
+    ),
+    '2026-08-24',
+    '2026-08-24'
+);
+$rangeReservations = array();
+foreach ($rangeResponse['reservations'] as $reservation) {
+    $rangeReservations[(string)$reservation['scheduler_record_id']] = $reservation;
+}
+$rangeWarningCodes = array_column(
+    (array)($rangeReservations[$rangeOverlapA]['validation']['warnings'] ?? array()),
+    'code'
+);
+$checks['schedule ranges add per-reservation validation without changing reservation fields'] =
+    $rangeWarningCodes === array('aircraft_overlap', 'cohort_overlap', 'crew_overlap')
+    && ($rangeReservations[$rangeOverlapA]['validation']['result'] ?? '') === 'allowed_with_warning'
+    && ($rangeReservations[$rangeTouching]['validation']['result'] ?? '') === 'allowed'
+    && !isset($rangeReservations[$rangeCancelled])
+    && ($rangeReservations[$rangeOverlapA]['aircraft']['registration'] ?? '') === 'N70TEST'
+    && isset($rangeReservations[$rangeOverlapA]['authorized_actions']);
 $presentLocal = new ReflectionMethod($api, 'localWithMilliseconds');
 $timeFixtures = array(
     '2026-01-15T10:00:00' => '2026-01-15T10:00:00.000',
@@ -382,6 +455,54 @@ $checks['timezone contract is explicit and never appends UTC Z'] =
     $timeOk
     && $bootstrap['operational_timezone'] === 'America/Los_Angeles'
     && $bootstrap['scheduler']['schedule_time_semantics'] === 'timezone_free_operational_local';
+
+$canonicalContext = new SchedulerOperationalContextService(
+    $pdo,
+    'America/Los_Angeles',
+    static fn(): array => array(
+        'home_airport' => 'KCAN',
+        'gate_label' => 'Canonical Test Base',
+        'gate_lat' => 33.6267,
+        'gate_lon' => -116.1597,
+    )
+);
+$canonicalApi = new SchedulerApiService($pdo, $canonicalContext);
+$canonicalBootstrap = $canonicalApi->bootstrap(array(
+    'user' => array('id' => 1, 'uuid' => '', 'email' => '', 'name' => 'Admin', 'role' => 'admin'),
+    'device' => array('organization_id' => 7),
+));
+$canonicalRange = $canonicalApi->scheduleRange(
+    array(
+        'user' => array('id' => 1, 'role' => 'admin'),
+        'device' => array('organization_id' => 7),
+    ),
+    '2026-08-24',
+    '2026-08-24'
+);
+$canonicalBase = $canonicalBootstrap['operational_home_base'] ?? array();
+$rangeBase = $canonicalRange['operational_home_base'] ?? array();
+$astronomy = $canonicalRange['astronomy_days'][0] ?? array();
+$operationalContextSource = file_get_contents(
+    __DIR__ . '/../src/scheduler/SchedulerOperationalContextService.php'
+) ?: '';
+$checks['scheduler API reuses canonical online home-base configuration'] =
+    ($canonicalBase['source'] ?? '') === SchedulerOperationalContextService::SOURCE
+    && ($canonicalBase['airport_identifier'] ?? '') === 'KCAN'
+    && ($canonicalBase['display_name'] ?? '') === 'Canonical Test Base'
+    && (int)($canonicalBase['organization_id'] ?? 0) === 7
+    && $rangeBase === $canonicalBase
+    && str_contains($operationalContextSource, 'tv_kiosk_config()')
+    && str_contains($operationalContextSource, 'new AirportDataService(');
+$checks['server returns actual civil-twilight boundaries in operational local time'] =
+    ($astronomy['date'] ?? '') === '2026-08-24'
+    && ($astronomy['airport_identifier'] ?? '') === 'KCAN'
+    && ($astronomy['operational_timezone'] ?? '') === 'America/Los_Angeles'
+    && ($astronomy['calculation_method'] ?? '') === SchedulerOperationalContextService::ASTRONOMY_METHOD
+    && strcmp((string)$astronomy['morning_civil_twilight_begin'], (string)$astronomy['sunrise']) < 0
+    && strcmp((string)$astronomy['sunrise'], (string)$astronomy['sunset']) < 0
+    && strcmp((string)$astronomy['sunset'], (string)$astronomy['evening_civil_twilight_end']) < 0
+    && !str_ends_with((string)$astronomy['sunrise'], 'Z');
+
 $studentCapabilities = $api->capabilities(array('id' => 2, 'role' => 'student'));
 $staffCapabilities = $api->capabilities(array('id' => 5, 'role' => 'supervisor'));
 $checks['server capabilities derive actions from existing scheduler authorization'] =

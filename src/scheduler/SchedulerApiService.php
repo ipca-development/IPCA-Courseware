@@ -7,6 +7,7 @@ require_once __DIR__ . '/../FlightScheduleService.php';
 require_once __DIR__ . '/../MissionCatalogService.php';
 require_once __DIR__ . '/../communication/CommunicationSupport.php';
 require_once __DIR__ . '/SchedulerApiException.php';
+require_once __DIR__ . '/SchedulerOperationalContextService.php';
 require_once __DIR__ . '/SchedulerVisibilityService.php';
 
 final class SchedulerApiService
@@ -16,22 +17,29 @@ final class SchedulerApiService
 
     private FlightScheduleService $schedule;
     private SchedulerVisibilityService $visibility;
+    private SchedulerOperationalContextService $operationalContext;
 
-    public function __construct(private PDO $pdo)
-    {
+    public function __construct(
+        private PDO $pdo,
+        ?SchedulerOperationalContextService $operationalContext = null
+    ) {
         $this->schedule = new FlightScheduleService($pdo);
         $this->visibility = new SchedulerVisibilityService($pdo);
+        $this->operationalContext = $operationalContext
+            ?? new SchedulerOperationalContextService($pdo, self::OPERATIONAL_TIMEZONE);
     }
 
     /** @param array<string,mixed> $session @return array<string,mixed> */
     public function bootstrap(array $session): array
     {
+        $organizationId = $this->organizationId($session);
         return array(
             'ok' => true,
             'user' => CommunicationSupport::publicUser($session['user']),
-            'organization' => array('id' => $this->organizationId($session)),
+            'organization' => array('id' => $organizationId),
             'capabilities' => $this->capabilities($session['user']),
             'operational_timezone' => self::OPERATIONAL_TIMEZONE,
+            'operational_home_base' => $this->operationalContext->homeBase($organizationId),
             'scheduler' => array(
                 'max_range_days' => self::MAX_RANGE_DAYS,
                 'overlap_policy' => 'warning',
@@ -95,12 +103,30 @@ final class SchedulerApiService
             $type = strtolower(trim((string)($filters['reservation_type'] ?? '')));
             return $type === '' || strtolower((string)($slot['reservation_type'] ?? '')) === $type;
         }));
+        $warningsByReservation = $this->schedule->assessResourceConflictsForReservations(array_map(
+            static fn(array $slot): string => (string)($slot['scheduler_record_id'] ?? ''),
+            $slots
+        ));
+        $organizationId = $this->organizationId($session);
         return array(
             'ok' => true,
             'range' => array('start' => $start, 'end' => $end),
             'operational_timezone' => self::OPERATIONAL_TIMEZONE,
+            'operational_home_base' => $this->operationalContext->homeBase($organizationId),
+            'astronomy_days' => $this->operationalContext->astronomyDays(
+                $organizationId,
+                $start,
+                $end
+            ),
             'reservations' => array_map(
-                fn(array $slot): array => $this->presentReservation($slot, $session, false),
+                function (array $slot) use ($session, $warningsByReservation): array {
+                    $reservation = $this->presentReservation($slot, $session, false);
+                    $recordId = strtolower((string)($slot['scheduler_record_id'] ?? ''));
+                    $reservation['validation'] = $this->validationEnvelope(
+                        $warningsByReservation[$recordId] ?? array()
+                    );
+                    return $reservation;
+                },
                 $slots
             ),
             'refreshed_at' => gmdate('c'),
