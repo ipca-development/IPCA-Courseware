@@ -43,6 +43,11 @@ $status = strtolower(trim((string)($_GET['status'] ?? 'all')));
 if (!in_array($status, $allowedStatuses, true)) {
     $status = 'all';
 }
+$allowedKinds = array('all', 'flight', 'junk', 'unclassified');
+$kind = strtolower(trim((string)($_GET['kind'] ?? 'all')));
+if (!in_array($kind, $allowedKinds, true)) {
+    $kind = 'all';
+}
 $search = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 120);
 $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = 100;
@@ -57,6 +62,9 @@ $stats = array(
     'receiving' => 0,
     'errors' => 0,
     'unique_bytes' => 0,
+    'flight_csv' => 0,
+    'junk' => 0,
+    'unclassified' => 0,
 );
 
 try {
@@ -84,16 +92,38 @@ try {
     $bytesStmt->execute(array($organizationId));
     $stats['unique_bytes'] = (int)$bytesStmt->fetchColumn();
 
+    $classificationStmt = $pdo->prepare(
+        "SELECT COALESCE(SUM(c.source_kind = 'GARMIN_FLIGHT_CSV'), 0) AS flight_csv,
+                COALESCE(SUM(c.id IS NOT NULL AND c.source_kind <> 'GARMIN_FLIGHT_CSV'), 0) AS junk,
+                COALESCE(SUM(c.id IS NULL), 0) AS unclassified
+         FROM (
+             SELECT DISTINCT archive_file_id
+             FROM ipca_garmin_sync_upload_sessions
+             WHERE organization_id = ? AND archive_file_id IS NOT NULL
+         ) owned
+         LEFT JOIN ipca_garmin_sync_file_classifications c
+           ON c.archive_file_id = owned.archive_file_id"
+    );
+    $classificationStmt->execute(array($organizationId));
+    $stats = array_merge($stats, $classificationStmt->fetch(PDO::FETCH_ASSOC) ?: array());
+
     $where = array('s.organization_id = ?');
     $params = array($organizationId);
     if ($status !== 'all') {
         $where[] = 's.status = ?';
         $params[] = $status;
     }
+    if ($kind === 'flight') {
+        $where[] = "c.source_kind = 'GARMIN_FLIGHT_CSV'";
+    } elseif ($kind === 'junk') {
+        $where[] = "c.id IS NOT NULL AND c.source_kind <> 'GARMIN_FLIGHT_CSV'";
+    } elseif ($kind === 'unclassified') {
+        $where[] = 'c.id IS NULL';
+    }
     if ($search !== '') {
-        $where[] = '(s.original_filename LIKE ? OR s.upload_uuid LIKE ? OR s.expected_sha256 LIKE ? OR a.object_uuid LIKE ?)';
+        $where[] = '(s.original_filename LIKE ? OR s.upload_uuid LIKE ? OR s.expected_sha256 LIKE ? OR a.object_uuid LIKE ? OR c.aircraft_registration LIKE ?)';
         $like = '%' . $search . '%';
-        array_push($params, $like, $like, $like, $like);
+        array_push($params, $like, $like, $like, $like, $like);
     }
     $whereSql = implode(' AND ', $where);
 
@@ -101,6 +131,7 @@ try {
         "SELECT COUNT(*)
          FROM ipca_garmin_sync_upload_sessions s
          LEFT JOIN ipca_garmin_sync_archive_files a ON a.id = s.archive_file_id
+         LEFT JOIN ipca_garmin_sync_file_classifications c ON c.archive_file_id = a.id
          WHERE {$whereSql}"
     );
     $countStmt->execute($params);
@@ -112,9 +143,17 @@ try {
                 s.received_chunks_json, s.retry_count, s.last_error_code,
                 s.last_error_message, s.receipt_uuid, s.finalized_at,
                 s.created_at, s.updated_at, a.object_uuid, a.verified_at,
-                d.device_uuid, d.display_name AS device_name
+                d.device_uuid, d.display_name AS device_name,
+                c.source_kind, c.analysis_eligible, c.aircraft_registration,
+                c.product, c.system_identifier, c.classification_reason,
+                EXISTS(
+                    SELECT 1 FROM ipca_aircraft_devices fleet
+                    WHERE UPPER(fleet.registration) = UPPER(c.aircraft_registration)
+                      AND fleet.active = 1
+                ) AS registration_in_active_fleet
          FROM ipca_garmin_sync_upload_sessions s
          LEFT JOIN ipca_garmin_sync_archive_files a ON a.id = s.archive_file_id
+         LEFT JOIN ipca_garmin_sync_file_classifications c ON c.archive_file_id = a.id
          LEFT JOIN ipca_garmin_sync_devices d
            ON d.id = s.device_id AND d.organization_id = s.organization_id
          WHERE {$whereSql}
@@ -134,9 +173,9 @@ try {
 }
 
 $totalPages = max(1, (int)ceil($totalRows / $perPage));
-$queryForPage = static function (int $targetPage) use ($status, $search): string {
+$queryForPage = static function (int $targetPage) use ($status, $kind, $search): string {
     return http_build_query(array_filter(
-        array('status' => $status, 'q' => $search, 'page' => $targetPage),
+        array('status' => $status, 'kind' => $kind, 'q' => $search, 'page' => $targetPage),
         static fn($value): bool => $value !== '' && $value !== 'all'
     ));
 };
@@ -169,6 +208,11 @@ cw_header('Garmin Sync uploaded files');
 .gs-status--duplicate { background:#dbeafe; color:#1e40af; }
 .gs-status--receiving { background:#fef3c7; color:#92400e; }
 .gs-status--error { background:#fee2e2; color:#991b1b; }
+.gs-kind { display:inline-block; border-radius:7px; padding:4px 7px; font-size:.75rem; font-weight:800; }
+.gs-kind--flight { background:#dcfce7; color:#166534; }
+.gs-kind--junk { background:#fee2e2; color:#991b1b; }
+.gs-kind--pending { background:#e2e8f0; color:#475569; }
+.gs-registration { font-size:1rem; font-weight:900; color:#0f172a; }
 .gs-error { margin:16px 0; padding:12px; border:1px solid #fecaca; border-radius:10px; color:#991b1b; background:#fef2f2; }
 .gs-pagination { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:14px; }
 @media (max-width:700px) { .gs-files { padding:14px; } }
@@ -191,6 +235,9 @@ cw_header('Garmin Sync uploaded files');
   <?php else: ?>
     <section class="gs-stats" aria-label="Garmin Sync totals">
       <div class="gs-stat"><strong><?= number_format((int)$stats['unique_files']) ?></strong><span>Unique verified files</span></div>
+      <div class="gs-stat"><strong><?= number_format((int)$stats['flight_csv']) ?></strong><span>Garmin flight CSVs</span></div>
+      <div class="gs-stat"><strong><?= number_format((int)$stats['junk']) ?></strong><span>Junk / unsupported</span></div>
+      <div class="gs-stat"><strong><?= number_format((int)$stats['unclassified']) ?></strong><span>Awaiting classification</span></div>
       <div class="gs-stat"><strong><?= garmin_sync_files_format_bytes((int)$stats['unique_bytes']) ?></strong><span>Verified archive size</span></div>
       <div class="gs-stat"><strong><?= number_format((int)$stats['completed']) ?></strong><span>Completed uploads</span></div>
       <div class="gs-stat"><strong><?= number_format((int)$stats['receiving']) ?></strong><span>Receiving</span></div>
@@ -207,11 +254,19 @@ cw_header('Garmin Sync uploaded files');
         </select>
       </label>
       <label>
-        Filename, upload ID, object ID, or SHA-256
+        File type
+        <select name="kind">
+          <?php foreach ($allowedKinds as $option): ?>
+            <option value="<?= h($option) ?>" <?= $kind === $option ? 'selected' : '' ?>><?= h(ucfirst($option)) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </label>
+      <label>
+        Filename, registration, upload ID, object ID, or SHA-256
         <input type="search" name="q" value="<?= h($search) ?>" size="42" placeholder="Search received files">
       </label>
       <button class="btn btn-primary" type="submit">Filter</button>
-      <?php if ($status !== 'all' || $search !== ''): ?>
+      <?php if ($status !== 'all' || $kind !== 'all' || $search !== ''): ?>
         <a class="btn btn-secondary" href="/admin/garmin_sync_files.php">Clear</a>
       <?php endif; ?>
     </form>
@@ -226,6 +281,8 @@ cw_header('Garmin Sync uploaded files');
         <thead>
           <tr>
             <th>Filename</th>
+            <th>File type</th>
+            <th>Airplane registration</th>
             <th>Status</th>
             <th>Size / received</th>
             <th>Device</th>
@@ -237,7 +294,7 @@ cw_header('Garmin Sync uploaded files');
         </thead>
         <tbody>
           <?php if ($rows === array()): ?>
-            <tr><td colspan="8" class="gs-muted">No Garmin Sync uploads match this view.</td></tr>
+            <tr><td colspan="10" class="gs-muted">No Garmin Sync uploads match this view.</td></tr>
           <?php endif; ?>
           <?php foreach ($rows as $row): ?>
             <?php
@@ -248,9 +305,31 @@ cw_header('Garmin Sync uploaded files');
               }
               $receivedChunks = json_decode((string)($row['received_chunks_json'] ?? '[]'), true);
               $receivedChunkCount = is_array($receivedChunks) ? count($receivedChunks) : 0;
+              $sourceKind = trim((string)($row['source_kind'] ?? ''));
+              $isFlightCsv = $sourceKind === 'GARMIN_FLIGHT_CSV';
             ?>
             <tr>
               <td class="gs-name"><?= h((string)$row['original_filename']) ?></td>
+              <td>
+                <?php if ($isFlightCsv): ?>
+                  <span class="gs-kind gs-kind--flight">Garmin flight CSV</span>
+                <?php elseif ($sourceKind !== ''): ?>
+                  <span class="gs-kind gs-kind--junk">Junk / unsupported</span>
+                <?php else: ?>
+                  <span class="gs-kind gs-kind--pending">Unclassified</span>
+                <?php endif; ?>
+                <?php if (!empty($row['classification_reason'])): ?>
+                  <br><span class="gs-muted"><?= h((string)$row['classification_reason']) ?></span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <?php if (!empty($row['aircraft_registration'])): ?>
+                  <span class="gs-registration"><?= h((string)$row['aircraft_registration']) ?></span>
+                  <?php if (empty($row['registration_in_active_fleet'])): ?><br><span class="gs-muted">Not in active fleet</span><?php endif; ?>
+                <?php else: ?>
+                  <span class="gs-muted"><?= $isFlightCsv ? 'Not identified' : '—' ?></span>
+                <?php endif; ?>
+              </td>
               <td><span class="gs-status gs-status--<?= h($rowStatus) ?>"><?= h($rowStatus) ?></span></td>
               <td>
                 <?= h(garmin_sync_files_format_bytes((int)$row['expected_byte_count'])) ?><br>
