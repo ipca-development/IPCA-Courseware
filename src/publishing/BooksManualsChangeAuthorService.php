@@ -398,6 +398,8 @@ final class BooksManualsChangeAuthorService
         $prompt = implode("\n", array(
             'You are the Amendment Author operating in TARGETED PATCH MODE.',
             'Correct only the supplied unresolved Independent Review checks.',
+            'Use the smallest textual delta that satisfies the invariant. Prefer one changed sentence in one node when that is sufficient.',
+            'Do not repeat the same corrective concept in multiple nodes or sentences.',
             'Do not reinterpret scope, create structure, add sections, or rewrite unaffected wording.',
             'Return only nodes whose identifiers are explicitly listed in allowed_repair_scope.',
             'Preserve durable controlled-manual language and do not invent organizational policy or software capability.',
@@ -518,6 +520,35 @@ final class BooksManualsChangeAuthorService
                 $this->buildAuthorizedBrief($planId),
                 (array)$candidate['section_drafts']
             );
+            $candidate = $this->minimizeTargetedCandidate(
+                $acceptedProposal,
+                $candidate,
+                array_values(array_unique($failedCheckIds)),
+                $changedSections
+            );
+            foreach ($changedSections as $section => $change) {
+                $remainingBefore = array();
+                $remainingAfter = array();
+                foreach ((array)($change['changed_nodes'] ?? array()) as $number) {
+                    $beforeContent = $allDrafts[$section]['nodes'][$number] ?? null;
+                    $afterContent = $candidate['section_drafts'][$section]['nodes'][$number] ?? null;
+                    if ($this->json($beforeContent) === $this->json($afterContent)) {
+                        continue;
+                    }
+                    $remainingBefore[(string)$number] = $beforeContent;
+                    $remainingAfter[(string)$number] = $afterContent;
+                }
+                if ($remainingAfter === array()) {
+                    unset($changedSections[$section]);
+                    continue;
+                }
+                $changedSections[$section]['changed_nodes'] = array_keys($remainingAfter);
+                $changedSections[$section]['before'] = array('nodes' => $remainingBefore);
+                $changedSections[$section]['after'] = array('nodes' => $remainingAfter);
+            }
+            if (array_diff($scopeSections, array_keys($changedSections)) !== array()) {
+                throw new RuntimeException('Minimal targeted correction omitted an affected section.');
+            }
             if ($this->json($candidate['lifecycle'] ?? array())
                 !== $this->json($acceptedProposal['lifecycle'] ?? array())) {
                 throw new RuntimeException('Targeted correction changed the accepted lifecycle model.');
@@ -896,6 +927,74 @@ final class BooksManualsChangeAuthorService
                 'items' => $outside,
             ),
         );
+    }
+
+    /**
+     * Remove redundant node edits while preserving every prior PASS and every
+     * targeted invariant. The model proposes wording; deterministic review
+     * chooses the smallest node set that still passes.
+     *
+     * @param list<string> $targetCheckIds
+     * @param array<string,array<string,mixed>> $changedSections
+     * @return array<string,mixed>
+     */
+    private function minimizeTargetedCandidate(
+        array $acceptedProposal,
+        array $candidate,
+        array $targetCheckIds,
+        array $changedSections
+    ): array {
+        require_once __DIR__ . '/BooksManualsChangeReviewerService.php';
+        $reviewer = new BooksManualsChangeReviewerService($this->pdo, $this->plans);
+        $baselineVerification = $reviewer->verifyReadableAmendmentProposal($acceptedProposal);
+        $baselinePasses = array_fill_keys(array_values(array_map(
+            static fn(array $check): string => (string)$check['check_id'],
+            array_filter(
+                (array)($baselineVerification['review_checks'] ?? array()),
+                static fn(array $check): bool => (string)($check['status'] ?? '') === 'PASS'
+            )
+        )), true);
+        $passes = static function (
+            array $proposal
+        ) use ($reviewer, $targetCheckIds, $baselinePasses): bool {
+            $verification = $reviewer->verifyReadableAmendmentProposal($proposal);
+            $results = array_column(
+                (array)($verification['review_checks'] ?? array()),
+                null,
+                'check_id'
+            );
+            foreach ($targetCheckIds as $checkId) {
+                if ((string)($results[$checkId]['status'] ?? '') !== 'PASS') {
+                    return false;
+                }
+            }
+            foreach (array_keys($baselinePasses) as $checkId) {
+                if ((string)($results[$checkId]['status'] ?? '') !== 'PASS') {
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (!$passes($candidate)) {
+            throw new RuntimeException(
+                'Targeted Author correction did not satisfy its stable check without regression.'
+            );
+        }
+        $changes = array();
+        foreach ($changedSections as $section => $change) {
+            foreach ((array)($change['changed_nodes'] ?? array()) as $number) {
+                $changes[] = array((string)$section, (string)$number);
+            }
+        }
+        foreach (array_reverse($changes) as [$section, $number]) {
+            $trial = $candidate;
+            $trial['section_drafts'][$section]['nodes'][$number] =
+                $acceptedProposal['section_drafts'][$section]['nodes'][$number] ?? null;
+            if ($passes($trial)) {
+                $candidate = $trial;
+            }
+        }
+        return $candidate;
     }
 
     /** @param array<string,mixed> $proposal @return array{valid:bool,failures:list<string>} */
