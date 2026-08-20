@@ -48,6 +48,16 @@ $kind = strtolower(trim((string)($_GET['kind'] ?? 'all')));
 if (!in_array($kind, $allowedKinds, true)) {
     $kind = 'all';
 }
+$allowedActivities = array(
+    'flight' => 'Flight',
+    'power_up' => 'Power-up',
+    'pending' => 'Pending',
+    'all' => 'All',
+);
+$activity = strtolower(trim((string)($_GET['activity'] ?? 'flight')));
+if (!array_key_exists($activity, $allowedActivities)) {
+    $activity = 'flight';
+}
 $search = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 120);
 $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = 100;
@@ -140,6 +150,13 @@ try {
     } elseif ($kind === 'unclassified') {
         $where[] = 'c.id IS NULL';
     }
+    if ($activity === 'flight') {
+        $where[] = "activity.activity_kind = 'FLIGHT'";
+    } elseif ($activity === 'power_up') {
+        $where[] = "activity.activity_kind = 'POWER_UP'";
+    } elseif ($activity === 'pending') {
+        $where[] = "c.source_kind = 'GARMIN_FLIGHT_CSV' AND activity.id IS NULL";
+    }
     if ($search !== '') {
         $where[] = '(s.original_filename LIKE ? OR s.upload_uuid LIKE ? OR s.expected_sha256 LIKE ? OR a.object_uuid LIKE ? OR c.aircraft_registration LIKE ?)';
         $like = '%' . $search . '%';
@@ -152,6 +169,7 @@ try {
          FROM ipca_garmin_sync_upload_sessions s
          LEFT JOIN ipca_garmin_sync_archive_files a ON a.id = s.archive_file_id
          LEFT JOIN ipca_garmin_sync_file_classifications c ON c.archive_file_id = a.id
+         LEFT JOIN ipca_garmin_sync_file_activity_analyses activity ON activity.archive_file_id = a.id
          WHERE {$whereSql}"
     );
     $countStmt->execute($params);
@@ -198,9 +216,9 @@ try {
 }
 
 $totalPages = max(1, (int)ceil($totalRows / $perPage));
-$queryForPage = static function (int $targetPage) use ($status, $kind, $search): string {
+$queryForPage = static function (int $targetPage) use ($status, $kind, $activity, $search): string {
     return http_build_query(array_filter(
-        array('status' => $status, 'kind' => $kind, 'q' => $search, 'page' => $targetPage),
+        array('status' => $status, 'kind' => $kind, 'activity' => $activity, 'q' => $search, 'page' => $targetPage),
         static fn($value): bool => $value !== '' && $value !== 'all'
     ));
 };
@@ -251,7 +269,7 @@ cw_header('Garmin Sync uploaded files');
   <div class="gs-head">
     <div>
       <h1>Garmin Sync uploaded files</h1>
-      <p>Read-only view of uploader sessions and verified archive files for this organization.</p>
+      <p>Read-only view of verified flight files. Power-up logs remain archived and are excluded by default.</p>
     </div>
     <div class="gs-actions">
       <a class="btn btn-secondary" href="/admin/garmin_sync_enrollment.php">Device enrollment</a>
@@ -293,11 +311,19 @@ cw_header('Garmin Sync uploaded files');
         </select>
       </label>
       <label>
+        Activity
+        <select name="activity">
+          <?php foreach ($allowedActivities as $option => $label): ?>
+            <option value="<?= h($option) ?>" <?= $activity === $option ? 'selected' : '' ?>><?= h($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </label>
+      <label>
         Filename, registration, upload ID, object ID, or SHA-256
         <input type="search" name="q" value="<?= h($search) ?>" size="42" placeholder="Search received files">
       </label>
       <button class="btn btn-primary" type="submit">Filter</button>
-      <?php if ($status !== 'all' || $kind !== 'all' || $search !== ''): ?>
+      <?php if ($status !== 'all' || $kind !== 'all' || $activity !== 'flight' || $search !== ''): ?>
         <a class="btn btn-secondary" href="/admin/garmin_sync_files.php">Clear</a>
       <?php endif; ?>
     </form>

@@ -31,11 +31,14 @@ $required = [
     'activity column' => '<th>Activity</th>',
     'red Power-up pill' => 'gs-activity--power-up',
     'green Flight pill' => 'gs-activity--flight',
+    'Flight-only default' => "\$_GET['activity'] ?? 'flight'",
+    'Flight activity query' => "activity.activity_kind = 'FLIGHT'",
+    'preserved Power-up filter' => "'power_up' => 'Power-up'",
     'verified unique-file count' => 'COUNT(DISTINCT archive_file_id)',
     'status filter allowlist' => "'receiving', 'verified', 'duplicate', 'error'",
     'bounded pagination' => '$perPage = 100;',
     'escaped output' => "h((string)\$row['original_filename'])",
-    'read-only description' => 'Read-only view of uploader sessions',
+    'read-only description' => 'Read-only view of verified flight files',
 ];
 
 foreach ($required as $label => $needle) {
