@@ -832,7 +832,7 @@ final class BooksManualsChangeReviewerService
             ),
             'records.occurrence-evidence-complete' => array(
                 'RECORDS', 'MATERIAL', (string)($nodes['4.2'] ?? ''), array('4.2'), array('4.2'),
-                array('/(?:authority|ECCAIRS|external)\s+(?:submissions?|status|updates?)/iu', '/(?:(?:acknowledgement|acceptance|follow-up).{0,80}evidence|evidence.{0,80}(?:acknowledgement|acceptance|follow-up))/isu', '/investigation\s+(?:records?|evidence|content)|findings/iu', '/implementation\s+(?:status|evidence)/iu', '/closure\s+(?:rationale|approval|authorization)/iu'),
+                array('/(?:authority|ECCAIRS|external)\s+(?:submissions?|status|updates?)/iu', '/(?:(?:acknowledgement|acceptance|follow-up).{0,180}evidence|evidence.{0,180}(?:acknowledgement|acceptance|follow-up))/isu', '/investigation\s+(?:records?|evidence|content)|findings/iu', '/implementation\s+(?:status|evidence)/iu', '/closure\s+(?:rationale|approval|authorization|evidence)/iu'),
                 'Control of Records retains authority, investigation, action and closure evidence.',
                 'Section 4.2 does not control all required occurrence evidence.'
             ),

@@ -88,8 +88,9 @@ $semanticEquivalent['section_drafts']['5.7']['nodes']['5.7.3'] =
     'A periodic reconciliation, conducted at least quarterly, shall compare reportable occurrences and ECCAIRS records. '
     . 'Discrepancies and adverse trends shall be reported for systemic action without replacing occurrence-level control.';
 $semanticEquivalent['section_drafts']['4.2']['nodes']['4.2'] =
-    'Evidence of external submissions, receipt or acceptance shall be retained with investigation content, '
-    . 'implementation evidence and the closure rationale.';
+    'A retained evidence set shall cover initial, intermediate and final ECCAIRS submissions or updates '
+    . 'and their acceptance or status where applicable, together with the investigation record, '
+    . 'implementation status and closure evidence.';
 $semanticReview = $reviewer->verifyReadableAmendmentProposal($semanticEquivalent);
 $semanticChecks = array_column(
     (array)$semanticReview['review_checks'],
