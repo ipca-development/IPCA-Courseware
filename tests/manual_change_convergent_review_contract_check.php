@@ -26,6 +26,12 @@ $reviewer = file_get_contents(
 $recovery = file_get_contents(
     $root . '/scripts/recover_manual_change_architect_review.php'
 ) ?: '';
+$historicalRepair = file_get_contents(
+    $root . '/scripts/repair_manual_change_historical_scope.php'
+) ?: '';
+$contentPreview = file_get_contents(
+    $root . '/scripts/prepare_manual_change_review_patch.php'
+) ?: '';
 $planService = file_get_contents(
     $root . '/src/publishing/BooksManualsChangePlanService.php'
 ) ?: '';
@@ -122,6 +128,19 @@ $checks = array(
         && str_contains($resolutionService, 'reconcileVerificationChecks')
         && str_contains($resolutionService, 'checks_fixed')
         && str_contains($resolutionService, 'new_checks'),
+    'historical scope repair is deterministic and separately governed' =>
+        str_contains($historicalRepair, 'HISTORICAL_SCOPE_REPAIR')
+        && str_contains($historicalRepair, 'accepted_steps_2_4_unchanged')
+        && str_contains($historicalRepair, 'source_manual_unchanged')
+        && str_contains($resolutionService, 'repairHistoricalPatchScope')
+        && str_contains($resolutionService, 'REVIEW_DIVERGENCE_RESOLVED'),
+    'content correction previews remain human governed and node scoped' =>
+        str_contains($contentPreview, 'human_acceptance_required')
+        && str_contains($contentPreview, 'allowed_repair_nodes')
+        && str_contains($contentPreview, 'frozen_unaffected_node_count')
+        && str_contains($author, 'current_accepted_wording')
+        && str_contains($author, 'target_state_evidence')
+        && str_contains($author, 'preservation_boundaries'),
     'READY_TO_APPLY is strict and only moves forward' =>
         str_contains($api, "'outcome' => 'READY_TO_APPLY'")
         && str_contains($api, "'unresolved_material_findings' => 0")
@@ -130,7 +149,9 @@ $checks = array(
     'Step 5 is one-question-at-a-time with targeted correction preview' =>
         str_contains($ui, 'Question <?= $questionPosition ?> of')
         && str_contains($ui, 'Current accepted wording')
-        && str_contains($ui, 'Proposed targeted correction')
+        && str_contains($ui, 'Proposed minimal correction')
+        && str_contains($ui, 'Historical Scope Repair')
+        && str_contains($ui, 'Content Correction')
         && str_contains($ui, 'Review Details')
         && str_contains($js, 'answer_review_question')
         && str_contains($js, 'generate_targeted_correction')

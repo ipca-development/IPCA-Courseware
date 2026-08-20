@@ -299,20 +299,37 @@ $reviewPatches = array_values(array_filter(
     (array)($reviewResolutionState['patches'] ?? array()),
     'is_array'
 ));
-$reviewPendingPatch = array_values(array_filter(
+$reviewPendingPatches = array_values(array_filter(
     $reviewPatches,
     static fn(array $patch): bool => in_array(
         strtoupper((string)($patch['status'] ?? '')),
         array('PROPOSED', 'HUMAN_ACCEPTED_PENDING_VERIFICATION'),
         true
     )
-))[0] ?? array();
+));
+$reviewHistoricalScopeRepairs = array_values(array_filter(
+    $reviewPatches,
+    static function (array $patch): bool {
+        $payload = mcw_array($patch['proposed_payload_json'] ?? array());
+        return strtoupper((string)($patch['status'] ?? '')) === 'VERIFIED'
+            && (string)($payload['mode'] ?? '') === 'HISTORICAL_SCOPE_REPAIR';
+    }
+));
 $reviewLatestPatch = $reviewPatches === array() ? array() : $reviewPatches[array_key_last($reviewPatches)];
 $reviewLatestPatchStatus = strtoupper((string)($reviewLatestPatch['status'] ?? ''));
 $reviewLatestPatchVerification = mcw_array($reviewLatestPatch['verification_json'] ?? array());
 $reviewLatestPatchReconciliation = mcw_array(
     $reviewLatestPatchVerification['reconciliation'] ?? array()
 );
+$reviewVerifiedCorrections = 0;
+foreach ($reviewPatches as $candidatePatch) {
+    if (strtoupper((string)($candidatePatch['status'] ?? '')) !== 'VERIFIED') {
+        continue;
+    }
+    $candidateVerification = mcw_array($candidatePatch['verification_json'] ?? array());
+    $candidateReconciliation = mcw_array($candidateVerification['reconciliation'] ?? array());
+    $reviewVerifiedCorrections += (int)($candidateReconciliation['checks_fixed'] ?? 0);
+}
 $reviewRepairGroups = array_values(array_filter(
     (array)($reviewResolutionState['repair_groups'] ?? array()),
     'is_array'
@@ -697,7 +714,7 @@ books_manuals_page_open(array(
           <?php $questionCount = (int)($reviewCounts['HUMAN_DECISION_REQUIRED'] ?? 0); ?>
           <?php $answeredCount = count((array)($reviewResolutionState['answers'] ?? array())); ?>
           <?php $remainingCorrections = (int)($reviewResolutionCounts['UNRESOLVED'] ?? 0); ?>
-          <?php $verifiedCorrections = (int)($reviewLatestPatchReconciliation['checks_fixed'] ?? 0); ?>
+          <?php $verifiedCorrections = $reviewVerifiedCorrections; ?>
           <div class="mcw-review-summary">
             <strong><?= $reviewResolutionReady ? 'Independent Review Complete' : 'Independent Review' ?></strong>
             <span>✓ <?= (int)($reviewCheckCounts['PASS'] ?? 0) ?> checks passed</span>
@@ -709,6 +726,16 @@ books_manuals_page_open(array(
           <?php if ($reviewLatestPatchStatus === 'VERIFICATION_FAILED'): ?>
             <div class="mcw-review-result is-review"><h3>Correction accepted, but Independent Review found <?= (int)($reviewLatestPatchReconciliation['checks_after'] ?? $remainingCorrections) ?> remaining issue<?= (int)($reviewLatestPatchReconciliation['checks_after'] ?? $remainingCorrections) === 1 ? '' : 's' ?>.</h3><p>The human acceptance is preserved. Only checks that independently passed were retained as verified.</p></div>
           <?php endif; ?>
+          <?php foreach ($reviewHistoricalScopeRepairs as $scopeRepair): ?>
+            <?php $scopeRepairPayload = mcw_array($scopeRepair['proposed_payload_json'] ?? array()); ?>
+            <?php $scopeRepairVerification = mcw_array($scopeRepair['verification_json'] ?? array()); ?>
+            <section class="mcw-review-result is-ready">
+              <span class="mcw-kicker">Historical Scope Repair</span>
+              <h3>Restores wording unintentionally changed by failed Patch 1.</h3>
+              <p><strong>Restored accepted nodes:</strong> <?= h(implode(' · ', array_map('strval', (array)($scopeRepairPayload['allowed_repair_nodes'] ?? array())))) ?></p>
+              <p>Exact Step 4 fingerprints restored · frozen nodes byte-identical · <?= h((string)($scopeRepairVerification['patch_verification_status'] ?? 'VERIFIED')) ?></p>
+            </section>
+          <?php endforeach; ?>
 
           <?php if (!empty($reviewResolutionState['review_divergence_detected'])): ?>
             <div class="mcw-review-result is-review"><h3>Review divergence detected</h3><p>Automatic correction has stopped because the accepted patch changed wording outside the reconstructed repair scope. Review Details contains the diagnostic state.</p></div>
@@ -750,22 +777,29 @@ books_manuals_page_open(array(
               <label class="mcw-field"><span>Optional explanation</span><textarea rows="3" data-mcw-review-answer-explanation></textarea></label>
               <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-answer-review-question>Continue</button>
             </section>
-          <?php elseif ($reviewPendingPatch !== array()): ?>
-            <?php $patchPayload = mcw_array($reviewPendingPatch['proposed_payload_json'] ?? array()); ?>
-            <?php $patchAwaitingVerification = strtoupper((string)($reviewPendingPatch['status'] ?? '')) === 'HUMAN_ACCEPTED_PENDING_VERIFICATION'; ?>
-            <section class="mcw-targeted-patch" data-mcw-targeted-patch="<?= (int)$reviewPendingPatch['id'] ?>">
-              <span class="mcw-kicker"><?= $patchAwaitingVerification ? 'Correction accepted · verification pending' : 'Targeted correction' ?></span>
-              <?php foreach ((array)($patchPayload['changed_sections'] ?? array()) as $section => $change): ?>
-                <?php if (!is_array($change)) continue; ?>
-                <h3><?= h((string)$section) ?></h3>
-                <h4>Current accepted wording</h4>
-                <pre><?= h(implode("\n\n", array_map('strval', (array)($change['before']['nodes'] ?? array())))) ?></pre>
-                <h4>Proposed targeted correction</h4>
-                <pre><?= h(implode("\n\n", array_map('strval', (array)($change['after']['nodes'] ?? array())))) ?></pre>
-                <h4>Why this correction is required</h4><p><?= h((string)($change['reason'] ?? 'Resolve the identified Independent Review finding.')) ?></p>
-              <?php endforeach; ?>
-              <div class="mcw-step-actions"><?php if (!$patchAwaitingVerification): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-request-patch-adjustment>Request Adjustment</button><?php endif; ?><button class="app-btn app-btn--primary" type="button" data-mcw-accept-targeted-patch><?= $patchAwaitingVerification ? 'Retry Verification' : 'Accept Correction' ?></button></div>
-            </section>
+          <?php elseif ($reviewPendingPatches !== array()): ?>
+            <?php foreach ($reviewPendingPatches as $reviewPendingPatch): ?>
+              <?php $patchPayload = mcw_array($reviewPendingPatch['proposed_payload_json'] ?? array()); ?>
+              <?php $patchAwaitingVerification = strtoupper((string)($reviewPendingPatch['status'] ?? '')) === 'HUMAN_ACCEPTED_PENDING_VERIFICATION'; ?>
+              <?php $repairChecks = array_values(array_filter((array)($patchPayload['repair_checks'] ?? array()), 'is_array')); ?>
+              <section class="mcw-targeted-patch" data-mcw-targeted-patch="<?= (int)$reviewPendingPatch['id'] ?>">
+                <span class="mcw-kicker"><?= $patchAwaitingVerification ? 'Content Correction accepted · verification pending' : 'Content Correction' ?></span>
+                <?php foreach ((array)($patchPayload['changed_sections'] ?? array()) as $section => $change): ?>
+                  <?php if (!is_array($change)) continue; ?>
+                  <h3><?= h((string)$section) ?> · <?= h(implode(' · ', array_map('strval', (array)($change['changed_nodes'] ?? array())))) ?></h3>
+                  <h4>Current accepted wording</h4>
+                  <pre><?= h(implode("\n\n", array_map('strval', (array)($change['before']['nodes'] ?? array())))) ?></pre>
+                  <h4>Proposed minimal correction</h4>
+                  <pre><?= h(implode("\n\n", array_map('strval', (array)($change['after']['nodes'] ?? array())))) ?></pre>
+                  <h4>Why this is required</h4><p><?= h((string)($change['reason'] ?? 'Resolve the identified Independent Review finding.')) ?></p>
+                <?php endforeach; ?>
+                <h4>Check(s) expected to resolve</h4>
+                <ul><?php foreach ($repairChecks as $repairCheck): ?><li><code><?= h((string)($repairCheck['check_id'] ?? '')) ?></code> — <?= h((string)($repairCheck['required_invariant'] ?? '')) ?></li><?php endforeach; ?></ul>
+                <h4>Unchanged content</h4>
+                <p><?= count((array)($patchPayload['frozen_node_fingerprints'] ?? array())) ?> unaffected accepted nodes are frozen by byte fingerprint.</p>
+                <div class="mcw-step-actions"><?php if (!$patchAwaitingVerification): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-request-patch-adjustment>Request Adjustment</button><?php endif; ?><button class="app-btn app-btn--primary" type="button" data-mcw-accept-targeted-patch><?= $patchAwaitingVerification ? 'Retry Verification' : 'Accept Correction' ?></button></div>
+              </section>
+            <?php endforeach; ?>
           <?php elseif ($reviewResolutionReady): ?>
             <div class="mcw-review-result is-ready"><h3>✓ No unresolved issues</h3><ul><li>✓ Accepted requirements represented</li><li>✓ Human decisions resolved</li><li>✓ Targeted corrections verified</li><li>✓ Known limitations correctly represented</li><li>✓ Accepted structure preserved</li><li>✓ Unaffected wording unchanged</li><li>✓ No integrity blockers</li></ul></div>
             <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-run-review>Continue to Apply</button>

@@ -188,11 +188,15 @@ final class BooksManualsChangeReviewResolutionService
              WHERE plan_id=? AND review_id=?',
             array($planId, $reviewId)
         );
-        $diverged = array_values(array_filter(
-            $cycles,
-            static fn(array $cycle): bool =>
-                (string)$cycle['status'] === 'REVIEW_DIVERGENCE_DETECTED'
-        )) !== array();
+        $diverged = false;
+        foreach ($cycles as $cycle) {
+            $cycleStatus = (string)($cycle['status'] ?? '');
+            if ($cycleStatus === 'REVIEW_DIVERGENCE_DETECTED') {
+                $diverged = true;
+            } elseif ($cycleStatus === 'REVIEW_DIVERGENCE_RESOLVED') {
+                $diverged = false;
+            }
+        }
         $ready = $baseline !== null
             && $reviewId > 0
             && $unresolved === 0
@@ -385,11 +389,6 @@ final class BooksManualsChangeReviewResolutionService
         array $patchResult,
         int $actorUserId
     ): array {
-        $plan = $this->plans->getPlan($planId);
-        if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
-            || (string)($plan['stage'] ?? '') !== 'review') {
-            throw new RuntimeException('Targeted corrections may only be proposed during Independent Review.');
-        }
         if (($patchResult['schema'] ?? '') !== 'ipca.manual-change-targeted-patch.v1'
             || empty($patchResult['accepted_structure_nodes_unchanged'])
             || empty($patchResult['lifecycle_unchanged'])
@@ -400,56 +399,118 @@ final class BooksManualsChangeReviewResolutionService
         if ($findingIds === array()) {
             throw new InvalidArgumentException('A targeted correction must resolve a specific review finding.');
         }
-        $fingerprint = hash('sha256', $this->json(array(
-            'baseline_id' => $baselineId,
-            'parent_draft_id' => $parentDraftId,
-            'finding_ids' => $findingIds,
-            'scope' => $patchResult['scope_sections'],
-            'candidate' => $patchResult['candidate_proposal'],
-        )));
-        $existing = $this->row(
-            'SELECT * FROM ipca_manual_ai_architect_review_patches
-             WHERE plan_id=? AND patch_fingerprint=? LIMIT 1',
-            array($planId, $fingerprint)
-        );
-        if ($existing !== null) {
-            if (strtoupper((string)($existing['status'] ?? '')) === 'ADJUSTMENT_REQUESTED') {
-                throw new RuntimeException('The regenerated correction did not address the requested adjustment.');
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_ai_architect_plans SET id=id WHERE id=?'
+            )->execute(array($planId));
+            $plan = $this->plans->getPlan($planId);
+            if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($plan['stage'] ?? '') !== 'review') {
+                throw new RuntimeException(
+                    'Targeted corrections may only be proposed during Independent Review.'
+                );
             }
-            return $existing;
+            $latestDraft = $this->latestAcceptedDraft($planId);
+            if ($latestDraft === null || (int)$latestDraft['id'] !== $parentDraftId) {
+                throw new RuntimeException(
+                    'The targeted correction preview is stale because the review candidate changed.'
+                );
+            }
+            $findingRows = $this->rows(
+                'SELECT f.id,f.review_id,m.resolution_status
+                 FROM ipca_manual_ai_architect_review_findings f
+                 JOIN ipca_manual_ai_architect_review_check_metadata m ON m.finding_id=f.id
+                 WHERE f.plan_id=? AND f.id IN ('
+                    . implode(',', array_fill(0, count($findingIds), '?')) . ')',
+                array_merge(array($planId), $findingIds)
+            );
+            $reviewIds = array_values(array_unique(array_map(
+                static fn(array $row): int => (int)$row['review_id'],
+                $findingRows
+            )));
+            if (count($findingRows) !== count($findingIds)
+                || count($reviewIds) !== 1
+                || array_values(array_filter(
+                    $findingRows,
+                    static fn(array $row): bool =>
+                        strtoupper((string)$row['resolution_status']) !== 'UNRESOLVED'
+                )) !== array()) {
+                throw new RuntimeException(
+                    'The targeted correction findings are no longer unresolved and patchable.'
+                );
+            }
+            if ($baselineId !== $this->baselineIdForReview($reviewIds[0])) {
+                throw new RuntimeException(
+                    'The targeted correction preview is stale because the review baseline changed.'
+                );
+            }
+            $fingerprint = hash('sha256', $this->json(array(
+                'baseline_id' => $baselineId,
+                'parent_draft_id' => $parentDraftId,
+                'finding_ids' => $findingIds,
+                'scope' => $patchResult['scope_sections'],
+                'candidate' => $patchResult['candidate_proposal'],
+            )));
+            $existing = $this->row(
+                'SELECT * FROM ipca_manual_ai_architect_review_patches
+                 WHERE plan_id=? AND patch_fingerprint=? LIMIT 1',
+                array($planId, $fingerprint)
+            );
+            if ($existing !== null) {
+                if (strtoupper((string)($existing['status'] ?? '')) === 'ADJUSTMENT_REQUESTED') {
+                    throw new RuntimeException(
+                        'The regenerated correction did not address the requested adjustment.'
+                    );
+                }
+                $this->pdo->commit();
+                return $existing;
+            }
+            $this->pdo->prepare(
+                "UPDATE ipca_manual_ai_architect_review_patches
+                 SET status='SUPERSEDED'
+                 WHERE plan_id=? AND UPPER(status)='ADJUSTMENT_REQUESTED'"
+            )->execute(array($planId));
+            $patchId = $this->plans->save('review_patches', $planId, array(
+                'patch_uuid' => $this->uuid(),
+                'baseline_id' => $baselineId,
+                'parent_draft_id' => $parentDraftId,
+                'finding_ids_json' => $findingIds,
+                'scope_json' => array(
+                    'sections' => $patchResult['scope_sections'],
+                    'nodes' => (array)($patchResult['allowed_repair_nodes'] ?? array()),
+                    'failed_check_ids' => (array)($patchResult['failed_check_ids'] ?? array()),
+                ),
+                'before_payload_json' => array_map(
+                    static fn(array $change): mixed => $change['before'] ?? array(),
+                    (array)$patchResult['changed_sections']
+                ),
+                'proposed_payload_json' => $patchResult,
+                'unchanged_fingerprints_json' => $patchResult['unchanged_section_fingerprints'],
+                'patch_fingerprint' => $fingerprint,
+                'status' => 'PROPOSED',
+                'proposed_by' => $actorUserId,
+            ));
+            $this->plans->appendEvent(
+                $planId,
+                'INDEPENDENT_REVIEW_TARGETED_PATCH_PROPOSED',
+                12,
+                array(
+                    'patch_id' => $patchId,
+                    'finding_ids' => $findingIds,
+                    'scope_sections' => $patchResult['scope_sections'],
+                    'patch_fingerprint' => $fingerprint,
+                    'stage_preserved' => 'review',
+                ),
+                $actorUserId
+            );
+            $this->pdo->commit();
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
         }
-        $this->pdo->prepare(
-            "UPDATE ipca_manual_ai_architect_review_patches
-             SET status='SUPERSEDED'
-             WHERE plan_id=? AND UPPER(status)='ADJUSTMENT_REQUESTED'"
-        )->execute(array($planId));
-        $patchId = $this->plans->save('review_patches', $planId, array(
-            'patch_uuid' => $this->uuid(),
-            'baseline_id' => $baselineId,
-            'parent_draft_id' => $parentDraftId,
-            'finding_ids_json' => $findingIds,
-            'scope_json' => array(
-                'sections' => $patchResult['scope_sections'],
-                'nodes' => (array)($patchResult['allowed_repair_nodes'] ?? array()),
-                'failed_check_ids' => (array)($patchResult['failed_check_ids'] ?? array()),
-            ),
-            'before_payload_json' => array_map(
-                static fn(array $change): mixed => $change['before'] ?? array(),
-                (array)$patchResult['changed_sections']
-            ),
-            'proposed_payload_json' => $patchResult,
-            'unchanged_fingerprints_json' => $patchResult['unchanged_section_fingerprints'],
-            'patch_fingerprint' => $fingerprint,
-            'status' => 'PROPOSED',
-            'proposed_by' => $actorUserId,
-        ));
-        $this->plans->appendEvent($planId, 'INDEPENDENT_REVIEW_TARGETED_PATCH_PROPOSED', 12, array(
-            'patch_id' => $patchId,
-            'finding_ids' => $findingIds,
-            'scope_sections' => $patchResult['scope_sections'],
-            'patch_fingerprint' => $fingerprint,
-            'stage_preserved' => 'review',
-        ), $actorUserId);
         return (array)$this->row(
             'SELECT * FROM ipca_manual_ai_architect_review_patches WHERE id=?',
             array($patchId)
@@ -474,7 +535,7 @@ final class BooksManualsChangeReviewResolutionService
         );
         if ($patch === null || !in_array(
             strtoupper((string)$patch['status']),
-            array('PROPOSED', 'ADJUSTMENT_REQUESTED', 'HUMAN_ACCEPTED_PENDING_VERIFICATION'),
+            array('PROPOSED', 'HUMAN_ACCEPTED_PENDING_VERIFICATION'),
             true
         )) {
             throw new RuntimeException('Targeted correction is not available for acceptance.');
@@ -489,6 +550,13 @@ final class BooksManualsChangeReviewResolutionService
         );
         if ($parentDraft === null) {
             throw new RuntimeException('The accepted draft baseline for this correction is unavailable.');
+        }
+        $latestAcceptedDraft = $this->latestAcceptedDraft($planId);
+        if ($latestAcceptedDraft === null
+            || (int)$latestAcceptedDraft['id'] !== (int)$parentDraft['id']) {
+            throw new RuntimeException(
+                'This correction preview is stale because another governed correction changed the review candidate.'
+            );
         }
         $parentPayload = is_array($parentDraft['draft_payload_json'])
             ? $parentDraft['draft_payload_json']
@@ -529,20 +597,44 @@ final class BooksManualsChangeReviewResolutionService
             )
         )));
         if (!$acceptanceAlreadyRecorded) {
-            $this->pdo->prepare(
-                "UPDATE ipca_manual_ai_architect_review_patches
-                 SET status='HUMAN_ACCEPTED_PENDING_VERIFICATION',accepted_by=?,
-                     accepted_at=CURRENT_TIMESTAMP(3)
-                 WHERE id=? AND plan_id=?"
-            )->execute(array($actorUserId, $patchId, $planId));
-            $this->plans->appendEvent($planId, 'INDEPENDENT_REVIEW_PATCH_HUMAN_ACCEPTED', 12, array(
-                'patch_id' => $patchId,
-                'parent_draft_id' => (int)$patch['parent_draft_id'],
-                'finding_ids' => $findingIds,
-                'check_ids' => $targetCheckIds,
-                'verification_pending' => true,
-                'stage_preserved' => 'review',
-            ), $actorUserId);
+            $this->pdo->beginTransaction();
+            try {
+                $this->pdo->prepare(
+                    'UPDATE ipca_manual_ai_architect_plans SET id=id WHERE id=?'
+                )->execute(array($planId));
+                $acceptStmt = $this->pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_review_patches
+                     SET status='HUMAN_ACCEPTED_PENDING_VERIFICATION',accepted_by=?,
+                         accepted_at=CURRENT_TIMESTAMP(3)
+                     WHERE id=? AND plan_id=? AND UPPER(status)='PROPOSED'"
+                );
+                $acceptStmt->execute(array($actorUserId, $patchId, $planId));
+                if ($acceptStmt->rowCount() !== 1) {
+                    throw new RuntimeException(
+                        'Targeted correction changed state before human acceptance could be recorded.'
+                    );
+                }
+                $this->plans->appendEvent(
+                    $planId,
+                    'INDEPENDENT_REVIEW_PATCH_HUMAN_ACCEPTED',
+                    12,
+                    array(
+                        'patch_id' => $patchId,
+                        'parent_draft_id' => (int)$patch['parent_draft_id'],
+                        'finding_ids' => $findingIds,
+                        'check_ids' => $targetCheckIds,
+                        'verification_pending' => true,
+                        'stage_preserved' => 'review',
+                    ),
+                    $actorUserId
+                );
+                $this->pdo->commit();
+            } catch (Throwable $error) {
+                if ($this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+                throw $error;
+            }
         }
         $verification = $reviewer->verifyTargetedPatch(
             $parentPayload,
@@ -551,21 +643,81 @@ final class BooksManualsChangeReviewResolutionService
             array_values((array)($patch['scope_json']['nodes'] ?? $patchPayload['allowed_repair_nodes'] ?? array())),
             $targetCheckIds
         );
-        $versionStmt = $this->pdo->prepare(
-            'SELECT COALESCE(MAX(draft_version),0)+1
-             FROM ipca_manual_ai_architect_drafts WHERE plan_id=?'
-        );
-        $versionStmt->execute(array($planId));
-        $draftVersion = max(1, (int)$versionStmt->fetchColumn());
         $encoded = $this->json($candidate);
         $reviewId = (int)($this->row(
             'SELECT review_id FROM ipca_manual_ai_architect_review_findings
              WHERE plan_id=? AND id=?',
             array($planId, $findingIds[0] ?? 0)
         )['review_id'] ?? 0);
-        $beforeUnresolved = $this->unresolvedCheckIds($planId, $reviewId);
         $this->pdo->beginTransaction();
         try {
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_ai_architect_plans SET id=id WHERE id=?'
+            )->execute(array($planId));
+            $lockedPatch = $this->row(
+                'SELECT * FROM ipca_manual_ai_architect_review_patches
+                 WHERE id=? AND plan_id=? LIMIT 1',
+                array($patchId, $planId)
+            );
+            $lockedLatestDraft = $this->latestAcceptedDraft($planId);
+            $lockedFindings = $findingIds === array() ? array() : $this->rows(
+                'SELECT f.id,m.resolution_status
+                 FROM ipca_manual_ai_architect_review_findings f
+                 JOIN ipca_manual_ai_architect_review_check_metadata m ON m.finding_id=f.id
+                 WHERE f.plan_id=? AND f.id IN ('
+                    . implode(',', array_fill(0, count($findingIds), '?')) . ')',
+                array_merge(array($planId), $findingIds)
+            );
+            $lockedStatus = strtoupper((string)($lockedPatch['status'] ?? ''));
+            if (in_array($lockedStatus, array('VERIFIED', 'VERIFICATION_FAILED'), true)) {
+                $this->pdo->commit();
+                return $this->state($planId, $reviewId);
+            }
+            if ($lockedPatch === null
+                || $lockedStatus !== 'HUMAN_ACCEPTED_PENDING_VERIFICATION') {
+                throw new RuntimeException(
+                    'Targeted correction is no longer pending verification.'
+                );
+            }
+            $stale = $lockedLatestDraft === null
+                || (int)$lockedLatestDraft['id'] !== (int)$parentDraft['id']
+                || $this->baselineIdForReview($reviewId) !== (int)$patch['baseline_id']
+                || count($lockedFindings) !== count($findingIds)
+                || array_values(array_filter(
+                    $lockedFindings,
+                    static fn(array $row): bool =>
+                        strtoupper((string)$row['resolution_status']) !== 'UNRESOLVED'
+                )) !== array();
+            if ($stale) {
+                $this->pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_review_patches
+                     SET status='SUPERSEDED'
+                     WHERE id=? AND plan_id=?
+                       AND UPPER(status)='HUMAN_ACCEPTED_PENDING_VERIFICATION'"
+                )->execute(array($patchId, $planId));
+                $this->plans->appendEvent(
+                    $planId,
+                    'INDEPENDENT_REVIEW_STALE_PATCH_SUPERSEDED',
+                    12,
+                    array(
+                        'patch_id' => $patchId,
+                        'parent_draft_id' => (int)$patch['parent_draft_id'],
+                        'stage_preserved' => 'review',
+                    ),
+                    $actorUserId
+                );
+                $this->pdo->commit();
+                throw new RuntimeException(
+                    'This accepted correction became stale and was superseded before verification.'
+                );
+            }
+            $versionStmt = $this->pdo->prepare(
+                'SELECT COALESCE(MAX(draft_version),0)+1
+                 FROM ipca_manual_ai_architect_drafts WHERE plan_id=?'
+            );
+            $versionStmt->execute(array($planId));
+            $draftVersion = max(1, (int)$versionStmt->fetchColumn());
+            $beforeUnresolved = $this->unresolvedCheckIds($planId, $reviewId);
             $draftId = $this->plans->save('drafts', $planId, array(
                 'draft_uuid' => $this->uuid(),
                 'structure_proposal_id' => $parentDraft['structure_proposal_id'],
@@ -577,10 +729,11 @@ final class BooksManualsChangeReviewResolutionService
                 'draft_payload_json' => $candidate,
                 'created_by' => $actorUserId,
             ));
+            $newBaseline = $this->freezeBaseline($planId, $reviewId, $actorUserId);
             $reconciliation = $this->reconcileVerificationChecks(
                 $planId,
                 $reviewId,
-                (int)$patch['baseline_id'],
+                (int)$newBaseline['id'],
                 (array)($verification['review_checks'] ?? array()),
                 $actorUserId,
                 array(
@@ -618,6 +771,12 @@ final class BooksManualsChangeReviewResolutionService
                 $patchId,
                 $planId,
             ));
+            $this->pdo->prepare(
+                "UPDATE ipca_manual_ai_architect_review_patches
+                 SET status='SUPERSEDED'
+                 WHERE plan_id=? AND id<>? AND parent_draft_id=?
+                   AND UPPER(status)='PROPOSED'"
+            )->execute(array($planId, $patchId, (int)$patch['parent_draft_id']));
             $this->plans->appendEvent($planId, 'INDEPENDENT_REVIEW_PATCH_VERIFICATION_COMPLETED', 12, array(
                 'patch_id' => $patchId,
                 'parent_draft_id' => (int)$patch['parent_draft_id'],
@@ -629,6 +788,15 @@ final class BooksManualsChangeReviewResolutionService
                 'accepted_structure_preserved' => $verification['accepted_structure_preserved'],
                 'stage_preserved' => 'review',
             ), $actorUserId);
+            $afterUnresolved = $this->unresolvedCheckIds($planId, $reviewId);
+            $this->recordCycle($planId, $reviewId, (int)$newBaseline['id'], array(
+                'checks_before' => count($beforeUnresolved),
+                'checks_fixed' => count(array_diff($beforeUnresolved, $afterUnresolved)),
+                'checks_remaining' => count(array_intersect($beforeUnresolved, $afterUnresolved)),
+                'new_checks' => count(array_diff($afterUnresolved, $beforeUnresolved)),
+                'checks_after' => count($afterUnresolved),
+                'patch_id' => $patchId,
+            ));
             $this->pdo->commit();
         } catch (Throwable $error) {
             if ($this->pdo->inTransaction()) {
@@ -636,16 +804,6 @@ final class BooksManualsChangeReviewResolutionService
             }
             throw $error;
         }
-        $newBaseline = $this->freezeBaseline($planId, $reviewId, $actorUserId);
-        $afterUnresolved = $this->unresolvedCheckIds($planId, $reviewId);
-        $this->recordCycle($planId, $reviewId, (int)$newBaseline['id'], array(
-            'checks_before' => count($beforeUnresolved),
-            'checks_fixed' => count(array_diff($beforeUnresolved, $afterUnresolved)),
-            'checks_remaining' => count(array_intersect($beforeUnresolved, $afterUnresolved)),
-            'new_checks' => count(array_diff($afterUnresolved, $beforeUnresolved)),
-            'checks_after' => count($afterUnresolved),
-            'patch_id' => $patchId,
-        ));
         return $this->state($planId, $reviewId);
     }
 
@@ -869,6 +1027,397 @@ final class BooksManualsChangeReviewResolutionService
         return $this->state($planId, $reviewId);
     }
 
+    /**
+     * Restore only the nodes that a failed historical patch changed outside
+     * its true semantic repair scope. This is deterministic baseline
+     * restoration, not newly authored amendment content.
+     *
+     * @return array{patch:array<string,mixed>,state:array<string,mixed>}
+     */
+    public function repairHistoricalPatchScope(
+        int $planId,
+        int $reviewId,
+        int $failedPatchId,
+        int $actorUserId,
+        BooksManualsChangeReviewerService $reviewer,
+        array $expectedRepairNodes
+    ): array {
+        $plan = $this->plans->getPlan($planId);
+        if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
+            || (string)($plan['stage'] ?? '') !== 'review') {
+            throw new RuntimeException('Historical scope repair is limited to the plan owner in Step 5.');
+        }
+        $expectedRepairNodes = array_values(array_unique(array_map(
+            'strval',
+            $expectedRepairNodes
+        )));
+        sort($expectedRepairNodes, SORT_NATURAL);
+        $failedPatch = $this->row(
+            'SELECT * FROM ipca_manual_ai_architect_review_patches
+             WHERE id=? AND plan_id=? LIMIT 1',
+            array($failedPatchId, $planId)
+        );
+        if ($failedPatch === null
+            || strtoupper((string)($failedPatch['status'] ?? '')) !== 'VERIFICATION_FAILED'
+            || (int)($failedPatch['resulting_draft_id'] ?? 0) <= 0) {
+            throw new RuntimeException('The failed historical patch is unavailable for deterministic repair.');
+        }
+        foreach ((array)$this->state($planId, $reviewId)['patches'] as $existingPatch) {
+            $existingPayload = (array)($existingPatch['proposed_payload_json'] ?? array());
+            if ((string)($existingPayload['mode'] ?? '') === 'HISTORICAL_SCOPE_REPAIR'
+                && (int)($existingPayload['source_patch_id'] ?? 0) === $failedPatchId
+                && strtoupper((string)($existingPatch['status'] ?? '')) === 'VERIFIED') {
+                $storedNodes = array_values(array_unique(array_map(
+                    'strval',
+                    (array)($existingPayload['allowed_repair_nodes'] ?? array())
+                )));
+                sort($storedNodes, SORT_NATURAL);
+                $storedFingerprints = (array)(
+                    $existingPayload['restored_node_fingerprints'] ?? array()
+                );
+                $existingVerification = (array)($existingPatch['verification_json'] ?? array());
+                $sourceDraft = $this->row(
+                    'SELECT * FROM ipca_manual_ai_architect_drafts
+                     WHERE id=? AND plan_id=? LIMIT 1',
+                    array((int)$failedPatch['parent_draft_id'], $planId)
+                );
+                $resultDraft = $this->row(
+                    'SELECT * FROM ipca_manual_ai_architect_drafts
+                     WHERE id=? AND plan_id=? LIMIT 1',
+                    array((int)$existingPatch['resulting_draft_id'], $planId)
+                );
+                $parentBaseline = $this->row(
+                    'SELECT * FROM ipca_manual_ai_architect_review_baselines
+                     WHERE id=? AND plan_id=? AND review_id=? LIMIT 1',
+                    array((int)$existingPatch['baseline_id'], $planId, $reviewId)
+                );
+                $resultBaseline = $this->row(
+                    'SELECT * FROM ipca_manual_ai_architect_review_baselines
+                     WHERE id=? AND plan_id=? AND review_id=? LIMIT 1',
+                    array(
+                        (int)($existingVerification['result_baseline_id'] ?? 0),
+                        $planId,
+                        $reviewId,
+                    )
+                );
+                $fingerprintsValid = $sourceDraft !== null && $resultDraft !== null;
+                foreach ($expectedRepairNodes as $node) {
+                    $sourceContent = $this->nodeContent(
+                        (array)($sourceDraft['draft_payload_json'] ?? array()),
+                        $node
+                    );
+                    $resultContent = $this->nodeContent(
+                        (array)($resultDraft['draft_payload_json'] ?? array()),
+                        $node
+                    );
+                    $expectedFingerprint = hash('sha256', $this->json($sourceContent));
+                    $fingerprintsValid = $fingerprintsValid
+                        && $sourceContent !== null
+                        && $resultContent === $sourceContent
+                        && hash_equals(
+                            $expectedFingerprint,
+                            (string)($storedFingerprints[$node] ?? '')
+                        );
+                }
+                if ($storedNodes !== $expectedRepairNodes
+                    || !$fingerprintsValid
+                    || $parentBaseline === null
+                    || $resultBaseline === null
+                    || (int)($existingVerification['parent_baseline_id'] ?? 0)
+                        !== (int)$existingPatch['baseline_id']
+                    || (int)($existingVerification['result_baseline_id'] ?? 0) <= 0) {
+                    throw new RuntimeException(
+                        'Existing historical scope repair failed idempotent provenance validation.'
+                    );
+                }
+                return array(
+                    'patch' => $existingPatch,
+                    'state' => $this->state($planId, $reviewId),
+                );
+            }
+        }
+        $scopeFinding = $this->row(
+            'SELECT f.*,m.check_id,m.review_status,m.resolution_status,m.affected_nodes_json
+             FROM ipca_manual_ai_architect_review_findings f
+             JOIN ipca_manual_ai_architect_review_check_metadata m ON m.finding_id=f.id
+             WHERE f.plan_id=? AND f.review_id=?
+               AND m.check_id=? AND m.resolution_status=? LIMIT 1',
+            array(
+                $planId,
+                $reviewId,
+                'integrity.historical-patch.true-repair-scope',
+                'BLOCKED',
+            )
+        );
+        if ($scopeFinding === null) {
+            throw new RuntimeException('No unresolved historical patch scope blocker requires restoration.');
+        }
+        $acceptedStep4 = $this->row(
+            'SELECT * FROM ipca_manual_ai_architect_drafts
+             WHERE id=? AND plan_id=? LIMIT 1',
+            array((int)$failedPatch['parent_draft_id'], $planId)
+        );
+        $currentDraft = $this->latestAcceptedDraft($planId);
+        if ($acceptedStep4 === null || $currentDraft === null
+            || (int)$currentDraft['id'] !== (int)$failedPatch['resulting_draft_id']) {
+            throw new RuntimeException('Historical scope repair requires the untouched failed-patch candidate.');
+        }
+        $failedVerification = (array)($failedPatch['verification_json'] ?? array());
+        $provenanceNodes = array_values(array_unique(array_map(
+            'strval',
+            (array)($failedVerification['historical_unrelated_changed_nodes'] ?? array())
+        )));
+        $blockedNodes = array_values(array_unique(array_map(
+            'strval',
+            (array)$scopeFinding['affected_nodes_json']
+        )));
+        sort($provenanceNodes, SORT_NATURAL);
+        sort($blockedNodes, SORT_NATURAL);
+        if ($provenanceNodes === array()
+            || $blockedNodes !== $provenanceNodes
+            || $expectedRepairNodes !== $provenanceNodes) {
+            throw new RuntimeException(
+                'Historical scope repair nodes do not match the explicitly governed repair set and failed-patch provenance.'
+            );
+        }
+        $acceptedPayload = (array)$acceptedStep4['draft_payload_json'];
+        $currentPayload = (array)$currentDraft['draft_payload_json'];
+        if ((string)($acceptedPayload['wizard_status'] ?? '') !== 'accepted'
+            || (string)($currentPayload['wizard_status'] ?? '') !== 'accepted') {
+            throw new RuntimeException('Historical scope repair requires accepted review-candidate provenance.');
+        }
+        $repair = $this->buildHistoricalScopeRepairCandidate(
+            $acceptedPayload,
+            $currentPayload,
+            $provenanceNodes
+        );
+        $candidate = $repair['candidate_proposal'];
+        $candidate['wizard_status'] = 'accepted';
+        $candidate['historical_scope_repair'] = array(
+            'mode' => 'HISTORICAL_SCOPE_REPAIR',
+            'source_patch_id' => $failedPatchId,
+            'accepted_step4_draft_id' => (int)$acceptedStep4['id'],
+            'parent_review_candidate_id' => (int)$currentDraft['id'],
+            'restored_nodes' => $repair['restored_nodes'],
+            'deterministic' => true,
+            'architect_rerun_performed' => false,
+            'production_applied' => false,
+        );
+        $verification = $reviewer->verifyTargetedPatch(
+            $currentPayload,
+            $candidate,
+            $repair['scope_sections'],
+            $repair['restored_nodes'],
+            array()
+        );
+        $historicalCheck = array(
+            'check_id' => 'integrity.historical-patch.true-repair-scope',
+            'check_version' => BooksManualsChangeReviewerService::CHECK_VERSION,
+            'category' => 'INTEGRITY',
+            'severity' => 'HARD',
+            'status' => 'PASS',
+            'affected_sections' => $repair['scope_sections'],
+            'affected_nodes' => $repair['restored_nodes'],
+            'required_invariant' => 'A correction preserves wording outside the nodes required by unresolved semantic checks.',
+            'observed_state' => 'Every unnecessary Patch 1 node was restored byte-for-byte from accepted draft 13.',
+            'evidence_references' => array(
+                'accepted_step4_draft:' . (int)$acceptedStep4['id'],
+                'failed_patch:' . $failedPatchId,
+                'failed_patch_draft:' . (int)$currentDraft['id'],
+            ),
+            'human_explanation' => 'Historical Patch 1 scope expansion was deterministically restored.',
+            'allowed_repair_scope' => array(),
+            'known_limitations' => array(),
+        );
+        $verification['review_checks'][] = $historicalCheck;
+        $versionStmt = $this->pdo->prepare(
+            'SELECT COALESCE(MAX(draft_version),0)+1
+             FROM ipca_manual_ai_architect_drafts WHERE plan_id=?'
+        );
+        $versionStmt->execute(array($planId));
+        $draftVersion = max(1, (int)$versionStmt->fetchColumn());
+        $parentBaselineId = $this->baselineIdForReview($reviewId);
+        $beforeUnresolved = $this->unresolvedCheckIds($planId, $reviewId);
+        $patchPayload = array(
+            'schema' => 'ipca.manual-change-historical-scope-repair.v1',
+            'mode' => 'HISTORICAL_SCOPE_REPAIR',
+            'source_patch_id' => $failedPatchId,
+            'parent_baseline_id' => $parentBaselineId,
+            'scope_sections' => $repair['scope_sections'],
+            'allowed_repair_nodes' => $repair['restored_nodes'],
+            'changed_sections' => $repair['changed_sections'],
+            'candidate_proposal' => $candidate,
+            'failed_check_ids' => array('integrity.historical-patch.true-repair-scope'),
+            'repair_checks' => array($historicalCheck),
+            'restored_node_fingerprints' => $repair['restored_node_fingerprints'],
+            'frozen_node_fingerprints' => $repair['frozen_node_fingerprints'],
+            'unchanged_section_fingerprints' => $repair['unchanged_section_fingerprints'],
+            'accepted_structure_nodes_unchanged' => true,
+            'lifecycle_unchanged' => true,
+            'architect_rerun_performed' => false,
+            'production_applied' => false,
+        );
+        $patchFingerprint = hash('sha256', $this->json(array(
+            'mode' => 'HISTORICAL_SCOPE_REPAIR',
+            'source_patch_id' => $failedPatchId,
+            'accepted_step4_draft_id' => (int)$acceptedStep4['id'],
+            'parent_draft_id' => (int)$currentDraft['id'],
+            'restored_node_fingerprints' => $repair['restored_node_fingerprints'],
+        )));
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_ai_architect_plans SET id=id WHERE id=?'
+            )->execute(array($planId));
+            $lockedCurrentDraft = $this->latestAcceptedDraft($planId);
+            $lockedScopeFinding = $this->row(
+                'SELECT m.resolution_status
+                 FROM ipca_manual_ai_architect_review_check_metadata m
+                 WHERE m.finding_id=? AND m.plan_id=? LIMIT 1',
+                array((int)$scopeFinding['id'], $planId)
+            );
+            if ($lockedCurrentDraft === null
+                || (int)$lockedCurrentDraft['id'] !== (int)$currentDraft['id']
+                || strtoupper((string)($lockedScopeFinding['resolution_status'] ?? ''))
+                    !== 'BLOCKED'
+                || $this->baselineIdForReview($reviewId) !== $parentBaselineId) {
+                throw new RuntimeException(
+                    'Historical scope repair became stale before deterministic restoration.'
+                );
+            }
+            $versionStmt->execute(array($planId));
+            $draftVersion = max(1, (int)$versionStmt->fetchColumn());
+            $draftId = $this->plans->save('drafts', $planId, array(
+                'draft_uuid' => $this->uuid(),
+                'structure_proposal_id' => $currentDraft['structure_proposal_id'],
+                'target_book_version_id' => $currentDraft['target_book_version_id'],
+                'draft_version' => $draftVersion,
+                'status' => 'generated',
+                'source_fingerprint' => $currentDraft['source_fingerprint'],
+                'content_fingerprint' => hash('sha256', $this->json($candidate)),
+                'draft_payload_json' => $candidate,
+                'created_by' => $actorUserId,
+            ));
+            $newBaseline = $this->freezeBaseline($planId, $reviewId, $actorUserId);
+            $baselineId = (int)$newBaseline['id'];
+            $patchId = $this->plans->save('review_patches', $planId, array(
+                'patch_uuid' => $this->uuid(),
+                'baseline_id' => $parentBaselineId,
+                'parent_draft_id' => (int)$currentDraft['id'],
+                'resulting_draft_id' => $draftId,
+                'finding_ids_json' => array((int)$scopeFinding['id']),
+                'scope_json' => array(
+                    'sections' => $repair['scope_sections'],
+                    'nodes' => $repair['restored_nodes'],
+                    'failed_check_ids' => array('integrity.historical-patch.true-repair-scope'),
+                    'repair_type' => 'HISTORICAL_SCOPE_REPAIR',
+                ),
+                'before_payload_json' => array_map(
+                    static fn(array $change): array => (array)$change['before'],
+                    $repair['changed_sections']
+                ),
+                'proposed_payload_json' => $patchPayload,
+                'unchanged_fingerprints_json' => $repair['unchanged_section_fingerprints'],
+                'patch_fingerprint' => $patchFingerprint,
+                'status' => 'VERIFIED',
+                'verification_json' => array(),
+                'proposed_by' => $actorUserId,
+                'verified_at' => gmdate('Y-m-d H:i:s.v'),
+            ));
+            $reconciliation = $this->reconcileVerificationChecks(
+                $planId,
+                $reviewId,
+                $baselineId,
+                (array)$verification['review_checks'],
+                $actorUserId,
+                array(
+                    'patch_id' => $patchId,
+                    'repair_type' => 'HISTORICAL_SCOPE_REPAIR',
+                    'resulting_draft_id' => $draftId,
+                )
+            );
+            $historicalResult = array_values(array_filter(
+                (array)$verification['review_checks'],
+                static fn(array $check): bool =>
+                    (string)($check['check_id'] ?? '')
+                        === 'integrity.historical-patch.true-repair-scope'
+            ));
+            $verified = count($historicalResult) === 1
+                && (string)($historicalResult[0]['status'] ?? '') === 'PASS'
+                && (int)$reconciliation['checks_fixed'] === 1
+                && (int)$reconciliation['new_checks'] === 0
+                && (int)$reconciliation['regressed_checks'] === 0
+                && !empty($verification['frozen_nodes_byte_unchanged'])
+                && !empty($verification['accepted_structure_preserved']);
+            if (!$verified) {
+                throw new RuntimeException('Deterministic historical scope restoration did not pass scoped verification.');
+            }
+            $verification['reconciliation'] = $reconciliation;
+            $verification['patch_verification_status'] = 'VERIFIED';
+            $verification['repair_type'] = 'HISTORICAL_SCOPE_REPAIR';
+            $verification['parent_baseline_id'] = $parentBaselineId;
+            $verification['result_baseline_id'] = $baselineId;
+            $verification['restored_node_fingerprints'] = $repair['restored_node_fingerprints'];
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_ai_architect_review_patches
+                 SET resulting_draft_id=?,verification_json=?,verified_at=?
+                 WHERE id=? AND plan_id=?'
+            )->execute(array(
+                $draftId,
+                $this->json($verification),
+                gmdate('Y-m-d H:i:s.v'),
+                $patchId,
+                $planId,
+            ));
+            $this->plans->appendEvent(
+                $planId,
+                'INDEPENDENT_REVIEW_HISTORICAL_SCOPE_REPAIR_VERIFIED',
+                12,
+                array(
+                    'patch_id' => $patchId,
+                    'source_patch_id' => $failedPatchId,
+                    'accepted_step4_draft_id' => (int)$acceptedStep4['id'],
+                    'parent_review_candidate_id' => (int)$currentDraft['id'],
+                    'resulting_draft_id' => $draftId,
+                    'restored_nodes' => $repair['restored_nodes'],
+                    'reconciliation' => $reconciliation,
+                    'architect_rerun_performed' => false,
+                    'manual_content_mutated' => false,
+                    'stage_preserved' => 'review',
+                ),
+                $actorUserId
+            );
+            $afterUnresolved = $this->unresolvedCheckIds($planId, $reviewId);
+            $this->recordCycle($planId, $reviewId, $baselineId, array(
+                'checks_before' => count($beforeUnresolved),
+                'checks_fixed' => count(array_diff($beforeUnresolved, $afterUnresolved)),
+                'checks_remaining' => count(array_intersect($beforeUnresolved, $afterUnresolved)),
+                'new_checks' => count(array_diff($afterUnresolved, $beforeUnresolved)),
+                'checks_after' => count($afterUnresolved),
+                'patch_id' => $patchId,
+                'divergence_resolved' => true,
+            ));
+            $this->plans->updatePlan($planId, array(
+                'stage' => 'review',
+                'status' => $afterUnresolved === array() ? 'ready_for_review' : 'blocked',
+                'updated_by' => $actorUserId,
+            ));
+            $this->pdo->commit();
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
+        }
+        return array(
+            'patch' => (array)$this->row(
+                'SELECT * FROM ipca_manual_ai_architect_review_patches WHERE id=?',
+                array($patchId)
+            ),
+            'state' => $this->state($planId, $reviewId),
+        );
+    }
+
     public function requestPatchAdjustment(
         int $planId,
         int $patchId,
@@ -883,15 +1432,44 @@ final class BooksManualsChangeReviewResolutionService
             || (string)($plan['stage'] ?? '') !== 'review') {
             throw new RuntimeException('Targeted correction adjustments belong to Independent Review.');
         }
-        $this->pdo->prepare(
-            "UPDATE ipca_manual_ai_architect_review_patches
-             SET status='ADJUSTMENT_REQUESTED',verification_json=? WHERE id=? AND plan_id=?"
-        )->execute(array($this->json(array('adjustment_reason' => trim($reason))), $patchId, $planId));
-        $this->plans->appendEvent($planId, 'INDEPENDENT_REVIEW_PATCH_ADJUSTMENT_REQUESTED', 12, array(
-            'patch_id' => $patchId,
-            'reason' => trim($reason),
-            'stage_preserved' => 'review',
-        ), $actorUserId);
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_ai_architect_plans SET id=id WHERE id=?'
+            )->execute(array($planId));
+            $stmt = $this->pdo->prepare(
+                "UPDATE ipca_manual_ai_architect_review_patches
+                 SET status='ADJUSTMENT_REQUESTED',verification_json=?
+                 WHERE id=? AND plan_id=? AND UPPER(status)='PROPOSED'"
+            );
+            $stmt->execute(array(
+                $this->json(array('adjustment_reason' => trim($reason))),
+                $patchId,
+                $planId,
+            ));
+            if ($stmt->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'Only a proposed, unaccepted correction can be adjusted.'
+                );
+            }
+            $this->plans->appendEvent(
+                $planId,
+                'INDEPENDENT_REVIEW_PATCH_ADJUSTMENT_REQUESTED',
+                12,
+                array(
+                    'patch_id' => $patchId,
+                    'reason' => trim($reason),
+                    'stage_preserved' => 'review',
+                ),
+                $actorUserId
+            );
+            $this->pdo->commit();
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
+        }
     }
 
     public function explicitlyReopenBaseline(
@@ -1738,6 +2316,136 @@ final class BooksManualsChangeReviewResolutionService
     }
 
     /**
+     * @param list<string> $restoreNodes
+     * @return array{
+     *   candidate_proposal:array<string,mixed>,
+     *   scope_sections:list<string>,
+     *   restored_nodes:list<string>,
+     *   changed_sections:array<string,array<string,mixed>>,
+     *   restored_node_fingerprints:array<string,string>,
+     *   frozen_node_fingerprints:array<string,string>,
+     *   unchanged_section_fingerprints:array<string,string>
+     * }
+     */
+    private function buildHistoricalScopeRepairCandidate(
+        array $acceptedStep4,
+        array $currentCandidate,
+        array $restoreNodes
+    ): array {
+        $restoreNodes = array_values(array_unique(array_filter(array_map(
+            static fn(mixed $node): string => trim((string)$node),
+            $restoreNodes
+        ))));
+        if ($restoreNodes === array()) {
+            throw new RuntimeException('Historical scope repair has no nodes to restore.');
+        }
+        $acceptedDrafts = (array)($acceptedStep4['section_drafts'] ?? array());
+        $currentDrafts = (array)($currentCandidate['section_drafts'] ?? array());
+        if (array_keys($acceptedDrafts) !== array_keys($currentDrafts)) {
+            throw new RuntimeException('Historical scope repair cannot alter the accepted section structure.');
+        }
+        $candidate = $currentCandidate;
+        $restoreSet = array_fill_keys($restoreNodes, true);
+        $restored = array();
+        $scopeSections = array();
+        $changedSections = array();
+        $restoredFingerprints = array();
+        $frozenFingerprints = array();
+        $unchangedSectionFingerprints = array();
+        foreach ($currentDrafts as $section => $currentDraft) {
+            $acceptedDraft = (array)($acceptedDrafts[$section] ?? array());
+            $acceptedNodes = (array)($acceptedDraft['nodes'] ?? array());
+            $currentNodes = (array)($currentDraft['nodes'] ?? array());
+            if (array_keys($acceptedNodes) !== array_keys($currentNodes)) {
+                throw new RuntimeException(
+                    "Historical scope repair cannot alter accepted nodes in Section {$section}."
+                );
+            }
+            $beforeNodes = array();
+            $afterNodes = array();
+            foreach ($currentNodes as $number => $currentContent) {
+                $number = (string)$number;
+                if (isset($restoreSet[$number])) {
+                    if (!array_key_exists($number, $acceptedNodes)) {
+                        throw new RuntimeException("Accepted Step 4 node {$number} is unavailable.");
+                    }
+                    if ($this->json($acceptedNodes[$number]) === $this->json($currentContent)) {
+                        throw new RuntimeException(
+                            "Historical scope repair node {$number} already matches accepted Step 4."
+                        );
+                    }
+                    $candidate['section_drafts'][$section]['nodes'][$number] = $acceptedNodes[$number];
+                    $beforeNodes[$number] = $currentContent;
+                    $afterNodes[$number] = $acceptedNodes[$number];
+                    $restored[] = $number;
+                    $scopeSections[(string)$section] = true;
+                    $restoredFingerprints[$number] = hash(
+                        'sha256',
+                        $this->json($acceptedNodes[$number])
+                    );
+                    continue;
+                }
+                $frozenFingerprints[$number] = hash('sha256', $this->json($currentContent));
+            }
+            if ($beforeNodes !== array()) {
+                $changedSections[(string)$section] = array(
+                    'reason' => 'Restore exact accepted Step 4 wording unintentionally changed by failed Patch 1.',
+                    'repair_type' => 'HISTORICAL_SCOPE_REPAIR',
+                    'changed_nodes' => array_keys($beforeNodes),
+                    'before' => array('nodes' => $beforeNodes),
+                    'after' => array('nodes' => $afterNodes),
+                );
+            } else {
+                $unchangedSectionFingerprints[(string)$section] = hash(
+                    'sha256',
+                    $this->json($currentDraft)
+                );
+            }
+        }
+        sort($restored, SORT_NATURAL);
+        $missing = array_values(array_diff($restoreNodes, $restored));
+        if ($missing !== array()) {
+            throw new RuntimeException(
+                'Historical scope repair could not locate nodes: ' . implode(', ', $missing)
+            );
+        }
+        return array(
+            'candidate_proposal' => $candidate,
+            'scope_sections' => array_keys($scopeSections),
+            'restored_nodes' => $restored,
+            'changed_sections' => $changedSections,
+            'restored_node_fingerprints' => $restoredFingerprints,
+            'frozen_node_fingerprints' => $frozenFingerprints,
+            'unchanged_section_fingerprints' => $unchangedSectionFingerprints,
+        );
+    }
+
+    private function nodeContent(array $proposal, string $node): ?string
+    {
+        foreach ((array)($proposal['section_drafts'] ?? array()) as $draft) {
+            if (array_key_exists($node, (array)($draft['nodes'] ?? array()))) {
+                return (string)$draft['nodes'][$node];
+            }
+        }
+        return null;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function latestAcceptedDraft(int $planId): ?array
+    {
+        foreach (array_reverse($this->rows(
+            "SELECT * FROM ipca_manual_ai_architect_drafts
+             WHERE plan_id=? AND status='generated' ORDER BY id DESC",
+            array($planId)
+        )) as $draft) {
+            if ((string)($draft['draft_payload_json']['wizard_status'] ?? '') === 'accepted') {
+                return $draft;
+            }
+        }
+        return null;
+    }
+
+    /**
      * @param list<array<string,mixed>> $checks
      * @param array<string,mixed> $context
      * @return array{checks_before:int,checks_fixed:int,checks_remaining:int,new_checks:int,regressed_checks:int,checks_after:int}
@@ -1835,20 +2543,27 @@ final class BooksManualsChangeReviewResolutionService
             ? (int)$metricsOverride['checks_after']
             : (int)$state['unresolved_material_findings'];
         $newChecks = (int)($metricsOverride['new_checks'] ?? 0);
-        $alreadyDiverged = array_values(array_filter(
-            $prior,
-            static fn(array $cycle): bool =>
-                (string)$cycle['status'] === 'REVIEW_DIVERGENCE_DETECTED'
-        )) !== array();
-        $diverged = $alreadyDiverged
+        $alreadyDiverged = false;
+        foreach ($prior as $cycle) {
+            $cycleStatus = (string)($cycle['status'] ?? '');
+            if ($cycleStatus === 'REVIEW_DIVERGENCE_DETECTED') {
+                $alreadyDiverged = true;
+            } elseif ($cycleStatus === 'REVIEW_DIVERGENCE_RESOLVED') {
+                $alreadyDiverged = false;
+            }
+        }
+        $divergenceResolved = !empty($metricsOverride['divergence_resolved']);
+        $diverged = !$divergenceResolved && ($alreadyDiverged
             || ($newChecks >= 3 || ($newChecks > 0 && $after > $before))
             || (count($prior) >= 2
                 && $after > (int)$prior[array_key_last($prior)]['unresolved_after']
                 && (int)$prior[array_key_last($prior)]['unresolved_after']
-                    > (int)$prior[array_key_last($prior) - 1]['unresolved_after']);
-        $status = $diverged
-            ? 'REVIEW_DIVERGENCE_DETECTED'
-            : ($after === 0 ? 'READY_TO_APPLY' : ($after < $before ? 'CONVERGING' : 'OPEN'));
+                    > (int)$prior[array_key_last($prior) - 1]['unresolved_after']));
+        $status = $divergenceResolved
+            ? 'REVIEW_DIVERGENCE_RESOLVED'
+            : ($diverged
+                ? 'REVIEW_DIVERGENCE_DETECTED'
+                : ($after === 0 ? 'READY_TO_APPLY' : ($after < $before ? 'CONVERGING' : 'OPEN')));
         $metrics = array(
             'unresolved_before' => $before,
             'unresolved_after' => $after,
@@ -1857,6 +2572,7 @@ final class BooksManualsChangeReviewResolutionService
             'checks_remaining' => (int)($metricsOverride['checks_remaining'] ?? $after),
             'new_checks' => $newChecks,
             'checks_after' => $after,
+            'divergence_resolved' => $divergenceResolved,
             'counts' => $state['counts'],
             'questions_answered' => count((array)$state['answers']),
             'patches' => count((array)$state['patches']),

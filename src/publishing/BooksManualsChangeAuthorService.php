@@ -250,6 +250,7 @@ final class BooksManualsChangeAuthorService
         if ((string)($acceptedProposal['wizard_status'] ?? '') !== 'accepted') {
             throw new RuntimeException('Targeted correction requires accepted Step 4 wording.');
         }
+        $authorizedBrief = $this->buildAuthorizedBrief($planId);
         $allDrafts = (array)($acceptedProposal['section_drafts'] ?? array());
         $scope = array();
         $allowedNodes = array();
@@ -280,15 +281,61 @@ final class BooksManualsChangeAuthorService
                     }
                 }
             }
+            $affectedSections = array_values(array_filter(array_map(
+                static fn(mixed $value): string => trim((string)$value),
+                (array)($finding['affected_sections_json'] ?? array())
+            )));
+            $acceptedCurrentWording = array();
+            foreach ($repairScope as $number) {
+                foreach ($allDrafts as $draft) {
+                    if (array_key_exists($number, (array)($draft['nodes'] ?? array()))) {
+                        $acceptedCurrentWording[$number] = (string)$draft['nodes'][$number];
+                        break;
+                    }
+                }
+            }
+            $relevantImpacts = array_values(array_filter(
+                (array)($authorizedBrief['approved_impacts'] ?? array()),
+                static function (array $impact) use ($affectedSections): bool {
+                    $section = trim((string)($impact['section_number'] ?? ''));
+                    return $section !== '' && in_array($section, $affectedSections, true);
+                }
+            ));
+            $relevantBoundaries = array_values(array_filter(
+                (array)($authorizedBrief['scope_boundaries'] ?? array()),
+                static function (array $boundary) use ($affectedSections): bool {
+                    $section = trim((string)($boundary['section_number'] ?? ''));
+                    return $section === '' || in_array($section, $affectedSections, true);
+                }
+            ));
             $repairChecks[] = array(
                 'check_id' => $checkId,
                 'required_invariant' => (string)($finding['required_invariant'] ?? $finding['why_matters'] ?? ''),
                 'observed_defect' => (string)($finding['observed_state'] ?? $finding['human_explanation'] ?? ''),
                 'human_explanation' => (string)($finding['human_explanation'] ?? ''),
-                'affected_sections' => array_values((array)($finding['affected_sections_json'] ?? array())),
+                'current_accepted_wording' => $acceptedCurrentWording,
+                'affected_sections' => $affectedSections,
                 'affected_nodes' => array_values((array)($finding['affected_nodes_json'] ?? array())),
                 'allowed_repair_scope' => $repairScope,
                 'canonical_evidence' => array_values((array)($finding['evidence_references_json'] ?? array())),
+                'target_state_evidence' => array_values(array_map(
+                    static fn(array $impact): array => array(
+                        'impact_key' => (string)($impact['impact_key'] ?? ''),
+                        'section_number' => (string)($impact['section_number'] ?? ''),
+                        'title' => (string)($impact['title'] ?? ''),
+                        'description' => (string)($impact['description'] ?? ''),
+                        'target_concepts' => (array)($impact['target_concepts_json'] ?? array()),
+                        'canonical_evidence' => (array)($impact['canonical_evidence_json'] ?? array()),
+                    ),
+                    $relevantImpacts
+                )),
+                'preservation_boundaries' => array(
+                    'protected_logic' => array_values(array_map(
+                        static fn(array $impact): array => (array)($impact['preserved_logic_json'] ?? array()),
+                        $relevantImpacts
+                    )),
+                    'accepted_scope_boundaries' => $relevantBoundaries,
+                ),
                 'known_limitations' => array_values((array)($finding['known_limitations_json'] ?? array())),
             );
         }
@@ -365,6 +412,9 @@ final class BooksManualsChangeAuthorService
             '---BEGIN ALLOWED REPAIR NODES---',
             $this->json(array_keys($allowedNodes)),
             '---END ALLOWED REPAIR NODES---',
+            '---BEGIN FROZEN UNAFFECTED NODE FINGERPRINTS---',
+            $this->json($frozenNodeFingerprints),
+            '---END FROZEN UNAFFECTED NODE FINGERPRINTS---',
             '---BEGIN ACCEPTED AFFECTED WORDING---',
             $this->json($scopedDrafts),
             '---END ACCEPTED AFFECTED WORDING---',
@@ -408,6 +458,7 @@ final class BooksManualsChangeAuthorService
                     throw new RuntimeException('Targeted Author attempted to modify content outside the authorized review scope.');
                 }
                 $nodes = array();
+                $beforeNodes = array();
                 foreach ((array)($patch['nodes'] ?? array()) as $node) {
                     $number = trim((string)($node['number'] ?? ''));
                     $content = trim((string)($node['content'] ?? ''));
@@ -417,18 +468,26 @@ final class BooksManualsChangeAuthorService
                     if (!isset($allowedNodes[$number])) {
                         throw new RuntimeException('Targeted Author attempted to modify a frozen unrelated node.');
                     }
+                    $currentContent = (string)(
+                        $candidate['section_drafts'][$section]['nodes'][$number] ?? ''
+                    );
+                    if ($this->json($currentContent) === $this->json($content)) {
+                        continue;
+                    }
+                    $beforeNodes[$number] = $currentContent;
                     $nodes[$number] = $content;
                 }
                 if ($nodes === array()) {
-                    throw new RuntimeException('Targeted correction returned no controlled wording.');
+                    throw new RuntimeException('Targeted correction returned no changed controlled wording.');
                 }
                 foreach ($nodes as $number => $content) {
                     $candidate['section_drafts'][$section]['nodes'][$number] = $content;
                 }
                 $changedSections[$section] = array(
                     'reason' => trim((string)($patch['reason'] ?? '')),
-                    'before' => $allDrafts[$section],
-                    'after' => $candidate['section_drafts'][$section],
+                    'changed_nodes' => array_keys($nodes),
+                    'before' => array('nodes' => $beforeNodes),
+                    'after' => array('nodes' => $nodes),
                 );
             }
             if (array_keys($changedSections) !== $scopeSections
