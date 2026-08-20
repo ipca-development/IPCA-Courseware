@@ -644,6 +644,11 @@ const noOpBlurSaveRows = new Set([
 function parityComparable(row, observation) {
   if (noOpBlurSaveRows.has(row)) return observation.value;
   const comparable = structuredClone(observation);
+  if (row.startsWith('history.') && Array.isArray(comparable.requests)) {
+    comparable.requests = comparable.requests.filter(
+      (request) => request.action !== 'save_section_layout',
+    );
+  }
   for (const request of comparable.requests || []) {
     const payload = request?.payload?.payload;
     if (request?.action !== 'update_block' || Number(request?.payload?.block_id) !== 6 || !payload) {
