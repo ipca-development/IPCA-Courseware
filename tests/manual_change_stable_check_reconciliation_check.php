@@ -108,6 +108,23 @@ foreach (array(
     );
 }
 
+$reporterEquivalent = $proposal;
+foreach ($reporterEquivalent['section_drafts']['5.6']['nodes'] as $number => $_content) {
+    $reporterEquivalent['section_drafts']['5.6']['nodes'][$number] = '';
+}
+$reporterEquivalent['section_drafts']['5.6']['nodes']['5.6.1'] =
+    'EuroPilot Center shall protect the reporter in accordance with its just-culture principles.';
+$reporterReview = $reviewer->verifyReadableAmendmentProposal($reporterEquivalent);
+$reporterCheck = array_column(
+    (array)$reporterReview['review_checks'],
+    null,
+    'check_id'
+)['preservation.reporter-protection-just-culture'] ?? array();
+stableCheckAssert(
+    (string)($reporterCheck['status'] ?? '') === 'PASS',
+    'Reporter protection still depends on a preferred verb inflection.'
+);
+
 $resolvePatchSection = new ReflectionMethod($author, 'resolveTargetedPatchSection');
 $resolvedSection = $resolvePatchSection->invoke(
     $author,

@@ -713,7 +713,7 @@ final class BooksManualsChangeReviewerService
             'preliminary-30-day-deadline' => array('the preliminary 30-day deadline', array('/(?:within|not later than)\s+30\s+days/iu')),
             'final-three-month-timing' => array('the final three-month timing', array('/(?:not later than|within)\s+three\s+months/iu')),
             'mandatory-voluntary-distinction' => array('the mandatory and voluntary reporting distinction', array('/mandatory(?:\s+occurrence)?[-\s]reporting/iu', '/voluntary(?:\s+occurrence)?[-\s]reporting/iu')),
-            'reporter-protection-just-culture' => array('reporter protection and just culture', array('/(?:reporter\s+protection|protect(?:s|ion).{0,30}reporter|reporter.{0,30}protect)/iu', '/just[-\s]culture/iu')),
+            'reporter-protection-just-culture' => array('reporter protection and just culture', array('/(?:reporter\s+protection|protect(?:s|ed|ing)?\s+(?:the\s+)?reporter|reporter.{0,30}protect)/iu', '/just[-\s]culture/iu')),
             'causal-contributing-factors' => array('causal and contributing factors', array('/causal\s+(?:and|or)\s+contributing\s+factors/iu')),
         );
         foreach ($preservationChecks as $key => [$label, $patterns]) {
