@@ -431,7 +431,10 @@ final class BooksManualsChangeApplyService
         $draft = $this->latestRow(
             "SELECT id,content_fingerprint,draft_payload_json
              FROM ipca_manual_ai_architect_drafts
-             WHERE plan_id=? AND status='generated' ORDER BY id DESC LIMIT 1"
+             WHERE id=(
+                 SELECT MAX(id) FROM ipca_manual_ai_architect_drafts
+                 WHERE plan_id=? AND status='generated'
+             )"
                 . $lockClause,
             array($planId)
         );

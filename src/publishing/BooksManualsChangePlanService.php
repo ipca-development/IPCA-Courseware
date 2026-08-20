@@ -826,7 +826,12 @@ final class BooksManualsChangePlanService
             }
             $draft = $this->row(
                 'SELECT * FROM ' . self::TABLES['drafts']
-                . ' WHERE plan_id=? ORDER BY draft_version DESC,id DESC LIMIT 1' . $lock,
+                . ' WHERE id=(
+                    SELECT latest.id FROM (
+                        SELECT id FROM ' . self::TABLES['drafts'] . '
+                        WHERE plan_id=? ORDER BY draft_version DESC,id DESC LIMIT 1
+                    ) latest
+                )' . $lock,
                 array($planId)
             );
             if ($draft === null || (string)($draft['status'] ?? '') !== 'generated') {
@@ -1312,7 +1317,10 @@ final class BooksManualsChangePlanService
     ): bool {
         $baseline = $this->row(
             'SELECT draft_baseline_json FROM ' . self::TABLES['review_baselines']
-            . ' WHERE plan_id=? ORDER BY id DESC LIMIT 1',
+            . ' WHERE id=(
+                SELECT MAX(id) FROM ' . self::TABLES['review_baselines'] . '
+                WHERE plan_id=?
+            )',
             array($planId)
         );
         if ($baseline === null) {

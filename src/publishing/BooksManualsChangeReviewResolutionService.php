@@ -309,7 +309,10 @@ final class BooksManualsChangeReviewResolutionService
             }
             $review = $this->row(
                 'SELECT * FROM ipca_manual_ai_architect_reviews
-                 WHERE plan_id=? ORDER BY id DESC LIMIT 1' . $lock,
+                 WHERE id=(
+                     SELECT MAX(id) FROM ipca_manual_ai_architect_reviews
+                     WHERE plan_id=?
+                 )' . $lock,
                 array($planId)
             );
             $reviewId = (int)($review['id'] ?? 0);
@@ -317,7 +320,9 @@ final class BooksManualsChangeReviewResolutionService
                 throw new RuntimeException('Independent Review is unavailable.');
             }
             $planStage = (string)($plan['stage'] ?? '');
-            $existingPayload = $this->decode($review['review_payload_json'] ?? null);
+            $existingPayload = is_array($review['review_payload_json'] ?? null)
+                ? $review['review_payload_json']
+                : $this->decode((string)($review['review_payload_json'] ?? ''));
             if ($planStage === 'operations'
                 && (string)($review['status'] ?? '') === 'approved'
                 && strtoupper((string)($existingPayload['status'] ?? '')) === 'READY'
@@ -2406,7 +2411,10 @@ final class BooksManualsChangeReviewResolutionService
             : ' FOR UPDATE';
         $baseline = $this->row(
             'SELECT * FROM ipca_manual_ai_architect_review_baselines
-             WHERE plan_id=? AND review_id=? ORDER BY id DESC LIMIT 1' . $lock,
+             WHERE id=(
+                 SELECT MAX(id) FROM ipca_manual_ai_architect_review_baselines
+                 WHERE plan_id=? AND review_id=?
+             )' . $lock,
             array($planId, $reviewId)
         );
         $frozenDraft = (array)($baseline['draft_baseline_json'] ?? array());

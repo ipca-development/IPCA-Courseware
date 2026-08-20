@@ -176,6 +176,7 @@ $checks = array(
         && str_contains($resolutionService, "'status' => 'ready_to_apply'")
         && str_contains($resolutionService, "\$planStage === 'operations'")
         && str_contains($resolutionService, "\$existingPayload['outcome']")
+        && str_contains($resolutionService, "is_array(\$review['review_payload_json']")
         && str_contains($resolutionService, 'assertPreparedOperationPackageCurrent')
         && str_contains($resolutionService, 'array_replace($existingPayload')
         && str_contains($resolutionService, "'operation_package_transition'")
