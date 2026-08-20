@@ -77,6 +77,37 @@ stableCheckAssert(
     'Retained-evidence governance still depends on word order rather than the semantic control.'
 );
 
+$semanticEquivalent = $proposal;
+$semanticEquivalent['section_drafts']['5.6']['nodes']['5.6.9'] =
+    'An occurrence shall not be closed until required intermediate and final ECCAIRS follow-up '
+    . 'is complete and the related ECCAIRS submission, receipt, acceptance or equivalent evidence is retained.';
+$semanticEquivalent['section_drafts']['5.6']['nodes']['5.6.8'] =
+    'The Safety Manager shall maintain the ECCAIRS Follow-up Control Log for reportable occurrences. '
+    . 'The log shall track each deadline, reporting stage, action status, investigation and supporting evidence.';
+$semanticEquivalent['section_drafts']['5.7']['nodes']['5.7.3'] =
+    'A periodic reconciliation, conducted at least quarterly, shall compare occurrence records and ECCAIRS records. '
+    . 'Discrepancies and adverse trends shall be reported for systemic action without replacing occurrence-level control.';
+$semanticEquivalent['section_drafts']['4.2']['nodes']['4.2'] =
+    'Evidence of external submissions, receipt or acceptance shall be retained with investigation content, '
+    . 'implementation evidence and the closure rationale.';
+$semanticReview = $reviewer->verifyReadableAmendmentProposal($semanticEquivalent);
+$semanticChecks = array_column(
+    (array)$semanticReview['review_checks'],
+    null,
+    'check_id'
+);
+foreach (array(
+    'closure.authority-follow-up-gate',
+    'monitoring.occurrence-level',
+    'monitoring.aggregate-assurance',
+    'records.occurrence-evidence-complete',
+) as $checkId) {
+    stableCheckAssert(
+        (string)($semanticChecks[$checkId]['status'] ?? '') === 'PASS',
+        "{$checkId} still depends on preferred prose rather than its semantic control."
+    );
+}
+
 $resolvePatchSection = new ReflectionMethod($author, 'resolveTargetedPatchSection');
 $resolvedSection = $resolvePatchSection->invoke(
     $author,

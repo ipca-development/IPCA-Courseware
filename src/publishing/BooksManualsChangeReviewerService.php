@@ -802,7 +802,7 @@ final class BooksManualsChangeReviewerService
             ),
             'closure.authority-follow-up-gate' => array(
                 'CLOSURE', 'MATERIAL', $closure, array('5.6'), array('5.6.9'),
-                array('/closure\s+shall\s+not\s+be\s+approved|before\s+approving.{0,120}closure|does\s+not\s+permit\s+closure/isu', '/intermediate.{0,80}final.{0,100}ECCAIRS|ECCAIRS\s+follow-up/isu', '/(?:submission|acceptance)\s+evidence/iu'),
+                array('/closure\s+shall\s+not\s+be\s+approved|shall\s+not\s+be\s+closed|before\s+approving.{0,120}closure|does\s+not\s+permit\s+closure/isu', '/intermediate.{0,80}final.{0,100}ECCAIRS|ECCAIRS\s+follow-up/isu', '/(?:(?:submission|acceptance).{0,100}evidence|evidence.{0,100}(?:submission|acceptance))/isu'),
                 'Required authority follow-up and evidence are explicit prerequisites to closure.',
                 'Investigation completion can bypass required ECCAIRS follow-up.'
             ),
@@ -814,13 +814,13 @@ final class BooksManualsChangeReviewerService
             ),
             'monitoring.occurrence-level' => array(
                 'MONITORING', 'MATERIAL', (string)($nodes['5.6.8'] ?? ''), array('5.6'), array('5.6.8'),
-                array('/(?:monitor|review)\s+open\s+(?:reportable\s+)?occurrences/iu', '/(?:deadline|reporting stage)/iu', '/actions?/iu', '/(?:evidence|investigation)/iu'),
+                array('/(?:monitor|review)\s+open\s+(?:reportable\s+)?occurrences|Follow-up Control Log.{0,100}(?:reportable\s+)?occurrences/isu', '/(?:deadline|reporting stage)/iu', '/actions?/iu', '/(?:evidence|investigation)/iu'),
                 'Occurrence-level deadlines, investigations, actions and evidence remain monitored in Section 5.6.',
                 'Occurrence-level monitoring is incomplete in 5.6.8.'
             ),
             'monitoring.aggregate-assurance' => array(
                 'MONITORING', 'MATERIAL', (string)($nodes['5.7.3'] ?? ''), array('5.7'), array('5.7.3'),
-                array('/(?:aggregate|systemic|quarterly reconciliation)/iu', '/(?:trends?|discrepanc)/iu', '/(?:individual occurrences|occurrence records)/iu'),
+                array('/(?:aggregate|systemic|quarterly|periodic.{0,40}reconciliation)/isu', '/(?:trends?|discrepanc)/iu', '/(?:individual occurrences|occurrence records)/iu'),
                 'Section 5.7 provides aggregate/systemic assurance without replacing occurrence-level control.',
                 'Aggregate assurance is incomplete in Section 5.7.'
             ),
@@ -832,7 +832,7 @@ final class BooksManualsChangeReviewerService
             ),
             'records.occurrence-evidence-complete' => array(
                 'RECORDS', 'MATERIAL', (string)($nodes['4.2'] ?? ''), array('4.2'), array('4.2'),
-                array('/(?:authority|ECCAIRS)\s+(?:submission|status|update)/iu', '/(?:acknowledgement|acceptance|follow-up)\s+evidence/iu', '/investigation\s+(?:records?|evidence)|findings/iu', '/implementation\s+(?:status|evidence)/iu', '/closure\s+(?:rationale|approval|authorization)/iu'),
+                array('/(?:authority|ECCAIRS|external)\s+(?:submissions?|status|updates?)/iu', '/(?:(?:acknowledgement|acceptance|follow-up).{0,80}evidence|evidence.{0,80}(?:acknowledgement|acceptance|follow-up))/isu', '/investigation\s+(?:records?|evidence|content)|findings/iu', '/implementation\s+(?:status|evidence)/iu', '/closure\s+(?:rationale|approval|authorization)/iu'),
                 'Control of Records retains authority, investigation, action and closure evidence.',
                 'Section 4.2 does not control all required occurrence evidence.'
             ),
