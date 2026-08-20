@@ -453,10 +453,85 @@
     window.setTimeout(check, 1200);
   }
 
+  function setupPendingDrafting() {
+    if (root.dataset.draftingPending !== '1' || planId <= 0) return;
+    var status = String(root.dataset.draftStatus || 'not_started');
+    var polling = false;
+
+    function render(progress, message) {
+      progress = progress || {};
+      var percent = Math.max(3, Math.min(100, Number(progress.percent || 3)));
+      var fill = root.querySelector('[data-mcw-drafting-fill]');
+      var bar = root.querySelector('[data-mcw-drafting-bar]');
+      var percentNode = root.querySelector('[data-mcw-drafting-percent]');
+      var label = root.querySelector('[data-mcw-drafting-label]');
+      var messageNode = root.querySelector('[data-mcw-drafting-message]');
+      if (fill) fill.style.width = percent + '%';
+      if (bar) bar.setAttribute('aria-valuenow', String(percent));
+      if (percentNode) percentNode.textContent = Math.round(percent) + '%';
+      if (label && progress.label) label.textContent = String(progress.label);
+      if (messageNode && message) messageNode.textContent = String(message);
+    }
+
+    async function poll() {
+      if (polling) return;
+      polling = true;
+      try {
+        var result = await request('draft_status');
+        status = String(result.draft_status || 'not_started');
+        render(result.progress, result.message);
+        if (status === 'generated') {
+          render(Object.assign({}, result.progress || {}, {
+            percent: 100,
+            label: 'Proposed manual amendments are ready'
+          }));
+          window.location.reload();
+          return;
+        }
+        if (status === 'abandoned') {
+          var retry = root.querySelector('[data-mcw-retry-drafting]');
+          if (retry) retry.hidden = false;
+          render(result.progress, result.message || 'Draft generation could not be completed.');
+          return;
+        }
+      } catch (error) {
+        toast('Drafting is still running. This page will keep checking.', true);
+      } finally {
+        polling = false;
+      }
+      window.setTimeout(poll, 3000);
+    }
+
+    async function start(button) {
+      if (button) busy(button, true, 'Starting…');
+      try {
+        await request('generate_drafts');
+        status = 'generating';
+        var retry = root.querySelector('[data-mcw-retry-drafting]');
+        if (retry) retry.hidden = true;
+        window.setTimeout(poll, 900);
+      } catch (error) {
+        toast(error.message, true);
+        if (button) busy(button, false);
+      }
+    }
+
+    root.addEventListener('click', function (event) {
+      var retry = event.target.closest('[data-mcw-retry-drafting]');
+      if (retry) start(retry);
+    });
+    if (status === 'not_started' || status === 'abandoned') {
+      if (status === 'not_started') start(null);
+    } else {
+      window.setTimeout(poll, 900);
+    }
+  }
+
   setupFiles();
   setupIntake();
   setupImpactDecisions();
   setupDraftDecisions();
   setupProgression();
   setupPendingAnalysis();
+  setupPendingDrafting();
 }());

@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeArchitectService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeStructureService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeAuthorService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -116,6 +117,19 @@ function architect_api_progress_callback(int $planId): Closure
     return static function (array $progress) use ($planId): void {
         architect_api_write_progress($planId, $progress);
     };
+}
+
+/** @param array<string,mixed> $draft */
+function architect_api_draft_stale(array $draft): bool
+{
+    if ((string)($draft['status'] ?? '') !== 'generating') {
+        return false;
+    }
+    $payload = is_array($draft['draft_payload_json'] ?? null)
+        ? $draft['draft_payload_json']
+        : array();
+    $started = strtotime((string)($payload['started_at'] ?? $draft['created_at'] ?? ''));
+    return $started !== false && $started < time() - 600;
 }
 
 function architect_api_ensure_structure(
@@ -257,6 +271,7 @@ $userId = (int)($user['id'] ?? 0);
 $plans = new BooksManualsChangePlanService($pdo);
 $architect = new BooksManualsChangeArchitectService($pdo, $plans);
 $structures = new BooksManualsChangeStructureService($pdo, $plans);
+$author = new BooksManualsChangeAuthorService($pdo, $plans);
 
 try {
     if (!$plans->tablesPresent()) {
@@ -571,11 +586,146 @@ try {
                 $architect,
                 $structures
             );
+            $structureResult = $plans->acceptStructure(
+                $planId,
+                $userId
+            );
+            architect_api_write_progress($planId, array(
+                'percent' => 3,
+                'stage_key' => 'drafting',
+                'label' => 'Preparing authorized manual amendments',
+                'started_at' => gmdate(DATE_ATOM),
+            ));
+            architect_api_finish_response(202, array(
+                'ok' => true,
+                'result' => $structureResult + array('draft_status' => 'generating'),
+                'csrf_token' => architect_api_csrf(),
+            ));
+            ignore_user_abort(true);
+            @set_time_limit(360);
+            try {
+                $author->generateAndPersist($planId, $userId, array(
+                    'progress_callback' => architect_api_progress_callback($planId),
+                ));
+            } catch (Throwable $draftError) {
+                error_log(
+                    'Manual Change Author generation failed for plan '
+                    . $planId . ': ' . $draftError->getMessage()
+                );
+            }
+            exit;
+
+        case 'generate_drafts':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $plan = $plans->getPlan($planId);
+            if ((int)($plan['owner_id'] ?? 0) !== $userId) {
+                throw new RuntimeException('Only the Change Plan owner can generate amendment wording.');
+            }
+            $report = $plans->loadPlan($planId);
+            $draftRows = array_values(array_filter((array)($report['drafts'] ?? array()), 'is_array'));
+            $latestDraft = $draftRows === array() ? array() : $draftRows[array_key_last($draftRows)];
+            $latestStatus = (string)($latestDraft['status'] ?? '');
+            if ($latestStatus === 'generated') {
+                architect_api_json(200, array(
+                    'ok' => true,
+                    'result' => array('draft_status' => 'generated'),
+                    'csrf_token' => architect_api_csrf(),
+                ));
+            }
+            if ($latestStatus === 'generating' && !architect_api_draft_stale($latestDraft)) {
+                architect_api_json(202, array(
+                    'ok' => true,
+                    'result' => array('draft_status' => 'generating'),
+                    'csrf_token' => architect_api_csrf(),
+                ));
+            }
+            if ($latestStatus === 'generating') {
+                $pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_drafts SET status='abandoned' WHERE id=? AND plan_id=?"
+                )->execute(array((int)$latestDraft['id'], $planId));
+                $plans->appendEvent($planId, 'AMENDMENT_DRAFTING_TIMED_OUT', 12, array(
+                    'draft_id' => (int)$latestDraft['id'],
+                    'timeout_seconds' => 600,
+                ), $userId);
+            }
+            architect_api_write_progress($planId, array(
+                'percent' => 3,
+                'stage_key' => 'drafting',
+                'label' => 'Preparing authorized manual amendments',
+                'started_at' => gmdate(DATE_ATOM),
+            ));
+            architect_api_finish_response(202, array(
+                'ok' => true,
+                'result' => array('draft_status' => 'generating'),
+                'csrf_token' => architect_api_csrf(),
+            ));
+            ignore_user_abort(true);
+            @set_time_limit(360);
+            try {
+                $author->generateAndPersist($planId, $userId, array(
+                    'progress_callback' => architect_api_progress_callback($planId),
+                ));
+            } catch (Throwable $draftError) {
+                error_log(
+                    'Manual Change Author generation failed for plan '
+                    . $planId . ': ' . $draftError->getMessage()
+                );
+            }
+            exit;
+
+        case 'draft_status':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $plan = $plans->getPlan($planId);
+            if ((int)($plan['owner_id'] ?? 0) !== $userId) {
+                throw new RuntimeException('Only the Change Plan owner can view drafting progress.');
+            }
+            $report = $plans->loadPlan($planId);
+            $draftRows = array_values(array_filter((array)($report['drafts'] ?? array()), 'is_array'));
+            $latestDraft = $draftRows === array() ? array() : $draftRows[array_key_last($draftRows)];
+            $draftPayload = is_array($latestDraft['draft_payload_json'] ?? null)
+                ? $latestDraft['draft_payload_json']
+                : array();
+            $latestStatus = (string)($latestDraft['status'] ?? 'not_started');
+            if (architect_api_draft_stale($latestDraft)) {
+                $latestStatus = 'abandoned';
+                $draftPayload['failure_message'] = 'Draft generation stopped before completing. Retry the governed drafting job.';
+                $draftPayload['generation_status'] = 'failed';
+                $draftPayload['failed_at'] = gmdate(DATE_ATOM);
+                $encodedDraftPayload = json_encode(
+                    $draftPayload,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+                );
+                $pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_drafts
+                        SET status='abandoned',draft_payload_json=?,content_fingerprint=?
+                      WHERE id=? AND plan_id=?"
+                )->execute(array(
+                    $encodedDraftPayload,
+                    hash('sha256', $encodedDraftPayload),
+                    (int)$latestDraft['id'],
+                    $planId,
+                ));
+                $plans->updatePlan($planId, array(
+                    'stage' => 'drafting',
+                    'status' => 'blocked',
+                    'failure_message' => $draftPayload['failure_message'],
+                    'updated_by' => $userId,
+                ));
+                $plans->appendEvent($planId, 'AMENDMENT_DRAFTING_TIMED_OUT', 12, array(
+                    'draft_id' => (int)$latestDraft['id'],
+                    'timeout_seconds' => 600,
+                ), $userId);
+            }
             architect_api_json(200, array(
                 'ok' => true,
-                'result' => $plans->acceptStructure(
-                    $planId,
-                    $userId
+                'result' => array(
+                    'draft_status' => $latestStatus,
+                    'message' => (string)(
+                        $draftPayload['failure_message']
+                        ?? $plan['failure_message']
+                        ?? ''
+                    ),
+                    'progress' => architect_api_read_progress($planId),
                 ),
                 'csrf_token' => architect_api_csrf(),
             ));

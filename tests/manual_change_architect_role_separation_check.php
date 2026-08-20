@@ -39,6 +39,11 @@ $checks = array(
         str_contains($author, 'assembleAmendmentProposal')
         && str_contains($author, 'Draft sections must exactly equal the individually accepted impacts.')
         && str_contains($author, 'Drafting was attempted for unaccepted structure node'),
+    'Generated drafts pass the same authorization boundary before persistence' =>
+        str_contains($author, 'generateAndPersist')
+        && str_contains($author, '$this->assembleAmendmentProposal(')
+        && str_contains($author, 'validateGeneratedProposal')
+        && str_contains($author, "'production_applied' => false"),
     'Reviewer has an independent prompt' =>
         str_contains($reviewer, 'manual-change-independent-reviewer-v1'),
     'Reviewer READY gate requires no unexplained exact legacy hits' =>

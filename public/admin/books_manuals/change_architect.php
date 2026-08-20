@@ -232,6 +232,7 @@ if ($displayStructureNodes === array()) {
 $drafts = array_values(array_filter((array)($report['drafts'] ?? array()), 'is_array'));
 $draft = $drafts === array() ? array() : $drafts[array_key_last($drafts)];
 $draftPayload = mcw_array($draft['draft_payload_json'] ?? array());
+$draftStatus = (string)($draft['status'] ?? 'not_started');
 $draftSections = array();
 foreach ((array)($draftPayload['section_drafts'] ?? $draftPayload['sections'] ?? array()) as $key => $value) {
     if (!is_array($value)) {
@@ -297,6 +298,8 @@ books_manuals_page_open(array(
   data-csrf-token="<?= h($csrf) ?>"
   data-active-step="<?= $activeStep ?>"
   data-analysis-pending="<?= $analysisPending ? '1' : '0' ?>"
+  data-drafting-pending="<?= $step3Complete && $activeStep === 4 && $draftSections === array() ? '1' : '0' ?>"
+  data-draft-status="<?= h($draftStatus) ?>"
 >
   <?php if ($loadError !== '' && $report === array()): ?>
     <div class="cmp-alert cmp-alert--error"><?= h($loadError) ?></div>
@@ -561,6 +564,14 @@ books_manuals_page_open(array(
       <?php elseif ($activeStep === 4): ?>
         <section class="mcw-step mcw-step--active" data-mcw-step="4">
           <header><span class="mcw-step-number">4</span><div><h2>Proposed Manual Amendments</h2><p>Review the resulting controlled-manual wording one section at a time.</p></div></header>
+          <?php if ($draftSections === array()): ?>
+            <div class="mcw-drafting-progress" data-mcw-drafting-progress>
+              <div class="mcw-progress-heading"><strong data-mcw-drafting-label><?= $draftStatus === 'abandoned' ? 'Draft generation requires attention' : 'Drafting authorized manual amendments' ?></strong><span data-mcw-drafting-percent><?= $draftStatus === 'abandoned' ? '—' : '3%' ?></span></div>
+              <div class="mcw-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" data-mcw-drafting-bar><span data-mcw-drafting-fill style="width:3%"></span></div>
+              <p data-mcw-drafting-message><?= h((string)($draftPayload['failure_message'] ?? 'The Amendment Author is drafting only the approved sections and accepted structure nodes. This page will continue automatically when the controlled wording is ready.')) ?></p>
+              <button class="app-btn app-btn--secondary" type="button" data-mcw-retry-drafting <?= $draftStatus === 'abandoned' ? '' : 'hidden' ?>>Retry Draft Generation</button>
+            </div>
+          <?php endif; ?>
           <div class="mcw-drafts">
             <?php foreach ($draftSections as $section): ?>
               <?php $sectionNumber = (string)($section['section_number'] ?? $section['number'] ?? 'Section'); ?>
@@ -578,7 +589,7 @@ books_manuals_page_open(array(
               </details>
             <?php endforeach; ?>
           </div>
-          <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-accept-drafts <?= $allDraftsAccepted ? '' : 'disabled' ?>>Accept Draft Amendments &amp; Continue</button>
+          <?php if ($draftSections !== array()): ?><button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-accept-drafts <?= $allDraftsAccepted ? '' : 'disabled' ?>>Accept Draft Amendments &amp; Continue</button><?php endif; ?>
         </section>
       <?php endif; ?>
     <?php endif; ?>

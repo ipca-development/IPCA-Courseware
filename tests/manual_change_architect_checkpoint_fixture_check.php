@@ -77,6 +77,62 @@ architect_fixture_assert(
     )) === 0,
     'Parent/child Compliance Monitoring candidates were not consolidated out of amendment scope.'
 );
+
+$noSmsMonitoringHomeFixture = $fixture;
+$noSmsMonitoringHomeFixture['manual']['sections'] = array_values(array_filter(
+    $noSmsMonitoringHomeFixture['manual']['sections'],
+    static fn(array $section): bool => (string)($section['number'] ?? '') !== '5.7'
+));
+foreach ($noSmsMonitoringHomeFixture['manual']['sections'] as &$section) {
+    if ((int)($section['id'] ?? 0) !== 115) {
+        continue;
+    }
+    foreach ($section['children'] as &$child) {
+        if (str_starts_with((string)($child['title'] ?? ''), '10.2')) {
+            $child['text'] .= ' The programme also monitors occurrence trends and safety-reporting competence.';
+        }
+    }
+    unset($child);
+}
+unset($section);
+$noSmsMonitoringHomeReport = $service->runFixtureCheckpoint($noSmsMonitoringHomeFixture);
+$noSmsMonitoringHomeAmendments = architect_fixture_numbers(
+    $noSmsMonitoringHomeReport['what_should_actually_be_amended']
+);
+architect_fixture_assert(
+    !in_array('10', $noSmsMonitoringHomeAmendments, true)
+        && !in_array('10.2', $noSmsMonitoringHomeAmendments, true)
+        && in_array('8.1', $noSmsMonitoringHomeAmendments, true),
+    'Compliance Monitoring captured the SMS monitoring component when Section 5.7 was absent.'
+);
+
+$complianceLegacyFixture = $fixture;
+foreach ($complianceLegacyFixture['manual']['sections'] as &$section) {
+    if ((int)($section['id'] ?? 0) !== 115) {
+        continue;
+    }
+    foreach ($section['children'] as &$child) {
+        if (str_starts_with((string)($child['title'] ?? ''), '10.2')) {
+            $child['text'] .= ' Auditor recurrent-training records are scheduled in Pipedrive.';
+        }
+    }
+    unset($child);
+}
+unset($section);
+$complianceLegacyReport = $service->runFixtureCheckpoint($complianceLegacyFixture);
+architect_fixture_assert(
+    !in_array(
+        '10.2',
+        architect_fixture_numbers($complianceLegacyReport['what_should_actually_be_amended']),
+        true
+    )
+        && in_array(
+            '10.2',
+            architect_fixture_numbers($complianceLegacyReport['review_separately']),
+            true
+        ),
+    'An incidental legacy identity improperly promoted Compliance Monitoring training.'
+);
 $primary = array_values(array_filter(
     $amendments,
     static fn(array $impact): bool =>

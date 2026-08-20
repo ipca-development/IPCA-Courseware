@@ -1506,9 +1506,17 @@ final class BooksManualsChangeArchitectService
                 static fn(array $hit): bool =>
                     (string)$hit['proposed_disposition'] === 'REVIEW_SEPARATELY'
             )) === count($sectionHits);
+            $complianceProgrammeWithoutDelta = $this->isComplianceProgrammeContext($context)
+                && !$hasTargetDelta;
             if (!empty($context['is_system_managed'])) {
                 $classification = self::OUT_OF_SCOPE;
                 $rationale = 'This is system-managed publishing content, not a substantive operational amendment area.';
+            } elseif ($complianceProgrammeWithoutDelta && $hasLegacy) {
+                $classification = self::REVIEW_SEPARATELY;
+                $rationale = 'An exact legacy identity occurs in the Compliance Monitoring function, but no change to that function is demonstrated by the SMS occurrence-lifecycle target.';
+            } elseif ($complianceProgrammeWithoutDelta) {
+                $classification = self::OUT_OF_SCOPE;
+                $rationale = 'The Compliance Monitoring function is relevant during discovery, but the SMS occurrence-lifecycle target establishes no operational delta here.';
             } elseif ($hasAmendmentCoverage && $hasTargetDelta) {
                 $classification = self::MUST_CHANGE;
                 $rationale = 'The section demonstrably covers a target-state component that changes.';
@@ -4078,7 +4086,10 @@ final class BooksManualsChangeArchitectService
             'monitoring' => preg_match(
                 '/\b(?:safety performance|performance monitoring|compliance monitoring)\b/iu',
                 $title
-            ) === 1,
+            ) === 1 && (
+                !$this->isComplianceProgrammeContext($context)
+                || preg_match('/\bsafety performance monitoring\b/iu', $functionalTitle) === 1
+            ),
             'training' => preg_match('/\b(?:training|competence)\b/iu', $title) === 1
                 && preg_match('/\b(?:safety|sms|occurrence)\b/iu', $text) === 1,
             'deadline' => preg_match('/\b(?:occurrence reporting|internal investigation)\b/iu', $title) === 1
@@ -4176,19 +4187,18 @@ final class BooksManualsChangeArchitectService
             'affected_roles' => $intent['affected_roles'] ?? array(),
             'affected_processes' => $intent['affected_processes'] ?? array(),
         )));
-        $complianceMonitoringContext = preg_match(
-            '/\bcompliance monitoring(?: system| assurance| training| program)?\b/iu',
-            $functionalTitle . ' ' . $text
-        ) === 1;
-        $smsOccurrenceContext = preg_match(
-            '/\b(?:sms|safety management system|occurrence|safety manager|reportability|ecca?irs|e-or|internal safety investigation|corrective action)\b/iu',
-            $functionalTitle . ' ' . $text
-        ) === 1;
+        $complianceMonitoringContext = $this->isComplianceProgrammeContext($context);
         $targetIsSmsOccurrence = preg_match(
             '/\b(?:sms|occurrence|reportability|ecca?irs|investigation|corrective action|controlled closure)\b/iu',
             $targetText
         ) === 1;
-        if ($complianceMonitoringContext && $targetIsSmsOccurrence && !$smsOccurrenceContext) {
+        $targetChangesComplianceProgramme = preg_match(
+            '/\b(?:compliance audit|compliance monitoring (?:system|programme|program|process)|audit finding)\b/iu',
+            $targetText
+        ) === 1;
+        if ($complianceMonitoringContext
+            && $targetIsSmsOccurrence
+            && !$targetChangesComplianceProgramme) {
             return false;
         }
         $functionalClassification = $this->classifySectionFunctions(array(
@@ -4231,6 +4241,19 @@ final class BooksManualsChangeArchitectService
                 && preg_match('/\b(?:training|competence|operational enablement)\w*\b/iu', $targetText) === 1,
         );
         return in_array(true, $demonstratedFunctions, true);
+    }
+
+    /** @param array<string,mixed> $context */
+    private function isComplianceProgrammeContext(array $context): bool
+    {
+        $pathTitle = implode(' ', array_map(
+            static fn(array $node): string => (string)($node['title'] ?? ''),
+            array_filter((array)($context['path'] ?? array()), 'is_array')
+        ));
+        return preg_match(
+            '/\b(?:compliance monitoring(?: system| programme| program| training)?|compliance audit|audit finding)\b/iu',
+            $pathTitle . ' ' . (string)($context['title'] ?? '')
+        ) === 1;
     }
 
     /** @param array<string,mixed> $section */

@@ -17,6 +17,7 @@ $js = file_get_contents($root . '/public/assets/manual-change-architect.js');
 $api = file_get_contents($root . '/public/admin/api/books_manuals_change_architect_api.php');
 $plans = file_get_contents($root . '/src/publishing/BooksManualsChangePlanService.php');
 $architect = file_get_contents($root . '/src/publishing/BooksManualsChangeArchitectService.php');
+$author = file_get_contents($root . '/src/publishing/BooksManualsChangeAuthorService.php');
 $structureService = file_get_contents($root . '/src/publishing/BooksManualsChangeStructureService.php');
 $seed = file_get_contents($root . '/scripts/seed_manual_change_architect_sms_ecairs.php');
 $library = file_get_contents($root . '/public/admin/books_manuals/index.php');
@@ -142,6 +143,20 @@ architect_ui_assert(
     'Governed blocker resolution and non-overridable integrity handling are incomplete.'
 );
 architect_ui_assert(str_contains($api, "case 'analyze_change':"), 'Wizard analysis API is missing.');
+architect_ui_assert(
+    str_contains((string)$author, 'generateAndPersist(')
+        && str_contains((string)$author, 'buildAuthorizedBrief(')
+        && str_contains((string)$author, 'assembleAmendmentProposal(')
+        && str_contains((string)$author, 'AMENDMENT_DRAFTING_COMPLETED')
+        && str_contains($api, "case 'generate_drafts':")
+        && str_contains($api, "case 'draft_status':")
+        && str_contains($api, '$author->generateAndPersist(')
+        && str_contains($page, 'data-drafting-pending')
+        && str_contains($page, 'Drafting authorized manual amendments')
+        && str_contains($js, "request('generate_drafts'")
+        && str_contains($js, "request('draft_status'"),
+    'Step 3 acceptance must generate, validate, persist, and progressively reveal Step 4 drafts.'
+);
 architect_ui_assert(
     str_contains($api, 'architect_api_finish_response(202')
         && str_contains($api, "case 'analysis_status':")

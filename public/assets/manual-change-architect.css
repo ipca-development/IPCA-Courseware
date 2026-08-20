@@ -394,6 +394,63 @@
   font-size: 10px;
 }
 
+.mcw-drafting-progress {
+  margin-bottom: 18px;
+  padding: 18px 20px;
+  border: 1px solid #cbdcea;
+  border-radius: 10px;
+  background: #f6fafe;
+}
+
+.mcw-progress-heading {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--mcw-navy);
+}
+
+.mcw-progress-heading > span {
+  color: var(--mcw-blue);
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.mcw-progress-track {
+  height: 12px;
+  margin-top: 13px;
+  overflow: hidden;
+  border: 1px solid #bed2e2;
+  border-radius: 999px;
+  background: #e7eef4;
+}
+
+.mcw-progress-track > span {
+  position: relative;
+  display: block;
+  min-width: 3px;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1769aa, #2187c5);
+  transition: width .65s ease;
+}
+
+.mcw-progress-track > span::after {
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent);
+  content: "";
+  animation: mcw-progress-scan 1.7s ease-in-out infinite;
+}
+
+.mcw-drafting-progress > p {
+  margin: 12px 0;
+  color: var(--mcw-muted);
+  font-size: 10px;
+}
+
 .mcw-analysis-elapsed {
   font-variant-numeric: tabular-nums;
 }
