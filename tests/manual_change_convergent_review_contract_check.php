@@ -116,6 +116,8 @@ $checks = array(
         str_contains($author, 'TARGETED PATCH MODE')
         && stripos($author, 'unrelated accepted wording') !== false
         && str_contains($author, 'Targeted Author attempted to add an unaccepted structure node')
+        && str_contains($author, 'PRIOR TARGETED ATTEMPT FEEDBACK')
+        && str_contains($author, 'Targeted Author correction failed stable checks:')
         && str_contains($author, "'production_applied' => false"),
     'Reviewer performs targeted reverification and scope checks' =>
         str_contains($reviewer, 'verifyTargetedPatch')

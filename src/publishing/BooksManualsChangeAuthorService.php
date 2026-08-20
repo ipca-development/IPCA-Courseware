@@ -245,7 +245,8 @@ final class BooksManualsChangeAuthorService
         int $actorUserId,
         array $acceptedProposal,
         array $findings,
-        array $governedFacts = array()
+        array $governedFacts = array(),
+        array $attemptFeedback = array()
     ): array {
         if ((string)($acceptedProposal['wizard_status'] ?? '') !== 'accepted') {
             throw new RuntimeException('Targeted correction requires accepted Step 4 wording.');
@@ -423,6 +424,9 @@ final class BooksManualsChangeAuthorService
             '---BEGIN GOVERNED HUMAN FACTS---',
             $this->json($governedFacts),
             '---END GOVERNED HUMAN FACTS---',
+            '---BEGIN PRIOR TARGETED ATTEMPT FEEDBACK---',
+            $this->json($attemptFeedback),
+            '---END PRIOR TARGETED ATTEMPT FEEDBACK---',
         ));
         $model = cw_openai_model();
         $started = microtime(true);
@@ -586,6 +590,20 @@ final class BooksManualsChangeAuthorService
                 $error->getMessage(),
                 $started
             );
+            if (count($attemptFeedback) < 2
+                && preg_match(
+                    '/^(?:Targeted Author attempted|Targeted correction returned|Targeted Author correction failed stable checks)/',
+                    $error->getMessage()
+                ) === 1) {
+                return $this->generateTargetedPatch(
+                    $planId,
+                    $actorUserId,
+                    $acceptedProposal,
+                    $findings,
+                    $governedFacts,
+                    array_merge($attemptFeedback, array($error->getMessage()))
+                );
+            }
             throw $error;
         }
     }
@@ -991,8 +1009,28 @@ final class BooksManualsChangeAuthorService
             return true;
         };
         if (!$passes($candidate)) {
+            $candidateVerification = $reviewer->verifyReadableAmendmentProposal($candidate);
+            $candidateResults = array_column(
+                (array)($candidateVerification['review_checks'] ?? array()),
+                null,
+                'check_id'
+            );
+            $failedTargets = array_values(array_filter(
+                $targetCheckIds,
+                static fn(string $checkId): bool =>
+                    (string)($candidateResults[$checkId]['status'] ?? '') !== 'PASS'
+            ));
+            $regressed = array_values(array_filter(
+                array_keys($baselinePasses),
+                static fn(string $checkId): bool =>
+                    (string)($candidateResults[$checkId]['status'] ?? '') !== 'PASS'
+            ));
             throw new RuntimeException(
-                'Targeted Author correction did not satisfy its stable check without regression.'
+                'Targeted Author correction failed stable checks: '
+                . implode(', ', $failedTargets)
+                . ($regressed === array()
+                    ? ''
+                    : '; regressed checks: ' . implode(', ', $regressed))
             );
         }
         $changes = array();
