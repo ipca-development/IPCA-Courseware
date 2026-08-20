@@ -85,6 +85,22 @@ final class BooksManualsChangeAuthorService
         array $options = array()
     ): array {
         $brief = $this->buildAuthorizedBrief($planId);
+        $reviewCorrections = array_values(array_filter(array_map(
+            static fn(mixed $issue): string => trim(is_string($issue) ? $issue : ''),
+            (array)($options['review_corrections'] ?? array())
+        )));
+        if ($reviewCorrections !== array()) {
+            $brief['independent_review_corrections'] = $reviewCorrections;
+            $brief['instruction'] .= ' Correct every listed Independent Review issue without expanding the accepted scope or structure.';
+        }
+        $controlledReviewCorrections = array_values(array_filter(array_map(
+            static fn(mixed $issue): string => trim(is_string($issue) ? $issue : ''),
+            (array)($options['controlled_review_corrections'] ?? array())
+        )));
+        if ($controlledReviewCorrections !== array()) {
+            $brief['controlled_review_corrections'] = $controlledReviewCorrections;
+            $brief['instruction'] .= ' Correct every listed controlled-review failure from the prior drafting attempt. Do not repeat the rejected claim, and do not expand the accepted scope or structure.';
+        }
         $progress = is_callable($options['progress_callback'] ?? null)
             ? $options['progress_callback']
             : null;
@@ -110,6 +126,7 @@ final class BooksManualsChangeAuthorService
                 'schema' => 'ipca.manual-change-amendment-generation.v1',
                 'generation_status' => 'generating',
                 'started_at' => gmdate(DATE_ATOM),
+                'controlled_review_corrections' => $controlledReviewCorrections,
             ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'created_by' => $actorUserId,
         ));
@@ -120,7 +137,9 @@ final class BooksManualsChangeAuthorService
                 'intval',
                 array_column((array)$brief['approved_impacts'], 'id')
             ),
+            'controlled_review_corrections' => $controlledReviewCorrections,
         ), $actorUserId);
+        $controlledReviewFailures = array();
         try {
             $this->reportProgress($progress, 10, 'authorizing', 'Verifying the accepted amendment boundary');
             $generated = $this->generateStructuredDraft($brief, $planId, $actorUserId);
@@ -143,9 +162,10 @@ final class BooksManualsChangeAuthorService
             );
             $quality = $this->validateGeneratedProposal($proposal);
             if (!$quality['valid']) {
+                $controlledReviewFailures = array_values((array)$quality['failures']);
                 throw new RuntimeException(
                     'Generated amendment wording failed controlled review: '
-                    . implode('; ', $quality['failures'])
+                    . implode('; ', $controlledReviewFailures)
                 );
             }
             $proposal['decisions'] = array();
@@ -184,6 +204,7 @@ final class BooksManualsChangeAuthorService
                 'schema' => 'ipca.manual-change-amendment-generation.v1',
                 'generation_status' => 'failed',
                 'failure_message' => $error->getMessage(),
+                'controlled_review_failures' => $controlledReviewFailures,
                 'failed_at' => gmdate(DATE_ATOM),
             ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
             $this->pdo->prepare(
@@ -200,6 +221,7 @@ final class BooksManualsChangeAuthorService
             $this->plans->appendEvent($planId, 'AMENDMENT_DRAFTING_FAILED', 12, array(
                 'draft_id' => $draftId,
                 'failure_message' => $error->getMessage(),
+                'controlled_review_failures' => $controlledReviewFailures,
             ), $actorUserId);
             $this->reportProgress($progress, 100, 'failed', 'Draft generation requires attention');
             throw $error;

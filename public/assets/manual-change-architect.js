@@ -300,7 +300,7 @@
       ['[data-mcw-accept-structure]', 'accept_structure', 'Accepting Structure…'],
       ['[data-mcw-accept-drafts]', 'accept_drafts', 'Accepting Amendments…'],
       ['[data-mcw-run-review]', 'run_independent_review', 'Accepting Independent Review…'],
-      ['[data-mcw-revise-structure]', 'revise_structure_after_review', 'Preparing Revised Structure…'],
+      ['[data-mcw-resolve-review]', 'resolve_independent_review', 'Preparing Governed Revision…'],
       ['[data-mcw-continue-apply]', 'continue_to_apply', 'Continuing…'],
       ['[data-mcw-apply]', 'apply_accepted_wizard_changes', 'Applying Accepted Changes…']
     ];
@@ -313,6 +313,8 @@
           var result = await request(entry[1]);
           if (result.redirect) {
             window.location.href = result.redirect;
+          } else if (entry[1] === 'resolve_independent_review') {
+            window.setTimeout(function () { window.location.reload(); }, 900);
           } else {
             window.location.reload();
           }
@@ -505,12 +507,19 @@
     }
 
     async function start(button) {
-      if (button) busy(button, true, 'Starting…');
+      if (button) busy(button, true, 'Applying Review Corrections…');
       try {
-        await request('generate_drafts');
+        var response = await request('generate_drafts');
+        var result = response.result || response;
         status = 'generating';
         var retry = root.querySelector('[data-mcw-retry-drafting]');
         if (retry) retry.hidden = true;
+        if (Number(result.controlled_review_correction_count || 0) > 0) {
+          render({
+            percent: 3,
+            label: 'Regenerating with controlled-review corrections'
+          }, 'The prior controlled-review failures are now explicit constraints for this drafting attempt.');
+        }
         window.setTimeout(poll, 900);
       } catch (error) {
         toast(error.message, true);

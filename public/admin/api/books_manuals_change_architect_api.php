@@ -209,6 +209,40 @@ function architect_api_draft_stale(array $draft): bool
     return $started !== false && $started < time() - 600;
 }
 
+/**
+ * Recover deterministic controlled-review failures from the latest abandoned
+ * draft. The message fallback keeps retries corrective for drafts generated
+ * before structured failure persistence was deployed.
+ *
+ * @param array<string,mixed> $draft
+ * @return list<string>
+ */
+function architect_api_draft_review_corrections(array $draft): array
+{
+    $payload = is_array($draft['draft_payload_json'] ?? null)
+        ? $draft['draft_payload_json']
+        : array();
+    $corrections = array_values(array_filter(array_map(
+        static fn(mixed $issue): string => trim(is_string($issue) ? $issue : ''),
+        (array)($payload['controlled_review_failures'] ?? array())
+    )));
+    if ($corrections !== array()) {
+        return $corrections;
+    }
+    $message = trim((string)($payload['failure_message'] ?? ''));
+    if (preg_match(
+        '/^Generated amendment wording failed controlled review:\s*(.+)$/isu',
+        $message,
+        $match
+    ) !== 1) {
+        return array();
+    }
+    return array_values(array_filter(array_map(
+        static fn(string $issue): string => trim($issue),
+        explode(';', (string)$match[1])
+    )));
+}
+
 function architect_api_ensure_structure(
     int $planId,
     int $actorUserId,
@@ -702,7 +736,8 @@ try {
             }
             exit;
 
-        case 'revise_structure_after_review':
+        case 'revise_structure_after_review': // Backward-compatible stale page action.
+        case 'resolve_independent_review':
             $planId = (int)($input['plan_id'] ?? 0);
             $plan = $plans->getPlan($planId);
             if ((int)($plan['owner_id'] ?? 0) !== $userId) {
@@ -718,7 +753,89 @@ try {
                 ? $reviewPayload['prepared_result']
                 : $reviewPayload;
             if (strtoupper((string)($preparedReview['status'] ?? '')) !== 'REQUIRES_REVIEW') {
-                throw new RuntimeException('Structure revision is available only for unresolved Independent Review issues.');
+                throw new RuntimeException('Review correction is available only for unresolved Independent Review issues.');
+            }
+            $reviewIssues = array_values(array_filter(array_map(
+                static fn(mixed $issue): string => trim(is_string($issue) ? $issue : ''),
+                (array)($preparedReview['issues'] ?? array())
+            )));
+            $needsStructureRevision = false;
+            foreach ($reviewIssues as $issue) {
+                if (preg_match(
+                    '/(?:accepted consolidated hierarchy|missing accepted structure node|unexpected structure node)/iu',
+                    $issue
+                ) === 1) {
+                    $needsStructureRevision = true;
+                    break;
+                }
+            }
+            if (!$needsStructureRevision) {
+                $pdo->beginTransaction();
+                try {
+                    $pdo->prepare(
+                        "UPDATE ipca_manual_ai_architect_reviews
+                         SET status='superseded' WHERE id=? AND plan_id=? AND status='requested'"
+                    )->execute(array((int)($latestReview['id'] ?? 0), $planId));
+                    $abandonedPayload = json_encode(array(
+                        'schema' => 'ipca.manual-change-amendment-generation.v1',
+                        'generation_status' => 'superseded_by_independent_review',
+                        'superseded_at' => gmdate(DATE_ATOM),
+                        'review_issues' => $reviewIssues,
+                    ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+                    $pdo->prepare(
+                        "UPDATE ipca_manual_ai_architect_drafts
+                         SET status='abandoned',draft_payload_json=?,content_fingerprint=?
+                         WHERE plan_id=? AND status='generated'"
+                    )->execute(array(
+                        $abandonedPayload,
+                        hash('sha256', $abandonedPayload),
+                        $planId,
+                    ));
+                    $plans->updatePlan($planId, array(
+                        'stage' => 'drafting',
+                        'status' => 'active',
+                        'updated_by' => $userId,
+                    ));
+                    $plans->appendEvent($planId, 'AMENDMENT_REVISION_REQUESTED_BY_REVIEW', 12, array(
+                        'review_id' => (int)($latestReview['id'] ?? 0),
+                        'issues' => $reviewIssues,
+                        'structure_revision_required' => false,
+                    ), $userId);
+                    $pdo->commit();
+                } catch (Throwable $error) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $error;
+                }
+                architect_api_write_progress($planId, array(
+                    'percent' => 3,
+                    'stage_key' => 'drafting',
+                    'label' => 'Revising wording against Independent Review',
+                    'started_at' => gmdate(DATE_ATOM),
+                ));
+                architect_api_finish_response(202, array(
+                    'ok' => true,
+                    'result' => array(
+                        'stage' => 'drafting',
+                        'draft_status' => 'generating',
+                    ),
+                    'csrf_token' => architect_api_csrf(),
+                ));
+                ignore_user_abort(true);
+                @set_time_limit(360);
+                try {
+                    $author->generateAndPersist($planId, $userId, array(
+                        'review_corrections' => $reviewIssues,
+                        'progress_callback' => architect_api_progress_callback($planId),
+                    ));
+                } catch (Throwable $draftError) {
+                    error_log(
+                        'Independent Review amendment revision failed for plan '
+                        . $planId . ': ' . $draftError->getMessage()
+                    );
+                }
+                exit;
             }
             $pdo->beginTransaction();
             try {
@@ -789,6 +906,9 @@ try {
             $draftRows = array_values(array_filter((array)($report['drafts'] ?? array()), 'is_array'));
             $latestDraft = $draftRows === array() ? array() : $draftRows[array_key_last($draftRows)];
             $latestStatus = (string)($latestDraft['status'] ?? '');
+            $controlledReviewCorrections = $latestStatus === 'abandoned'
+                ? architect_api_draft_review_corrections($latestDraft)
+                : array();
             if ($latestStatus === 'generated') {
                 architect_api_json(200, array(
                     'ok' => true,
@@ -815,18 +935,24 @@ try {
             architect_api_write_progress($planId, array(
                 'percent' => 3,
                 'stage_key' => 'drafting',
-                'label' => 'Preparing authorized manual amendments',
+                'label' => $controlledReviewCorrections !== array()
+                    ? 'Regenerating with controlled-review corrections'
+                    : 'Preparing authorized manual amendments',
                 'started_at' => gmdate(DATE_ATOM),
             ));
             architect_api_finish_response(202, array(
                 'ok' => true,
-                'result' => array('draft_status' => 'generating'),
+                'result' => array(
+                    'draft_status' => 'generating',
+                    'controlled_review_correction_count' => count($controlledReviewCorrections),
+                ),
                 'csrf_token' => architect_api_csrf(),
             ));
             ignore_user_abort(true);
             @set_time_limit(360);
             try {
                 $author->generateAndPersist($planId, $userId, array(
+                    'controlled_review_corrections' => $controlledReviewCorrections,
                     'progress_callback' => architect_api_progress_callback($planId),
                 ));
             } catch (Throwable $draftError) {

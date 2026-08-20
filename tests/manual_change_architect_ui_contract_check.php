@@ -63,10 +63,14 @@ architect_ui_assert(
     str_contains($page, "\$reviewPayload['prepared_result']")
         && str_contains($page, 'What must be corrected')
         && str_contains($page, 'Accept Independent Review &amp; Continue')
-        && str_contains($page, 'data-mcw-revise-structure')
-        && str_contains($js, 'revise_structure_after_review')
+        && str_contains($page, 'data-mcw-resolve-review')
+        && str_contains($page, 'Revise Proposed Amendments')
+        && str_contains($js, 'resolve_independent_review')
         && str_contains($api, "\$report['structure_proposals'] = array()")
-        && str_contains($api, "\$architect->buildImpactPresentation(\$report)"),
+        && str_contains($api, "\$architect->buildImpactPresentation(\$report)")
+        && str_contains($api, "'review_corrections' => \$reviewIssues")
+        && str_contains((string)$structureService, 'reopenExistingProposal(')
+        && str_contains((string)$structureService, 'reopened_existing_fingerprint'),
     'Independent Review must unwrap the prepared result, present blockers, and expose governed correction.'
 );
 architect_ui_assert(
@@ -170,7 +174,12 @@ architect_ui_assert(
         && str_contains($page, 'Drafting authorized manual amendments')
         && str_contains($js, "request('generate_drafts'")
         && str_contains($js, "request('draft_status'")
-        && str_contains($js, 'response.result || response'),
+        && str_contains($js, 'response.result || response')
+        && str_contains($api, 'architect_api_draft_review_corrections(')
+        && str_contains($api, "'controlled_review_corrections' => \$controlledReviewCorrections")
+        && str_contains((string)$author, "\$brief['controlled_review_corrections']")
+        && str_contains((string)$author, "'controlled_review_failures' => \$controlledReviewFailures")
+        && str_contains($js, 'Regenerating with controlled-review corrections'),
     'Step 3 acceptance must generate, validate, persist, and progressively reveal Step 4 drafts.'
 );
 architect_ui_assert(
@@ -185,6 +194,8 @@ architect_ui_assert(str_contains($plans, 'acceptImpactAnalysis('), 'Governed wiz
 architect_ui_assert(
     str_contains($api, 'architect_api_ensure_structure(')
         && str_contains((string)$structureService, 'buildProposalFromImpactPresentation(')
+        && str_contains((string)$structureService, 'reopenExistingProposal(')
+        && str_contains((string)$structureService, 'reopened_existing_fingerprint')
         && str_contains($page, '$displayStructureNodes')
         && str_contains($page, '$primaryArea[\'proposed_structure_items\']'),
     'Accepting Step 2 must prepare and display the governed Step 3 structure proposal.'

@@ -281,6 +281,16 @@ $reviewStatus = strtoupper((string)(
 ));
 $reviewApproved = (string)($review['status'] ?? '') === 'approved';
 $reviewIssues = array_values((array)($reviewDisplayPayload['issues'] ?? array()));
+$reviewNeedsStructureRevision = false;
+foreach ($reviewIssues as $reviewIssue) {
+    if (preg_match(
+        '/(?:accepted consolidated hierarchy|missing accepted structure node|unexpected structure node)/iu',
+        mcw_review_issue_text($reviewIssue)
+    ) === 1) {
+        $reviewNeedsStructureRevision = true;
+        break;
+    }
+}
 $operations = array_values(array_filter((array)($report['operations'] ?? array()), 'is_array'));
 $operation = $operations === array() ? array() : $operations[array_key_last($operations)];
 
@@ -294,6 +304,7 @@ $step2Complete = $amendments !== array() && !in_array(
 );
 $step3Complete = $structure !== array() && (string)($structure['status'] ?? '') === 'approved';
 $step4Complete = $draft !== array()
+    && $draftStatus === 'generated'
     && (string)($draftPayload['wizard_status'] ?? '') === 'accepted';
 $reviewReady = in_array(
     $reviewStatus,
@@ -651,7 +662,7 @@ books_manuals_page_open(array(
             <?php endif; ?>
           <?php else: ?>
             <p class="mcw-apply-note">The Wizard cannot continue until these review issues are corrected. The quality gate has not been bypassed.</p>
-            <button class="app-btn app-btn--secondary mcw-primary-action" type="button" data-mcw-revise-structure>Revise Proposed Structure</button>
+            <button class="app-btn app-btn--secondary mcw-primary-action" type="button" data-mcw-resolve-review><?= $reviewNeedsStructureRevision ? 'Revise Proposed Structure' : 'Revise Proposed Amendments' ?></button>
           <?php endif; ?>
         </section>
       <?php endif; ?>
