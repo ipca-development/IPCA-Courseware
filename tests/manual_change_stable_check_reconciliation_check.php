@@ -60,158 +60,6 @@ stableCheckAssert(
     'Semantic initial-submission control still depends on exact fixture prose.'
 );
 
-$evidenceFirst = $proposal;
-$evidenceFirst['section_drafts']['5.6']['nodes']['5.6.4'] =
-    'Initial ECCAIRS notification uses the information required for the applicable reporting stage. '
-    . 'Unavailable or unknown information shall not delay the reporting deadline. '
-    . 'The Safety Manager shall review and approve the notification before transmission. '
-    . 'Evidence of preparation, approval, submission and authority acceptance shall be retained.';
-$evidenceFirstReview = $reviewer->verifyReadableAmendmentProposal($evidenceFirst);
-$evidenceFirstCheck = array_column(
-    (array)$evidenceFirstReview['review_checks'],
-    null,
-    'check_id'
-)['eccairs.initial.governance-complete'] ?? array();
-stableCheckAssert(
-    (string)($evidenceFirstCheck['status'] ?? '') === 'PASS',
-    'Retained-evidence governance still depends on word order rather than the semantic control.'
-);
-
-$semanticEquivalent = $proposal;
-$semanticEquivalent['section_drafts']['5.6']['nodes']['5.6.9'] =
-    'An occurrence shall not be closed until required intermediate and final ECCAIRS follow-up '
-    . 'is complete and the related ECCAIRS submission, receipt, acceptance or equivalent evidence is retained.';
-$semanticEquivalent['section_drafts']['5.6']['nodes']['5.6.8'] =
-    'The Safety Manager shall maintain the ECCAIRS Follow-up Control Log for reportable occurrences. '
-    . 'The log shall track each deadline, reporting stage, action status, investigation and supporting evidence.';
-$semanticEquivalent['section_drafts']['5.7']['nodes']['5.7.3'] =
-    'A periodic reconciliation, conducted at least quarterly, shall compare reportable occurrences and ECCAIRS records. '
-    . 'Discrepancies and adverse trends shall be reported for systemic action without replacing occurrence-level control.';
-$semanticEquivalent['section_drafts']['4.2']['nodes']['4.2'] =
-    'A retained evidence set shall cover initial, intermediate and final ECCAIRS submissions or updates '
-    . 'and their acceptance or status where applicable, together with the investigation record, '
-    . 'implementation status and closure evidence.';
-$semanticReview = $reviewer->verifyReadableAmendmentProposal($semanticEquivalent);
-$semanticChecks = array_column(
-    (array)$semanticReview['review_checks'],
-    null,
-    'check_id'
-);
-foreach (array(
-    'closure.authority-follow-up-gate',
-    'monitoring.occurrence-level',
-    'monitoring.aggregate-assurance',
-    'records.occurrence-evidence-complete',
-) as $checkId) {
-    stableCheckAssert(
-        (string)($semanticChecks[$checkId]['status'] ?? '') === 'PASS',
-        "{$checkId} still depends on preferred prose rather than its semantic control."
-    );
-}
-
-$reporterEquivalent = $proposal;
-foreach ($reporterEquivalent['section_drafts']['5.6']['nodes'] as $number => $_content) {
-    $reporterEquivalent['section_drafts']['5.6']['nodes'][$number] = '';
-}
-$reporterEquivalent['section_drafts']['5.6']['nodes']['5.6.1'] =
-    'EuroPilot Center shall protect the reporter in accordance with its just-culture principles.';
-$reporterReview = $reviewer->verifyReadableAmendmentProposal($reporterEquivalent);
-$reporterCheck = array_column(
-    (array)$reporterReview['review_checks'],
-    null,
-    'check_id'
-)['preservation.reporter-protection-just-culture'] ?? array();
-stableCheckAssert(
-    (string)($reporterCheck['status'] ?? '') === 'PASS',
-    'Reporter protection still depends on a preferred verb inflection.'
-);
-
-$trainingCorrection = $proposal;
-$trainingCorrection['section_drafts']['8.1']['nodes']['8.1'] .=
-    "\n\nPersonnel assigned as Action Owners for corrective or mitigating actions shall be trained "
-    . 'and competent in implementation, completion evidence and effectiveness review.';
-$trainingReview = $reviewer->verifyReadableAmendmentProposal($trainingCorrection);
-$trainingCheck = array_column(
-    (array)$trainingReview['review_checks'],
-    null,
-    'check_id'
-)['training.corrective-action-competence'] ?? array();
-stableCheckAssert(
-    (string)($trainingCheck['status'] ?? '') === 'PASS',
-    'The minimal corrective-action competence wording does not satisfy its stable check.'
-);
-
-$scopedIds = $reviewer->scopedCheckIds(
-    array(
-        array(
-            'check_id' => 'target-node',
-            'affected_sections' => array('5.6'),
-            'affected_nodes' => array('5.6.7'),
-        ),
-        array(
-            'check_id' => 'frozen-node',
-            'affected_sections' => array('8.1'),
-            'affected_nodes' => array('8.1'),
-        ),
-        array(
-            'check_id' => 'section-level',
-            'affected_sections' => array('5.6'),
-            'affected_nodes' => array(),
-        ),
-        array(
-            'check_id' => 'global-metadata',
-            'affected_sections' => array(),
-            'affected_nodes' => array(),
-        ),
-    ),
-    array('5.6'),
-    array('5.6.7'),
-    array('explicit-target')
-);
-stableCheckAssert(
-    in_array('target-node', $scopedIds, true)
-        && in_array('section-level', $scopedIds, true)
-        && in_array('global-metadata', $scopedIds, true)
-        && in_array('explicit-target', $scopedIds, true)
-        && !in_array('frozen-node', $scopedIds, true),
-    'Scoped reverification did not isolate checks affected by the changed node.'
-);
-
-$targetedParent = $proposal;
-$targetedParent['section_drafts']['8.1']['nodes']['8.1'] = 'Training';
-$targetedCandidate = $targetedParent;
-$targetedCandidate['section_drafts']['5.6']['nodes']['5.6.7'] = str_replace(
-    'Submission of the initial occurrence does not complete the reporting process where subsequent intermediate or final information is required.',
-    'Submitting the initial occurrence alone cannot constitute completion when intermediate or final authority follow-up remains required.',
-    (string)$targetedCandidate['section_drafts']['5.6']['nodes']['5.6.7']
-);
-$targetedVerification = $reviewer->verifyTargetedPatch(
-    $targetedParent,
-    $targetedCandidate,
-    array('5.6'),
-    array('5.6.7'),
-    array('eccairs.follow-up.initial-not-completion')
-);
-$reverifiedIds = (array)($targetedVerification['reverified_check_ids'] ?? array());
-stableCheckAssert(
-    in_array('eccairs.follow-up.initial-not-completion', $reverifiedIds, true)
-        && !in_array('training.corrective-action-competence', $reverifiedIds, true),
-    'Targeted reverification reopened a check whose node remained byte-frozen.'
-);
-
-$resolvePatchSection = new ReflectionMethod($author, 'resolveTargetedPatchSection');
-$resolvedSection = $resolvePatchSection->invoke(
-    $author,
-    '5.6.4',
-    array(array('number' => '5.6.4', 'content' => 'Targeted correction')),
-    (array)$proposal['section_drafts'],
-    array('5.6' => true)
-);
-stableCheckAssert(
-    $resolvedSection === '5.6',
-    'A node-scoped Author response did not resolve to its accepted parent section.'
-);
-
 $db = new PDO('sqlite::memory:');
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->exec(
@@ -267,183 +115,14 @@ $db->exec(
 $db->exec(
     'CREATE TABLE ipca_manual_ai_architect_review_baselines (
         id INTEGER PRIMARY KEY,
-        plan_id INTEGER,
-        review_id INTEGER NOT NULL,
-        draft_baseline_json TEXT NOT NULL,
-        structure_baseline_json TEXT NOT NULL DEFAULT \'{}\'
+        draft_baseline_json TEXT NOT NULL
     )'
 );
-$db->exec(
-    'CREATE TABLE ipca_manual_ai_architect_review_questions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        question_uuid TEXT NOT NULL,
-        plan_id INTEGER NOT NULL,
-        finding_id INTEGER NOT NULL,
-        question_fingerprint TEXT NOT NULL,
-        question_type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        choices_json TEXT NOT NULL,
-        recommendation_json TEXT,
-        why_asking TEXT NOT NULL,
-        affected_sections_json TEXT NOT NULL,
-        evidence_json TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(plan_id, question_fingerprint)
-    )'
-);
-$db->exec(
-    'CREATE TABLE ipca_manual_ai_architect_review_patches (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        plan_id INTEGER NOT NULL,
-        baseline_id INTEGER NOT NULL,
-        parent_draft_id INTEGER,
-        resulting_draft_id INTEGER,
-        patch_fingerprint TEXT,
-        scope_json TEXT,
-        verification_json TEXT,
-        proposed_payload_json TEXT,
-        status TEXT NOT NULL
-    )'
-);
-$db->exec(
-    'CREATE TABLE ipca_manual_ai_architect_review_answers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        question_id INTEGER NOT NULL,
-        consequence TEXT NOT NULL,
-        governed_fact_json TEXT NOT NULL
-    )'
-);
-$db->exec(
-    "INSERT INTO ipca_manual_ai_architect_review_baselines
-     (id,review_id,draft_baseline_json) VALUES (1,9,'{}')"
-);
+$db->exec("INSERT INTO ipca_manual_ai_architect_review_baselines (id,draft_baseline_json) VALUES (1,'{}')");
 
 $resolution = new BooksManualsChangeReviewResolutionService(
     $db,
     new BooksManualsChangePlanService($db)
-);
-$assertPreparedPackage = new ReflectionMethod(
-    $resolution,
-    'assertPreparedOperationPackageCurrent'
-);
-$preparedFingerprint = str_repeat('a', 64);
-$unchangedTransition = $assertPreparedPackage->invoke(
-    $resolution,
-    20,
-    9,
-    1,
-    array('prepared_result' => array(
-        'operation_package' => array('package_fingerprint' => $preparedFingerprint),
-    )),
-    array('package_fingerprint' => $preparedFingerprint)
-);
-stableCheckAssert(
-    (string)($unchangedTransition['prepared_package_fingerprint'] ?? '')
-        === $preparedFingerprint
-        && empty($unchangedTransition['governed_candidate_transition']),
-    'An unchanged prepared operation package was not accepted.'
-);
-$packageDriftBlocked = false;
-try {
-    $assertPreparedPackage->invoke(
-        $resolution,
-        20,
-        9,
-        1,
-        array('prepared_result' => array(
-            'operation_package' => array(
-                'package_fingerprint' => $preparedFingerprint,
-                'plan_id' => 20,
-            ),
-        )),
-        array(
-            'package_fingerprint' => str_repeat('b', 64),
-            'plan_id' => 21,
-        )
-    );
-} catch (ReflectionException $error) {
-    throw $error;
-} catch (Throwable $error) {
-    $packageDriftBlocked = str_contains(
-        $error->getMessage(),
-        'source-bound operation package changed'
-    );
-}
-stableCheckAssert(
-    $packageDriftBlocked,
-    'Approval did not block operation-package drift after Independent Review preparation.'
-);
-$preparedPackage = array(
-    'package_fingerprint' => str_repeat('c', 64),
-    'plan_id' => 30,
-    'book_version_id' => 9,
-    'lifecycle_status' => 'in_review',
-    'draft_id' => 13,
-    'draft_fingerprint' => 'draft-13',
-    'target_contexts' => array(array('section_number' => '5.6', 'context_hash' => 'source')),
-    'pre_apply_section_fingerprints' => array('7' => 'section'),
-    'replacements' => array(
-        '5.6' => array('replacement_fingerprint' => 'old-5.6'),
-        '8.1' => array('replacement_fingerprint' => 'old-8.1'),
-    ),
-);
-$currentPackage = $preparedPackage;
-$currentPackage['package_fingerprint'] = str_repeat('d', 64);
-$currentPackage['draft_id'] = 15;
-$currentPackage['draft_fingerprint'] = 'draft-15';
-$currentPackage['replacements']['5.6']['replacement_fingerprint'] = 'new-5.6';
-$currentPackage['replacements']['8.1']['replacement_fingerprint'] = 'new-8.1';
-$structure = json_encode(
-    array('nodes' => array('5.6', '8.1')),
-    JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
-);
-$db->prepare(
-    'INSERT INTO ipca_manual_ai_architect_review_baselines
-     (id,plan_id,review_id,draft_baseline_json,structure_baseline_json)
-     VALUES (3,30,11,?,?),(4,30,11,?,?)'
-)->execute(array(
-    json_encode(array('id' => 13), JSON_THROW_ON_ERROR),
-    $structure,
-    json_encode(array('id' => 15), JSON_THROW_ON_ERROR),
-    $structure,
-));
-$db->prepare(
-    'INSERT INTO ipca_manual_ai_architect_review_patches
-     (id,plan_id,baseline_id,parent_draft_id,resulting_draft_id,patch_fingerprint,
-      scope_json,verification_json,proposed_payload_json,status)
-     VALUES (1,30,3,13,14,?,?,?,\'{}\',\'VERIFICATION_FAILED\'),
-            (2,30,3,14,15,?,?,?,?,\'VERIFIED\')'
-)->execute(array(
-    'patch-1',
-    json_encode(array('sections' => array('5.6', '8.1')), JSON_THROW_ON_ERROR),
-    '{}',
-    'patch-2',
-    json_encode(array('sections' => array('5.6')), JSON_THROW_ON_ERROR),
-    json_encode(array(
-        'patch_verification_status' => 'VERIFIED',
-        'repair_type' => 'HISTORICAL_SCOPE_REPAIR',
-        'parent_baseline_id' => 3,
-        'result_baseline_id' => 4,
-    ), JSON_THROW_ON_ERROR),
-    json_encode(array('source_patch_id' => 1), JSON_THROW_ON_ERROR),
-));
-$governedTransition = $assertPreparedPackage->invoke(
-    $resolution,
-    30,
-    11,
-    4,
-    array('prepared_result' => array('operation_package' => $preparedPackage)),
-    $currentPackage
-);
-stableCheckAssert(
-    !empty($governedTransition['governed_candidate_transition'])
-        && (array)$governedTransition['verified_patch_ids'] === array(2, 1)
-        && (array)$governedTransition['changed_replacement_sections']
-            === array('5.6', '8.1')
-        && (int)$governedTransition['result_baseline_id'] === 4,
-    'A verified, source-frozen review candidate transition was not accepted and audited.'
 );
 $persist = new ReflectionMethod($resolution, 'persistReviewCheck');
 $reconcile = new ReflectionMethod($resolution, 'reconcileVerificationChecks');
@@ -511,101 +190,6 @@ stableCheckAssert($states['check.b'] === 'UNRESOLVED', 'An unfixed finding did n
 stableCheckAssert($states['check.pass'] === 'VERIFIED', 'A failed patch reopened an omitted verified finding.');
 stableCheckAssert($states['check.hard'] === 'BLOCKED', 'A hard integrity blocker became overridable.');
 stableCheckAssert($states['check.new'] === 'UNRESOLVED', 'A genuinely new defect did not receive a new identity.');
-$questions = $db->query(
-    'SELECT question_type,choices_json,evidence_json
-     FROM ipca_manual_ai_architect_review_questions
-     WHERE status=\'pending\' ORDER BY id'
-)->fetchAll(PDO::FETCH_ASSOC) ?: array();
-stableCheckAssert(
-    count($questions) === 2,
-    'Ordinary failures were not reduced to one bounded question per exact repair scope.'
-);
-foreach ($questions as $question) {
-    $choices = json_decode((string)$question['choices_json'], true);
-    stableCheckAssert(
-        (string)$question['question_type'] === 'SINGLE_CHOICE'
-            && is_array($choices)
-            && array_column($choices, 'id') === array(
-                'yes-editor-review-note',
-                'no-current-wording-sufficient',
-                'other',
-            ),
-        'A review clarification is not a deterministic yes/no/other choice.'
-    );
-}
-$db->exec(
-    "INSERT INTO ipca_manual_ai_architect_review_baselines
-     (id,review_id,draft_baseline_json) VALUES (2,10,'{}')"
-);
-for ($index = 1; $index <= 10; $index++) {
-    $persist->invoke(
-        $resolution,
-        20,
-        10,
-        2,
-        $baseCheck("overflow.{$index}", 'FAIL', "9.{$index}"),
-        array('status' => 'REQUIRES_REVIEW'),
-        1
-    );
-}
-$synchronize = new ReflectionMethod($resolution, 'synchronizeClarificationQuestions');
-$synchronize->invoke($resolution, 20, 10);
-$boundedQueue = $db->query(
-    "SELECT q.id,q.evidence_json
-     FROM ipca_manual_ai_architect_review_questions q
-     JOIN ipca_manual_ai_architect_review_findings f ON f.id=q.finding_id
-     WHERE f.review_id=10 AND q.status='pending' ORDER BY q.id"
-)->fetchAll(PDO::FETCH_ASSOC) ?: array();
-stableCheckAssert(
-    count($boundedQueue) === 8,
-    'The initial clarification queue exceeded its fixed eight-question bound.'
-);
-$firstBounded = $boundedQueue[0];
-$db->prepare(
-    "INSERT INTO ipca_manual_ai_architect_review_answers
-     (question_id,consequence,governed_fact_json)
-     VALUES (?,'NO_MANUAL_CHANGE_REQUIRED','{}')"
-)->execute(array((int)$firstBounded['id']));
-$db->prepare(
-    "UPDATE ipca_manual_ai_architect_review_questions SET status='answered' WHERE id=?"
-)->execute(array((int)$firstBounded['id']));
-$synchronize->invoke($resolution, 20, 10);
-$remainingQueueIds = array_map(
-    'intval',
-    $db->query(
-        "SELECT q.id
-         FROM ipca_manual_ai_architect_review_questions q
-         JOIN ipca_manual_ai_architect_review_findings f ON f.id=q.finding_id
-         WHERE f.review_id=10 AND q.status='pending' ORDER BY q.id"
-    )->fetchAll(PDO::FETCH_COLUMN) ?: array()
-);
-$expectedRemainingIds = array_map(
-    static fn(array $question): int => (int)$question['id'],
-    array_slice($boundedQueue, 1)
-);
-stableCheckAssert(
-    $remainingQueueIds === $expectedRemainingIds,
-    'Answering one bounded question regenerated the overflow queue or promoted hidden questions.'
-);
-$questionClasses = $db->query(
-    "SELECT m.check_id,f.finding_class,f.status,f.blocking
-     FROM ipca_manual_ai_architect_review_findings f
-     JOIN ipca_manual_ai_architect_review_check_metadata m ON m.finding_id=f.id
-     WHERE m.check_id IN ('check.b','check.new','check.hard')
-     ORDER BY m.check_id"
-)->fetchAll(PDO::FETCH_ASSOC) ?: array();
-$questionClassById = array_column($questionClasses, null, 'check_id');
-stableCheckAssert(
-    (string)$questionClassById['check.b']['finding_class']
-        === BooksManualsChangeReviewResolutionService::HUMAN_DECISION_REQUIRED
-        && (string)$questionClassById['check.new']['status'] === 'question_pending'
-        && (int)$questionClassById['check.b']['blocking'] === 0
-        && (int)$questionClassById['check.new']['blocking'] === 0
-        && (string)$questionClassById['check.hard']['finding_class']
-            === BooksManualsChangeReviewResolutionService::HARD_INTEGRITY_BLOCKER
-        && (int)$questionClassById['check.hard']['blocking'] === 1,
-    'Question-first review weakened a technical blocker or left content in an Author loop.'
-);
 
 $reconcile->invoke(
     $resolution,
@@ -617,11 +201,7 @@ $reconcile->invoke(
     array('patch_id' => 2)
 );
 $afterRepeat = $db->query(
-    'SELECT m.check_id,m.resolution_status
-     FROM ipca_manual_ai_architect_review_check_metadata m
-     JOIN ipca_manual_ai_architect_review_findings f ON f.id=m.finding_id
-     WHERE f.review_id=9
-     ORDER BY m.check_id'
+    'SELECT check_id,resolution_status FROM ipca_manual_ai_architect_review_check_metadata ORDER BY check_id'
 )->fetchAll(PDO::FETCH_KEY_PAIR);
 stableCheckAssert(count($afterRepeat) === 5, 'Repeated repair created duplicate check identities.');
 stableCheckAssert($afterRepeat['check.a'] === 'VERIFIED', 'A later repair reopened an earlier verified check.');
@@ -686,51 +266,6 @@ stableCheckAssert(
     'A repairable HARD content requirement was turned into an opaque technical blocker.'
 );
 
-$dismissedScopeCheck = $baseCheck(
-    'evidence.section.8-1.change-accounting',
-    'FAIL',
-    '8.1',
-    'INTEGRITY',
-    'HARD'
-);
-$persist->invoke(
-    $resolution,
-    20,
-    9,
-    1,
-    $dismissedScopeCheck,
-    array('status' => 'REQUIRES_REVIEW'),
-    1
-);
-$dismissedScopeCheck['status'] = 'INFORMATIONAL';
-$dismissedScopeCheck['severity'] = 'INFORMATIONAL';
-$dismissedScopeCheck['affected_nodes'] = array();
-$dismissedScopeCheck['allowed_repair_scope'] = array();
-$dismissedScopeCheck['observed_state'] = 'Section 8.1 is outside the human-accepted amendment scope.';
-$dismissedScopeCheck['human_explanation'] = $dismissedScopeCheck['observed_state'];
-$scopeMetrics = $reconcile->invoke(
-    $resolution,
-    20,
-    9,
-    1,
-    array($dismissedScopeCheck),
-    1,
-    array('accepted_scope_reconciliation' => true)
-);
-$dismissedState = $db->query(
-    "SELECT review_status,resolution_status
-     FROM ipca_manual_ai_architect_review_check_metadata
-     WHERE check_id='evidence.section.8-1.change-accounting'"
-)->fetch(PDO::FETCH_ASSOC);
-stableCheckAssert(
-    $scopeMetrics['checks_fixed'] === 1
-        && $scopeMetrics['new_checks'] === 0
-        && $scopeMetrics['regressed_checks'] === 0
-        && ($dismissedState['review_status'] ?? '') === 'INFORMATIONAL'
-        && ($dismissedState['resolution_status'] ?? '') === 'VERIFIED',
-    'A hard check outside the accepted scope did not reconcile monotonically to informational.'
-);
-
 $repairGroups = new ReflectionMethod($resolution, 'repairGroups');
 $groups = $repairGroups->invoke($resolution, array(
     array(
@@ -748,33 +283,10 @@ $groups = $repairGroups->invoke($resolution, array(
         'allowed_repair_scope_json' => array('4.2'), 'check_id' => 'z',
         'human_explanation' => 'Z',
     ),
-    array(
-        'id' => 4, 'resolution_status' => 'UNRESOLVED', 'category' => 'GLOBAL',
-        'allowed_repair_scope_json' => array(), 'affected_nodes_json' => array(),
-        'affected_sections_json' => array(), 'check_id' => 'global',
-        'human_explanation' => 'Global accepted-package check.',
-    ),
 ));
 stableCheckAssert(
-    count($groups) === 3
-        && count((array)$groups[0]['check_ids']) === 2
-        && (array)($groups[2]['affected_nodes'] ?? array()) === array(
-            'Accepted amendment package',
-        ),
-    'Corrections were not grouped coherently or a scope-less check disappeared.'
-);
-
-$reviewPlanStatus = new ReflectionMethod($resolution, 'reviewPlanStatus');
-stableCheckAssert(
-    $reviewPlanStatus->invoke($resolution, array(
-        'hard_blockers' => 0,
-        'counts' => array('questions_pending' => 2),
-    )) === 'ready_for_review'
-        && $reviewPlanStatus->invoke($resolution, array(
-            'hard_blockers' => 1,
-            'counts' => array('questions_pending' => 0),
-        )) === 'blocked',
-    'Ordinary clarification questions still place the Change Plan in a blocked state.'
+    count($groups) === 2 && count((array)$groups[0]['check_ids']) === 2,
+    'Corrections were not grouped only by coherent repair scope.'
 );
 
 $resolutionSource = file_get_contents(

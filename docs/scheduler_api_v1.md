@@ -77,16 +77,6 @@ Bootstrap is intentionally lightweight:
     "resource_search": true
   },
   "operational_timezone": "America/Los_Angeles",
-  "operational_home_base": {
-    "id": 1,
-    "organization_id": 1,
-    "display_name": "Jacqueline Cochran Regional Airport",
-    "airport_identifier": "KTRM",
-    "latitude": 33.6267,
-    "longitude": -116.1597,
-    "operational_timezone": "America/Los_Angeles",
-    "source": "tv_kiosk_config"
-  },
   "scheduler": {
     "max_range_days": 31,
     "overlap_policy": "warning",
@@ -118,62 +108,6 @@ Date-range responses embed the labels required for a native agenda: aircraft
 registration, resolved mission, cohort, crew display names, status, type, route,
 evidence flags, lock state, updated timestamp, and authorized actions. A client
 does not need one request per resource to render a day.
-
-The top-level schedule response additively repeats `operational_home_base` and
-includes `astronomy_days` for every date in the requested range:
-
-```json
-{
-  "date": "2026-08-19",
-  "morning_civil_twilight_begin": "2026-08-19T05:43:55.000",
-  "sunrise": "2026-08-19T06:09:53.000",
-  "sunset": "2026-08-19T19:26:30.000",
-  "evening_civil_twilight_end": "2026-08-19T19:52:28.000",
-  "operational_timezone": "America/Los_Angeles",
-  "location_id": 1,
-  "airport_identifier": "KTRM",
-  "calculation_method": "php_date_sun_info_civil_twilight_v1"
-}
-```
-
-The base identifier comes from the existing installation-wide online operations
-configuration (`tv_kiosk_config`), with metadata resolved through the existing
-airport dataset. PHP `date_sun_info()` computes actual astronomical civil
-twilight server-side at that location. Returned values preserve the scheduler's
-timezone-free operational-local timestamp contract.
-
-Each returned reservation also has an additive `validation` projection:
-
-```json
-{
-  "reservation_uuid": "...",
-  "start_local": "2026-08-20T10:00:00.000",
-  "end_local": "2026-08-20T12:00:00.000",
-  "validation": {
-    "result": "allowed_with_warning",
-    "warnings": [
-      {
-        "code": "crew_overlap",
-        "resource_type": "user",
-        "resource_id": 101,
-        "message": "A selected crew member is already reserved during this time.",
-        "conflicting_reservation_uuid": "..."
-      }
-    ]
-  }
-}
-```
-
-This is a read-only projection of the same canonical aircraft, cohort, and crew
-overlap rules used by validation and schedule mutations. It retains half-open
-time-window behavior (an end exactly equal to another start is not an overlap),
-considers only `scheduled` and `claimed` conflicts, and remains advisory. An
-unconflicted reservation returns `{"result":"allowed","warnings":[]}`.
-
-The server evaluates the projection in fixed-size batches with at most three
-queries per 200 reservations, rather than performing conflict queries per
-reservation. Range refreshes do not mutate schedule state. Existing reservation
-fields and top-level range response fields are unchanged.
 
 ## Mutations
 

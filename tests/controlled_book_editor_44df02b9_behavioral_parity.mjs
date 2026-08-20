@@ -53,7 +53,6 @@ function renderVariantDocument(assets) {
   rootMarkup = rootMarkup
     .replace(/data-version-id="[^"]*"/, 'data-version-id="7"')
     .replace(/data-section-id="[^"]*"/, 'data-section-id="11"')
-    .replace(/data-initial-view="[^"]*"/, 'data-initial-view="edit"')
     .replace('id="cpbEditorRoot"', 'id="cpbEditorRoot" data-api-base="/mock/editor" data-document-type="form"');
   if (!rootMarkup.includes('id="cpbToolbar"') || !rootMarkup.includes('id="cpbCanvas"')) {
     throw new Error('extracted editor shell lacks toolbar or canvas');
@@ -89,9 +88,9 @@ function browserFixture(mode) {
   return { page, blocks, chrome };
 }
 
-async function installMock(page, mode, authoritativeSurface) {
+async function installMock(page, mode) {
   const fixture = browserFixture(mode);
-  await page.evaluate(({ fixture, mode, authoritativeSurface }) => {
+  await page.evaluate(({ fixture, mode }) => {
     const root = document.querySelector('#cpbEditorRoot');
     if (!root) throw new Error('variant editor shell did not render cpbEditorRoot');
     const listStart = root.querySelector('#cpbListStart');
@@ -106,39 +105,8 @@ async function installMock(page, mode, authoritativeSurface) {
       <select id="cpbFormVariableSelect"><option value=""></option><option value="student.full_name">Student full name</option></select>
     `);
     window.__requests = [];
-    window.__needsCanonicalStructuralRefresh = false;
     window.__fixturePage = fixture.page;
     window.__fixtureBlocks = fixture.blocks;
-    const prepareCanonicalBlock = (block) => {
-      const textLength = String(block.textContent || '').length;
-      block.classList.add('reader-semantic-piece');
-      block.setAttribute(
-        'data-source-fragment-id',
-        `section-11/${block.getAttribute('data-stable-anchor') || `block-${block.dataset.blockId}`}/root`,
-      );
-      block.setAttribute('data-source-range-start', '0');
-      block.setAttribute('data-source-range-end', String(textLength));
-      block.setAttribute('data-source-length', String(textLength));
-      block.setAttribute('data-presentation-copy', '0');
-      block.setAttribute('data-semantic-type', block.dataset.blockType || 'block');
-      block.querySelector(':scope > .cpb-block-chrome')?.remove();
-      block.querySelectorAll('[contenteditable]').forEach((field) => field.removeAttribute('contenteditable'));
-      return block;
-    };
-    const canonicalHolder = document.createElement('div');
-    canonicalHolder.innerHTML = fixture.page;
-    canonicalHolder.querySelectorAll('.cpb-block[data-block-id]').forEach(prepareCanonicalBlock);
-    const canonicalPage = {
-      section_id: 11,
-      page_number: 1,
-      page_html: `<article class="reader-generated-page" style="width:816px;height:1056px">
-        <header class="reader-page-header">Header 1</header>
-        <main class="reader-page-body">${canonicalHolder.innerHTML}</main>
-        <footer class="reader-page-footer">Footer 1<span class="reader-page-number">1</span></footer>
-      </article>`,
-      metadata: {},
-    };
-    window.__canonicalPage = canonicalPage;
     window.alert = () => {};
     window.confirm = () => true;
     window.prompt = (_message, fallback = '') => fallback || 'Fixture';
@@ -172,7 +140,6 @@ async function installMock(page, mode, authoritativeSurface) {
         { callout_type: 'warning', title: 'WARNING', text: '' }, { callout_type: 'note', title: 'NOTE', text: '' },
         { callout_type: 'caution', title: 'CAUTION', text: '' }, { callout_type: 'info', title: 'INFO', text: '' },
       ] });
-      if (action === 'wizard_changes') return response({ ok: true, changes: null });
       if (action === 'load') return response({
         ok: true, section_id: 11, editable: true, sections_tree: [{ id: 11, nav_id: '11', section_key: 'main_content', title: 'Fixture', children: [{ id: 12, nav_id: '12', title: 'Child', children: [] }] }],
         section: { id: 11, section_key: mode === 'annex' ? 'annexes' : 'main_content', title: 'Fixture' }, page_html: fixture.page,
@@ -186,86 +153,13 @@ async function installMock(page, mode, authoritativeSurface) {
         toc_settings: { include_title: true, include_subtitle_1: true }, toc_settings_catalog: [],
         section_number_display: { 1: '1.1' }, suggested_regulatory_refs: {}, manual_code: 'OM-A',
       });
-      if (action === 'stored_preview' && authoritativeSurface) {
-        return response({
-          ok: true,
-          result: {
-            pages: [window.__canonicalPage],
-            book_style_css: '',
-            freshness: { is_current: true },
-          },
-        });
-      }
       if (String(url).includes('controlled_book_page_break_api.php')) {
         if (action === 'list') return response({ ok: true, breaks: [], candidates: [{ anchor: 'paragraph-3' }] });
         return response({ ok: true, break: { id: 1, before_block_anchor: payload.before_block_anchor || 'paragraph-3' } });
       }
-      if (action === 'create_block') {
-        const createdHtml = blockHtml(payload.block_type, 100);
-        if (authoritativeSurface) {
-          const pageHolder = document.createElement('div');
-          pageHolder.innerHTML = window.__canonicalPage.page_html;
-          const createdHolder = document.createElement('div');
-          createdHolder.innerHTML = createdHtml;
-          const createdBlock = prepareCanonicalBlock(createdHolder.firstElementChild);
-          createdBlock.setAttribute('data-stable-anchor', 'block-100');
-          const anchor = pageHolder.querySelector(
-            `.cpb-block[data-block-id="${payload.insert_after_block_id || ''}"]`,
-          );
-          const blocksRoot = pageHolder.querySelector('[data-blocks-root]') || pageHolder.querySelector('.reader-page-body');
-          if (anchor) anchor.insertAdjacentElement('afterend', createdBlock);
-          else blocksRoot?.appendChild(createdBlock);
-          window.__canonicalPage.page_html = pageHolder.innerHTML;
-          window.__needsCanonicalStructuralRefresh = true;
-        }
-        return response({ ok: true, block_id: 100, block_html: createdHtml, section_number_display: {} });
-      }
-      if (action === 'upload_image') {
-        const uploadedHtml = `<div class="cpb-block cpb-block--image" data-block-id="101" data-block-type="image"><figure class="cpb-image cpb-image--editable" data-width-pct="100"><img src="/uploaded.png"><button class="cpb-image-rotate">rotate</button><span class="cpb-image-resize"></span><figcaption contenteditable="true">Uploaded</figcaption></figure></div>`;
-        if (authoritativeSurface) {
-          const pageHolder = document.createElement('div');
-          pageHolder.innerHTML = window.__canonicalPage.page_html;
-          const uploadedHolder = document.createElement('div');
-          uploadedHolder.innerHTML = uploadedHtml;
-          const uploadedBlock = prepareCanonicalBlock(uploadedHolder.firstElementChild);
-          uploadedBlock.setAttribute('data-stable-anchor', 'image-101');
-          const blocksRoot = pageHolder.querySelector('[data-blocks-root]')
-            || pageHolder.querySelector('.reader-page-body');
-          blocksRoot?.appendChild(uploadedBlock);
-          window.__canonicalPage.page_html = pageHolder.innerHTML;
-          window.__needsCanonicalStructuralRefresh = true;
-        }
-        return response({ ok: true, block_id: 101, block_html: uploadedHtml });
-      }
-      if (action === 'delete_block' && authoritativeSurface) {
-        const pageHolder = document.createElement('div');
-        pageHolder.innerHTML = window.__canonicalPage.page_html;
-        pageHolder.querySelectorAll(
-          `.cpb-block[data-block-id="${payload.block_id}"]`,
-        ).forEach((block) => block.remove());
-        window.__canonicalPage.page_html = pageHolder.innerHTML;
-        window.__needsCanonicalStructuralRefresh = true;
-        return response({ ok: true });
-      }
-      if (action === 'move_block') {
-        if (authoritativeSurface) {
-          const pageHolder = document.createElement('div');
-          pageHolder.innerHTML = window.__canonicalPage.page_html;
-          const block = pageHolder.querySelector(
-            `.cpb-block[data-block-id="${payload.block_id}"]`,
-          );
-          const sibling = payload.direction === 'up'
-            ? block?.previousElementSibling
-            : block?.nextElementSibling;
-          if (block && sibling) {
-            if (payload.direction === 'up') sibling.insertAdjacentElement('beforebegin', block);
-            else sibling.insertAdjacentElement('afterend', block);
-          }
-          window.__canonicalPage.page_html = pageHolder.innerHTML;
-          window.__needsCanonicalStructuralRefresh = true;
-        }
-        return response({ ok: true, page_body_html: fixture.blocks });
-      }
+      if (action === 'create_block') return response({ ok: true, block_id: 100, block_html: blockHtml(payload.block_type, 100), section_number_display: {} });
+      if (action === 'upload_image') return response({ ok: true, block_id: 101, block_html: `<div class="cpb-block cpb-block--image" data-block-id="101" data-block-type="image"><figure class="cpb-image cpb-image--editable" data-width-pct="100"><img src="/uploaded.png"><button class="cpb-image-rotate">rotate</button><span class="cpb-image-resize"></span><figcaption contenteditable="true">Uploaded</figcaption></figure></div>` });
+      if (action === 'move_block') return response({ ok: true, page_body_html: fixture.blocks });
       if (action === 'recompute_section_numbers') return response({ ok: true, page_html: '', section_number_display: { 1: '1.1' } });
       if (action === 'variables') return response({ ok: true, variables: [{ group: 'Student', variables: [{ key: 'student.full_name', label: 'Student full name' }] }] });
       if (action === 'ensure_lep_approval') return response({ ok: true, approval_url: '/approval/fixture' });
@@ -275,18 +169,9 @@ async function installMock(page, mode, authoritativeSurface) {
       if (['regenerate_toc','regenerate_lep_parts','regenerate_definitions','regenerate_annex_register','regenerate_annex_highlights','sync_manual_structure','regenerate_highlights'].includes(action)) {
         return response({ ok: true, page_html: fixture.page, result: { entries_count: 1 }, toc_settings: { include_title: true } });
       }
-      if (authoritativeSurface && ['live_ensure', 'live_status', 'live_retry'].includes(action)) {
-        const isCurrent = window.__needsCanonicalStructuralRefresh;
-        if (isCurrent) window.__needsCanonicalStructuralRefresh = false;
-        return response({
-          ok: true,
-          status: isCurrent ? 'current' : 'generating',
-          source_hash: isCurrent ? 'fixture-current' : 'fixture-generating',
-        });
-      }
       return response({ ok: true, presets: payload.presets, page_html: fixture.page });
     };
-  }, { fixture, mode, authoritativeSurface });
+  }, { fixture, mode });
 }
 
 function modeFor(row) {
@@ -340,7 +225,7 @@ async function exerciseRow(page, row) {
     const payload = (id) => [...window.__requests].reverse().find((request) => request.action === 'update_block' && request.payload.block_id === id)?.payload.payload;
     // Phase B pagination transport is additive and has its own behavioral contract.
     // Keep this parity observation focused on the frozen source-editor API calls and payloads.
-    const observe = (value) => ({ value, requests: window.__requests.filter((r) => !['load', 'get_callout_presets', 'wizard_changes', 'list', 'section_index', 'stored_preview', 'generate', 'live_ensure', 'live_status', 'live_retry', 'review_threads'].includes(r.action)) });
+    const observe = (value) => ({ value, requests: window.__requests.filter((r) => !['load', 'get_callout_presets', 'list', 'section_index', 'generate', 'live_ensure', 'live_status', 'live_retry', 'review_threads'].includes(r.action)) });
     await wait(50);
 
     switch (name) {
@@ -349,10 +234,7 @@ async function exerciseRow(page, row) {
         return observe({
           order: qa('#cpbToolbarMain button,#cpbToolbarMain select,#cpbToolbarMain input')
             .filter((e) => !e.hasAttribute('data-table-action'))
-            .map((e) => e.id || e.dataset.cmd || e.dataset.align || e.dataset.addBlock)
-            .filter((control) => control
-              && control !== 'cpbUndoWizardEdit'
-              && !String(control).startsWith('cpbCell')),
+            .map((e) => e.id || e.dataset.cmd || e.dataset.align || e.dataset.addBlock),
           rows: qa(
             '#cpbToolbarMain .cpb-toolbar-row'
               + ':not(.cpb-toolbar-row--table)'
@@ -426,12 +308,7 @@ async function exerciseRow(page, row) {
         selectAll('[data-block-id="2"] .cpb-paragraph'); click('[data-align="center"]');
         q('#cpbFontSelect').value = 'sans'; q('#cpbFontSelect').dispatchEvent(new Event('change', { bubbles: true }));
         q('#cpbFontSizeSelect').value = '14'; q('#cpbFontSizeSelect').dispatchEvent(new Event('change', { bubbles: true }));
-        q('#cpbTextColor').value = '#112233'; q('#cpbTextColor').dispatchEvent(new Event('input', { bubbles: true }));
-        for (let attempt = 0; attempt < 80; attempt += 1) {
-          const currentHtml = q('[data-block-id="2"] .cpb-paragraph').innerHTML;
-          if (payload(2)?.html === currentHtml) break;
-          await wait(25);
-        }
+        q('#cpbTextColor').value = '#112233'; q('#cpbTextColor').dispatchEvent(new Event('input', { bubbles: true })); await wait();
         return observe({ html: q('[data-block-id="2"] .cpb-paragraph').innerHTML, attrs: { align: q('[data-block-id="2"] .cpb-paragraph').dataset.textAlign, font: q('[data-block-id="2"] .cpb-paragraph').dataset.fontFamily, size: q('[data-block-id="2"] .cpb-paragraph').dataset.fontSize, color: q('[data-block-id="2"] .cpb-paragraph').dataset.textColor }, saved: payload(2) });
       }
       case 'history.undo': {
@@ -485,8 +362,7 @@ async function exerciseRow(page, row) {
         return observe({ chrome: 1, actions, insertRequest, moveRequest, deleteRequest: last('delete_block')?.payload, deleted: !q('[data-block-id="4"]') });
       }
       case 'block.insert':
-        focus('[data-block-id="2"] .cpb-paragraph'); click('[data-add-block="paragraph"]');
-        for (let attempt = 0; attempt < 60 && !q('[data-block-id="100"]'); attempt += 1) await wait(25);
+        focus('[data-block-id="2"] .cpb-paragraph'); click('[data-add-block="paragraph"]'); await wait(80);
         return observe({ create: last('create_block')?.payload, created: q('[data-block-id="100"]')?.dataset.blockType, focused: document.activeElement.closest('.cpb-block')?.dataset.blockId });
       case 'block.delete':
         click('[data-block-id="3"] [data-action="delete"]'); await wait(80);
@@ -496,8 +372,7 @@ async function exerciseRow(page, row) {
         click(`[data-block-id="3"] [data-action="${name.endsWith('up') ? 'move-up' : 'move-down'}"]`); await wait(80);
         return observe({ request: last('move_block')?.payload, sourceBlocks: qa('[data-blocks-root] > .cpb-block').length });
       case 'block.insert_paragraph_below':
-        click('[data-block-id="2"] [data-action="insert-paragraph"]');
-        for (let attempt = 0; attempt < 60 && !q('[data-block-id="100"]'); attempt += 1) await wait(25);
+        click('[data-block-id="2"] [data-action="insert-paragraph"]'); await wait(80);
         return observe({ afterId: q('[data-block-id="2"]')?.nextElementSibling?.dataset.blockId, request: last('create_block')?.payload, focusedBlock: document.activeElement.closest('.cpb-block')?.dataset.blockId });
       case 'table.single_source_object':
         return observe({ blocks: qa('[data-block-id="6"]').length, tables: qa('[data-block-id="6"] table.cpb-table').length, rows: qa('[data-block-id="6"] tr').length, tools: qa('[data-block-id="6"] .cpb-table-tools').length });
@@ -556,8 +431,7 @@ async function exerciseRow(page, row) {
         focus('[data-block-id="7"] .cpb-callout-text'); q('#cpbCalloutSelect').value = 'note'; q('#cpbCalloutSelect').dispatchEvent(new Event('change', { bubbles: true })); await wait();
         return observe({ type: q('[data-block-id="7"] .cpb-callout').dataset.calloutType, className: q('[data-block-id="7"] .cpb-callout').className, savedType: payload(7)?.callout_type });
       case 'image.upload': {
-        const input = q('#cpbImageInput'); const file = new File(['fixture'], 'fixture.png', { type: 'image/png' }); const transfer = new DataTransfer(); transfer.items.add(file); Object.defineProperty(input, 'files', { value: transfer.files, configurable: true }); input.dispatchEvent(new Event('change', { bubbles: true }));
-        for (let attempt = 0; attempt < 60 && !q('[data-block-id="101"]'); attempt += 1) await wait(25);
+        const input = q('#cpbImageInput'); const file = new File(['fixture'], 'fixture.png', { type: 'image/png' }); const transfer = new DataTransfer(); transfer.items.add(file); Object.defineProperty(input, 'files', { value: transfer.files, configurable: true }); input.dispatchEvent(new Event('change', { bubbles: true })); await wait(80);
         return observe({ upload: last('upload_image')?.payload, inserted: q('[data-block-id="101"] img')?.getAttribute('src'), focusedBlock: document.activeElement.closest('.cpb-block')?.dataset.blockId });
       }
       case 'image.resize': {
@@ -626,15 +500,7 @@ async function exerciseRow(page, row) {
         return observe({ sourceBlocks: qa('[data-blocks-root] > .cpb-block').length, breakRequest: window.__requests.find((r) => String(r.action).includes('split') || String(r.action).includes('create')), oneEditedSource: qa('[data-block-id="2"]').length });
       case 'pagination.page_furniture_only_addition':
         await wait(80);
-        return observe({
-          headers: qa('.reader-page-header').length || qa('.cpb-sheet > .cpb-page-header').length,
-          footers: qa('.reader-page-footer').length || qa('.cpb-sheet > .cpb-page-footer').length,
-          pageSurface: qa('.cpb-paginated-page').length || (qa('.cpb-print-furniture-layer').length ? 1 : 0),
-          editableFurniture: qa(
-            '.reader-page-header [contenteditable="true"],.reader-page-footer [contenteditable="true"],'
-              + '.cpb-print-furniture-layer [contenteditable="true"]',
-          ).length,
-        });
+        return observe({ sourceHeaders: qa('.cpb-sheet > .cpb-page-header').length, sourceFooters: qa('.cpb-sheet > .cpb-page-footer').length, furnitureLayers: qa('.cpb-print-furniture-layer').length, editableFurniture: qa('.cpb-print-furniture-layer [contenteditable="true"]').length });
       case 'pagination.presentation_copies_excluded':
         await wait(80);
         return observe({ semanticBlocks: qa('[data-blocks-root] > .cpb-block').length, duplicateSemanticIds: [...new Set(qa('.cpb-block[data-block-id]').map((b) => b.dataset.blockId).filter((id, i, all) => all.indexOf(id) !== i))], presentationCopiesInPayload: JSON.stringify(payload(2) || {}).includes('presentation-copy') });
@@ -737,7 +603,7 @@ function validateObservation(row, observation) {
     'editing.focus_retention': () => v.activeBlock === '2' && v.activeField === 'html' && v.saved === 'Focused',
     'editing.scroll_retention': () => v.before === 240 && v.after === 240 && v.saved === 'Scroll stable',
     'pagination.manual_break_only_addition': () => v.sourceBlocks === 9 && v.oneEditedSource === 1 && !!v.breakRequest,
-    'pagination.page_furniture_only_addition': () => v.headers === 1 && v.footers === 1 && v.pageSurface === 1 && v.editableFurniture === 0,
+    'pagination.page_furniture_only_addition': () => v.sourceHeaders === 1 && v.sourceFooters === 1 && v.furnitureLayers >= 1 && v.editableFurniture === 0,
     'pagination.presentation_copies_excluded': () => v.duplicateSemanticIds.length === 0 && !v.presentationCopiesInPayload,
   };
   if (Object.keys(rules).length !== expectedRowCount) {
@@ -763,8 +629,6 @@ const noOpBlurSaveRows = new Set([
   'list.shift_enter',
   'list.single_block_actions',
   'block.insert',
-  'block.insert_paragraph_below',
-  'image.upload',
   'table.add_row',
   'table.delete_row',
   'table.title_row',
@@ -773,59 +637,17 @@ const noOpBlurSaveRows = new Set([
 ]);
 
 function parityComparable(row, observation) {
-  const comparable = structuredClone(
-    noOpBlurSaveRows.has(row) ? observation.value : observation,
-  );
-  const stripCsrf = (value) => {
-    if (!value || typeof value !== 'object') return;
-    delete value.csrf_token;
-    Object.values(value).forEach(stripCsrf);
-  };
-  stripCsrf(comparable);
-  if (noOpBlurSaveRows.has(row)) {
-    // The canonical surface intentionally restores focus to a newly uploaded
-    // image after automatic repagination; the legacy source canvas did not.
-    if (row === 'image.upload') delete comparable.focusedBlock;
-    return comparable;
-  }
-  if (row.startsWith('history.') && Array.isArray(comparable.requests)) {
-    comparable.requests = comparable.requests.filter(
-      (request) => request.action !== 'save_section_layout',
-    );
-  }
-  for (const request of comparable.requests || []) {
-    const payload = request?.payload?.payload;
-    if (request?.action !== 'update_block' || Number(request?.payload?.block_id) !== 6 || !payload) {
-      continue;
-    }
-    // The current Editor stores inherited table typography as unset values and
-    // carries additive per-edge borders. Those schema extensions are covered
-    // by their own contracts; normalize them out of this frozen source-behavior gate.
-    for (const key of [
-      'title_font_family', 'title_font_size', 'title_text_color', 'title_borders',
-      'header_font_family', 'header_font_size', 'header_text_color', 'header_borders',
-      'cell_font_family', 'cell_font_size', 'cell_text_color', 'cell_borders',
-    ]) {
-      delete payload[key];
-    }
-  }
-  return comparable;
+  return noOpBlurSaveRows.has(row) ? observation.value : observation;
 }
 
-async function runVariant(page, assets, row, authoritativeSurface) {
+async function runVariant(page, assets, row) {
   await page.setContent(renderVariantDocument(assets), { waitUntil: 'domcontentloaded' });
-  await installMock(page, modeFor(row), authoritativeSurface);
+  await installMock(page, modeFor(row));
   const errors = [];
   const onPageError = (error) => errors.push(error.message);
   page.on('pageerror', onPageError);
   await page.addScriptTag({ content: assets.js });
-  await page.waitForFunction(
-    (authoritative) => authoritative
-      ? !!document.querySelector('#cpbCanvas .cpb-paginated-page')
-      : !!document.querySelector('#cpbCanvas .cpb-sheet'),
-    authoritativeSurface,
-    { timeout: 5000 },
-  );
+  await page.waitForFunction(() => document.querySelector('#cpbCanvas .cpb-sheet'), null, { timeout: 5000 });
   await page.waitForFunction(() => {
     const root = document.querySelector('#cpbEditorRoot');
     return !root.hasAttribute('aria-busy') || root.getAttribute('aria-busy') === 'false';
@@ -839,10 +661,6 @@ async function runVariant(page, assets, row, authoritativeSurface) {
 
 let browser;
 let failures = 0;
-const testFilter = String(process.env.CPB_TEST_FILTER || '').trim().toLowerCase();
-const selectedRows = testFilter
-  ? rows.filter((row) => row.toLowerCase().includes(testFilter))
-  : rows;
 const stats = {
   baseline: { executed: 0, passed: 0, failed: 0, skipped: 0, flaky: 0, retried: 0 },
   current: { executed: 0, passed: 0, failed: 0, skipped: 0, flaky: 0, retried: 0 },
@@ -855,7 +673,7 @@ try {
       throw bundledError;
     });
   }
-  for (const row of selectedRows) {
+  for (const row of rows) {
     let baseline;
     let current;
     let baselineError;
@@ -864,12 +682,7 @@ try {
       stats[variant].executed += 1;
       const variantPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
       try {
-        const result = await runVariant(
-          variantPage,
-          variant === 'baseline' ? baselineAssets : currentAssets,
-          row,
-          variant === 'current',
-        );
+        const result = await runVariant(variantPage, variant === 'baseline' ? baselineAssets : currentAssets, row);
         stats[variant].passed += 1;
         if (variant === 'baseline') baseline = result;
         else current = result;
@@ -894,10 +707,6 @@ try {
     ) {
       failures += 1;
       console.log(`FAIL ${row} — baseline/current normalized behavior or API payload mismatch`);
-      if (process.env.IPCA_EDITOR_PARITY_DEBUG === '1') {
-        console.log(`  baseline=${JSON.stringify(parityComparable(row, baseline))}`);
-        console.log(`  current=${JSON.stringify(parityComparable(row, current))}`);
-      }
     } else {
       const detail = noOpBlurSaveRows.has(row)
         ? 'behavior and final payload match; redundant unchanged-field blur save suppressed'
@@ -912,7 +721,7 @@ try {
   if (browser) await browser.close();
 }
 
-console.log(`\nBehavioral parity rows: ${selectedRows.length}`);
+console.log(`\nBehavioral parity rows: ${rows.length}`);
 for (const variant of ['baseline', 'current']) {
   const s = stats[variant];
   console.log(`${variant[0].toUpperCase()}${variant.slice(1)}: executed=${s.executed} passed=${s.passed} failed=${s.failed} skipped=${s.skipped} flaky=${s.flaky} retried=${s.retried}`);

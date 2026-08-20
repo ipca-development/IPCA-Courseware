@@ -32,9 +32,6 @@ $historicalRepair = file_get_contents(
 $contentPreview = file_get_contents(
     $root . '/scripts/prepare_manual_change_review_patch.php'
 ) ?: '';
-$scopeReconciliation = file_get_contents(
-    $root . '/scripts/reconcile_manual_change_review_scope.php'
-) ?: '';
 $planService = file_get_contents(
     $root . '/src/publishing/BooksManualsChangePlanService.php'
 ) ?: '';
@@ -72,12 +69,8 @@ $checks = array(
     'migration is additive and defines all review artifacts' =>
         substr_count($migration, 'CREATE TABLE IF NOT EXISTS ') === 7
         && !preg_match('/\b(?:DROP|TRUNCATE)\s+TABLE\b|\bDELETE\s+FROM\b/i', $migration)
-        && substr_count($migration, 'ALTER TABLE ') === 2
+        && substr_count($migration, 'ALTER TABLE ') === 1
         && str_contains($migration, 'MODIFY COLUMN status VARCHAR(40)')
-        && str_contains(
-            $migration,
-            'UNIQUE KEY uk_imaa_review_baseline_hash (plan_id, review_id, baseline_fingerprint)'
-        )
         && str_contains($migration, 'ipca_manual_ai_architect_review_baselines')
         && str_contains($migration, 'ipca_manual_ai_architect_review_findings')
         && str_contains($migration, 'ipca_manual_ai_architect_review_questions')
@@ -99,12 +92,7 @@ $checks = array(
         str_contains($migration, 'governed_fact_json JSON NOT NULL')
         && str_contains($migration, 'UNIQUE KEY uk_imaa_review_answer_question')
         && str_contains($api, 'answer_review_question')
-        && str_contains($api, 'selected_choice_ids')
-        && str_contains($resolutionService, '$rawConsequences')
-        && str_contains(
-            $resolutionService,
-            "'wording_change_required' => \$consequence === 'STRUCTURAL_CONSEQUENCE'"
-        ),
+        && str_contains($api, 'selected_choice_ids'),
     'automatic Step 5 backward transition endpoint is disabled' =>
         str_contains($api, 'cannot automatically reopen or regenerate accepted Steps 2–4')
         && !str_contains($api, 'AMENDMENT_REVISION_REQUESTED_BY_REVIEW')
@@ -125,17 +113,12 @@ $checks = array(
         str_contains($author, 'TARGETED PATCH MODE')
         && stripos($author, 'unrelated accepted wording') !== false
         && str_contains($author, 'Targeted Author attempted to add an unaccepted structure node')
-        && str_contains($author, 'PRIOR TARGETED ATTEMPT FEEDBACK')
-        && str_contains($author, 'Targeted Author correction failed stable checks:')
         && str_contains($author, "'production_applied' => false"),
     'Reviewer performs targeted reverification and scope checks' =>
         str_contains($reviewer, 'verifyTargetedPatch')
-        && str_contains($reviewer, 'scopedCheckIds')
         && str_contains($reviewer, 'Targeted correction changed unrelated accepted wording')
-        && str_contains($reviewer, "'reconciliation_checks' =>")
         && str_contains($reviewer, "'review_checks' => \$reviewChecks")
         && str_contains($reviewer, 'frozen_nodes_byte_unchanged')
-        && str_contains($resolutionService, "\$verification['reconciliation_checks']")
         && str_contains($reviewer, "'architect_rerun_performed' => false"),
     'stable checks and patch verification states are persisted separately' =>
         str_contains($migration, 'check_id VARCHAR(191) NOT NULL')
@@ -158,44 +141,21 @@ $checks = array(
         && str_contains($author, 'current_accepted_wording')
         && str_contains($author, 'target_state_evidence')
         && str_contains($author, 'preservation_boundaries'),
-    'accepted-scope reconciliation does not rerun governed stages' =>
-        str_contains($scopeReconciliation, 'reconcileAcceptedReviewScope')
-        && str_contains($scopeReconciliation, 'drafts_unchanged')
-        && str_contains($scopeReconciliation, 'review_baselines_unchanged')
-        && str_contains($scopeReconciliation, "'architect_rerun_performed' => false")
-        && str_contains($scopeReconciliation, "'manual_content_mutated' => false"),
-    'ordinary review cannot restart an Author correction loop' =>
-        str_contains($api, 'Interactive Author correction is disabled in Independent Review.')
-        && !str_contains($api, '$author->generateTargetedPatch(')
-        && !str_contains($ui, 'data-mcw-accept-targeted-patch'),
     'READY_TO_APPLY is strict and only moves forward' =>
-        str_contains($api, '$reviewResolution->approveForApply(')
-        && str_contains($resolutionService, "'outcome' => 'READY_TO_APPLY'")
-        && str_contains($resolutionService, "empty(\$state['ready_to_apply'])")
-        && str_contains($resolutionService, "'stage' => 'operations'")
-        && str_contains($resolutionService, "'status' => 'ready_to_apply'")
-        && str_contains($resolutionService, "\$planStage === 'operations'")
-        && str_contains($resolutionService, "\$existingPayload['outcome']")
-        && str_contains($resolutionService, "is_array(\$review['review_payload_json']")
-        && str_contains($resolutionService, 'assertPreparedOperationPackageCurrent')
-        && str_contains($resolutionService, 'array_replace($existingPayload')
-        && str_contains($resolutionService, "'operation_package_transition'")
-        && str_contains($resolutionService, 'verifiedPackageTransitionLineage')
-        && str_contains($api, '$apply->buildPreflightPackage($planId, true)')
-        && str_contains($api, 'Independent Review cannot automatically reopen'),
-    'Step 5 is one-question-at-a-time without an Author correction loop' =>
+        str_contains($api, "'outcome' => 'READY_TO_APPLY'")
+        && str_contains($api, "'unresolved_material_findings' => 0")
+        && str_contains($api, '$continueResult = $plans->continueToApply')
+        && str_contains($api, "'automatic_backward_transition_performed' => false"),
+    'Step 5 is one-question-at-a-time with targeted correction preview' =>
         str_contains($ui, 'Question <?= $questionPosition ?> of')
-        && str_contains($ui, 'Additional instruction (required for “Other”)')
+        && str_contains($ui, 'Current accepted wording')
+        && str_contains($ui, 'Proposed minimal correction')
         && str_contains($ui, 'Historical Scope Repair')
         && str_contains($ui, 'Content Correction')
         && str_contains($ui, 'Review Details')
         && str_contains($js, 'answer_review_question')
-        && !str_contains($ui, 'Generate Correction for Remaining Issues')
-        && str_contains($resolutionService, 'synchronizeClarificationQuestions')
-        && str_contains($resolutionService, '$maxQuestions = 8')
-        && str_contains($resolutionService, 'bounded-review-summary|')
-        && str_contains($resolutionService, 'EDITOR_FOLLOW_UP_REQUIRED')
-        && str_contains($resolutionService, "'author_correction_generated' => false"),
+        && str_contains($js, 'generate_targeted_correction')
+        && str_contains($js, 'accept_targeted_correction'),
     'recovery is metadata-only and fingerprints accepted baselines' =>
         str_contains($recovery, "'manual_content_mutated' => false")
         && str_contains($recovery, "'architect_rerun_performed' => false")

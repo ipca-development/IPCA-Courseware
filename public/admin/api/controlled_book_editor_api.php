@@ -41,25 +41,6 @@ function cp_editor_json(int $code, array $payload): void
     exit;
 }
 
-function cp_editor_csrf(): string
-{
-    if (!isset($_SESSION['controlled_book_editor_csrf'])
-        || !is_string($_SESSION['controlled_book_editor_csrf'])
-        || strlen($_SESSION['controlled_book_editor_csrf']) < 32) {
-        $_SESSION['controlled_book_editor_csrf'] = bin2hex(random_bytes(32));
-    }
-    return (string)$_SESSION['controlled_book_editor_csrf'];
-}
-
-/** @param array<string,mixed> $input */
-function cp_editor_require_csrf(array $input): void
-{
-    $provided = (string)($input['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
-    if ($provided === '' || !hash_equals(cp_editor_csrf(), $provided)) {
-        cp_editor_json(403, array('ok' => false, 'error' => 'Invalid CSRF token.'));
-    }
-}
-
 /**
  * @param array<string,mixed> $version
  */
@@ -206,114 +187,9 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $_POST = array_merge($_POST, $json);
     }
 }
-if ($_SERVER['REQUEST_METHOD'] === 'POST'
-    && in_array($action, array('revert_wizard_change', 'undo_wizard_edit'), true)) {
-    cp_editor_require_csrf($_POST);
-}
 
 try {
     switch ($action) {
-        case 'wizard_changes':
-            $versionId = (int)($_GET['version_id'] ?? $_POST['version_id'] ?? 0);
-            if ($versionId <= 0) {
-                throw new InvalidArgumentException('version_id is required.');
-            }
-            try {
-                $wizardChanges = $wizardApplySvc->editorChanges($versionId, $uid);
-            } catch (Throwable $error) {
-                error_log('Wizard Editor change history failed: ' . $error->getMessage());
-                cp_editor_json(500, array(
-                    'ok' => false,
-                    'error' => 'Wizard change history is temporarily unavailable.',
-                ));
-            }
-            cp_editor_json(200, array(
-                'ok' => true,
-                'changes' => $wizardChanges,
-            ));
-            break;
-        case 'revert_wizard_change':
-            $versionId = (int)($_POST['version_id'] ?? 0);
-            $operationId = (int)($_POST['operation_id'] ?? 0);
-            $sectionId = (int)($_POST['section_id'] ?? 0);
-            if ($versionId <= 0 || $operationId <= 0 || $sectionId <= 0) {
-                throw new InvalidArgumentException(
-                    'version_id, operation_id and section_id are required.'
-                );
-            }
-            try {
-                $result = $wizardApplySvc->revertEditorChange(
-                    $versionId,
-                    $operationId,
-                    $sectionId,
-                    $uid,
-                    !empty($_POST['force']),
-                    (string)($_POST['expected_current_fingerprint'] ?? '')
-                );
-            } catch (PDOException $error) {
-                error_log('Wizard Editor revert database failure: ' . $error->getMessage());
-                cp_editor_json(500, array(
-                    'ok' => false,
-                    'error' => 'The Wizard change could not be reverted because storage is unavailable.',
-                ));
-            } catch (RuntimeException $error) {
-                if ($error->getCode() !== 409) {
-                    cp_editor_json(400, array(
-                        'ok' => false,
-                        'error' => $error->getMessage(),
-                    ));
-                }
-                try {
-                    $changes = $wizardApplySvc->editorChanges($versionId, $uid);
-                } catch (Throwable $lookupError) {
-                    error_log(
-                        'Wizard Editor confirmation fingerprint lookup failed: '
-                        . $lookupError->getMessage()
-                    );
-                    cp_editor_json(500, array(
-                        'ok' => false,
-                        'error' => 'The latest section fingerprint could not be confirmed.',
-                    ));
-                }
-                $currentFingerprint = '';
-                foreach ((array)($changes['items'] ?? array()) as $item) {
-                    if ((int)($item['operation_id'] ?? 0) === $operationId
-                        && (int)($item['section_id'] ?? 0) === $sectionId) {
-                        $currentFingerprint = (string)($item['current_fingerprint'] ?? '');
-                        break;
-                    }
-                }
-                cp_editor_json(409, array(
-                    'ok' => false,
-                    'error' => preg_replace('/^CONFIRM_REVERT:\s*/', '', $error->getMessage()),
-                    'requires_confirmation' => str_starts_with(
-                        $error->getMessage(),
-                        'CONFIRM_REVERT:'
-                    ),
-                    'current_fingerprint' => $currentFingerprint,
-                ));
-            } catch (Throwable $error) {
-                error_log('Wizard Editor revert failed: ' . $error->getMessage());
-                cp_editor_json(500, array(
-                    'ok' => false,
-                    'error' => 'The Wizard change could not be reverted.',
-                ));
-            }
-            $changesAfterRevert = null;
-            $sidebarRefreshWarning = '';
-            try {
-                $changesAfterRevert = $wizardApplySvc->editorChanges($versionId, $uid);
-            } catch (Throwable $error) {
-                $sidebarRefreshWarning = 'Reload the Editor to refresh the Wizard change list.';
-                error_log('Wizard Editor sidebar refresh failed after revert: ' . $error->getMessage());
-            }
-            cp_editor_json(200, array(
-                'ok' => true,
-                'result' => $result,
-                'changes' => $changesAfterRevert,
-                'sidebar_refresh_warning' => $sidebarRefreshWarning,
-            ));
-            break;
         case 'undo_wizard_edit':
             $versionId = (int)($_POST['version_id'] ?? 0);
             $operationId = (int)($_POST['operation_id'] ?? 0);
@@ -2946,14 +2822,6 @@ function cp_editor_handle_update_block(
             $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
         }
     }
-    $contentChange = true;
-    if ($row !== null && (string)($row['block_type'] ?? '') === 'table') {
-        $priorPayload = json_decode((string)($row['payload_json'] ?? '{}'), true);
-        $priorPayload = is_array($priorPayload) ? $priorPayload : array();
-        $nextPayload = $payload;
-        unset($priorPayload['col_widths'], $nextPayload['col_widths']);
-        $contentChange = $priorPayload != $nextPayload;
-    }
 
     $blocks->updateBlock($blockId, $payload, $uid);
     $block = $blocks->getBlock($blockId);
@@ -2968,7 +2836,6 @@ function cp_editor_handle_update_block(
 
     $response = array_merge(array(
         'ok' => true,
-        'content_change' => $contentChange,
         'block' => $block,
         'block_html' => $renderer->renderBlock($block, ControlledPublishingBookRenderer::MODE_EDIT),
     ), cp_editor_numbering_payload($numbering));

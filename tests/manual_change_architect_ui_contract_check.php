@@ -18,10 +18,6 @@ $api = file_get_contents($root . '/public/admin/api/books_manuals_change_archite
 $plans = file_get_contents($root . '/src/publishing/BooksManualsChangePlanService.php');
 $architect = file_get_contents($root . '/src/publishing/BooksManualsChangeArchitectService.php');
 $author = file_get_contents($root . '/src/publishing/BooksManualsChangeAuthorService.php');
-$reviewer = file_get_contents($root . '/src/publishing/BooksManualsChangeReviewerService.php');
-$reviewResolution = file_get_contents(
-    $root . '/src/publishing/BooksManualsChangeReviewResolutionService.php'
-);
 $structureService = file_get_contents($root . '/src/publishing/BooksManualsChangeStructureService.php');
 $seed = file_get_contents($root . '/scripts/seed_manual_change_architect_sms_ecairs.php');
 $library = file_get_contents($root . '/public/admin/books_manuals/index.php');
@@ -73,23 +69,19 @@ architect_ui_assert(
 );
 architect_ui_assert(
     str_contains($page, "\$reviewPayload['prepared_result']")
-        && str_contains($page, 'Review material points through short human questions')
+        && str_contains($page, 'Review Decisions')
         && str_contains($page, 'Question <?= $questionPosition ?> of')
-        && str_contains($page, 'Additional instruction (required for “Other”)')
+        && str_contains($page, 'Current accepted wording')
+        && str_contains($page, 'Proposed minimal correction')
         && str_contains($page, 'Historical Scope Repair')
         && str_contains($page, 'Content Correction')
         && str_contains($js, 'answer_review_question')
-        && !str_contains($page, 'Generate Correction for Remaining Issues')
-        && str_contains($api, 'prepareClarificationQueue')
-        && str_contains($api, "'review_checks' => \$reviewChecks")
-        && str_contains($api, "\$governance['review_checks']")
-        && str_contains((string)$reviewer, "'governance.legacy-hit.'")
-        && str_contains((string)$reviewer, "'governance.review-boundary.'")
+        && str_contains($js, 'generate_targeted_correction')
         && str_contains($api, 'cannot automatically reopen or regenerate accepted Steps 2–4')
-        && str_contains((string)$reviewResolution, "'outcome' => 'READY_TO_APPLY'")
+        && str_contains($api, "'outcome' => 'READY_TO_APPLY'")
         && str_contains((string)$structureService, 'reopenExistingProposal(')
         && str_contains((string)$structureService, 'reopened_existing_fingerprint'),
-    'Independent Review must preserve accepted baselines and expose bounded human clarification.'
+    'Independent Review must preserve accepted baselines and expose governed convergent correction.'
 );
 architect_ui_assert(
     !str_contains($page, 'Run Independent Review')

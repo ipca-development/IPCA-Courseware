@@ -55,34 +55,6 @@ function renderDocument() {
 async function installMock(page) {
   await page.evaluate(({ sourceBlocks }) => {
     const pageHtml = `<div class="cpb-sheet"><div class="cpb-sheet-body" data-blocks-root="1">${sourceBlocks}</div></div>`;
-    const canonicalHolder = document.createElement('div');
-    canonicalHolder.innerHTML = sourceBlocks;
-    canonicalHolder.querySelectorAll('.cpb-block').forEach((block) => {
-      const field = block.querySelector('.cpb-paragraph');
-      const sourceLength = String(field?.textContent || '').length;
-      block.classList.add('reader-semantic-piece');
-      block.setAttribute(
-        'data-source-fragment-id',
-        `section-11/${block.getAttribute('data-stable-anchor')}/root`,
-      );
-      block.setAttribute('data-source-range-start', '0');
-      block.setAttribute('data-source-range-end', String(sourceLength));
-      block.setAttribute('data-source-length', String(sourceLength));
-      block.setAttribute('data-presentation-copy', '0');
-      block.setAttribute('data-semantic-type', 'paragraph');
-      block.querySelector('.cpb-block-chrome')?.remove();
-      field?.removeAttribute('contenteditable');
-    });
-    const canonicalPage = {
-      section_id: 11,
-      page_number: 1,
-      page_html: `<article class="reader-generated-page" style="width:640px;height:900px">
-        <header class="reader-page-header">Phase B</header>
-        <main class="reader-page-body" data-blocks-root="1">${canonicalHolder.innerHTML}</main>
-        <footer class="reader-page-footer"><span class="reader-page-number">1</span></footer>
-      </article>`,
-      metadata: {},
-    };
     const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
       status,
       headers: { 'Content-Type': 'application/json' },
@@ -146,16 +118,6 @@ async function installMock(page) {
           manual_code: 'PB',
         });
       }
-      if (action === 'stored_preview') {
-        return jsonResponse({
-          ok: true,
-          result: {
-            pages: [canonicalPage],
-            book_style_css: '',
-            freshness: { is_current: true },
-          },
-        });
-      }
       if (String(url).includes('controlled_book_page_break_api.php')) {
         return jsonResponse({ ok: true, breaks: [], candidates: [] });
       }
@@ -205,7 +167,7 @@ async function newEditorPage(browser) {
   await installMock(page);
   await page.addScriptTag({ content: editorJs });
   await page.waitForFunction(() =>
-    document.querySelector('#cpbCanvas .cpb-paginated-page .cpb-block[data-block-id="2"]')
+    document.querySelector('#cpbCanvas .cpb-block[data-block-id="2"]')
     && document.querySelector('#cpbEditorRoot').__cpbPhaseB
   );
   await page.waitForFunction(() =>
@@ -213,7 +175,7 @@ async function newEditorPage(browser) {
   );
   await page.evaluate(() => {
     window.__phaseB.requests = window.__phaseB.requests.filter((request) =>
-      !['get_callout_presets', 'load', 'list', 'section_index', 'stored_preview'].includes(request.action)
+      !['get_callout_presets', 'load', 'list', 'section_index'].includes(request.action)
     );
   });
   return { page, browserErrors };
@@ -325,21 +287,15 @@ test('rapid commits coalesce with monotonic revisions and stable anchors', async
     await waitForCount(page, 'ensures', 1);
     await page.waitForTimeout(100);
     const observed = await page.evaluate(() => ({
-      revisions: window.__phaseB.committed
-        .filter((event) => event.mutation_kind === 'update_block')
-        .map((event) => event.client_mutation_revision),
-      anchors: window.__phaseB.committed
-        .filter((event) => event.mutation_kind === 'update_block')
-        .map((event) => event.stable_anchor),
-      allRevisions: window.__phaseB.committed.map((event) => event.client_mutation_revision),
+      revisions: window.__phaseB.committed.map((event) => event.client_mutation_revision),
+      anchors: window.__phaseB.committed.map((event) => event.stable_anchor),
       ensureRevisions: window.__phaseB.requests
         .filter((request) => request.action === 'live_ensure')
         .map((request) => request.payload.client_mutation_revision),
     }));
     assert.deepEqual(observed.revisions, [1, 2, 3]);
     assert.deepEqual(observed.anchors, ['paragraph-2', 'paragraph-2', 'paragraph-2']);
-    assert.deepEqual(observed.allRevisions, [1, 2, 3, 4]);
-    assert.deepEqual(observed.ensureRevisions, [4]);
+    assert.deepEqual(observed.ensureRevisions, [3]);
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();
@@ -362,16 +318,13 @@ test('one request stays active; newest pending runs next; stale result loses', a
     await waitForCount(page, 'ensures', 1);
     await mutateAndBlur(page, 'Pending revision two');
     await mutateAndBlur(page, 'Newest revision three');
-    await waitForCount(page, 'updates', 3);
-    await page.waitForTimeout(900);
-    const beforeResolve = await page.evaluate(() => ({
-      ensureRevisions: window.__phaseB.requests
+    await waitForCount(page, 'committed', 3);
+    await page.waitForTimeout(600);
+    assert.deepEqual(await page.evaluate(() =>
+      window.__phaseB.requests
         .filter((request) => request.action === 'live_ensure')
-        .map((request) => request.payload.client_mutation_revision),
-      newestRevision: document.querySelector('#cpbEditorRoot').__cpbPhaseB
-        .livePaginationState().mutationRevision,
-    }));
-    assert.equal(beforeResolve.ensureRevisions.length, 1);
+        .map((request) => request.payload.client_mutation_revision)
+    ), [1]);
 
     await page.evaluate(() => window.__phaseB.resolveLive(0, {
       ok: true,
@@ -383,16 +336,16 @@ test('one request stays active; newest pending runs next; stale result loses', a
       window.__phaseB.requests
         .filter((request) => request.action === 'live_ensure')
         .map((request) => request.payload.client_mutation_revision)
-    ), [beforeResolve.ensureRevisions[0], beforeResolve.newestRevision]);
+    ), [1, 3]);
     assert.equal(await page.evaluate(() =>
       document.querySelector('#cpbEditorRoot').__cpbPhaseB.livePaginationState().acceptedRevision
     ), 0);
 
     await waitForCount(page, 'statuses', 1, 5000);
-    await page.waitForFunction((acceptedRevision) =>
+    await page.waitForFunction(() =>
       document.querySelector('#cpbEditorRoot').__cpbPhaseB
-        .livePaginationState().acceptedRevision === acceptedRevision,
-    beforeResolve.newestRevision);
+        .livePaginationState().acceptedRevision === 3
+    );
     const observed = await page.evaluate(() => {
       const state = document.querySelector('#cpbEditorRoot').__cpbPhaseB.livePaginationState();
       return {
@@ -407,8 +360,8 @@ test('one request stays active; newest pending runs next; stale result loses', a
     });
     assert.deepEqual(observed, {
       maxActive: 1,
-      statusRevisions: [beforeResolve.newestRevision],
-      acceptedRevision: beforeResolve.newestRevision,
+      statusRevisions: [3],
+      acceptedRevision: 3,
       sourceHash: 'hash-3-current',
       status: 'current',
     });
@@ -564,10 +517,6 @@ test('native content undo and redo behavior remains unchanged', async (browser) 
 
 let browser;
 let failures = 0;
-const testFilter = String(process.env.CPB_TEST_FILTER || '').trim().toLowerCase();
-const selectedCases = testFilter
-  ? cases.filter((testCase) => testCase.name.toLowerCase().includes(testFilter))
-  : cases;
 try {
   try {
     browser = await chromium.launch({ headless: true });
@@ -576,7 +525,7 @@ try {
       throw bundledError;
     });
   }
-  for (const testCase of selectedCases) {
+  for (const testCase of cases) {
     try {
       await testCase.run(browser);
       console.log(`PASS ${testCase.name}`);
@@ -592,7 +541,7 @@ try {
   if (browser) await browser.close();
 }
 
-console.log(`\nPhase B browser requirements: executed=${selectedCases.length} passed=${selectedCases.length - failures} failed=${failures}`);
+console.log(`\nPhase B browser requirements: executed=${cases.length} passed=${cases.length - failures} failed=${failures}`);
 if (failures) {
   console.log('CONTROLLED_BOOK_EDITOR_PHASE_B: FAIL');
   process.exit(1);

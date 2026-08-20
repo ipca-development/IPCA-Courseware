@@ -11,7 +11,6 @@ const requireFromGarmin = createRequire(path.join(root, 'scripts/garmin/package.
 const { chromium } = requireFromGarmin('playwright');
 const editorJs = fs.readFileSync(path.join(root, 'public/assets/controlled_book_editor.js'), 'utf8');
 const editorCss = fs.readFileSync(path.join(root, 'public/assets/controlled_book_editor.css'), 'utf8');
-const readerContentCss = fs.readFileSync(path.join(root, 'public/assets/manual_reader_content.css'), 'utf8');
 const editorShell = fs.readFileSync(
   path.join(root, 'public/admin/compliance/controlled_book_editor.php'),
   'utf8',
@@ -48,42 +47,38 @@ function storedPage(sectionId, pageNumber, marker, width = 640, height = 900) {
     page_html: `<article class="reader-generated-page proof-book-style" style="width:${width}px;height:${height}px">
       <header class="reader-page-header">Header ${marker}</header>
       <main class="reader-page-body" data-blocks-root="1">
-        <div class="reader-semantic-piece cpb-block cpb-block--paragraph"
+        <div class="reader-semantic-piece" contenteditable="true"
           data-source-fragment-id="${fragmentId}" data-block-id="1" data-block-type="paragraph"
           data-stable-anchor="paragraph-1" data-source-range-start="0" data-source-range-end="22"
           data-source-length="22" data-presentation-copy="0" data-semantic-type="paragraph">
-          <p class="cpb-paragraph" data-field="html">Body ${marker}</p><button type="button" onclick="window.__projectionClicked=1">Edit ${marker}</button>
+          <p>Body ${marker}</p><button type="button" onclick="window.__projectionClicked=1">Edit ${marker}</button>
         </div>
-        <div class="reader-semantic-piece cpb-block cpb-block--paragraph"
+        <div class="reader-semantic-piece"
           data-source-fragment-id="${secondFragmentId}" data-block-id="2" data-block-type="paragraph"
           data-stable-anchor="paragraph-2" data-source-range-start="0" data-source-range-end="28"
           data-source-length="28" data-presentation-copy="0" data-semantic-type="paragraph">
-          <p class="cpb-paragraph" data-field="html">Second body ${marker}</p>
+          <p>Second body ${marker}</p>
         </div>
-        <div class="reader-semantic-piece cpb-block cpb-block--heading"
+        <div class="reader-semantic-piece"
           data-source-fragment-id="section-${sectionId}/heading/root" data-block-id="3"
           data-block-type="heading" data-stable-anchor="heading-1"
           data-source-range-start="0" data-source-range-end="7"
           data-source-length="7" data-presentation-copy="0" data-semantic-type="heading">
-          <h2 class="cpb-heading" data-field="html">Heading</h2>
+          <h2>Heading</h2>
         </div>
-        <div class="reader-semantic-piece cpb-block cpb-block--paragraph"
+        <div class="reader-semantic-piece"
           data-source-fragment-id="section-${sectionId}/paragraph-copy/repeat" data-block-id="1"
           data-block-type="paragraph" data-stable-anchor="paragraph-1"
           data-source-range-start="0" data-source-range-end="5"
           data-source-length="22" data-presentation-copy="1" data-semantic-type="paragraph">
-          <p class="cpb-paragraph" data-field="html">Copy</p>
+          <p>Copy</p>
         </div>
       </main>
       <footer class="reader-page-footer">Footer ${marker}<span class="reader-page-number">${pageNumber}</span></footer>
     </article>`,
     metadata: {
       metrics: {
-        page_width: width,
-        page_height: height,
-        header_frame: { x: 32, y: 20, width: width - 64, height: 50 },
         content_frame: { x: 32, y: 90, width: width - 64, height: height - 160 },
-        footer_frame: { x: 32, y: height - 50, width: width - 64, height: 30 },
         block_measurements: [{
           source_fragment_id: fragmentId,
           semantic_type: 'paragraph',
@@ -117,128 +112,6 @@ function previewResult(sectionId = 11, marker = 'initial', pageNumber = 41) {
   };
 }
 
-function splitTablePreviewResult(sectionId = 11) {
-  const page = (pageNumber, rowIndex, firstValue, repeatedHeader) => ({
-    section_id: sectionId,
-    page_number: pageNumber,
-    page_html: `<article class="reader-generated-page" style="width:640px;height:900px">
-      <div class="reader-page-header-region" style="position:absolute;left:40px;top:30px;width:560px;height:75px">
-        <header class="cpb-page-header" style="height:100%">
-          <table class="cpb-page-header-table"><tbody><tr>
-            <td style="padding:5px 8px;vertical-align:middle">Logo</td>
-            <td class="cpb-page-header-cell--center" style="padding:5px 8px;vertical-align:middle">Manual<br>PART 1</td>
-            <td style="padding:5px 8px;vertical-align:middle">Page: ${pageNumber}<br>Revision: 1<br>Date:</td>
-          </tr></tbody></table>
-        </header>
-      </div>
-      <main class="reader-page-body">
-        <div class="reader-semantic-piece reader-table-group cpb-block cpb-block--table"
-          data-block-id="3" data-block-type="table" data-stable-anchor="table-3"
-          data-semantic-type="table">
-          <div class="cpb-table-block cpb-table-block--align-left" data-table-align="left"
-            data-table-style-kind="standard">
-            <div class="cpb-table-wrap cpb-table-border-medium" data-border-width="medium"
-              data-border-color="#94a3b8"
-              style="width:280px;max-width:100%;--cpb-table-border-color:#94a3b8">
-              <table class="cpb-table" data-field="table" style="width:280px">
-                <colgroup><col style="width:140px"><col style="width:140px"></colgroup>
-                <thead data-source-fragment-id="section-${sectionId}/table-3/table-header"
-                  data-source-range-start="0" data-source-range-end="14" data-source-length="14"
-                  data-presentation-copy="${repeatedHeader ? '1' : '0'}">
-                  <tr class="cpb-table-title-row" data-title-row="1"><td colspan="2">Table title</td></tr>
-                  <tr class="cpb-table-header-row"><th><span class="cpb-th-text">A</span></th><th><span class="cpb-th-text">B</span></th></tr>
-                </thead>
-                <tbody><tr data-source-fragment-id="section-${sectionId}/table-3/table-row-${rowIndex}"
-                  data-source-range-start="0" data-source-range-end="4" data-source-length="4"
-                  data-presentation-copy="0"><td>${firstValue}</td><td>B${rowIndex + 1}</td></tr></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </main>
-      <footer class="reader-page-footer"><span class="reader-page-number">${pageNumber}</span></footer>
-    </article>`,
-    metadata: {},
-  });
-  return {
-    ok: true,
-    result: {
-      pages: [
-        page(51, 0, 'A1', false),
-        page(52, 1, 'A2', true),
-      ],
-      book_style_css: '.reader-generated-page{color:rgb(12, 34, 56)}',
-      freshness: { is_current: true },
-    },
-  };
-}
-
-function splitParagraphPreviewResult(sectionId = 11) {
-  const page = (pageNumber, rangeStart, rangeEnd, text) => ({
-    section_id: sectionId,
-    page_number: pageNumber,
-    page_html: `<article class="reader-generated-page" style="width:640px;height:900px">
-      <header class="reader-page-header">Header</header>
-      <main class="reader-page-body">
-        <div class="reader-semantic-piece cpb-block cpb-block--paragraph"
-          data-source-fragment-id="section-${sectionId}/paragraph-1/root"
-          data-block-id="1" data-block-type="paragraph" data-stable-anchor="paragraph-1"
-          data-source-range-start="${rangeStart}" data-source-range-end="${rangeEnd}"
-          data-source-length="22" data-presentation-copy="0" data-semantic-type="paragraph">
-          <div class="cpb-paragraph-row"><div class="cpb-paragraph" data-field="html">${text}</div></div>
-        </div>
-      </main>
-      <footer class="reader-page-footer"><span class="reader-page-number">${pageNumber}</span></footer>
-    </article>`,
-    metadata: {},
-  });
-  return {
-    ok: true,
-    result: {
-      pages: [
-        page(61, 0, 11, 'Alpha beta '),
-        page(62, 11, 22, 'gamma delta'),
-      ],
-      book_style_css: '',
-      freshness: { is_current: true },
-    },
-  };
-}
-
-function splitListPreviewResult(sectionId = 11) {
-  const listPage = (pageNumber, start, items) => ({
-    section_id: sectionId,
-    page_number: pageNumber,
-    page_html: `<article class="reader-generated-page" style="width:640px;height:900px">
-      <header class="reader-page-header">Header</header>
-      <main class="reader-page-body">
-        <div class="reader-semantic-piece reader-list-group cpb-block cpb-block--list"
-          data-block-id="4" data-block-type="list" data-stable-anchor="list-4"
-          data-semantic-type="list">
-          <ol class="cpb-list" start="${start + 1}" data-field="items">${items.map((text, offset) =>
-            `<li data-source-fragment-id="section-${sectionId}/list-4/li-${start + offset}"
-              data-source-range-start="0" data-source-range-end="${text.length}"
-              data-source-length="${text.length}" data-presentation-copy="0">${text}</li>`
-          ).join('')}</ol>
-        </div>
-      </main>
-      <footer class="reader-page-footer"><span class="reader-page-number">${pageNumber}</span></footer>
-    </article>`,
-    metadata: {},
-  });
-  return {
-    ok: true,
-    result: {
-      pages: [
-        listPage(71, 0, ['One']),
-        listPage(72, 1, ['Two', 'Three']),
-      ],
-      book_style_css: '',
-      freshness: { is_current: true },
-    },
-  };
-}
-
 function renderDocument(search = '') {
   const start = editorShell.indexOf('<div class="cpb-editor-root" id="cpbEditorRoot"');
   const end = editorShell.indexOf('<script src="/assets/controlled_book_editor.js', start);
@@ -249,12 +122,13 @@ function renderDocument(search = '') {
     .replace(/data-version-id="[^"]*"/, 'data-version-id="7"')
     .replace(/data-section-id="[^"]*"/, 'data-section-id="11"')
     .replace(
-      /data-initial-view="[^"]*"/,
-      `data-initial-view="${search.includes('canonical_pages=1') ? 'paginated' : 'edit'}"`,
-    )
-    .replace(
       'id="cpbEditorRoot"',
       'id="cpbEditorRoot" data-api-base="/mock/editor" data-document-type="manual"',
+    )
+    .replace(
+      '<div class="cpb-canvas-scroll" id="cpbCanvas">',
+      '<button type="button" id="cpbViewPaginated">Exact paginated view</button>'
+        + '<div class="cpb-canvas-scroll" id="cpbCanvas">',
     );
   const base = `http://phase-c.test/${search ? `?${search}` : ''}`;
   return {
@@ -263,11 +137,9 @@ function renderDocument(search = '') {
       <style>
         body{margin:0}.cpb-editor-root{height:700px}
         #cpbCanvas{height:260px;overflow-y:auto;overflow-anchor:none;flex:none}
-        .cpb-editor-source-mode .cpb-sheet{min-height:1100px}
-        .cpb-editor-source-mode .cpb-block{box-sizing:border-box;min-height:430px;margin:0}
-        .cmp-page section table td{padding:12px 14px!important;vertical-align:top!important}
+        .cpb-sheet{min-height:1100px}.cpb-block{box-sizing:border-box;min-height:430px;margin:0}
       </style>
-      </head><body class="cmp-page">${shell}</body></html>`,
+      </head><body>${shell}</body></html>`,
     url: base,
   };
 }
@@ -292,7 +164,6 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
       pendingLoads: [],
       pageRulePlans: [],
       pendingPageRules: [],
-      updatePlans: [],
       rendered: [],
       activated: [],
       queuePreview(plan) { this.previewPlans.push(plan); },
@@ -300,7 +171,6 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
       queueLoad(plan) { this.loadPlans.push(plan); },
       resolveLoad(index) { this.pendingLoads[index].deferred.resolve(); },
       queuePageRules(plan) { this.pageRulePlans.push(plan); },
-      queueUpdate(plan) { this.updatePlans.push(plan); },
       resolvePageRules(index, payload) {
         this.pendingPageRules[index].deferred.resolve(payload || { ok: true, breaks: [], candidates: [] });
       },
@@ -353,8 +223,6 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
             title: `Section ${sectionId}`,
           },
           version: { id: 7, book_key: 'phase-c-book', status: 'draft' },
-          authoritative_editor_page_starts_enabled:
-            new URLSearchParams(location.search).get('authoritative_starts') === '1',
           page_html: `<div class="cpb-sheet"><div class="cpb-sheet-body" data-blocks-root="1">${sourceBlocks}</div></div>`,
           section_number_display: {},
           suggested_regulatory_refs: {},
@@ -392,13 +260,7 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
       if (action === 'section_index') {
         return jsonResponse({ ok: true, section_page_index: {}, page_count: 1 });
       }
-      if (action === 'live_ensure' || action === 'live_status' || action === 'live_retry') {
-        return jsonResponse({ ok: true, result: { status: 'current' } });
-      }
-      if (action === 'update_block') {
-        const plan = window.__phaseC.updatePlans.shift() || {};
-        return jsonResponse(plan.payload || { ok: true });
-      }
+      if (action === 'update_block') return jsonResponse({ ok: true });
       if (action === 'create_block' && payload.block_type === 'table') {
         const holder = document.createElement('div');
         holder.innerHTML = sourceBlocks;
@@ -436,17 +298,10 @@ async function newEditorPage(
     }, initialPageRules);
   }
   await page.addScriptTag({ content: editorJs });
-  try {
-    await page.waitForFunction(() =>
-      document.querySelector('#cpbCanvas .cpb-paginated-page')
-      && document.querySelector('#cpbEditorRoot').__cpbPhaseC
-    );
-  } catch (error) {
-    console.log(`  boot-errors=${JSON.stringify(browserErrors)}`);
-    console.log(`  boot-requests=${JSON.stringify(await page.evaluate(() => window.__phaseC?.requests || []))}`);
-    console.log(`  boot-canvas=${JSON.stringify(await page.locator('#cpbCanvas').innerText().catch(() => 'missing'))}`);
-    throw error;
-  }
+  await page.waitForFunction(() =>
+    document.querySelector('#cpbCanvas .cpb-block[data-block-id]')
+    && document.querySelector('#cpbEditorRoot').__cpbPhaseC
+  );
   await page.waitForFunction(() =>
     document.querySelector('#cpbEditorRoot').getAttribute('aria-busy') === 'false'
     && document.querySelector('#cpbSectionAssembly')?.hidden
@@ -486,73 +341,23 @@ async function projectionMarker(page) {
 
 const cases = [];
 const phaseDCases = [];
-const primaryWysiwygCases = new Set([
-  'single authoritative WYSIWYG surface has no preview/source or page navigation chrome',
-  'publication CSS stays inside pages and table geometry is immutable on render',
-  'authoritative page edits save in place and refresh automatically',
-  'layout-only block saves repaginate without regenerating revision highlights',
-  'deferred canonical refresh drains immediately after table save',
-  'automatic repagination preserves the direct editor caret',
-  'split paragraph edits merge into the complete source block',
-  'split list edits preserve surrounding items and inserted rows',
-  'automatic repagination preserves a split table cell caret',
-  'split authoritative table fragments save only their mapped source rows',
-  'authoritative table resize saves deliberate pixel geometry only',
-  'authoritative canvas remains hidden until all page assets and geometry settle',
-  'manual page breaks remain visible inside the authoritative page',
-]);
 function test(name, run) {
-  if (
-    !primaryWysiwygCases.has(name)
-    && process.env.CPB_RUN_LEGACY_SOURCE_PAGINATION !== '1'
-  ) return;
   cases.push({ name, run });
 }
-// Source mode is a continuous authoring surface, not a pagination authority.
-// Keep its former heuristic-layout checks available only for diagnostics.
-function testLegacySourcePagination(name, run) {
-  if (process.env.CPB_RUN_LEGACY_SOURCE_PAGINATION === '1') test(name, run);
-}
 function testPhaseD(name, run) {
-  if (process.env.CPB_RUN_LEGACY_SOURCE_PAGINATION !== '1') return;
   const testCase = { name, run };
   cases.push(testCase);
   phaseDCases.push(testCase);
 }
 
-test('single authoritative WYSIWYG surface has no preview/source or page navigation chrome', async (browser) => {
-  const initial = previewResult();
-  initial.result.pages.push(storedPage(11, 42, 'second-page'));
-  const { page, browserErrors } = await newEditorPage(browser, '', initial);
+test('disabled by default makes no stored_preview call', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
   try {
-    assert.equal(await page.locator('#cpbViewPaginated').count(), 0);
-    assert.equal(await page.locator('#cpbViewEdit').count(), 0);
-    assert.equal(await page.locator('#cpbPaginationRegenerate').count(), 0);
-    assert.equal(await page.locator('#cpbPaginationApprove').count(), 0);
-    assert.equal(await page.locator('#cpbCanvas .cpb-pagination-panel').count(), 0);
-    assert.equal(await page.locator('#cpbCanvas .cpb-pagination-page-navigation').count(), 0);
-    assert.equal(await page.locator('#cpbCanvas iframe').count(), 0);
-    assert.equal(await page.locator('#cpbCanvas .cpb-paginated-page').count(), 2);
-    assert.equal(await page.locator('#cpbCanvas .reader-generated-page').count(), 2);
-    assert.deepEqual(
-      await page.locator('#cpbCanvas .reader-generated-page').first().evaluate((node) => ({
-        width: Math.round(node.getBoundingClientRect().width),
-        height: Math.round(node.getBoundingClientRect().height),
-      })),
-      { width: 640, height: 900 },
-    );
-    assert.equal(
-      await page.locator('#cpbCanvas .reader-semantic-piece[data-block-id="1"] .cpb-paragraph')
-        .first().getAttribute('contenteditable'),
-      'true',
-    );
-    assert.equal(
-      await page.locator('#cpbCanvas .proof-book-style').first()
-        .evaluate((node) => getComputedStyle(node).color),
-      'rgb(12, 34, 56)',
-    );
-    assert.match(await page.locator('#cpbPublicationCss').textContent(), /proof-book-style/);
+    await page.waitForTimeout(100);
     assert.equal(await page.locator('#cpbProjection').count(), 0);
+    assert.equal(await page.evaluate(() =>
+      window.__phaseC.requests.filter((request) => request.action === 'stored_preview').length
+    ), 0);
     assert.equal(await page.evaluate(() =>
       document.querySelector('#cpbEditorRoot').__cpbPhaseC.enabled
     ), false);
@@ -562,527 +367,18 @@ test('single authoritative WYSIWYG surface has no preview/source or page navigat
   }
 });
 
-test('manual page breaks remain visible inside the authoritative page', async (browser) => {
-  const initial = previewResult();
-  const secondPage = storedPage(11, 42, 'second-page');
-  secondPage.page_html = secondPage.page_html.replaceAll(
-    'data-stable-anchor="paragraph-2"',
-    'data-stable-anchor="paragraph-second"',
-  );
-  initial.result.pages.push(secondPage);
-  const pageRules = {
-    ok: true,
-    breaks: [{
-      id: 91,
-      section_id: 11,
-      before_block_anchor: 'paragraph-second',
-    }],
-    candidates: [],
-  };
-  const { page, browserErrors } = await newEditorPage(
-    browser,
-    '',
-    initial,
-    pageRules,
-  );
+test('section canvas stays covered until fonts, page rules, and final geometry are ready', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
   try {
-    const control = page.locator('#cpbCanvas .cpb-canonical-manual-break-control');
-    await control.waitFor();
-    assert.deepEqual(await control.evaluate((marker) => {
-      const line = getComputedStyle(marker, '::before');
-      const label = getComputedStyle(marker.querySelector('span'));
-      const button = marker.querySelector('button');
-      const buttonRect = button.getBoundingClientRect();
-      const pages = Array.from(marker.parentElement.querySelectorAll('.cpb-paginated-page'));
-      const firstRect = pages[0].getBoundingClientRect();
-      const secondRect = pages[1].getBoundingClientRect();
-      const markerRect = marker.getBoundingClientRect();
-      return {
-        lineStyle: line.borderTopStyle,
-        lineColor: line.borderTopColor,
-        label: marker.querySelector('span').textContent,
-        labelBackground: label.backgroundColor,
-        labelColor: label.color,
-        buttonText: button.textContent,
-        buttonVisible: buttonRect.width > 20 && buttonRect.height >= 18,
-        centeredInGap: Math.abs(
-          (markerRect.top + markerRect.height / 2)
-          - (firstRect.bottom + secondRect.top) / 2
-        ) < 2,
-      };
-    }), {
-      lineStyle: 'dashed',
-      lineColor: 'rgb(30, 115, 190)',
-      label: 'Manual Page Break',
-      labelBackground: 'rgb(232, 242, 255)',
-      labelColor: 'rgb(30, 95, 158)',
-      buttonText: 'Remove',
-      buttonVisible: true,
-      centeredInGap: true,
-    });
-    await control.getByRole('button', { name: 'Remove manual page break' }).click();
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.some((request) =>
-        request.action === 'remove' && Number(request.payload.break_id) === 91
-      )
-      && !document.querySelector('#cpbCanvas .cpb-canonical-manual-break-control')
-    );
-    assert.equal(await page.locator('#cpbCanvas .cpb-pagination-panel').count(), 0);
-    assert.equal(await page.locator('#cpbCanvas .cpb-pagination-page-navigation').count(), 0);
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('publication CSS stays inside pages and table geometry is immutable on render', async (browser) => {
-  const initial = splitTablePreviewResult();
-  initial.result.book_style_css = readerContentCss;
-  initial.result.pages.forEach((stored) => {
-    stored.page_html = stored.page_html
-      .replaceAll('style="width:140px"', 'style="width:50%"');
-  });
-  const { page, browserErrors } = await newEditorPage(browser, '', initial);
-  try {
-    assert.deepEqual(await page.evaluate(() => {
-      const table = document.querySelector(
-        '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-table',
-      );
-      const wrap = table.closest('.cpb-table-wrap');
-      const stack = document.querySelector('#cpbCanvas .cpb-pages-stack');
-      return {
-        rootBorder: getComputedStyle(document.documentElement)
-          .getPropertyValue('--cpb-frame-border-color').trim(),
-        pageBorder: getComputedStyle(stack)
-          .getPropertyValue('--cpb-frame-border-color').trim(),
-        tableWidth: table.style.width,
-        wrapWidth: wrap.style.width,
-        columnWidths: Array.from(table.querySelectorAll('col')).map((col) => col.style.width),
-      };
-    }), {
-      rootBorder: '',
-      pageBorder: '#94a3b8',
-      tableWidth: '280px',
-      wrapWidth: '280px',
-      columnWidths: ['50%', '50%'],
-    });
-    assert.deepEqual(await page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="51"]',
-    ).evaluate((frame) => {
-      const center = frame.querySelector('.cpb-page-header-cell--center');
-      const style = getComputedStyle(center);
-      return {
-        frameTag: frame.tagName,
-        paddingTop: style.paddingTop,
-        paddingBottom: style.paddingBottom,
-        verticalAlign: style.verticalAlign,
-      };
-    }), {
-      frameTag: 'DIV',
-      paddingTop: '5px',
-      paddingBottom: '5px',
-      verticalAlign: 'middle',
-    });
-
-    const tableBlock = page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-block--table',
-    );
-    await tableBlock.hover();
-    assert.equal(
-      await tableBlock.locator(':scope > .cpb-block-chrome')
-        .evaluate((node) => getComputedStyle(node).display),
-      'flex',
-    );
-
-    const updateCount = await page.evaluate(() => window.__phaseC.requests
-      .filter((request) => request.action === 'update_block').length);
-    const resizeHandle = tableBlock.locator('.cpb-col-resize').first();
-    await resizeHandle.dispatchEvent('mousedown', { clientX: 410, clientY: 240 });
     await page.evaluate(() => {
-      document.dispatchEvent(new MouseEvent('mouseup', {
-        bubbles: true,
-        clientX: 410,
-        clientY: 240,
-      }));
-    });
-    await tableBlock.locator('tbody td').first().click({ position: { x: 12, y: 12 } });
-    await page.waitForTimeout(800);
-    assert.equal(await page.evaluate(() => window.__phaseC.requests
-      .filter((request) => request.action === 'update_block').length), updateCount);
-    assert.deepEqual(await tableBlock.locator('.cpb-table').evaluate((table) => ({
-      tableWidth: table.style.width,
-      wrapWidth: table.closest('.cpb-table-wrap').style.width,
-      columnWidths: Array.from(table.querySelectorAll('col')).map((col) => col.style.width),
-    })), {
-      tableWidth: '280px',
-      wrapWidth: '280px',
-      columnWidths: ['50%', '50%'],
-    });
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('authoritative page edits save in place and refresh automatically', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '');
-  try {
-    assert.equal(
-      await page.locator('#cpbEditorRoot').evaluate((node) =>
-        node.classList.contains('cpb-editor-paginated-mode')
-      ),
-      true,
-    );
-    const canonicalPage = page.locator('#cpbCanvas .cpb-paginated-page').first();
-    assert.match(await canonicalPage.locator('.reader-page-body').innerText(), /Body initial/);
-    assert.equal(
-      await canonicalPage.locator('.proof-book-style').evaluate((node) => getComputedStyle(node).color),
-      'rgb(12, 34, 56)',
-    );
-    assert.match(await page.locator('#cpbPublicationCss').textContent(), /proof-book-style/);
-    assert.equal(await page.evaluate(() =>
-      window.__phaseC.requests.find((request) => request.action === 'stored_preview')
-        ?.payload.section_id
-    ), '11');
-    assert.equal(await page.locator('#cpbCanvas .cpb-print-page').count(), 0);
-    assert.equal(await page.locator('#cpbCanvas iframe').count(), 0);
-
-    const baseline = await page.evaluate(() =>
-      window.__phaseC.requests.filter((request) => request.action === 'stored_preview').length
-    );
-    await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }),
-      previewResult(11, 'after-save', 41));
-    const field = canonicalPage.locator(
-      '.reader-semantic-piece[data-block-id="1"] .cpb-paragraph',
-    ).first();
-    assert.equal(await field.getAttribute('data-paginated-input-wired'), '1');
-    await field.fill('Changed through canonical page');
-    await page.waitForTimeout(800);
-    await field.blur();
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.some((request) => request.action === 'update_block')
-      && window.__phaseC.requests.some((request) => request.action === 'live_ensure')
-    );
-    await waitForPreviewCount(page, baseline + 1);
-    await page.locator('#cpbCanvas .reader-page-body').filter({ hasText: 'after-save' }).waitFor();
-    assert.equal(await page.locator('#cpbPaginatedBlockEditor').count(), 0);
-    assert.equal(await page.evaluate(() =>
-      window.__phaseC.requests.find((request) => request.action === 'update_block')
-        ?.payload.payload.html
-    ), 'Changed through canonical page');
-    assert.equal(
-      await page.locator('#cpbEditorRoot').evaluate((node) =>
-        node.classList.contains('cpb-editor-paginated-mode')
-      ),
-      true,
-    );
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('layout-only block saves repaginate without regenerating revision highlights', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '');
-  try {
-    await page.evaluate((refreshed) => {
-      window.__phaseC.queueUpdate({ payload: { ok: true, content_change: false } });
-      window.__phaseC.queuePreview({ payload: refreshed });
-    }, previewResult(11, 'layout-only refresh', 41));
-    const field = page.locator(
-      '#cpbCanvas .reader-semantic-piece[data-block-id="1"] .cpb-paragraph',
-    ).first();
-    await field.fill('Layout-only response fixture');
-    await field.blur();
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.some((request) => request.action === 'live_ensure')
-    );
-    await page.waitForTimeout(900);
-    assert.equal(await page.evaluate(() =>
-      window.__phaseC.requests.filter((request) =>
-        request.action === 'regenerate_highlights'
-      ).length
-    ), 0);
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('deferred canonical refresh drains immediately after table save', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '');
-  try {
-    const refreshed = previewResult(11, 'drained refresh', 41);
-    await page.evaluate((payload) => {
-      window.__phaseC.queuePreview({ payload });
-      window.__phaseC.queuePreview({ payload });
-    }, refreshed);
-    const field = page.locator(
-      '#cpbCanvas .reader-semantic-piece[data-block-id="1"] .cpb-paragraph',
-    ).first();
-    await field.fill('Pending authoritative refresh');
-    await page.locator('#cpbEditorRoot').evaluate((root) => {
-      root.dispatchEvent(new CustomEvent('cpb:live-pagination-state', {
-        detail: { status: 'current' },
-      }));
-    });
-    await field.blur();
-    await page.waitForFunction(() =>
-      document.querySelector('#cpbCanvas .reader-page-body')?.textContent
-        .includes('drained refresh')
-      && window.__phaseC.requests.filter((request) => request.action === 'live_ensure').length === 0,
-    null, { timeout: 1500 });
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('automatic repagination preserves the direct editor caret', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '');
-  try {
-    await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }),
-      previewResult(11, 'focused refresh', 41));
-    const field = page.locator(
-      '#cpbCanvas .reader-semantic-piece[data-block-id="1"] .cpb-paragraph',
-    ).first();
-    await field.fill('Body focused refresh');
-    await field.evaluate((node) => {
-      const selection = getSelection();
-      const range = document.createRange();
-      range.setStart(node.firstChild, 5);
-      range.collapse(true);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      node.focus();
-    });
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.filter((request) => request.action === 'stored_preview').length >= 2
-      && document.activeElement?.classList.contains('cpb-paragraph')
-      && getSelection()?.anchorOffset === 5
-    );
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.textContent),
-      'Body focused refresh',
-    );
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('split paragraph edits merge into the complete source block', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '', splitParagraphPreviewResult());
-  try {
-    const secondFragment = page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="62"] .cpb-paragraph',
-    );
-    assert.equal(await secondFragment.getAttribute('contenteditable'), 'true');
-    await secondFragment.fill('revised text');
-    await secondFragment.blur();
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.some((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 1
-      )
-    );
-    assert.equal(await page.evaluate(() =>
-      window.__phaseC.requests.find((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 1
-      )?.payload.payload.html
-    ), 'Alpha beta revised text');
-    assert.equal(await page.locator('#cpbCanvas [data-fragment-dirty="1"]').count(), 0);
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('split list edits preserve surrounding items and inserted rows', async (browser) => {
-  const listSource = `
-    <div class="cpb-block cpb-block--list" data-block-id="4" data-block-type="list"
-      data-stable-anchor="list-4">
-      <div class="cpb-block-chrome" contenteditable="false"></div>
-      <ol class="cpb-list" contenteditable="true" data-field="items" start="1">
-        <li>One</li><li>Two</li><li>Three</li>
-      </ol>
-    </div>`;
-  const { page, browserErrors } = await newEditorPage(
-    browser,
-    '',
-    splitListPreviewResult(),
-    null,
-    listSource,
-  );
-  try {
-    const secondList = page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="72"] .cpb-list',
-    );
-    assert.equal(await secondList.getAttribute('contenteditable'), 'true');
-    await secondList.evaluate((list) => {
-      list.focus();
-      list.children[0].textContent = 'Two revised';
-      const inserted = document.createElement('li');
-      inserted.textContent = 'Inserted';
-      list.children[0].insertAdjacentElement('afterend', inserted);
-      list.dispatchEvent(new InputEvent('input', { bubbles: true }));
-      list.blur();
-    });
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.some((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 4
-      )
-    );
-    assert.deepEqual(await page.evaluate(() =>
-      window.__phaseC.requests.find((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 4
-      )?.payload.payload.items
-    ), ['One', 'Two revised', 'Inserted', 'Three']);
-    assert.equal(await page.locator('#cpbCanvas [data-fragment-dirty="1"]').count(), 0);
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('split authoritative table fragments save only their mapped source rows', async (browser) => {
-  const initial = splitTablePreviewResult();
-  initial.result.pages.forEach((stored) => {
-    stored.page_html = stored.page_html
-      .replaceAll('style="width:140px"', 'style="width:50%"');
-  });
-  const { page, browserErrors } = await newEditorPage(browser, '', initial);
-  try {
-    assert.equal(await page.locator('#cpbCanvas .cpb-paginated-page').count(), 2);
-    const firstBodyCell = page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-block--table tbody td',
-    ).first();
-    assert.equal(await firstBodyCell.getAttribute('contenteditable'), 'true');
-    assert.equal(
-      await page.locator(
-        '#cpbCanvas .cpb-paginated-page[data-page-number="52"] thead th',
-      ).first().getAttribute('contenteditable'),
-      null,
-    );
-    await firstBodyCell.fill('Edited A1');
-    await firstBodyCell.blur();
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.some((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 3
-      )
-    );
-    const rows = await page.evaluate(() =>
-      window.__phaseC.requests.find((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 3
-      )?.payload.payload.rows
-    );
-    assert.deepEqual(rows, [
-      ['Edited A1', 'B1'],
-      ['A2', 'B2'],
-    ]);
-    assert.deepEqual(await page.evaluate(() =>
-      window.__phaseC.requests.find((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 3
-      )?.payload.payload.col_widths
-    ), [140, 140]);
-    assert.equal(await page.locator('#cpbCanvas [data-fragment-dirty="1"]').count(), 0);
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('authoritative table resize saves deliberate pixel geometry only', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '', splitTablePreviewResult());
-  try {
-    await page.evaluate((refreshed) => {
-      window.__phaseC.queueUpdate({ payload: { ok: true, content_change: false } });
-      window.__phaseC.queuePreview({ payload: refreshed });
-    }, splitTablePreviewResult());
-    const tableBlock = page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-block--table',
-    );
-    const handle = tableBlock.locator('.cpb-col-resize').first();
-    await handle.dispatchEvent('mousedown', { clientX: 410, clientY: 240 });
-    await page.evaluate(() => {
-      document.dispatchEvent(new MouseEvent('mousemove', {
-        bubbles: true,
-        clientX: 430,
-        clientY: 240,
-      }));
-      document.dispatchEvent(new MouseEvent('mouseup', {
-        bubbles: true,
-        clientX: 430,
-        clientY: 240,
-      }));
-    });
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.some((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 3
-      )
-    );
-    assert.deepEqual(await page.evaluate(() =>
-      window.__phaseC.requests.find((request) =>
-        request.action === 'update_block' && Number(request.payload.block_id) === 3
-      )?.payload.payload.col_widths
-    ), [160, 120]);
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('automatic repagination preserves a split table cell caret', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '', splitTablePreviewResult());
-  try {
-    const refreshed = splitTablePreviewResult();
-    refreshed.result.pages[1].page_html = refreshed.result.pages[1].page_html
-      .replace('>A2<', '>A2 focused<');
-    await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }), refreshed);
-
-    const pageTwoCell = page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="52"] .cpb-block--table tbody td',
-    ).first();
-    await pageTwoCell.evaluate((cell) => {
-      cell.textContent = 'A2 focused';
-      cell.focus();
-      const range = document.createRange();
-      range.setStart(cell.firstChild, 3);
-      range.collapse(true);
-      const selection = getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      cell.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-    });
-    await page.waitForFunction(() =>
-      window.__phaseC.requests.some((request) =>
-        request.action === 'update_block'
-        && request.payload.payload.rows?.[1]?.[0] === 'A2 focused'
-      )
-    );
-    await page.waitForFunction(() =>
-      document.activeElement?.tagName === 'TD'
-      && document.activeElement.textContent === 'A2 focused'
-      && getSelection()?.anchorOffset === 3
-    );
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-test('authoritative canvas remains hidden until all page assets and geometry settle', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '');
-  try {
-    await page.evaluate((payload) => {
       window.__phaseC.assemblies = [];
       document.querySelector('#cpbEditorRoot').addEventListener(
         'cpb:section-assembly-complete',
         (event) => window.__phaseC.assemblies.push(structuredClone(event.detail)),
       );
-      window.__phaseC.queuePreview({ payload });
       window.__phaseC.queuePageRules({ defer: true });
       document.querySelector('#cpbCanvas').scrollTop = 480;
-    }, previewResult(12, 'section-twelve', 72));
+    });
     await page.getByTitle('Section Twelve').click();
     await page.waitForFunction(() => window.__phaseC.pendingPageRules.length === 1);
     const loading = await page.evaluate(() => {
@@ -1101,7 +397,7 @@ test('authoritative canvas remains hidden until all page assets and geometry set
     assert.equal(loading.overlayVisible, true);
     assert.ok(loading.progress >= 52, JSON.stringify(loading));
     assert.equal(loading.canvasVisibility, 'hidden');
-    assert.match(loading.label, /loading|fonts|images|geometry/i);
+    assert.match(loading.label, /fonts|images|page rules/i);
 
     await page.evaluate(() => window.__phaseC.resolvePageRules(0));
     await page.waitForFunction(() =>
@@ -1111,17 +407,15 @@ test('authoritative canvas remains hidden until all page assets and geometry set
     );
     const ready = await page.evaluate(() => ({
       activeSection: document.querySelector('.cpb-tree-link.is-active')?.title,
-      canonicalPages: document.querySelectorAll('#cpbCanvas .reader-generated-page').length,
-      pageWrapperTag: document.querySelector('#cpbCanvas .cpb-paginated-page')?.tagName,
-      canvasVisibility: getComputedStyle(document.querySelector('#cpbCanvas')).visibility,
+      printLayout: document.querySelector('#cpbCanvas .cpb-sheet')?.classList.contains('cpb-print-layout'),
+      furniture: document.querySelectorAll('#cpbCanvas .cpb-print-furniture-layer').length,
       status: document.querySelector('#cpbSaveStatus').textContent,
       scrollTop: document.querySelector('#cpbCanvas').scrollTop,
       assembly: window.__phaseC.assemblies[0],
     }));
     assert.equal(ready.activeSection, 'Section Twelve');
-    assert.equal(ready.canonicalPages, 1);
-    assert.equal(ready.pageWrapperTag, 'DIV');
-    assert.equal(ready.canvasVisibility, 'visible');
+    assert.equal(ready.printLayout, true);
+    assert.ok(ready.furniture >= 1);
     assert.equal(ready.status, 'Ready');
     assert.equal(ready.scrollTop, 0);
     assert.equal(ready.assembly.section_id, 12);
@@ -1167,74 +461,7 @@ test('a slower prior section response cannot replace the newest selected section
   }
 });
 
-test('authoritative table-row boundaries and content frame drive editor pages', async (browser) => {
-  const first = storedPage(11, 41, 'table-row-first', 816, 1056);
-  const second = storedPage(11, 42, 'table-row-second', 816, 1056);
-  [first, second].forEach((stored) => {
-    stored.metadata.metrics.content_frame = { x: 56, y: 140, width: 704, height: 760 };
-    stored.metadata.metrics.header_frame = { x: 56, y: 48, width: 704, height: 72 };
-    stored.metadata.metrics.footer_frame = { x: 56, y: 924, width: 704, height: 32 };
-  });
-  first.metadata.coverage = [{
-    source_fragment_id: 'section-11/table-3/table-row-0',
-    section_id: 11,
-    range_start: 0,
-    presentation_copy: false,
-  }];
-  second.metadata.coverage = [{
-    source_fragment_id: 'section-11/table-3/table-row-1',
-    section_id: 11,
-    range_start: 0,
-    presentation_copy: false,
-  }];
-  const preview = {
-    ok: true,
-    result: {
-      pages: [first, second],
-      freshness: { is_current: true },
-      book_style_css: '',
-    },
-  };
-  const tableOnly = sourceBlocks.slice(sourceBlocks.indexOf(
-    '<div class="cpb-block cpb-block--table"'
-  ));
-  const { page, browserErrors } = await newEditorPage(
-    browser,
-    'authoritative_starts=1',
-    preview,
-    null,
-    tableOnly,
-  );
-  try {
-    const observed = await page.evaluate(() => {
-      const sheet = document.querySelector('#cpbCanvas .cpb-sheet');
-      const tbody = document.querySelector('#cpbCanvas [data-block-id="3"] tbody');
-      const sourceRows = Array.from(tbody.rows).filter((row) =>
-        row.getAttribute('data-auto-page-break') !== '1'
-      );
-      const secondRowTop = (
-        sourceRows[1].getBoundingClientRect().top - sheet.getBoundingClientRect().top
-      );
-      return {
-        projectedBreaks: tbody.querySelectorAll(
-          'tr[data-authoritative-page-break="1"]'
-        ).length,
-        secondRowLocalTop: secondRowTop - (1056 + 28),
-        contentTop: sheet.style.getPropertyValue('--cpb-print-content-top'),
-        contentWidth: sheet.style.getPropertyValue('--cpb-print-content-width'),
-      };
-    });
-    assert.equal(observed.projectedBreaks, 1);
-    assert.ok(Math.abs(observed.secondRowLocalTop - 140) <= 2, JSON.stringify(observed));
-    assert.equal(observed.contentTop, '140px');
-    assert.equal(observed.contentWidth, '704px');
-  } finally {
-    assert.deepEqual(browserErrors, []);
-    await page.close();
-  }
-});
-
-testLegacySourcePagination('long paragraphs and table rows never enter repeated header or footer bands', async (browser) => {
+test('long paragraphs and table rows never enter repeated header or footer bands', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
     await page.evaluate(() => {
@@ -1330,7 +557,7 @@ testLegacySourcePagination('long paragraphs and table rows never enter repeated 
   }
 });
 
-testLegacySourcePagination('a 103-row emergency table starts without empty pages and keeps stable continuation geometry', async (browser) => {
+test('a 103-row emergency table starts without empty pages and keeps stable continuation geometry', async (browser) => {
   const rows = Array.from({ length: 103 }, (_, index) => {
     if (index % 12 === 0) {
       return `<tr><td colspan="3" contenteditable="true">CATEGORY ${index / 12 + 1}</td></tr>`;
@@ -1434,7 +661,7 @@ testLegacySourcePagination('a 103-row emergency table starts without empty pages
   }
 });
 
-testLegacySourcePagination('styled paragraph headings move intact instead of gaining an inline page gap', async (browser) => {
+test('styled paragraph headings move intact instead of gaining an inline page gap', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
     await page.evaluate(() => {
@@ -1554,7 +781,7 @@ test('manual break before a styled heading is not duplicated by heading flow', a
   }
 });
 
-testLegacySourcePagination('generated TOC rows flow across editor pages without crossing page furniture', async (browser) => {
+test('generated TOC rows flow across editor pages without crossing page furniture', async (browser) => {
   const tocRows = Array.from({ length: 90 }, (_, index) => `
     <div class="cpb-toc-row cpb-toc-depth-${Math.min(3, index % 4)}"
       data-toc-depth="${Math.min(3, index % 4)}" data-toc-style="subtitle_2">
@@ -1688,18 +915,18 @@ test('table controls stay in the second toolbar row and replace floating tools',
       buttonHeight: Math.round(
         main.querySelector('button.cpb-tool-btn').getBoundingClientRect().height
       ),
-      invisibleActions: Array.from(main.querySelectorAll('[data-table-action]')).filter((control) => {
-        const rect = control.getBoundingClientRect();
-        return rect.width <= 0 || rect.height <= 0 || getComputedStyle(control).visibility === 'hidden';
-      }).length,
+      primaryRight: Math.max(...Array.from(
+        main.querySelectorAll('.cpb-toolbar-row--primary button, .cpb-toolbar-row--primary select, .cpb-toolbar-row--primary input')
+      ).map((control) => control.getBoundingClientRect().right)),
+      sharedLeft: document.querySelector('#cpbToolbarShared').getBoundingClientRect().left,
     }));
     assert.equal(toolbarLayout.rows, 3);
     assert.equal(toolbarLayout.tableLines, 2, 'table controls must occupy two toolbar rows');
     assert.deepEqual(toolbarLayout.overflow, [0, 0, 0]);
-    assert.ok(toolbarLayout.toolbarHeight >= 70);
-    assert.ok(toolbarLayout.rowHeights.every((height) => height >= 23));
+    assert.equal(toolbarLayout.toolbarHeight, 70);
+    assert.deepEqual(toolbarLayout.rowHeights, [23, 23, 23]);
     assert.equal(toolbarLayout.buttonHeight, 18);
-    assert.equal(toolbarLayout.invisibleActions, 0);
+    assert.ok(toolbarLayout.primaryRight <= toolbarLayout.sharedLeft);
     assert.equal(await toolbar.locator('[data-table-action="table-align-center"]').isDisabled(), true);
 
     const clickedCell = page.locator(
@@ -2422,10 +1649,6 @@ test('continuous_editor=1 emergency fallback disables live projection', async (b
 let browser;
 let failures = 0;
 let phaseDFailures = 0;
-const testFilter = String(process.env.CPB_TEST_FILTER || '').trim().toLowerCase();
-const selectedCases = testFilter
-  ? cases.filter((testCase) => testCase.name.toLowerCase().includes(testFilter))
-  : cases;
 try {
   try {
     browser = await chromium.launch({ headless: true });
@@ -2434,7 +1657,7 @@ try {
       throw bundledError;
     });
   }
-  for (const testCase of selectedCases) {
+  for (const testCase of cases) {
     try {
       await testCase.run(browser);
       console.log(`PASS ${testCase.name}`);
@@ -2451,11 +1674,10 @@ try {
   if (browser) await browser.close();
 }
 
-const selectedPhaseDCases = selectedCases.filter((testCase) => phaseDCases.includes(testCase));
-const phaseCCaseCount = selectedCases.length - selectedPhaseDCases.length;
+const phaseCCaseCount = cases.length - phaseDCases.length;
 const phaseCFailures = failures - phaseDFailures;
 console.log(`\nPhase C browser requirements: executed=${phaseCCaseCount} passed=${phaseCCaseCount - phaseCFailures} failed=${phaseCFailures}`);
-console.log(`Phase D paragraph requirements: executed=${selectedPhaseDCases.length} passed=${selectedPhaseDCases.length - phaseDFailures} failed=${phaseDFailures}`);
+console.log(`Phase D paragraph requirements: executed=${phaseDCases.length} passed=${phaseDCases.length - phaseDFailures} failed=${phaseDFailures}`);
 if (failures) {
   console.log('CONTROLLED_BOOK_EDITOR_PHASE_C: FAIL');
   console.log('CONTROLLED_BOOK_EDITOR_PHASE_D_PARAGRAPH: FAIL');

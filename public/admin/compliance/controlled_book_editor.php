@@ -12,12 +12,6 @@ require_once __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.p
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeApplyService.php';
 
 $user = compliance_require_access($pdo);
-if (!isset($_SESSION['controlled_book_editor_csrf'])
-    || !is_string($_SESSION['controlled_book_editor_csrf'])
-    || strlen($_SESSION['controlled_book_editor_csrf']) < 32) {
-    $_SESSION['controlled_book_editor_csrf'] = bin2hex(random_bytes(32));
-}
-$editorCsrfToken = (string)$_SESSION['controlled_book_editor_csrf'];
 $foundation = new ControlledPublishingFoundationService($pdo);
 $sections = new ControlledPublishingSectionService($pdo);
 
@@ -53,22 +47,10 @@ if ($version === null) {
 $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookVersion($version);
 $wizardUndo = null;
 try {
-    $wizardApply = new BooksManualsChangeApplyService(
+    $wizardUndo = (new BooksManualsChangeApplyService(
         $pdo,
         new BooksManualsChangePlanService($pdo)
-    );
-    $wizardChanges = $wizardApply->editorChanges($versionId, (int)$user['id']);
-    $allWizardChangesPristine = is_array($wizardChanges)
-        && (array)($wizardChanges['items'] ?? array()) !== array()
-        && count(array_filter(
-            (array)$wizardChanges['items'],
-            static fn(array $item): bool =>
-                (string)($item['status'] ?? '') !== 'APPLIED'
-                || empty($item['can_revert'])
-        )) === 0;
-    $wizardUndo = $allWizardChangesPristine
-        ? $wizardApply->availableUndo($versionId)
-        : null;
+    ))->availableUndo($versionId);
 } catch (Throwable $e) {
     $wizardUndo = null;
 }
@@ -118,7 +100,6 @@ compliance_page_open(array(
 <div class="cpb-editor-root" id="cpbEditorRoot"
      data-version-id="<?= (int)$versionId ?>"
      data-section-id="<?= (int)$sectionId ?>"
-     data-csrf-token="<?= h($editorCsrfToken) ?>"
      data-annex-book="<?= $isAnnexBook ? '1' : '0' ?>">
   <div class="cpb-editor-shell">
     <aside class="cpb-tree-panel">
@@ -126,17 +107,10 @@ compliance_page_open(array(
         <h2 id="cpbTreeHeadTitle">Manual sections</h2>
         <button type="button" id="cpbTreeToggleAll" class="cpb-tree-toggle-all" aria-pressed="false" title="Expand or collapse all sections">Expand all</button>
       </div>
-      <div class="cpb-sidebar-tabs" id="cpbSidebarTabs" hidden>
-        <button type="button" class="is-active" data-cpb-sidebar-tab="sections">Sections</button>
-        <button type="button" data-cpb-sidebar-tab="changes">Changes <span id="cpbWizardChangeCount">0</span></button>
-      </div>
       <div class="cpb-tree-scroll" id="cpbSectionTree">
         <p style="padding:12px 16px;margin:0;font-size:12px;color:#94a3b8;">Loading outline…</p>
       </div>
-      <div class="cpb-wizard-changes" id="cpbWizardChanges" hidden>
-        <p class="cpb-wizard-changes__empty">No Wizard changes are attached to this draft.</p>
-      </div>
-      <div class="cpb-tree-actions" id="cpbTreeActions">
+      <div class="cpb-tree-actions">
         <?php if (!$isAnnexBook): ?>
         <button type="button" id="cpbEditOutline" class="cpb-tree-outline-btn" title="Edit PART and MAIN chapter titles">Edit outline</button>
         <?php endif; ?>
@@ -347,7 +321,6 @@ compliance_page_open(array(
         <div class="cpb-toolbar-lep" id="cpbToolbarLep" hidden aria-hidden="true"></div>
         <div class="cpb-toolbar-part0" id="cpbToolbarPart0" hidden aria-hidden="true"></div>
         <div class="cpb-toolbar-shared" id="cpbToolbarShared">
-        <span class="cpb-pagination-status" id="cpbPaginationStatus" hidden></span>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbZoomOut" title="Zoom out">−</button>
           <span class="cpb-zoom-label" id="cpbZoomLabel">100%</span>

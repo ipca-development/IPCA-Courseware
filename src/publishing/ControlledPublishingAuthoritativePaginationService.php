@@ -181,7 +181,6 @@ final class ControlledPublishingAuthoritativePaginationService
             }
             $this->validateMergedCoverageOrder($pages);
             $sectionIndex = $this->sectionIndexFromPages($pages);
-            $this->assertSourceSectionCoverage($source, $sectionIndex);
             $anchorIndex = $this->anchorIndexFromPages($pages);
             foreach ($pages as &$page) {
                 $page['page_html'] = $this->injectTocPageNumbers(
@@ -247,58 +246,12 @@ final class ControlledPublishingAuthoritativePaginationService
     {
         $index = array();
         foreach ($pages as $page) {
-            $pageNumber = (int)($page['page_number'] ?? 0);
             $sectionId = (int)($page['section_id'] ?? 0);
             if ($sectionId > 0 && !isset($index[(string)$sectionId])) {
-                $index[(string)$sectionId] = $pageNumber;
-            }
-            $metadata = is_array($page['metadata'] ?? null) ? $page['metadata'] : array();
-            $coverage = is_array($metadata['coverage'] ?? null) ? $metadata['coverage'] : array();
-            foreach ($coverage as $entry) {
-                if (!is_array($entry) || !empty($entry['presentation_copy'])) {
-                    continue;
-                }
-                $coveredSectionId = (int)($entry['section_id'] ?? 0);
-                if ($coveredSectionId > 0 && !isset($index[(string)$coveredSectionId])) {
-                    $index[(string)$coveredSectionId] = $pageNumber;
-                }
+                $index[(string)$sectionId] = (int)($page['page_number'] ?? 0);
             }
         }
         return $index;
-    }
-
-    /**
-     * @param array<string,mixed> $source
-     * @param array<string,int> $sectionIndex
-     */
-    private function assertSourceSectionCoverage(array $source, array $sectionIndex): void
-    {
-        $missing = array();
-        foreach ($source['sections'] ?? array() as $section) {
-            if (!is_array($section)) {
-                continue;
-            }
-            $sectionId = (int)($section['section_id'] ?? 0);
-            $hasContent = (string)($section['content_mode'] ?? '') === 'cover'
-                || (is_array($section['units'] ?? null) && $section['units'] !== array());
-            if ($sectionId <= 0 || !$hasContent || isset($sectionIndex[(string)$sectionId])) {
-                continue;
-            }
-            $missing[] = array(
-                'section_id' => $sectionId,
-                'section_key' => (string)($section['section_key'] ?? ''),
-                'title' => (string)($section['title'] ?? ''),
-            );
-        }
-        if ($missing === array()) {
-            return;
-        }
-
-        throw new ControlledPublishingPaginationValidationException(array(
-            'code' => 'MISSING_SECTION_PAGE',
-            'message' => 'Authoritative pagination omitted one or more non-empty sections.',
-            'failures' => $missing,
-        ));
     }
 
     /**

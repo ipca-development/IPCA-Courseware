@@ -6,7 +6,7 @@ $failures = array();
 
 $protected = array(
     'src/publishing/ControlledPublishingBlockService.php'
-        => 'a0c103104d4182dbe797d85ea04d3d757972b34cf4bc5e989925a034d64e7c39',
+        => '7657371be4bd2a7a2821af68130e76403e3e02bb167478087681ee9f146e169d',
 );
 foreach ($protected as $relative => $hash) {
     if (!is_file($root . '/' . $relative) || hash_file('sha256', $root . '/' . $relative) !== $hash) {
@@ -15,14 +15,6 @@ foreach ($protected as $relative => $hash) {
 }
 
 $contracts = array(
-    'docs/architecture/authoritative-manual-pagination.md' => array(
-        'single-surface authoring',
-        'stored `page_html`',
-        '`data-source-fragment-id`',
-        'range-aware save',
-        'presentation copies remain read-only',
-        'automatically queue `live_ensure`',
-    ),
     'src/publishing/ControlledPublishingAuthoritativePaginationService.php' => array(
         'live-authoritative-flow-v2',
         'MANUAL_BREAK_REQUIRED',
@@ -38,8 +30,6 @@ $contracts = array(
         'Authoritative pagination is already running for this manual version',
         'INCREMENTAL_PREFIX_MISMATCH',
         'validateMergedCoverageOrder',
-        'assertSourceSectionCoverage',
-        'MISSING_SECTION_PAGE',
     ),
     'scripts/authoritative_manual_paginator.cjs' => array(
         'ReaderPaginationCore.js',
@@ -47,8 +37,8 @@ $contracts = array(
         'validation failed',
         'authoritative_layout',
         'CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH',
-        'const resolvedHeaderHeight = measuredBands.portrait.header || headerHeight',
-        'const resolvedFooterHeight = measuredBands.portrait.footer || footerHeight',
+        'const resolvedHeaderHeight = measuredBands.header || headerHeight',
+        'const resolvedFooterHeight = measuredBands.footer || footerHeight',
         'INCREMENTAL_PREFIX_MISMATCH',
     ),
     'src/publishing/ControlledPublishingReaderLayoutProfile.php' => array(
@@ -72,42 +62,11 @@ $contracts = array(
         'authoritativeEditorPageStartsFromResult',
         'data-authoritative-page-break',
         'state.authoritativeEditorPageStarts = []',
-        'observeCanonicalPageState',
-        "root.addEventListener('cpb:live-pagination-state', observeCanonicalPageState)",
-        "viewMode: 'paginated'",
-        'enforceAuthoritativeEditorSurface',
-        'var pages = sectionPages;',
-        "content.innerHTML = page.page_html || '';",
-        'scopePublicationCssForEditor',
-        'installEditorPublicationCss',
-        'wireTableResize(blockEl, authoritativeSurface)',
-        'wirePaginatedFields();',
-        'hasUnsavedCanonicalEdits',
-        'waitForAuthoritativeSurfaceReady',
-        'waitForAuthoritativeGeometry',
-        'markManualBreaksInPages',
-        'cpb-canonical-manual-break-control',
-        'fallbackMutation.content_change === false',
-        'data-table-geometry-dirty',
-        'tableColumnWidthForPayload',
-        'drainCanonicalRefreshWhenReady',
-        "setSectionAssembly(true, 'Loading fonts and images…', 72)",
-        "setSectionAssembly(true, 'Stabilizing exact page geometry…', 92)",
-    ),
-    'public/admin/compliance/controlled_book_editor.php' => array(
-        'id="cpbEditorRoot"',
-    ),
-    'src/publishing/ControlledPublishingPaginationService.php' => array(
-        'htmlHasPaginableContent',
-        '<(?:img|svg|canvas|video)',
-        'contains governed blocks but no renderable units',
     ),
     'public/admin/api/controlled_book_page_map_api.php' => array(
-        "'returned_page_count' => count(\$responsePages)",
+        "'returned_page_count' => count(\$pages)",
         "\$sectionId > 0 ? \$sectionId : null",
         "\$reader->authoritativePageMapFreshness(\$version, \$paginateSource)",
-        "\$reader->readerPublicationPackage(\$version, \$paginateSource)",
-        "'artifact_compatible' => \$artifactCompatible",
         'ControlledPublishingPaginationValidationException',
         '$e->payload()',
         "case 'live_ensure':",
@@ -204,8 +163,6 @@ $contracts = array(
         "case 'split_block_page_break':",
         'cp_editor_handle_split_block_page_break',
         'ControlledPublishingManualPageBreakService',
-        "unset(\$priorPayload['col_widths'], \$nextPayload['col_widths'])",
-        "'content_change' => \$contentChange",
     ),
     'src/publishing/ControlledPublishingPaginationService.php' => array(
         'exact browser measurement',
@@ -270,50 +227,17 @@ foreach ($contracts as $relative => $markers) {
     }
 }
 
-$editorShell = (string)@file_get_contents(
+$editorMarkup = (string)@file_get_contents(
     $root . '/public/admin/compliance/controlled_book_editor.php'
 );
 foreach (array(
-    'id="cpbViewPaginated"',
-    'id="cpbViewEdit"',
-    'id="cpbPaginationRegenerate"',
-    'id="cpbPaginationApprove"',
-    'Page (iOS)',
-    'data-initial-view=',
-) as $forbiddenControl) {
-    if (str_contains($editorShell, $forbiddenControl)) {
-        $failures[] = "Editor still exposes preview/source workflow control: {$forbiddenControl}";
-    }
-}
-
-$editorJs = (string)@file_get_contents($root . '/public/assets/controlled_book_editor.js');
-foreach (array(
-    'canvasEl.appendChild(paginationBreakControl())',
-    'canvasEl.appendChild(paginationPageNavigation(',
-    'function paginationBreakControl(',
-    'function paginationPageNavigation(',
-    'appendCanonicalPageEditPortals',
-    'cpbPaginatedBlockEditor',
-    'function setViewMode(',
-) as $forbiddenChrome) {
-    if (str_contains($editorJs, $forbiddenChrome)) {
-        $failures[] = "Authoritative editor still renders non-document page chrome: {$forbiddenChrome}";
-    }
-}
-if (str_contains($editorJs, "publicationCssEl.textContent = result.book_style_css")) {
-    $failures[] = 'Authoritative publication CSS is still installed globally in the admin document.';
-}
-
-$architectureDoc = (string)@file_get_contents(
-    $root . '/docs/architecture/authoritative-manual-pagination.md'
-);
-foreach (array(
-    'projected iframe remains sandboxed, non-editable',
-    'edit the continuous source document',
-    'page furniture is explicitly labelled as an approximate editing layout',
-) as $obsoletePolicy) {
-    if (str_contains($architectureDoc, $obsoletePolicy)) {
-        $failures[] = "Architecture policy still describes the removed split editor: {$obsoletePolicy}";
+    'cpbViewPaginated',
+    'cpbPaginationRegenerate',
+    'cpbPaginationApprove',
+    'cpbPaginationStatus',
+) as $removedControl) {
+    if (str_contains($editorMarkup, $removedControl)) {
+        $failures[] = 'Removed page-management control remains in the unified editor: ' . $removedControl;
     }
 }
 

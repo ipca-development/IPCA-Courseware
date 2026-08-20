@@ -86,9 +86,6 @@ $authoritative = (string)file_get_contents(
     __DIR__ . '/../src/publishing/ControlledPublishingAuthoritativePaginationService.php'
 );
 $api = (string)file_get_contents(__DIR__ . '/../public/student/api/manual_reader_api.php');
-$adminPreviewApi = (string)file_get_contents(
-    __DIR__ . '/../public/admin/api/controlled_book_page_map_api.php'
-);
 $store = (string)file_get_contents(
     __DIR__ . '/../src/publishing/ControlledPublishingReaderPageMapStore.php'
 );
@@ -102,12 +99,6 @@ publication_snapshot_assert(
 publication_snapshot_assert(
     'reader API serves the frozen package contract',
     str_contains($api, 'readerPublicationPackage(')
-);
-publication_snapshot_assert(
-    'admin canonical Page Editor serves the same frozen package contract',
-    str_contains($adminPreviewApi, '$reader->readerPublicationPackage($version, $paginateSource)')
-        && str_contains($adminPreviewApi, "'artifact_compatible' => \$artifactCompatible")
-        && str_contains($adminPreviewApi, '$responsePages = $artifactCompatible ? $pages : array()')
 );
 publication_snapshot_assert(
     'released compatibility refresh is explicit and approval-preserving',

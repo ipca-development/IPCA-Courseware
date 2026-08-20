@@ -2170,106 +2170,6 @@ final class FlightScheduleService
     }
 
     /**
-     * Read-only overlap projection for schedule range responses.
-     *
-     * Conflict lookup is performed in fixed-size batches with three queries per
-     * batch (aircraft, cohort, and crew), rather than one assessment per slot.
-     * The shared predicate and warning factory below keep this projection aligned
-     * with the authoritative mutation/validation semantics.
-     *
-     * @param list<string> $recordIds
-     * @return array<string,list<array<string,mixed>>>
-     */
-    public function assessResourceConflictsForReservations(array $recordIds): array
-    {
-        $normalized = array();
-        foreach ($recordIds as $recordId) {
-            $recordId = strtolower(trim((string)$recordId));
-            if ($recordId !== '') {
-                $normalized[$recordId] = true;
-            }
-        }
-        $recordIds = array_keys($normalized);
-        $warningsByRecord = array_fill_keys($recordIds, array());
-        if ($recordIds === array()) {
-            return $warningsByRecord;
-        }
-
-        $seen = array();
-        foreach (array_chunk($recordIds, 200) as $batch) {
-            $placeholders = implode(',', array_fill(0, count($batch), '?'));
-            $conflictPredicate = $this->resourceConflictPredicate(
-                'conflict',
-                'target.scheduler_record_id',
-                'target.scheduled_end_time',
-                'target.scheduled_start_time'
-            );
-            $queries = array(
-                'aircraft_overlap' => "
-                    SELECT LOWER(target.scheduler_record_id) AS target_record_id,
-                           target.aircraft_id AS resource_id,
-                           MIN(conflict.scheduler_record_id) AS conflicting_record_id
-                      FROM ipca_flight_schedule_slots target
-                      INNER JOIN ipca_flight_schedule_slots conflict
-                        ON conflict.aircraft_id = target.aircraft_id
-                       AND $conflictPredicate
-                     WHERE target.scheduler_record_id IN ($placeholders)
-                     GROUP BY target.id, target.scheduler_record_id, target.aircraft_id
-                     ORDER BY target.id ASC
-                ",
-                'cohort_overlap' => "
-                    SELECT LOWER(target.scheduler_record_id) AS target_record_id,
-                           target.cohort_id AS resource_id,
-                           MIN(conflict.scheduler_record_id) AS conflicting_record_id
-                      FROM ipca_flight_schedule_slots target
-                      INNER JOIN ipca_flight_schedule_slots conflict
-                        ON conflict.cohort_id = target.cohort_id
-                       AND $conflictPredicate
-                     WHERE target.scheduler_record_id IN ($placeholders)
-                       AND target.cohort_id IS NOT NULL
-                     GROUP BY target.id, target.scheduler_record_id, target.cohort_id
-                     ORDER BY target.id ASC
-                ",
-                'crew_overlap' => "
-                    SELECT LOWER(target.scheduler_record_id) AS target_record_id,
-                           target_crew.user_id AS resource_id,
-                           MIN(target_crew.id) AS crew_order,
-                           MIN(conflict.scheduler_record_id) AS conflicting_record_id
-                      FROM ipca_flight_schedule_slots target
-                      INNER JOIN ipca_flight_schedule_crew target_crew
-                        ON target_crew.schedule_slot_id = target.id
-                      INNER JOIN ipca_flight_schedule_crew conflict_crew
-                        ON conflict_crew.user_id = target_crew.user_id
-                      INNER JOIN ipca_flight_schedule_slots conflict
-                        ON conflict.id = conflict_crew.schedule_slot_id
-                       AND $conflictPredicate
-                     WHERE target.scheduler_record_id IN ($placeholders)
-                       AND target_crew.user_id IS NOT NULL
-                     GROUP BY target.id, target.scheduler_record_id, target_crew.user_id
-                     ORDER BY target.id ASC, crew_order ASC
-                ",
-            );
-            foreach ($queries as $code => $sql) {
-                $statement = $this->pdo->prepare($sql);
-                $statement->execute($batch);
-                foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-                    $targetId = strtolower(trim((string)($row['target_record_id'] ?? '')));
-                    if ($targetId === '' || !isset($warningsByRecord[$targetId]) || !empty($seen[$targetId][$code])) {
-                        continue;
-                    }
-                    $warningsByRecord[$targetId][] = $this->resourceConflictWarning(
-                        $code,
-                        (int)$row['resource_id'],
-                        (string)$row['conflicting_record_id']
-                    );
-                    $seen[$targetId][$code] = true;
-                }
-            }
-        }
-        return $warningsByRecord;
-    }
-
-    /**
      * @param list<int> $crewUserIds
      * @return list<string>
      */
@@ -2302,37 +2202,46 @@ final class FlightScheduleService
     ): array {
         $warnings = array();
         $lockClause = $lockRows ? $this->lockClause() : '';
-        $conflictPredicate = $this->resourceConflictPredicate('conflict', '?', '?', '?');
         $aircraftConflict = $this->pdo->prepare(
-            "SELECT conflict.scheduler_record_id FROM ipca_flight_schedule_slots conflict
-             WHERE conflict.aircraft_id = ?
-               AND $conflictPredicate
+            "SELECT scheduler_record_id FROM ipca_flight_schedule_slots
+             WHERE scheduler_record_id <> ?
+               AND aircraft_id = ?
+               AND status IN ('scheduled', 'claimed')
+               AND scheduled_start_time < ?
+               AND scheduled_end_time > ?
              LIMIT 1" . $lockClause
         );
-        $aircraftConflict->execute(array($aircraftId, $recordId, $end, $start));
+        $aircraftConflict->execute(array($recordId, $aircraftId, $end, $start));
         $aircraftConflictId = $aircraftConflict->fetchColumn();
         if ($aircraftConflictId !== false) {
-            $warnings[] = $this->resourceConflictWarning(
-                'aircraft_overlap',
-                $aircraftId,
-                (string)$aircraftConflictId
+            $warnings[] = array(
+                'code' => 'aircraft_overlap',
+                'resource_type' => 'aircraft',
+                'resource_id' => $aircraftId,
+                'message' => 'The selected aircraft is already reserved during this time.',
+                'conflicting_reservation_uuid' => (string)$aircraftConflictId,
             );
         }
 
         if ($cohortId !== null) {
             $cohortConflict = $this->pdo->prepare(
-                "SELECT conflict.scheduler_record_id FROM ipca_flight_schedule_slots conflict
-                 WHERE conflict.cohort_id = ?
-                   AND $conflictPredicate
+                "SELECT scheduler_record_id FROM ipca_flight_schedule_slots
+                 WHERE scheduler_record_id <> ?
+                   AND cohort_id = ?
+                   AND status IN ('scheduled', 'claimed')
+                   AND scheduled_start_time < ?
+                   AND scheduled_end_time > ?
                  LIMIT 1" . $lockClause
             );
-            $cohortConflict->execute(array($cohortId, $recordId, $end, $start));
+            $cohortConflict->execute(array($recordId, $cohortId, $end, $start));
             $cohortConflictId = $cohortConflict->fetchColumn();
             if ($cohortConflictId !== false) {
-                $warnings[] = $this->resourceConflictWarning(
-                    'cohort_overlap',
-                    $cohortId,
-                    (string)$cohortConflictId
+                $warnings[] = array(
+                    'code' => 'cohort_overlap',
+                    'resource_type' => 'cohort',
+                    'resource_id' => $cohortId,
+                    'message' => 'The selected cohort already has a reservation during this time.',
+                    'conflicting_reservation_uuid' => (string)$cohortConflictId,
                 );
             }
         }
@@ -2343,60 +2252,26 @@ final class FlightScheduleService
                 "SELECT c.user_id, s.scheduler_record_id
                  FROM ipca_flight_schedule_crew c
                  INNER JOIN ipca_flight_schedule_slots s ON s.id = c.schedule_slot_id
-                 WHERE c.user_id IN ($placeholders)
-                   AND " . $this->resourceConflictPredicate('s', '?', '?', '?') . "
+                 WHERE s.scheduler_record_id <> ?
+                   AND c.user_id IN ($placeholders)
+                   AND s.status IN ('scheduled', 'claimed')
+                   AND s.scheduled_start_time < ?
+                   AND s.scheduled_end_time > ?
                  LIMIT 1" . $lockClause
             );
-            $crewConflict->execute(array_merge($crewUserIds, array($recordId, $end, $start)));
+            $crewConflict->execute(array_merge(array($recordId), $crewUserIds, array($end, $start)));
             $crewConflictRow = $crewConflict->fetch(PDO::FETCH_ASSOC);
             if (is_array($crewConflictRow)) {
-                $warnings[] = $this->resourceConflictWarning(
-                    'crew_overlap',
-                    (int)$crewConflictRow['user_id'],
-                    (string)$crewConflictRow['scheduler_record_id']
+                $warnings[] = array(
+                    'code' => 'crew_overlap',
+                    'resource_type' => 'user',
+                    'resource_id' => (int)$crewConflictRow['user_id'],
+                    'message' => 'A selected crew member is already reserved during this time.',
+                    'conflicting_reservation_uuid' => (string)$crewConflictRow['scheduler_record_id'],
                 );
             }
         }
         return $warnings;
-    }
-
-    private function resourceConflictPredicate(
-        string $slotAlias,
-        string $recordIdExpression,
-        string $endExpression,
-        string $startExpression
-    ): string {
-        return "$slotAlias.scheduler_record_id <> $recordIdExpression
-               AND $slotAlias.status IN ('scheduled', 'claimed')
-               AND $slotAlias.scheduled_start_time < $endExpression
-               AND $slotAlias.scheduled_end_time > $startExpression";
-    }
-
-    /** @return array<string,mixed> */
-    private function resourceConflictWarning(string $code, int $resourceId, string $conflictingRecordId): array
-    {
-        [$resourceType, $message] = match ($code) {
-            'aircraft_overlap' => array(
-                'aircraft',
-                'The selected aircraft is already reserved during this time.',
-            ),
-            'cohort_overlap' => array(
-                'cohort',
-                'The selected cohort already has a reservation during this time.',
-            ),
-            'crew_overlap' => array(
-                'user',
-                'A selected crew member is already reserved during this time.',
-            ),
-            default => throw new InvalidArgumentException('Unsupported schedule overlap warning code.'),
-        };
-        return array(
-            'code' => $code,
-            'resource_type' => $resourceType,
-            'resource_id' => $resourceId,
-            'message' => $message,
-            'conflicting_reservation_uuid' => $conflictingRecordId,
-        );
     }
 
     /**

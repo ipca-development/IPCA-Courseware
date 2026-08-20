@@ -9,7 +9,7 @@ require_once __DIR__ . '/BooksManualsChangePlanService.php';
 final class BooksManualsChangeReviewerService
 {
     public const PROMPT_VERSION = 'manual-change-independent-reviewer-v1';
-    public const CHECK_VERSION = '4';
+    public const CHECK_VERSION = '2';
     public const READY = 'READY';
     public const REQUIRES_REVIEW = 'REQUIRES_REVIEW';
 
@@ -62,77 +62,6 @@ final class BooksManualsChangeReviewerService
         $status = $unexplainedHits === array() && $unresolvedBoundaries === array()
             ? self::READY
             : self::REQUIRES_REVIEW;
-        $governanceChecks = array();
-        foreach ($unexplainedHits as $hit) {
-            $hitId = (int)($hit['id'] ?? 0);
-            $identity = trim((string)(
-                $hit['matched_identity']
-                ?? $hit['legacy_identity']
-                ?? $hit['matched_text']
-                ?? 'legacy reference'
-            ));
-            $section = trim((string)(
-                $hit['section_number']
-                ?? $hit['canonical_section_number']
-                ?? ''
-            ));
-            $entityKey = $hitId > 0
-                ? (string)$hitId
-                : substr(hash('sha256', $this->json($hit)), 0, 24);
-            $governanceChecks[] = array(
-                'check_id' => 'governance.legacy-hit.' . $entityKey,
-                'check_version' => self::CHECK_VERSION,
-                'category' => 'SCOPE',
-                'severity' => 'HARD',
-                'status' => 'FAIL',
-                'affected_sections' => $section === '' ? array() : array($section),
-                'affected_nodes' => $section === '' ? array() : array($section),
-                'required_invariant' =>
-                    'Every exact in-scope legacy reference has an accepted human disposition.',
-                'observed_state' => 'Legacy reference awaiting disposition: ' . $identity,
-                'evidence_references' => array(
-                    'legacy_hit:' . $entityKey,
-                    'accepted_impact_analysis',
-                ),
-                'human_explanation' =>
-                    'An exact legacy reference still lacks its governed disposition'
-                    . ($section === '' ? '.' : ' in ' . $section . '.'),
-                'allowed_repair_scope' => array(),
-                'known_limitations' => array(),
-            );
-        }
-        foreach ($unresolvedBoundaries as $boundary) {
-            $boundaryId = (int)($boundary['id'] ?? 0);
-            $section = trim((string)(
-                $boundary['section_number']
-                ?? $boundary['scope_key']
-                ?? ''
-            ));
-            $entityKey = $boundaryId > 0
-                ? (string)$boundaryId
-                : substr(hash('sha256', $this->json($boundary)), 0, 24);
-            $governanceChecks[] = array(
-                'check_id' => 'governance.review-boundary.' . $entityKey,
-                'check_version' => self::CHECK_VERSION,
-                'category' => 'SCOPE',
-                'severity' => 'HARD',
-                'status' => 'FAIL',
-                'affected_sections' => $section === '' ? array() : array($section),
-                'affected_nodes' => $section === '' ? array() : array($section),
-                'required_invariant' =>
-                    'Every REVIEW_SEPARATELY boundary has an accepted disposition before Step 5.',
-                'observed_state' => 'An accepted-scope review boundary remains active.',
-                'evidence_references' => array(
-                    'review_boundary:' . $entityKey,
-                    'accepted_impact_analysis',
-                ),
-                'human_explanation' =>
-                    'A REVIEW_SEPARATELY boundary remains unresolved'
-                    . ($section === '' ? '.' : ' for ' . $section . '.'),
-                'allowed_repair_scope' => array(),
-                'known_limitations' => array(),
-            );
-        }
 
         return array(
             'schema' => 'ipca.manual-change-independent-review.v1',
@@ -141,11 +70,6 @@ final class BooksManualsChangeReviewerService
             'prompt_version' => self::PROMPT_VERSION,
             'status' => $status,
             'ready_rule' => 'READY requires zero unexplained exact legacy hits and zero unresolved review boundaries.',
-            'blockers' => array_values(array_map(
-                static fn(array $check): string => (string)$check['human_explanation'],
-                $governanceChecks
-            )),
-            'review_checks' => $governanceChecks,
             'unexplained_exact_legacy_hits' => $unexplainedHits,
             'unresolved_review_boundaries' => $unresolvedBoundaries,
             'accepted_review_exceptions' => $acceptedReviewExceptions,
@@ -574,11 +498,6 @@ final class BooksManualsChangeReviewerService
             'strval',
             (array)($proposal['accepted_structure_nodes'] ?? array())
         )));
-        $acceptedNodeSet = array_fill_keys($acceptedNodes, true);
-        $acceptedImpactSet = array_fill_keys(array_values(array_unique(array_map(
-            'strval',
-            (array)($proposal['accepted_impact_numbers'] ?? array())
-        ))), true);
         $implementedNodes = array_keys($nodes);
         $missingNodes = array_values(array_diff($acceptedNodes, $implementedNodes));
         $unexpectedNodes = array_values(array_diff($implementedNodes, $acceptedNodes));
@@ -749,25 +668,12 @@ final class BooksManualsChangeReviewerService
             array('accepted_structure_nodes')
         );
         foreach (array('3.3', '4.2', '5.6', '5.7', '8.1') as $section) {
-            $checkId = 'evidence.section.' . $this->checkSlug($section) . '.change-accounting';
-            if (!isset($acceptedImpactSet[$section])) {
-                $checks[] = $this->informationalReviewCheck(
-                    $checkId,
-                    'INTEGRITY',
-                    array($section),
-                    array(),
-                    "Section {$section} records preserved, replaced and added content when it is within the accepted amendment scope.",
-                    "Section {$section} is outside the human-accepted amendment scope.",
-                    array('accepted_impact_numbers', 'accepted_structure_nodes')
-                );
-                continue;
-            }
             $draft = (array)($drafts[$section] ?? array());
             $complete = (array)($draft['current_preserved'] ?? array()) !== array()
                 && array_key_exists('current_removed_replaced', $draft)
                 && (array)($draft['new_content_added'] ?? array()) !== array();
             $checks[] = $this->reviewCheck(
-                $checkId,
+                'evidence.section.' . $this->checkSlug($section) . '.change-accounting',
                 'INTEGRITY',
                 'HARD',
                 $complete,
@@ -789,7 +695,7 @@ final class BooksManualsChangeReviewerService
             'preliminary-30-day-deadline' => array('the preliminary 30-day deadline', array('/(?:within|not later than)\s+30\s+days/iu')),
             'final-three-month-timing' => array('the final three-month timing', array('/(?:not later than|within)\s+three\s+months/iu')),
             'mandatory-voluntary-distinction' => array('the mandatory and voluntary reporting distinction', array('/mandatory(?:\s+occurrence)?[-\s]reporting/iu', '/voluntary(?:\s+occurrence)?[-\s]reporting/iu')),
-            'reporter-protection-just-culture' => array('reporter protection and just culture', array('/(?:reporter\s+protection|protect(?:s|ed|ing)?\s+(?:the\s+)?reporter|reporter.{0,30}protect)/iu', '/just[-\s]culture/iu')),
+            'reporter-protection-just-culture' => array('reporter protection and just culture', array('/(?:reporter\s+protection|protect(?:s|ion).{0,30}reporter|reporter.{0,30}protect)/iu', '/just[-\s]culture/iu')),
             'causal-contributing-factors' => array('causal and contributing factors', array('/causal\s+(?:and|or)\s+contributing\s+factors/iu')),
         );
         foreach ($preservationChecks as $key => [$label, $patterns]) {
@@ -818,7 +724,7 @@ final class BooksManualsChangeReviewerService
             ),
             'eccairs.initial.governance-complete' => array(
                 'ECCAIRS_INITIAL', 'MATERIAL', $initial, array('5.6.4'), array('5.6.4'),
-                array('/Safety Manager/iu', '/(?:information required|required information)/iu', '/(?:unknown|unavailable)/iu', '/review.{0,60}approv|approv.{0,60}transmission/isu', '/(?:retain.{0,240}(?:submission|authority|evidence)|(?:submission|authority|evidence).{0,240}retain)/isu'),
+                array('/Safety Manager/iu', '/(?:information required|required information)/iu', '/(?:unknown|unavailable)/iu', '/review.{0,60}approv|approv.{0,60}transmission/isu', '/retain.{0,240}(?:submission|authority|evidence)/isu'),
                 'Initial ECCAIRS preparation covers required information, unavailable information, Safety Manager approval and retained evidence.',
                 'Initial ECCAIRS governance requirements are incomplete.'
             ),
@@ -878,7 +784,7 @@ final class BooksManualsChangeReviewerService
             ),
             'closure.authority-follow-up-gate' => array(
                 'CLOSURE', 'MATERIAL', $closure, array('5.6'), array('5.6.9'),
-                array('/closure\s+shall\s+not\s+be\s+approved|shall\s+not\s+be\s+closed|before\s+approving.{0,120}closure|does\s+not\s+permit\s+closure/isu', '/intermediate.{0,80}final.{0,100}ECCAIRS|ECCAIRS\s+follow-up/isu', '/(?:(?:submission|acceptance).{0,100}evidence|evidence.{0,100}(?:submission|acceptance))/isu'),
+                array('/closure\s+shall\s+not\s+be\s+approved|before\s+approving.{0,120}closure|does\s+not\s+permit\s+closure/isu', '/intermediate.{0,80}final.{0,100}ECCAIRS|ECCAIRS\s+follow-up/isu', '/(?:submission|acceptance)\s+evidence/iu'),
                 'Required authority follow-up and evidence are explicit prerequisites to closure.',
                 'Investigation completion can bypass required ECCAIRS follow-up.'
             ),
@@ -890,13 +796,13 @@ final class BooksManualsChangeReviewerService
             ),
             'monitoring.occurrence-level' => array(
                 'MONITORING', 'MATERIAL', (string)($nodes['5.6.8'] ?? ''), array('5.6'), array('5.6.8'),
-                array('/(?:monitor|review)\s+open\s+(?:reportable\s+)?occurrences|Follow-up Control Log.{0,100}(?:reportable\s+)?occurrences/isu', '/(?:deadline|reporting stage)/iu', '/actions?/iu', '/(?:evidence|investigation)/iu'),
+                array('/(?:monitor|review)\s+open\s+(?:reportable\s+)?occurrences/iu', '/(?:deadline|reporting stage)/iu', '/actions?/iu', '/(?:evidence|investigation)/iu'),
                 'Occurrence-level deadlines, investigations, actions and evidence remain monitored in Section 5.6.',
                 'Occurrence-level monitoring is incomplete in 5.6.8.'
             ),
             'monitoring.aggregate-assurance' => array(
                 'MONITORING', 'MATERIAL', (string)($nodes['5.7.3'] ?? ''), array('5.7'), array('5.7.3'),
-                array('/(?:aggregate|systemic|quarterly|periodic.{0,40}reconciliation)/isu', '/(?:trends?|discrepanc)/iu', '/(?:individual occurrences|reportable occurrences|occurrence(?:-management)? records)/iu'),
+                array('/(?:aggregate|systemic|quarterly reconciliation)/iu', '/(?:trends?|discrepanc)/iu', '/(?:individual occurrences|occurrence records)/iu'),
                 'Section 5.7 provides aggregate/systemic assurance without replacing occurrence-level control.',
                 'Aggregate assurance is incomplete in Section 5.7.'
             ),
@@ -908,15 +814,15 @@ final class BooksManualsChangeReviewerService
             ),
             'records.occurrence-evidence-complete' => array(
                 'RECORDS', 'MATERIAL', (string)($nodes['4.2'] ?? ''), array('4.2'), array('4.2'),
-                array('/(?:authority|ECCAIRS|external)\s+(?:submissions?|status|updates?)/iu', '/(?:(?:acknowledgement|acceptance|follow-up).{0,180}evidence|evidence.{0,180}(?:acknowledgement|acceptance|follow-up))/isu', '/investigation\s+(?:records?|evidence|content)|findings/iu', '/implementation\s+(?:status|evidence)/iu', '/closure\s+(?:rationale|approval|authorization|evidence)/iu'),
+                array('/(?:authority|ECCAIRS)\s+(?:submission|status|update)/iu', '/(?:acknowledgement|acceptance|follow-up)\s+evidence/iu', '/investigation\s+(?:records?|evidence)|findings/iu', '/implementation\s+(?:status|evidence)/iu', '/closure\s+(?:rationale|approval|authorization)/iu'),
                 'Control of Records retains authority, investigation, action and closure evidence.',
                 'Section 4.2 does not control all required occurrence evidence.'
             ),
             'training.corrective-action-competence' => array(
                 'TRAINING', 'MATERIAL', (string)($nodes['8.1'] ?? ''), array('8.1'), array('8.1'),
                 array('/corrective\s+(?:or|and)\s+mitigating\s+action/iu', '/Action Owners?/iu', '/implementation|completion\s+evidence/iu', '/effectiveness/iu'),
-                'Personnel assigned corrective or mitigating actions, including Action Owners, are trained and competent in implementation, completion evidence and effectiveness control.',
-                'Section 8.1 does not explicitly connect corrective or mitigating Action Owners to implementation, completion-evidence and effectiveness competence.'
+                'Training covers action ownership, implementation evidence and effectiveness control.',
+                'Section 8.1 does not include corrective-action competence.'
             ),
             'reporting.missing-information-deadline' => array(
                 'ECCAIRS_INITIAL', 'MATERIAL', $text56, array('5.6'), array('5.6.3', '5.6.4'),
@@ -932,26 +838,6 @@ final class BooksManualsChangeReviewerService
             ),
         );
         foreach ($semantic as $id => [$category, $severity, $text, $sections, $affectedNodes, $patterns, $invariant, $failure]) {
-            $inAcceptedScope = array_values(array_filter(
-                array_map('strval', $affectedNodes),
-                static fn(string $node): bool => isset($acceptedNodeSet[$node])
-            )) !== array()
-                || array_values(array_filter(
-                    array_map('strval', $sections),
-                    static fn(string $section): bool => isset($acceptedImpactSet[$section])
-                )) !== array();
-            if (!$inAcceptedScope) {
-                $checks[] = $this->informationalReviewCheck(
-                    $id,
-                    $category,
-                    $sections,
-                    array(),
-                    $invariant,
-                    'This invariant is outside the human-accepted amendment scope.',
-                    array('accepted_impact_numbers', 'accepted_structure_nodes')
-                );
-                continue;
-            }
             $passed = $this->matchesEvery($text, $patterns);
             $checks[] = $this->reviewCheck(
                 $id,
@@ -1114,41 +1000,6 @@ final class BooksManualsChangeReviewerService
         );
     }
 
-    /**
-     * Retain a stable check identity without treating a human-dismissed
-     * amendment area as missing content.
-     *
-     * @param list<string> $sections
-     * @param list<string> $nodes
-     * @param list<string> $evidence
-     * @return array<string,mixed>
-     */
-    private function informationalReviewCheck(
-        string $checkId,
-        string $category,
-        array $sections,
-        array $nodes,
-        string $invariant,
-        string $observed,
-        array $evidence
-    ): array {
-        return array(
-            'check_id' => $checkId,
-            'check_version' => self::CHECK_VERSION,
-            'category' => $category,
-            'severity' => 'INFORMATIONAL',
-            'status' => 'INFORMATIONAL',
-            'affected_sections' => array_values(array_unique(array_map('strval', $sections))),
-            'affected_nodes' => array_values(array_unique(array_map('strval', $nodes))),
-            'required_invariant' => $invariant,
-            'observed_state' => $observed,
-            'evidence_references' => array_values(array_unique(array_map('strval', $evidence))),
-            'human_explanation' => $observed,
-            'allowed_repair_scope' => array(),
-            'known_limitations' => array(),
-        );
-    }
-
     /** @param list<string> $patterns */
     private function matchesEvery(string $text, array $patterns): bool
     {
@@ -1158,54 +1009,6 @@ final class BooksManualsChangeReviewerService
             }
         }
         return true;
-    }
-
-    /**
-     * Select checks that can be affected by a node-scoped correction.
-     *
-     * @param list<array<string,mixed>> $checks
-     * @param list<string> $scopeSections
-     * @param list<string> $scopeNodes
-     * @param list<string> $alwaysInclude
-     * @return list<string>
-     */
-    public function scopedCheckIds(
-        array $checks,
-        array $scopeSections,
-        array $scopeNodes,
-        array $alwaysInclude = array()
-    ): array {
-        $sectionSet = array_fill_keys(array_map('strval', $scopeSections), true);
-        $nodeSet = array_fill_keys(array_map('strval', $scopeNodes), true);
-        $selected = array_fill_keys(array_map('strval', $alwaysInclude), true);
-        foreach ($checks as $check) {
-            $checkId = (string)($check['check_id'] ?? '');
-            if ($checkId === '') {
-                continue;
-            }
-            $affectedNodes = array_values(array_map(
-                'strval',
-                (array)($check['affected_nodes'] ?? array())
-            ));
-            $affectedSections = array_values(array_map(
-                'strval',
-                (array)($check['affected_sections'] ?? array())
-            ));
-            $nodeIntersection = array_values(array_filter(
-                $affectedNodes,
-                static fn(string $node): bool => isset($nodeSet[$node])
-            ));
-            $sectionIntersection = array_values(array_filter(
-                $affectedSections,
-                static fn(string $section): bool => isset($sectionSet[$section])
-            ));
-            if ($nodeIntersection !== array()
-                || ($affectedNodes === array() && $sectionIntersection !== array())
-                || ($affectedNodes === array() && $affectedSections === array())) {
-                $selected[$checkId] = true;
-            }
-        }
-        return array_keys($selected);
     }
 
     private function checkSlug(string $value): string
@@ -1273,52 +1076,15 @@ final class BooksManualsChangeReviewerService
             $after
         );
         $structurePreserved = $structureBefore === $structureAfter;
-        $changedNodes = array();
-        $changedSections = array();
-        foreach (array_keys($allowedNodes) as $number) {
-            foreach ($before as $section => $draft) {
-                if (!array_key_exists($number, (array)($draft['nodes'] ?? array()))) {
-                    continue;
-                }
-                if ($this->json($draft['nodes'][$number] ?? null)
-                    !== $this->json($after[$section]['nodes'][$number] ?? null)) {
-                    $changedNodes[] = $number;
-                    $changedSections[] = (string)$section;
-                }
-                break;
-            }
-        }
-        $changedNodes = array_values(array_unique($changedNodes));
-        $changedSections = array_values(array_unique($changedSections));
         $verification = $this->verifyReadableAmendmentProposal($candidateProposal);
-        $parentVerification = $this->verifyReadableAmendmentProposal($acceptedProposal);
-        $reviewChecks = array_values((array)($verification['review_checks'] ?? array()));
-        $reverifiedCheckIds = $this->scopedCheckIds(
-            array_values((array)($parentVerification['review_checks'] ?? array())),
-            $changedSections,
-            $changedNodes,
-            array_values(array_unique(array_map('strval', $targetCheckIds)))
-        );
-        $reverifiedSet = array_fill_keys($reverifiedCheckIds, true);
-        $reconciliationChecks = array_values(array_filter(
-            $reviewChecks,
-            static fn(array $check): bool =>
-                isset($reverifiedSet[(string)($check['check_id'] ?? '')])
-        ));
-        $issues = array_values(array_map(
-            static fn(array $check): string => (string)($check['human_explanation'] ?? ''),
-            array_filter(
-                $reconciliationChecks,
-                static fn(array $check): bool =>
-                    (string)($check['status'] ?? '') === 'FAIL'
-            )
-        ));
+        $issues = array_values((array)($verification['issues'] ?? array()));
         if ($scopeViolations !== array()) {
             $issues[] = 'Targeted correction changed unrelated accepted wording.';
         }
         if (!$structurePreserved) {
             $issues[] = 'Targeted correction changed the accepted structure.';
         }
+        $reviewChecks = array_values((array)($verification['review_checks'] ?? array()));
         $checkMap = array_column($reviewChecks, null, 'check_id');
         $targetedResults = array();
         foreach (array_values(array_unique(array_map('strval', $targetCheckIds))) as $checkId) {
@@ -1378,8 +1144,6 @@ final class BooksManualsChangeReviewerService
         );
         $reviewChecks[] = $preservationCheck;
         $reviewChecks[] = $structureCheck;
-        $reconciliationChecks[] = $preservationCheck;
-        $reconciliationChecks[] = $structureCheck;
         return array(
             'schema' => 'ipca.manual-change-targeted-reverification.v1',
             'status' => $issues === array() ? 'VERIFIED' : self::REQUIRES_REVIEW,
@@ -1387,14 +1151,6 @@ final class BooksManualsChangeReviewerService
             'scope_nodes' => array_keys($allowedNodes),
             'targeted_check_ids' => array_keys($targetedResults),
             'targeted_check_results' => $targetedResults,
-            'reverified_check_ids' => array_values(array_unique(array_merge(
-                $reverifiedCheckIds,
-                array(
-                    'integrity.targeted-patch.frozen-nodes',
-                    'integrity.targeted-patch.structure-preserved',
-                )
-            ))),
-            'reconciliation_checks' => $reconciliationChecks,
             'review_checks' => $reviewChecks,
             'unaffected_sections_byte_unchanged' => !in_array(false, $unchanged, true),
             'unaffected_section_results' => $unchanged,

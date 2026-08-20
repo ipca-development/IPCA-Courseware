@@ -43,21 +43,9 @@ wizard_apply_assert(
     'Wizard apply and undo must be transactional.'
 );
 wizard_apply_assert(
-    str_contains($service, 'WIZARD_APPLICATION_STALE_CLAIM_RECOVERED')
-        && str_contains($service, '|attempt:')
-        && str_contains($service, '$claimedOperation')
-        && str_contains($service, 'Stale Wizard application claim recovered safely.'),
-    'Apply claims must prevent duplicate-key failures and recover abandoned running operations.'
-);
-wizard_apply_assert(
     str_contains($service, 'context_hash')
         && str_contains($service, 'assertTargetsUnchanged')
         && str_contains($service, 'buildPreflightPackage')
-        && str_contains(
-            $service,
-            '$this->buildTargets($planId, $versionId, $sectionDrafts, $forUpdate)'
-        )
-        && str_contains($service, '$this->structureTitles($planId, $forUpdate)')
         && str_contains($service, 'independently_reviewed_package')
         && str_contains($service, 'The selected manual changed after impact analysis'),
     'Wizard apply must build and revalidate the independently reviewed operation package.'
@@ -105,25 +93,6 @@ wizard_apply_assert(
         && str_contains($editorApi, "case 'undo_wizard_edit'")
         && str_contains($editorJs, "apiPost('undo_wizard_edit'"),
     'The Editor must expose the guarded server-authoritative Undo Wizard Edit action.'
-);
-wizard_apply_assert(
-    str_contains($service, 'editorChanges(')
-        && str_contains($service, 'revertEditorChange(')
-        && str_contains($service, "'operation_type' => 'revert_wizard_change_item'")
-        && str_contains($service, 'expectedCurrentFingerprint')
-        && str_contains($service, "'derived_sections_refreshed'")
-        && str_contains($service, "'overwritten_section'")
-        && str_contains($editorApi, "case 'wizard_changes'")
-        && str_contains($editorApi, "case 'revert_wizard_change'")
-        && str_contains($editorPage, 'cpbWizardChanges')
-        && str_contains($editorJs, 'data-cpb-revert-wizard-change'),
-    'The Editor must expose independently guarded per-section Wizard reverts.'
-);
-wizard_apply_assert(
-    str_contains($service, "'review_guidance' => \$this->reviewGuidance")
-        && str_contains($service, "'editor_action_required' => false")
-        && str_contains($editorJs, 'Independent Review guidance'),
-    'Governed review answers must be carried into the Editor sidebar without another Author pass.'
 );
 wizard_apply_assert(
     str_contains($wizardPage, 'No revision will be created, incremented, approved or transitioned')

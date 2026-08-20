@@ -236,8 +236,7 @@ annex_book_assert(
 );
 annex_book_assert(
     'Annex edits do not invoke Manual Highlight of Changes automation',
-    str_contains($editorJs, 'if (isAnnexBook) return false;')
-        && str_contains($editorJs, 'if (isAnnexBook) return;')
+    substr_count($editorJs, 'if (isAnnexBook) return;') >= 2
         && str_contains($editorJs, "if (isAnnexBook) syncSelect.style.display = 'none';")
 );
 annex_book_assert(

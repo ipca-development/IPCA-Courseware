@@ -152,47 +152,9 @@ try {
             $freshness = $checkFreshness
                 ? $reader->authoritativePageMapFreshness($version, $paginateSource)
                 : array('is_current' => true, 'mismatches' => array());
-            $generation = is_array($approval['generation'] ?? null)
-                ? $approval['generation']
-                : array();
-            $frozenPackage = is_array($generation['publication_package'] ?? null)
-                ? $generation['publication_package']
-                : array();
-            $frozenPackageValid = $frozenPackage !== array()
-                && (string)($generation['style_hash'] ?? '') !== ''
-                && (string)($generation['manifest_hash'] ?? '') !== ''
-                && hash_equals(
-                    (string)$generation['style_hash'],
-                    (string)($frozenPackage['css']['hash'] ?? '')
-                )
-                && hash_equals(
-                    (string)$generation['manifest_hash'],
-                    (string)($frozenPackage['manifest_hash'] ?? '')
-                );
-            $publicationPackage = null;
-            if ($includeStyle && is_array($paginateSource)) {
-                $publicationPackage = $frozenPackageValid
-                    ? $frozenPackage
-                    : $reader->readerPublicationPackage($version, $paginateSource);
-            }
-            $artifactCompatible = $pages === array() || !$includeStyle || (
-                is_array($publicationPackage)
-                && (string)($generation['style_hash'] ?? '') !== ''
-                && (string)($generation['manifest_hash'] ?? '') !== ''
-                && hash_equals(
-                    (string)$generation['style_hash'],
-                    (string)($publicationPackage['css']['hash'] ?? '')
-                )
-                && hash_equals(
-                    (string)$generation['manifest_hash'],
-                    (string)($publicationPackage['manifest_hash'] ?? '')
-                )
-            );
-            $responsePages = $artifactCompatible ? $pages : array();
-            $approvalResponse = $approval;
-            if (is_array($approvalResponse['generation'] ?? null)) {
-                unset($approvalResponse['generation']['publication_package']);
-            }
+            $publicationPackage = $includeStyle && is_array($paginateSource)
+                ? $reader->paginationPublicationPackage($version, $paginateSource)
+                : null;
             cp_pm_json(200, array(
                 'ok' => true,
                 'result' => array(
@@ -200,7 +162,7 @@ try {
                     'book_key' => (string)($version['book_key'] ?? ''),
                     'version_label' => (string)($version['version_label'] ?? ''),
                     'lifecycle_status' => (string)($version['lifecycle_status'] ?? ''),
-                    'pagination' => $approvalResponse,
+                    'pagination' => $approval,
                     'freshness' => $freshness,
                     'book_style_css' => is_array($publicationPackage)
                         ? (string)($publicationPackage['css']['content'] ?? '')
@@ -208,12 +170,8 @@ try {
                     'book_style_css_hash' => is_array($publicationPackage)
                         ? (string)($publicationPackage['css']['hash'] ?? '')
                         : null,
-                    'artifact_compatible' => $artifactCompatible,
-                    'compatibility_error' => $artifactCompatible
-                        ? null
-                        : 'Stored page HTML and its frozen publication style package do not match. Regenerate pages.',
                     'page_count' => $store->pageCount($versionId, $layoutProfile),
-                    'returned_page_count' => count($responsePages),
+                    'returned_page_count' => count($pages),
                     'section_id' => $sectionId > 0 ? $sectionId : null,
                     'pages' => array_map(static fn(array $page): array => array(
                         'page_number' => (int)$page['page_number'],
@@ -224,7 +182,7 @@ try {
                         'is_section_start' => !empty($page['is_section_start']),
                         'page_html' => (string)$page['page_html'],
                         'metadata' => $page['metadata'] ?? array(),
-                    ), $responsePages),
+                    ), $pages),
                 ),
             ));
 

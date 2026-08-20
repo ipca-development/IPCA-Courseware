@@ -180,12 +180,7 @@ final class BooksManualsChangeAuthorService
                 "UPDATE ipca_manual_ai_architect_drafts
                     SET status='generated',draft_payload_json=?,content_fingerprint=?
                   WHERE id=? AND plan_id=?"
-            )->execute(array(
-                $encoded,
-                $this->plans->draftPayloadFingerprint($proposal),
-                $draftId,
-                $planId,
-            ));
+            )->execute(array($encoded, hash('sha256', $encoded), $draftId, $planId));
             $this->plans->updatePlan($planId, array(
                 'stage' => 'drafting',
                 'status' => 'ready_for_review',
@@ -208,27 +203,18 @@ final class BooksManualsChangeAuthorService
             if ($controlledReviewFailures === array()) {
                 $controlledReviewFailures = $this->correctableDraftFailures($error);
             }
-            $failurePayload = array(
+            $payload = json_encode(array(
                 'schema' => 'ipca.manual-change-amendment-generation.v1',
                 'generation_status' => 'failed',
                 'failure_message' => $error->getMessage(),
                 'controlled_review_failures' => $controlledReviewFailures,
                 'failed_at' => gmdate(DATE_ATOM),
-            );
-            $payload = json_encode(
-                $failurePayload,
-                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
-            );
+            ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
             $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_architect_drafts
                     SET status='abandoned',draft_payload_json=?,content_fingerprint=?
                   WHERE id=? AND plan_id=?"
-            )->execute(array(
-                $payload,
-                $this->plans->draftPayloadFingerprint($failurePayload),
-                $draftId,
-                $planId,
-            ));
+            )->execute(array($payload, hash('sha256', $payload), $draftId, $planId));
             $this->plans->updatePlan($planId, array(
                 'stage' => 'drafting',
                 'status' => 'blocked',
@@ -259,8 +245,7 @@ final class BooksManualsChangeAuthorService
         int $actorUserId,
         array $acceptedProposal,
         array $findings,
-        array $governedFacts = array(),
-        array $attemptFeedback = array()
+        array $governedFacts = array()
     ): array {
         if ((string)($acceptedProposal['wizard_status'] ?? '') !== 'accepted') {
             throw new RuntimeException('Targeted correction requires accepted Step 4 wording.');
@@ -438,13 +423,9 @@ final class BooksManualsChangeAuthorService
             '---BEGIN GOVERNED HUMAN FACTS---',
             $this->json($governedFacts),
             '---END GOVERNED HUMAN FACTS---',
-            '---BEGIN PRIOR TARGETED ATTEMPT FEEDBACK---',
-            $this->json($attemptFeedback),
-            '---END PRIOR TARGETED ATTEMPT FEEDBACK---',
         ));
         $model = cw_openai_model();
         $started = microtime(true);
-        $generated = null;
         try {
             $response = cw_openai_responses(array(
                 'model' => $model,
@@ -474,12 +455,7 @@ final class BooksManualsChangeAuthorService
                 if (!is_array($patch)) {
                     continue;
                 }
-                $section = $this->resolveTargetedPatchSection(
-                    trim((string)($patch['section_number'] ?? '')),
-                    (array)($patch['nodes'] ?? array()),
-                    $allDrafts,
-                    $scope
-                );
+                $section = trim((string)($patch['section_number'] ?? ''));
                 if ($section === '' || !isset($scope[$section]) || !isset($candidate['section_drafts'][$section])) {
                     throw new RuntimeException('Targeted Author attempted to modify content outside the authorized review scope.');
                 }
@@ -594,34 +570,7 @@ final class BooksManualsChangeAuthorService
                 'production_applied' => false,
             );
         } catch (Throwable $error) {
-            $this->logAi(
-                'ERROR',
-                $planId,
-                $actorUserId,
-                $model,
-                $prompt,
-                is_array($generated) ? $generated : null,
-                $error->getMessage(),
-                $started
-            );
-            $retryLimit = str_starts_with(
-                $error->getMessage(),
-                'Targeted correction returned no changed controlled wording.'
-            ) ? 1 : 2;
-            if (count($attemptFeedback) < $retryLimit
-                && preg_match(
-                    '/^(?:Targeted Author attempted|Targeted correction returned|Targeted Author correction failed stable checks)/',
-                    $error->getMessage()
-                ) === 1) {
-                return $this->generateTargetedPatch(
-                    $planId,
-                    $actorUserId,
-                    $acceptedProposal,
-                    $findings,
-                    $governedFacts,
-                    array_merge($attemptFeedback, array($error->getMessage()))
-                );
-            }
+            $this->logAi('ERROR', $planId, $actorUserId, $model, $prompt, null, $error->getMessage(), $started);
             throw $error;
         }
     }
@@ -998,31 +947,11 @@ final class BooksManualsChangeAuthorService
         require_once __DIR__ . '/BooksManualsChangeReviewerService.php';
         $reviewer = new BooksManualsChangeReviewerService($this->pdo, $this->plans);
         $baselineVerification = $reviewer->verifyReadableAmendmentProposal($acceptedProposal);
-        $scopeSections = array_values(array_unique(array_map(
-            'strval',
-            array_keys($changedSections)
-        )));
-        $scopeNodes = array();
-        foreach ($changedSections as $change) {
-            $scopeNodes = array_merge(
-                $scopeNodes,
-                array_map('strval', (array)($change['changed_nodes'] ?? array()))
-            );
-        }
-        $scopeNodes = array_values(array_unique($scopeNodes));
-        $reverifiedCheckIds = array_fill_keys($reviewer->scopedCheckIds(
-            array_values((array)($baselineVerification['review_checks'] ?? array())),
-            $scopeSections,
-            $scopeNodes,
-            $targetCheckIds
-        ), true);
         $baselinePasses = array_fill_keys(array_values(array_map(
             static fn(array $check): string => (string)$check['check_id'],
             array_filter(
                 (array)($baselineVerification['review_checks'] ?? array()),
-                static fn(array $check): bool =>
-                    (string)($check['status'] ?? '') === 'PASS'
-                    && isset($reverifiedCheckIds[(string)($check['check_id'] ?? '')])
+                static fn(array $check): bool => (string)($check['status'] ?? '') === 'PASS'
             )
         )), true);
         $passes = static function (
@@ -1047,28 +976,8 @@ final class BooksManualsChangeAuthorService
             return true;
         };
         if (!$passes($candidate)) {
-            $candidateVerification = $reviewer->verifyReadableAmendmentProposal($candidate);
-            $candidateResults = array_column(
-                (array)($candidateVerification['review_checks'] ?? array()),
-                null,
-                'check_id'
-            );
-            $failedTargets = array_values(array_filter(
-                $targetCheckIds,
-                static fn(string $checkId): bool =>
-                    (string)($candidateResults[$checkId]['status'] ?? '') !== 'PASS'
-            ));
-            $regressed = array_values(array_filter(
-                array_keys($baselinePasses),
-                static fn(string $checkId): bool =>
-                    (string)($candidateResults[$checkId]['status'] ?? '') !== 'PASS'
-            ));
             throw new RuntimeException(
-                'Targeted Author correction failed stable checks: '
-                . implode(', ', $failedTargets)
-                . ($regressed === array()
-                    ? ''
-                    : '; regressed checks: ' . implode(', ', $regressed))
+                'Targeted Author correction did not satisfy its stable check without regression.'
             );
         }
         $changes = array();
@@ -1086,50 +995,6 @@ final class BooksManualsChangeAuthorService
             }
         }
         return $candidate;
-    }
-
-    /**
-     * Resolve a model-supplied section label through its returned node IDs.
-     * The node-to-section mapping from the accepted draft is authoritative.
-     *
-     * @param list<array<string,mixed>> $patchNodes
-     * @param array<string,array<string,mixed>> $allDrafts
-     * @param array<string,bool> $scope
-     */
-    private function resolveTargetedPatchSection(
-        string $declaredSection,
-        array $patchNodes,
-        array $allDrafts,
-        array $scope
-    ): string {
-        $resolved = array();
-        foreach ($patchNodes as $node) {
-            if (!is_array($node)) {
-                continue;
-            }
-            $number = trim((string)($node['number'] ?? ''));
-            if ($number === '') {
-                continue;
-            }
-            foreach ($allDrafts as $section => $draft) {
-                if (array_key_exists($number, (array)($draft['nodes'] ?? array()))) {
-                    $resolved[(string)$section] = true;
-                    break;
-                }
-            }
-        }
-        if (count($resolved) === 1) {
-            $canonical = (string)array_key_first($resolved);
-            if (isset($scope[$canonical])) {
-                return $canonical;
-            }
-        }
-        if ($resolved === array() && isset($scope[$declaredSection])) {
-            return $declaredSection;
-        }
-        throw new RuntimeException(
-            'Targeted Author attempted to modify content outside the authorized review scope.'
-        );
     }
 
     /** @param array<string,mixed> $proposal @return array{valid:bool,failures:list<string>} */

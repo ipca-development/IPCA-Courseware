@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_baselines (
   created_by INT NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   UNIQUE KEY uk_imaa_review_baseline_uuid (baseline_uuid),
-  UNIQUE KEY uk_imaa_review_baseline_hash (plan_id, review_id, baseline_fingerprint),
+  UNIQUE KEY uk_imaa_review_baseline_hash (plan_id, baseline_fingerprint),
   KEY idx_imaa_review_baseline_plan (plan_id, created_at),
   CONSTRAINT fk_imaa_review_baseline_plan
     FOREIGN KEY (plan_id) REFERENCES ipca_manual_ai_architect_plans(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -27,10 +27,6 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_baselines (
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-ALTER TABLE ipca_manual_ai_architect_review_baselines
-  DROP INDEX uk_imaa_review_baseline_hash,
-  ADD UNIQUE KEY uk_imaa_review_baseline_hash (plan_id, review_id, baseline_fingerprint);
-
 CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_findings (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   finding_uuid CHAR(36) NOT NULL,
@@ -39,8 +35,8 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_findings (
   baseline_id BIGINT UNSIGNED NOT NULL,
   finding_fingerprint CHAR(64) NOT NULL,
   finding_class VARCHAR(40) NOT NULL COMMENT 'INFORMATIONAL | MECHANICAL_FIX | HUMAN_DECISION_REQUIRED | TARGETED_AUTHOR_CORRECTION | HARD_INTEGRITY_BLOCKER | POTENTIAL_SCOPE_DEFECT',
-  outcome VARCHAR(40) NOT NULL COMMENT 'PASS | HUMAN_CLARIFICATION_REQUIRED | HUMAN_CLARIFICATION_RECORDED | TECHNICAL_INTEGRITY_BLOCKER | CONFIRMED_DEFECT | POTENTIAL_SCOPE_DEFECT',
-  status VARCHAR(32) NOT NULL DEFAULT 'open' COMMENT 'open | question_pending | review_acknowledged | patch_pending | patched | verified | closed | blocked',
+  outcome VARCHAR(40) NOT NULL COMMENT 'PASS | HUMAN_CLARIFICATION_REQUIRED | CONFIRMED_DEFECT | POTENTIAL_SCOPE_DEFECT',
+  status VARCHAR(32) NOT NULL DEFAULT 'open' COMMENT 'open | question_pending | answered | patch_pending | patched | verified | closed | blocked',
   material TINYINT(1) NOT NULL DEFAULT 1,
   blocking TINYINT(1) NOT NULL DEFAULT 1,
   title VARCHAR(255) NOT NULL,
@@ -103,7 +99,7 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_answers (
   affected_sections_json JSON NOT NULL,
   evidence_snapshot_json JSON NOT NULL,
   governed_fact_json JSON NOT NULL,
-  consequence VARCHAR(40) NOT NULL COMMENT 'NO_MANUAL_CHANGE_REQUIRED | EDITOR_REVIEW_NOTE | EDITOR_FOLLOW_UP_REQUIRED | TARGETED_WORDING_CHANGE_REQUIRED | STRUCTURAL_CONSEQUENCE',
+  consequence VARCHAR(40) NOT NULL COMMENT 'NO_MANUAL_CHANGE_REQUIRED | TARGETED_WORDING_CHANGE_REQUIRED | STRUCTURAL_CONSEQUENCE',
   wording_change_required TINYINT(1) NOT NULL DEFAULT 0,
   actor_id INT NOT NULL,
   answered_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -205,7 +201,7 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_check_metadata (
   category VARCHAR(64) NOT NULL,
   severity VARCHAR(32) NOT NULL,
   review_status VARCHAR(24) NOT NULL COMMENT 'PASS | FAIL | INFORMATIONAL',
-  resolution_status VARCHAR(24) NOT NULL COMMENT 'UNRESOLVED | VERIFIED | ACKNOWLEDGED | BLOCKED',
+  resolution_status VARCHAR(24) NOT NULL COMMENT 'UNRESOLVED | VERIFIED | BLOCKED',
   affected_nodes_json JSON NOT NULL,
   required_invariant TEXT NOT NULL,
   observed_state TEXT NOT NULL,
