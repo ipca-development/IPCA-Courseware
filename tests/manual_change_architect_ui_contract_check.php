@@ -179,6 +179,8 @@ architect_ui_assert(
         && str_contains($api, "'controlled_review_corrections' => \$controlledReviewCorrections")
         && str_contains((string)$author, "\$brief['controlled_review_corrections']")
         && str_contains((string)$author, "'controlled_review_failures' => \$controlledReviewFailures")
+        && str_contains((string)$author, 'correctableDraftFailures(')
+        && str_contains($api, 'Accepted structure node .+ (?:has no drafted content|was not implemented)')
         && str_contains($js, 'Regenerating with controlled-review corrections'),
     'Step 3 acceptance must generate, validate, persist, and progressively reveal Step 4 drafts.'
 );
@@ -195,6 +197,8 @@ architect_ui_assert(
     str_contains($api, 'architect_api_ensure_structure(')
         && str_contains((string)$structureService, 'buildProposalFromImpactPresentation(')
         && str_contains((string)$structureService, 'reopenExistingProposal(')
+        && str_contains((string)$structureService, 'findProposalByFingerprint(')
+        && str_contains((string)$structureService, "\$error->getCode() !== '23000'")
         && str_contains((string)$structureService, 'reopened_existing_fingerprint')
         && str_contains($page, '$displayStructureNodes')
         && str_contains($page, '$primaryArea[\'proposed_structure_items\']'),

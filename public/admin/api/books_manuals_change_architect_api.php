@@ -234,13 +234,28 @@ function architect_api_draft_review_corrections(array $draft): array
         '/^Generated amendment wording failed controlled review:\s*(.+)$/isu',
         $message,
         $match
-    ) !== 1) {
-        return array();
+    ) === 1) {
+        return array_values(array_filter(array_map(
+            static fn(string $issue): string => trim($issue),
+            explode(';', (string)$match[1])
+        )));
     }
-    return array_values(array_filter(array_map(
-        static fn(string $issue): string => trim($issue),
-        explode(';', (string)$match[1])
-    )));
+    if (preg_match(
+        '/^(?:'
+        . 'Draft sections must exactly equal the individually accepted impacts'
+        . '|Section .+ has no accepted-node implementation'
+        . '|Drafting was attempted for unaccepted structure node .+'
+        . '|Accepted structure node .+ (?:has no drafted content|was not implemented)'
+        . '|The drafted lifecycle is incomplete or out of the accepted order'
+        . '|Lifecycle state .+ lacks .+'
+        . '|The Amendment Author returned an invalid or duplicate section number'
+        . '|Section .+ contains an invalid or duplicate node'
+        . ')\.?$/iu',
+        $message
+    ) === 1) {
+        return array($message);
+    }
+    return array();
 }
 
 function architect_api_ensure_structure(

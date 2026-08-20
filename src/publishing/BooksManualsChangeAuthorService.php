@@ -200,6 +200,9 @@ final class BooksManualsChangeAuthorService
                 'section_count' => count($sectionDrafts),
             );
         } catch (Throwable $error) {
+            if ($controlledReviewFailures === array()) {
+                $controlledReviewFailures = $this->correctableDraftFailures($error);
+            }
             $payload = json_encode(array(
                 'schema' => 'ipca.manual-change-amendment-generation.v1',
                 'generation_status' => 'failed',
@@ -611,6 +614,28 @@ final class BooksManualsChangeAuthorService
             }
         }
         return array('valid' => $failures === array(), 'failures' => $failures);
+    }
+
+    /** @return list<string> */
+    private function correctableDraftFailures(Throwable $error): array
+    {
+        $message = trim($error->getMessage());
+        if ($message === '' || preg_match(
+            '/^(?:'
+            . 'Draft sections must exactly equal the individually accepted impacts'
+            . '|Section .+ has no accepted-node implementation'
+            . '|Drafting was attempted for unaccepted structure node .+'
+            . '|Accepted structure node .+ (?:has no drafted content|was not implemented)'
+            . '|The drafted lifecycle is incomplete or out of the accepted order'
+            . '|Lifecycle state .+ lacks .+'
+            . '|The Amendment Author returned an invalid or duplicate section number'
+            . '|Section .+ contains an invalid or duplicate node'
+            . ')\.?$/iu',
+            $message
+        ) !== 1) {
+            return array();
+        }
+        return array($message);
     }
 
     /** @param callable|null $callback */

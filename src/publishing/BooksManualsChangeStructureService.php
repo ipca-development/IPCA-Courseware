@@ -247,6 +247,11 @@ final class BooksManualsChangeStructureService
                 $existingMatch = $existing;
             }
         }
+        $existingMatch ??= $this->findProposalByFingerprint(
+            $planId,
+            (string)$proposal['structure_fingerprint'],
+            true
+        );
         if (is_array($existingMatch) && (int)($existingMatch['id'] ?? 0) > 0) {
             return $this->reopenExistingProposal(
                 $planId,
@@ -256,15 +261,36 @@ final class BooksManualsChangeStructureService
                 $actorUserId
             );
         }
-        $proposalId = $this->plans->save('structure_proposals', $planId, array(
-            'proposal_uuid' => $this->uuid(),
-            'proposal_version' => $version,
-            'title' => $proposal['title'],
-            'rationale' => $proposal['rationale'],
-            'status' => 'proposed',
-            'structure_fingerprint' => $proposal['structure_fingerprint'],
-            'proposed_by' => $actorUserId,
-        ));
+        try {
+            $proposalId = $this->plans->save('structure_proposals', $planId, array(
+                'proposal_uuid' => $this->uuid(),
+                'proposal_version' => $version,
+                'title' => $proposal['title'],
+                'rationale' => $proposal['rationale'],
+                'status' => 'proposed',
+                'structure_fingerprint' => $proposal['structure_fingerprint'],
+                'proposed_by' => $actorUserId,
+            ));
+        } catch (PDOException $error) {
+            if ((string)$error->getCode() !== '23000') {
+                throw $error;
+            }
+            $winningProposal = $this->findProposalByFingerprint(
+                $planId,
+                (string)$proposal['structure_fingerprint'],
+                true
+            );
+            if (!is_array($winningProposal) || (int)($winningProposal['id'] ?? 0) <= 0) {
+                throw $error;
+            }
+            return $this->reopenExistingProposal(
+                $planId,
+                (int)$winningProposal['id'],
+                (int)($winningProposal['proposal_version'] ?? 1),
+                $proposal,
+                $actorUserId
+            );
+        }
         $this->persistProposalAreas($planId, $proposalId, $proposal);
         $this->recordProposalReady(
             $planId,
@@ -275,6 +301,23 @@ final class BooksManualsChangeStructureService
             false
         );
         return $proposalId;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function findProposalByFingerprint(
+        int $planId,
+        string $fingerprint,
+        bool $lockingRead = false
+    ): ?array {
+        $sql = 'SELECT * FROM ipca_manual_ai_architect_structure_proposals
+                WHERE plan_id=? AND structure_fingerprint=? ORDER BY id DESC LIMIT 1';
+        if ($lockingRead && (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+            $sql .= ' FOR UPDATE';
+        }
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute(array($planId, $fingerprint));
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
     }
 
     /**
