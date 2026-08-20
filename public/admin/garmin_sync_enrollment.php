@@ -56,6 +56,7 @@ cw_header('Garmin Sync enrollment');
     Generate a one-time code for the standalone Garmin Sync uploader.
     It expires after 60 minutes and cannot authenticate any CVR service.
   </p>
+  <p><a class="btn btn-secondary" href="/admin/garmin_sync_files.php">View uploaded Garmin files</a></p>
 
   <?php if ($error !== null): ?>
     <div class="alert alert-danger" role="alert"><?= h($error) ?></div>
