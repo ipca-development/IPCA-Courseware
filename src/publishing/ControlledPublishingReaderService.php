@@ -1240,8 +1240,8 @@ final class ControlledPublishingReaderService
     }
 
     /**
-     * Return the style package frozen with an approved released page map.
-     * Draft/preview readers continue to use the current generated package.
+     * Return the style package frozen with the stored page map.
+     * Released readers require an approved map; previews may use a draft map.
      *
      * @param array<string,mixed> $version
      * @param array<string,mixed> $paginateSource
@@ -1249,8 +1249,13 @@ final class ControlledPublishingReaderService
      */
     public function readerPublicationPackage(array $version, array $paginateSource): array
     {
-        if ((string)($version['lifecycle_status'] ?? '') === 'released') {
-            $approval = $this->pageMapStore()->approvalMeta((int)($version['id'] ?? 0));
+        $lifecycle = (string)($version['lifecycle_status'] ?? '');
+        $approval = $this->pageMapStore()->approvalMeta((int)($version['id'] ?? 0));
+        $mapStatus = (string)($approval['status'] ?? '');
+        $mayUseStoredPackage = $lifecycle === 'released'
+            ? $mapStatus === 'approved'
+            : in_array($mapStatus, array('draft', 'approved'), true);
+        if ($mayUseStoredPackage) {
             $generation = is_array($approval['generation'] ?? null)
                 ? $approval['generation']
                 : array();
@@ -1259,8 +1264,7 @@ final class ControlledPublishingReaderService
                 : array();
             $frozenStyleHash = (string)($generation['style_hash'] ?? '');
             $frozenManifestHash = (string)($generation['manifest_hash'] ?? '');
-            if ((string)($approval['status'] ?? '') === 'approved'
-                && $frozen !== array()
+            if ($frozen !== array()
                 && $frozenStyleHash !== ''
                 && $frozenManifestHash !== ''
                 && hash_equals($frozenStyleHash, (string)($frozen['css']['hash'] ?? ''))

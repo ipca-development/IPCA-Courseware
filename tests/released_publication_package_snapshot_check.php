@@ -49,6 +49,9 @@ $stmt = $pdo->prepare(
     'INSERT INTO ipca_publishing_book_versions (id, metadata_json) VALUES (?, ?)'
 );
 $stmt->execute(array(10, json_encode($metadata, JSON_THROW_ON_ERROR)));
+$previewMetadata = $metadata;
+$previewMetadata['reader_page_map']['status'] = 'draft';
+$stmt->execute(array(11, json_encode($previewMetadata, JSON_THROW_ON_ERROR)));
 
 $reader = new ControlledPublishingReaderService($pdo);
 $resolved = $reader->readerPublicationPackage(
@@ -67,6 +70,17 @@ publication_snapshot_assert(
     'released reader package manifest hash matches frozen map identity',
     ($resolved['manifest_hash'] ?? '') === $metadata['reader_page_map']['generation']['manifest_hash']
 );
+$previewResolved = $reader->readerPublicationPackage(
+    array('id' => 11, 'lifecycle_status' => 'in_review'),
+    array()
+);
+publication_snapshot_assert(
+    'preview reader receives the package frozen with its draft page map',
+    ($previewResolved['css']['hash'] ?? '')
+        === $previewMetadata['reader_page_map']['generation']['style_hash']
+        && ($previewResolved['manifest_hash'] ?? '')
+        === $previewMetadata['reader_page_map']['generation']['manifest_hash']
+);
 
 $authoritative = (string)file_get_contents(
     __DIR__ . '/../src/publishing/ControlledPublishingAuthoritativePaginationService.php'
@@ -74,6 +88,9 @@ $authoritative = (string)file_get_contents(
 $api = (string)file_get_contents(__DIR__ . '/../public/student/api/manual_reader_api.php');
 $store = (string)file_get_contents(
     __DIR__ . '/../src/publishing/ControlledPublishingReaderPageMapStore.php'
+);
+$refresh = (string)file_get_contents(
+    __DIR__ . '/../scripts/refresh_released_publication_packages.php'
 );
 publication_snapshot_assert(
     'authoritative generation freezes its publication package',
@@ -87,6 +104,11 @@ publication_snapshot_assert(
     'released compatibility refresh is explicit and approval-preserving',
     str_contains($store, 'function replaceApprovedReleasedPages(')
         && str_contains($store, 'released_publication_compatibility_refresh')
+);
+publication_snapshot_assert(
+    'compatibility refresh explicitly supports preview page-map snapshots',
+    str_contains($refresh, "'include-previews'")
+        && str_contains($refresh, 'replaceDraftPages(')
 );
 
 echo "Released publication package snapshot: PASS\n";

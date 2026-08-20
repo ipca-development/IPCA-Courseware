@@ -6,11 +6,11 @@ $failures = array();
 
 $protected = array(
     'src/publishing/ControlledPublishingBlockService.php'
-        => '7a9967f65479a01edf6e14ac93dec306d6fe20b78beec1e34a1fbeb573f6f7bd',
+        => 'a0c103104d4182dbe797d85ea04d3d757972b34cf4bc5e989925a034d64e7c39',
     'src/document/StructuredDocumentPayload.php'
         => '9b5412d9966d0e7ce162ae652cbd8515b4f8864689852f2807e5f404f356a8ed',
     'src/publishing/ControlledPublishingBookRenderer.php'
-        => 'c4f1d66d9cf1a2e5e06cb4a3d305ff5b484ea3f8db47ef5ace05817924237f8d',
+        => 'b90d68a286497bbceec66e44253ed8dfeb76c15a7ca59865a280c9fa713d28ec',
 );
 
 foreach ($protected as $relative => $expectedHash) {
