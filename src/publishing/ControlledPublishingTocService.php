@@ -110,54 +110,35 @@ final class ControlledPublishingTocService
         $numberSvc = new ControlledPublishingSectionNumberService($this->pdo, $this->blocks);
         $numbering = $numberSvc->computeForVersion($versionId);
         $entries = $this->collectTocEntries($versionId, $numbering['display'], $settings);
-        $this->pdo->prepare("
-            DELETE FROM ipca_publishing_book_blocks
-            WHERE section_id = :section_id
-        ")->execute(array(':section_id' => $sectionId));
 
         $section = $this->sectionRow($sectionId);
         $stableBase = (string)($section['stable_anchor'] ?? 'TOC');
-        $sort = 10;
-        $created = 0;
-
-        $ins = $this->pdo->prepare("
-            INSERT INTO ipca_publishing_book_blocks
-                (book_version_id, section_id, block_key, stable_anchor, block_type, sort_order,
-                 payload_json, content_hash, is_system_managed, created_by, updated_by)
-            VALUES
-                (:book_version_id, :section_id, :block_key, :stable_anchor, :block_type, :sort_order,
-                 :payload_json, :content_hash, 1, :actor, :actor)
-        ");
-
         $headingPayload = array(
             'text' => 'Table of Contents',
             'level' => 1,
             'paragraph_style' => 'title',
         );
-        $this->insertTocBlock(
-            $ins,
-            $versionId,
-            $sectionId,
-            $stableBase,
-            'toc_title',
-            'heading',
-            $headingPayload,
-            $sort,
-            $actorUserId
+        $desired = array(
+            $this->tocBlockDefinition($stableBase, 'toc_title', 'heading', $headingPayload, 10),
         );
-        $sort += 10;
-        $created++;
 
         if ($entries === array()) {
             $para = array(
                 'html' => '<p>No TOC entries found. Apply Title or Subtitle paragraph styles to content blocks, then regenerate.</p>',
                 'paragraph_style' => 'body',
             );
-            $this->insertTocBlock($ins, $versionId, $sectionId, $stableBase, 'toc_empty', 'paragraph', $para, $sort, $actorUserId);
+            $desired[] = $this->tocBlockDefinition(
+                $stableBase,
+                'toc_empty',
+                'paragraph',
+                $para,
+                20
+            );
+            $this->replaceTocBlocks($versionId, $sectionId, $desired, $actorUserId);
             return array(
                 'section_id' => $sectionId,
                 'entries_count' => 0,
-                'blocks_created' => $created + 1,
+                'blocks_created' => count($desired),
                 'toc_settings' => $settings,
             );
         }
@@ -165,13 +146,19 @@ final class ControlledPublishingTocService
         $tocPayload = array(
             'entries' => $entries,
         );
-        $this->insertTocBlock($ins, $versionId, $sectionId, $stableBase, 'toc_entries', 'toc', $tocPayload, $sort, $actorUserId);
-        $created++;
+        $desired[] = $this->tocBlockDefinition(
+            $stableBase,
+            'toc_entries',
+            'toc',
+            $tocPayload,
+            20
+        );
+        $this->replaceTocBlocks($versionId, $sectionId, $desired, $actorUserId);
 
         return array(
             'section_id' => $sectionId,
             'entries_count' => count($entries),
-            'blocks_created' => $created,
+            'blocks_created' => count($desired),
             'toc_settings' => $settings,
         );
     }
@@ -576,33 +563,146 @@ final class ControlledPublishingTocService
         return is_array($row) ? $row : array();
     }
 
-    /**
-     * @param array<string,mixed> $payload
+    /** @param array<string,mixed> $payload
+     * @return array<string,mixed>
      */
-    private function insertTocBlock(
-        PDOStatement $ins,
-        int $versionId,
-        int $sectionId,
+    private function tocBlockDefinition(
         string $stableBase,
         string $keySuffix,
         string $blockType,
         array $payload,
-        int $sort,
-        ?int $actorUserId
-    ): void {
+        int $sort
+    ): array {
         $anchor = $stableBase . '-BLOCK-TOC-' . strtoupper($keySuffix);
         $hash = hash('sha256', $blockType . json_encode($payload, JSON_UNESCAPED_UNICODE));
-        $ins->execute(array(
-            ':book_version_id' => $versionId,
-            ':section_id' => $sectionId,
-            ':block_key' => 'toc_' . $keySuffix,
-            ':stable_anchor' => substr($anchor, 0, 191),
-            ':block_type' => $blockType,
-            ':sort_order' => $sort,
-            ':payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-            ':content_hash' => $hash,
-            ':actor' => $actorUserId,
+        return array(
+            'block_key' => 'toc_' . $keySuffix,
+            'stable_anchor' => substr($anchor, 0, 191),
+            'block_type' => $blockType,
+            'sort_order' => $sort,
+            'payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            'content_hash' => $hash,
+        );
+    }
+
+    /**
+     * Replace generated TOC content while preserving block IDs referenced by
+     * immutable Manual Change Architect evidence.
+     *
+     * @param list<array<string,mixed>> $desired
+     */
+    private function replaceTocBlocks(
+        int $versionId,
+        int $sectionId,
+        array $desired,
+        ?int $actorUserId
+    ): void {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, block_key FROM ipca_publishing_book_blocks
+             WHERE section_id = ? ORDER BY sort_order, id'
+        );
+        $stmt->execute(array($sectionId));
+        $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $protectedIds = $this->architectProtectedBlockIds(array_map(
+            static fn(array $row): int => (int)$row['id'],
+            $existing
         ));
+        $byKey = array();
+        foreach ($existing as $row) {
+            $byKey[(string)$row['block_key']] = $row;
+        }
+
+        $unused = $existing;
+        $usedIds = array();
+        $update = $this->pdo->prepare(
+            'UPDATE ipca_publishing_book_blocks
+             SET block_key=:block_key, stable_anchor=:stable_anchor, block_type=:block_type,
+                 sort_order=:sort_order, payload_json=:payload_json, content_hash=:content_hash,
+                 is_system_managed=1, updated_by=:actor, updated_at=CURRENT_TIMESTAMP
+             WHERE id=:id AND section_id=:section_id'
+        );
+        $insert = $this->pdo->prepare(
+            'INSERT INTO ipca_publishing_book_blocks
+                (book_version_id, section_id, block_key, stable_anchor, block_type, sort_order,
+                 payload_json, content_hash, is_system_managed, created_by, updated_by)
+             VALUES
+                (:book_version_id, :section_id, :block_key, :stable_anchor, :block_type,
+                 :sort_order, :payload_json, :content_hash, 1, :actor, :actor)'
+        );
+
+        foreach ($desired as $definition) {
+            $key = (string)$definition['block_key'];
+            $row = $byKey[$key] ?? null;
+            if (!is_array($row)) {
+                $row = array_shift($unused);
+                while (is_array($row) && isset($protectedIds[(int)$row['id']])) {
+                    $row = array_shift($unused);
+                }
+            }
+            if (is_array($row)) {
+                $id = (int)$row['id'];
+                $usedIds[$id] = true;
+                $unused = array_values(array_filter(
+                    $unused,
+                    static fn(array $candidate): bool => (int)$candidate['id'] !== $id
+                ));
+                $update->execute(array_merge($definition, array(
+                    'actor' => $actorUserId,
+                    'id' => $id,
+                    'section_id' => $sectionId,
+                )));
+                continue;
+            }
+            $insert->execute(array_merge($definition, array(
+                'book_version_id' => $versionId,
+                'section_id' => $sectionId,
+                'actor' => $actorUserId,
+            )));
+            $usedIds[(int)$this->pdo->lastInsertId()] = true;
+        }
+
+        foreach ($existing as $row) {
+            $id = (int)$row['id'];
+            if (isset($usedIds[$id])) {
+                continue;
+            }
+            if (isset($protectedIds[$id])) {
+                continue;
+            }
+            $this->pdo->prepare(
+                'DELETE FROM ipca_publishing_book_blocks WHERE id=? AND section_id=?'
+            )->execute(array($id, $sectionId));
+        }
+    }
+
+    /**
+     * @param list<int> $blockIds
+     * @return array<int,true>
+     */
+    private function architectProtectedBlockIds(array $blockIds): array
+    {
+        $blockIds = array_values(array_unique(array_filter(
+            array_map('intval', $blockIds),
+            static fn(int $id): bool => $id > 0
+        )));
+        if ($blockIds === array()) {
+            return array();
+        }
+        try {
+            $placeholders = implode(',', array_fill(0, count($blockIds), '?'));
+            $stmt = $this->pdo->prepare(
+                "SELECT DISTINCT block_id FROM ipca_manual_ai_architect_legacy_hits
+                 WHERE block_id IN ({$placeholders})"
+            );
+            $stmt->execute($blockIds);
+            $protected = array();
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: array() as $id) {
+                $protected[(int)$id] = true;
+            }
+            return $protected;
+        } catch (PDOException $e) {
+            return array();
+        }
     }
 
     private function isSkippableTocEntry(string $number, string $text, string $label): bool

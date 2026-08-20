@@ -183,11 +183,6 @@ final class ControlledPublishingRevisionService
             $this->partLabelsForVersion($versionId)
         );
 
-        $this->pdo->prepare("
-            DELETE FROM ipca_publishing_book_blocks
-            WHERE section_id = :section_id AND is_system_managed = 1
-        ")->execute(array(':section_id' => $sectionId));
-
         $section = $this->sectionRow($sectionId);
         $stableBase = (string)($section['stable_anchor'] ?? 'HIGHLIGHTS');
         $sortStmt = $this->pdo->prepare("
@@ -196,15 +191,7 @@ final class ControlledPublishingRevisionService
         ");
         $sortStmt->execute(array(':section_id' => $sectionId));
         $sort = max(10, (int)$sortStmt->fetchColumn() + 10);
-        $created = 0;
-        $ins = $this->pdo->prepare("
-            INSERT INTO ipca_publishing_book_blocks
-                (book_version_id, section_id, block_key, stable_anchor, block_type, sort_order,
-                 payload_json, content_hash, is_system_managed, created_by, updated_by)
-            VALUES
-                (:book_version_id, :section_id, :block_key, :stable_anchor, :block_type, :sort_order,
-                 :payload_json, :content_hash, 1, :actor, :actor)
-        ");
+        $desired = array();
 
         $versionLabel = $this->revisionDisplayLabel($versionId);
         $summaryPayload = array(
@@ -212,24 +199,30 @@ final class ControlledPublishingRevisionService
                 . ' Changes</p>',
             'paragraph_style' => 'subtitle_2',
         );
-        $this->insertHighlightBlock(
-            $ins,
-            $versionId,
-            $sectionId,
+        $desired[] = $this->highlightBlockDefinition(
             $stableBase,
             'summary',
             'paragraph',
             $summaryPayload,
-            $sort,
-            $actorUserId
+            $sort
         );
         $sort += 10;
-        $created++;
 
         if ($summaries === array()) {
             $para = array('html' => '<p>No content changes detected versus the prior version.</p>');
-            $this->insertHighlightBlock($ins, $versionId, $sectionId, $stableBase, 'none', 'paragraph', $para, $sort, $actorUserId);
-            return array('section_id' => $sectionId, 'blocks_created' => $created + 1, 'changes_count' => 0);
+            $desired[] = $this->highlightBlockDefinition(
+                $stableBase,
+                'none',
+                'paragraph',
+                $para,
+                $sort
+            );
+            $this->replaceHighlightBlocks($versionId, $sectionId, $desired, $actorUserId);
+            return array(
+                'section_id' => $sectionId,
+                'blocks_created' => count($desired),
+                'changes_count' => 0,
+            );
         }
 
         $byPart = array();
@@ -244,19 +237,14 @@ final class ControlledPublishingRevisionService
                 'font_bold' => true,
             );
             $partKey = 'part_' . substr(hash('sha256', $part), 0, 12);
-            $this->insertHighlightBlock(
-                $ins,
-                $versionId,
-                $sectionId,
+            $desired[] = $this->highlightBlockDefinition(
                 $stableBase,
                 $partKey,
                 'paragraph',
                 $partPayload,
-                $sort,
-                $actorUserId
+                $sort
             );
             $sort += 10;
-            $created++;
 
             $items = array_map(
                 static fn(array $summary): string => htmlspecialchars(
@@ -276,24 +264,20 @@ final class ControlledPublishingRevisionService
                 0,
                 12
             );
-            $this->insertHighlightBlock(
-                $ins,
-                $versionId,
-                $sectionId,
+            $desired[] = $this->highlightBlockDefinition(
                 $stableBase,
                 $listKey,
                 'list',
                 $listPayload,
-                $sort,
-                $actorUserId
+                $sort
             );
             $sort += 10;
-            $created++;
         }
+        $this->replaceHighlightBlocks($versionId, $sectionId, $desired, $actorUserId);
 
         return array(
             'section_id' => $sectionId,
-            'blocks_created' => $created,
+            'blocks_created' => count($desired),
             'changes_count' => count($summaries),
         );
     }
@@ -658,33 +642,143 @@ final class ControlledPublishingRevisionService
         return is_array($row) ? $row : array();
     }
 
-    /**
-     * @param array<string,mixed> $payload
+    /** @param array<string,mixed> $payload
+     * @return array<string,mixed>
      */
-    private function insertHighlightBlock(
-        PDOStatement $ins,
-        int $versionId,
-        int $sectionId,
+    private function highlightBlockDefinition(
         string $stableBase,
         string $keySuffix,
         string $blockType,
         array $payload,
-        int $sort,
-        ?int $actorUserId
-    ): void {
+        int $sort
+    ): array {
         $blockKey = 'highlights_' . $keySuffix;
         $anchor = $stableBase . '-BLOCK-HL-' . strtoupper($keySuffix);
         $hash = hash('sha256', $blockType . '|' . json_encode($payload, JSON_UNESCAPED_UNICODE));
-        $ins->execute(array(
-            ':book_version_id' => $versionId,
-            ':section_id' => $sectionId,
-            ':block_key' => substr($blockKey, 0, 128),
-            ':stable_anchor' => substr($anchor, 0, 191),
-            ':block_type' => $blockType,
-            ':sort_order' => $sort,
-            ':payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-            ':content_hash' => $hash,
-            ':actor' => $actorUserId,
+        return array(
+            'block_key' => substr($blockKey, 0, 128),
+            'stable_anchor' => substr($anchor, 0, 191),
+            'block_type' => $blockType,
+            'sort_order' => $sort,
+            'payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            'content_hash' => $hash,
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $desired
+     */
+    private function replaceHighlightBlocks(
+        int $versionId,
+        int $sectionId,
+        array $desired,
+        ?int $actorUserId
+    ): void {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, block_key FROM ipca_publishing_book_blocks
+             WHERE section_id=? AND is_system_managed=1 ORDER BY sort_order,id'
+        );
+        $stmt->execute(array($sectionId));
+        $existing = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $protectedIds = $this->architectProtectedBlockIds(array_map(
+            static fn(array $row): int => (int)$row['id'],
+            $existing
         ));
+        $byKey = array();
+        foreach ($existing as $row) {
+            $byKey[(string)$row['block_key']] = $row;
+        }
+        $unused = $existing;
+        $usedIds = array();
+        $update = $this->pdo->prepare(
+            'UPDATE ipca_publishing_book_blocks
+             SET block_key=:block_key,stable_anchor=:stable_anchor,block_type=:block_type,
+                 sort_order=:sort_order,payload_json=:payload_json,content_hash=:content_hash,
+                 is_system_managed=1,updated_by=:actor,updated_at=CURRENT_TIMESTAMP
+             WHERE id=:id AND section_id=:section_id'
+        );
+        $insert = $this->pdo->prepare(
+            'INSERT INTO ipca_publishing_book_blocks
+                (book_version_id,section_id,block_key,stable_anchor,block_type,sort_order,
+                 payload_json,content_hash,is_system_managed,created_by,updated_by)
+             VALUES
+                (:book_version_id,:section_id,:block_key,:stable_anchor,:block_type,
+                 :sort_order,:payload_json,:content_hash,1,:actor,:actor)'
+        );
+        foreach ($desired as $definition) {
+            $row = $byKey[(string)$definition['block_key']] ?? null;
+            if (!is_array($row) || isset($usedIds[(int)$row['id']])) {
+                $row = array_shift($unused);
+                while (
+                    is_array($row)
+                    && (
+                        isset($usedIds[(int)$row['id']])
+                        || isset($protectedIds[(int)$row['id']])
+                    )
+                ) {
+                    $row = array_shift($unused);
+                }
+            }
+            if (is_array($row)) {
+                $id = (int)$row['id'];
+                $usedIds[$id] = true;
+                $unused = array_values(array_filter(
+                    $unused,
+                    static fn(array $candidate): bool => (int)$candidate['id'] !== $id
+                ));
+                $update->execute(array_merge($definition, array(
+                    'actor' => $actorUserId,
+                    'id' => $id,
+                    'section_id' => $sectionId,
+                )));
+                continue;
+            }
+            $insert->execute(array_merge($definition, array(
+                'book_version_id' => $versionId,
+                'section_id' => $sectionId,
+                'actor' => $actorUserId,
+            )));
+            $usedIds[(int)$this->pdo->lastInsertId()] = true;
+        }
+        foreach ($existing as $row) {
+            $id = (int)$row['id'];
+            if (isset($usedIds[$id])) continue;
+            // Manual Change Architect evidence is immutable and deliberately
+            // restricts deletion. Keep an obsolete generated identity rather
+            // than turning a harmless editor save into a foreign-key failure.
+            if (isset($protectedIds[$id])) continue;
+            $this->pdo->prepare(
+                'DELETE FROM ipca_publishing_book_blocks WHERE id=? AND section_id=?'
+            )->execute(array($id, $sectionId));
+        }
+    }
+
+    /**
+     * @param list<int> $blockIds
+     * @return array<int,true>
+     */
+    private function architectProtectedBlockIds(array $blockIds): array
+    {
+        $blockIds = array_values(array_unique(array_filter(
+            array_map('intval', $blockIds),
+            static fn(int $id): bool => $id > 0
+        )));
+        if ($blockIds === array()) return array();
+        try {
+            $placeholders = implode(',', array_fill(0, count($blockIds), '?'));
+            $stmt = $this->pdo->prepare(
+                "SELECT DISTINCT block_id FROM ipca_manual_ai_architect_legacy_hits
+                 WHERE block_id IN ({$placeholders})"
+            );
+            $stmt->execute($blockIds);
+            $protected = array();
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: array() as $id) {
+                $protected[(int)$id] = true;
+            }
+            return $protected;
+        } catch (PDOException $e) {
+            // Older test/install schemas may predate the architect evidence table.
+            return array();
+        }
     }
 }
