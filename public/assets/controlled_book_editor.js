@@ -35,6 +35,10 @@
   var structStatusEl = document.getElementById('cpbStructStatus');
   var treeHeadTitleEl = document.getElementById('cpbTreeHeadTitle');
   var imageInput = document.getElementById('cpbImageInput');
+  var tableCellImageInput = document.getElementById('cpbTableCellImageInput');
+  var cellBorderStyleSelect = document.getElementById('cpbCellBorderStyle');
+  var cellBorderWidthSelect = document.getElementById('cpbCellBorderWidth');
+  var cellBorderColorInput = document.getElementById('cpbCellBorderColor');
   var paragraphStyleSelect = document.getElementById('cpbParagraphStyleSelect');
   var regulatoryRefInput = document.getElementById('cpbRegulatoryRef');
   var crossRefDocSelect = document.getElementById('cpbCrossRefDoc');
@@ -4355,6 +4359,220 @@
     });
   }
 
+  function selectedCanonicalTableCells(blockEl) {
+    var cell = resolveSelectedTableCell(blockEl);
+    if (!cell) return [];
+    return getTableCellsForStyle({ block: blockEl, el: cell, type: 'table-cell' });
+  }
+
+  function cellBorderSpec(forceNone) {
+    var style = forceNone ? 'none' : (cellBorderStyleSelect ? cellBorderStyleSelect.value : 'solid');
+    return {
+      style: style,
+      width: style === 'none' ? 0 : Math.max(1, Math.min(4, parseInt(
+        cellBorderWidthSelect ? cellBorderWidthSelect.value : '1',
+        10
+      ) || 1)),
+      color: cellBorderColorInput ? cellBorderColorInput.value : '#94a3b8',
+    };
+  }
+
+  function oppositeBorderSide(side) {
+    return { top: 'bottom', right: 'left', bottom: 'top', left: 'right' }[side] || '';
+  }
+
+  function adjacentTableCells(cell, side) {
+    if (!cell) return [];
+    var table = cell.closest('table');
+    if (!table) return [];
+    var rect = cell.getBoundingClientRect();
+    var epsilon = 2.5;
+    return Array.prototype.slice.call(table.querySelectorAll('th,td')).filter(function (other) {
+      if (other === cell || other.hidden || other.getAttribute('data-rowspan-covered') === '1') return false;
+      var otherRect = other.getBoundingClientRect();
+      var verticalOverlap = Math.min(rect.bottom, otherRect.bottom) - Math.max(rect.top, otherRect.top);
+      var horizontalOverlap = Math.min(rect.right, otherRect.right) - Math.max(rect.left, otherRect.left);
+      if (side === 'left') return Math.abs(otherRect.right - rect.left) <= epsilon && verticalOverlap > epsilon;
+      if (side === 'right') return Math.abs(otherRect.left - rect.right) <= epsilon && verticalOverlap > epsilon;
+      if (side === 'top') return Math.abs(otherRect.bottom - rect.top) <= epsilon && horizontalOverlap > epsilon;
+      if (side === 'bottom') return Math.abs(otherRect.top - rect.bottom) <= epsilon && horizontalOverlap > epsilon;
+      return false;
+    });
+  }
+
+  function setCellBorderSide(cell, side, spec, synchronize) {
+    if (!cell || !oppositeBorderSide(side)) return;
+    var borders = extractCellBorders(cell);
+    borders[side] = {
+      style: spec.style,
+      width: spec.style === 'none' ? 0 : spec.width,
+      color: spec.color,
+    };
+    cell.setAttribute('data-cell-borders', JSON.stringify(borders));
+    if (spec.style === 'none') {
+      cell.style.setProperty('border-' + side, 'none');
+    } else {
+      cell.style.setProperty(
+        'border-' + side,
+        spec.width + 'px ' + spec.style + ' ' + spec.color
+      );
+    }
+    if (synchronize !== false) {
+      adjacentTableCells(cell, side).forEach(function (neighbor) {
+        setCellBorderSide(neighbor, oppositeBorderSide(side), spec, false);
+      });
+    }
+  }
+
+  function applyCellBorderAction(blockEl, action) {
+    var cells = selectedCanonicalTableCells(blockEl);
+    if (!cells.length) {
+      setStatus('Click a table cell first', 'error');
+      return false;
+    }
+    var forceNone = action === 'cell-border-none';
+    var spec = cellBorderSpec(forceNone);
+    var selectedSet = new Set(cells);
+    var directSide = action.replace('cell-border-', '');
+    var sides = ['top', 'right', 'bottom', 'left'];
+    cells.forEach(function (cell) {
+      sides.forEach(function (side) {
+        var neighbors = adjacentTableCells(cell, side);
+        var hasSelectedNeighbor = neighbors.some(function (neighbor) {
+          return selectedSet.has(neighbor);
+        });
+        var shouldApply = forceNone
+          || directSide === 'all'
+          || directSide === side
+          || (directSide === 'outer' && !hasSelectedNeighbor)
+          || (directSide === 'inner' && hasSelectedNeighbor);
+        if (shouldApply) setCellBorderSide(cell, side, spec, true);
+      });
+    });
+    return true;
+  }
+
+  function tableCellImage(cell) {
+    return cell ? cell.querySelector('.cpb-table-cell-image') : null;
+  }
+
+  function setTableCellImageAlignment(blockEl, align) {
+    var cell = resolveSelectedTableCell(blockEl);
+    var figure = tableCellImage(cell);
+    if (!figure) {
+      setStatus('The selected cell has no image', 'error');
+      return false;
+    }
+    figure.setAttribute('data-align', align);
+    wireTableCellImages(blockEl);
+    return true;
+  }
+
+  function removeTableCellImage(blockEl) {
+    var cell = resolveSelectedTableCell(blockEl);
+    var figure = tableCellImage(cell);
+    if (!figure) {
+      setStatus('The selected cell has no image', 'error');
+      return false;
+    }
+    figure.remove();
+    return true;
+  }
+
+  function beginTableCellImageUpload(blockEl) {
+    var cell = resolveSelectedTableCell(blockEl);
+    if (!cell || !tableCellImageInput) {
+      setStatus('Click a table cell first', 'error');
+      return;
+    }
+    state.pendingTableImageCell = cell;
+    state.pendingTableImageBlock = blockEl;
+    tableCellImageInput.click();
+  }
+
+  function uploadTableCellImageFile(file) {
+    var cell = state.pendingTableImageCell;
+    var blockEl = state.pendingTableImageBlock;
+    if (!file || !cell || !blockEl || !isConnectedEl(cell) || !blockEl.contains(cell)) return;
+    var existing = tableCellImage(cell);
+    var existingImage = existing ? existing.querySelector('img') : null;
+    var alt = window.prompt(
+      'Alternative text for this image:',
+      existingImage ? (existingImage.getAttribute('alt') || '') : ''
+    );
+    if (alt === null) return;
+    var form = new FormData();
+    form.append('action', 'upload_table_cell_image');
+    form.append('version_id', String(state.versionId));
+    form.append('image', file);
+    setStatus('Uploading cell image…', 'saving');
+    apiUpload(form).then(function (res) {
+      if (!res.ok || !res.url) throw new Error(res.error || 'Cell image upload failed');
+      pushUndo();
+      var figure = existing || document.createElement('span');
+      figure.className = 'cpb-table-cell-image';
+      figure.setAttribute('data-width-pct', existing ? (existing.getAttribute('data-width-pct') || '50') : '50');
+      figure.setAttribute('data-align', existing ? (existing.getAttribute('data-align') || 'center') : 'center');
+      figure.innerHTML = '';
+      var image = document.createElement('img');
+      image.src = res.url;
+      image.alt = String(alt || '').slice(0, 500);
+      figure.appendChild(image);
+      if (!existing) cell.appendChild(figure);
+      wireTableCellImages(blockEl);
+      scheduleSave(blockEl);
+      return flushSave(blockEl);
+    }).then(function () {
+      setStatus('Cell image saved', 'saved');
+    }).catch(showError);
+  }
+
+  function wireTableCellImages(blockEl) {
+    if (!blockEl) return;
+    blockEl.querySelectorAll('.cpb-table-cell-image').forEach(function (figure) {
+      var pct = Math.max(15, Math.min(100, parseInt(figure.getAttribute('data-width-pct') || '50', 10) || 50));
+      figure.setAttribute('data-width-pct', String(pct));
+      figure.setAttribute('contenteditable', 'false');
+      figure.style.width = pct + '%';
+      var handle = figure.querySelector('.cpb-table-cell-image-resize');
+      if (!handle) {
+        handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = 'cpb-table-cell-image-resize';
+        handle.setAttribute('data-editor-only', '1');
+        handle.setAttribute('contenteditable', 'false');
+        handle.setAttribute('aria-label', 'Resize cell image');
+        handle.title = 'Drag to resize cell image';
+        figure.appendChild(handle);
+      }
+      if (handle.getAttribute('data-wired') === '1') return;
+      handle.setAttribute('data-wired', '1');
+      handle.addEventListener('pointerdown', function (event) {
+        if (!state.editable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        pushUndo();
+        var cell = figure.closest('th,td');
+        var startX = event.clientX;
+        var startWidth = parseInt(figure.getAttribute('data-width-pct') || '50', 10) || 50;
+        var cellWidth = Math.max(1, cell.getBoundingClientRect().width);
+        function move(moveEvent) {
+          var next = Math.max(15, Math.min(100, Math.round(startWidth + ((moveEvent.clientX - startX) / cellWidth) * 100)));
+          figure.setAttribute('data-width-pct', String(next));
+          figure.style.width = next + '%';
+        }
+        function up() {
+          document.removeEventListener('pointermove', move);
+          document.removeEventListener('pointerup', up);
+          scheduleSave(blockEl);
+          flushSave(blockEl);
+        }
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', up);
+      });
+    });
+  }
+
   function handleCanonicalTableAction(blockEl, action) {
     if (!blockEl || !action || !state.editable) return;
     if (action === 'delete-table') {
@@ -4380,6 +4598,10 @@
     }
     if (action === 'paste-table') {
       pasteEntireTable(blockEl);
+      return;
+    }
+    if (action === 'cell-image-insert') {
+      beginTableCellImageUpload(blockEl);
       return;
     }
     pushUndo();
@@ -4424,6 +4646,13 @@
     } else if (action === 'formula-sum') insertTableFormula(blockEl, 'SUM');
     else if (action === 'formula-avg') insertTableFormula(blockEl, 'AVG');
     else if (action === 'formula-custom') insertTableFormula(blockEl, 'CUSTOM');
+    else if (action === 'cell-image-left' || action === 'cell-image-center' || action === 'cell-image-right') {
+      if (!setTableCellImageAlignment(blockEl, action.replace('cell-image-', ''))) return;
+    } else if (action === 'cell-image-remove') {
+      if (!removeTableCellImage(blockEl)) return;
+    } else if (action.indexOf('cell-border-') === 0) {
+      if (!applyCellBorderAction(blockEl, action)) return;
+    }
     else if (action === 'cell-align-left' || action === 'cell-align-center' || action === 'cell-align-right') {
       var alignmentCell = resolveSelectedTableCell(blockEl);
       if (!alignmentCell) return;
@@ -4440,6 +4669,7 @@
       applyTableBlockAlign(blockEl, action.replace('table-align-', ''));
     }
     wireTableResize(blockEl);
+    wireTableCellImages(blockEl);
     syncTableWidth(blockEl);
     syncTableToolsContext(blockEl);
     scheduleSave(blockEl);
@@ -4942,6 +5172,7 @@
       normalizeTableTitleRow(blockEl);
       wireTableResize(blockEl);
       wireTableCellFocus(blockEl);
+      wireTableCellImages(blockEl);
       syncTableStyleControls(blockEl);
     });
 
@@ -7510,6 +7741,9 @@
       control.disabled = !active;
       control.classList.remove('is-active');
     });
+    [cellBorderStyleSelect, cellBorderWidthSelect, cellBorderColorInput].forEach(function (control) {
+      if (control) control.disabled = !active;
+    });
     if (!active) return;
     var structured = blockEl.getAttribute('data-structured-table-editor') === '1';
     var selected = state.selectedTableCells.filter(function (cell) {
@@ -7576,9 +7810,23 @@
         'cell-bg-clear',
         'copy-cells',
         'paste-cells',
+        'cell-image-insert',
+        'cell-border-top', 'cell-border-right', 'cell-border-bottom', 'cell-border-left',
+        'cell-border-all', 'cell-border-outer', 'cell-border-inner', 'cell-border-none',
       ],
       selectedCount === 0
     );
+    var selectedImage = selectedCell ? tableCellImage(selectedCell) : null;
+    var imageInsertButton = tableToolbarEl.querySelector('[data-table-action="cell-image-insert"]');
+    if (imageInsertButton) imageInsertButton.textContent = selectedImage ? 'Replace' : 'Insert';
+    setTableToolDisabled(
+      blockEl,
+      ['cell-image-left', 'cell-image-center', 'cell-image-right', 'cell-image-remove'],
+      !selectedImage
+    );
+    [cellBorderStyleSelect, cellBorderWidthSelect, cellBorderColorInput].forEach(function (control) {
+      if (control) control.disabled = selectedCount === 0 || structured;
+    });
     setTableToolDisabled(
       blockEl,
       ['formula-sum', 'formula-avg', 'formula-custom'],
@@ -7593,6 +7841,9 @@
         'cell-bg', 'cell-bg-clear', 'copy-cells', 'paste-cells',
         'border-thin', 'border-medium', 'border-thick', 'border-color',
         'formula-sum', 'formula-avg', 'formula-custom',
+        'cell-image-insert', 'cell-image-left', 'cell-image-center', 'cell-image-right', 'cell-image-remove',
+        'cell-border-top', 'cell-border-right', 'cell-border-bottom', 'cell-border-left',
+        'cell-border-all', 'cell-border-outer', 'cell-border-inner', 'cell-border-none',
       ], true);
     }
     syncTableStyleControls(blockEl);
@@ -7709,6 +7960,16 @@
       if (coloredSpan.getAttribute('color')) return cssColorToHex(coloredSpan.getAttribute('color'));
     }
     return '';
+  }
+
+  function extractCellBorders(cell) {
+    if (!cell) return {};
+    try {
+      var parsed = JSON.parse(cell.getAttribute('data-cell-borders') || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (e) {
+      return {};
+    }
   }
 
   function extractCellHtml(cell) {
@@ -7936,6 +8197,9 @@
     var headerColspans = [];
     var rowColspans = [];
     var rowRowspans = [];
+    var titleBorders = {};
+    var headerBorders = [];
+    var cellBorders = [];
     var titleAlign = 'center';
     var titleFontFamily = '';
     var titleFontSize = 0;
@@ -7954,6 +8218,7 @@
           headerFontFamily.push(extractCellFontFamily(th));
           headerFontSize.push(extractCellFontSize(th));
           headerTextColor.push(extractCellTextColor(th));
+          headerBorders.push(extractCellBorders(th));
         });
       }
       if (titleCell) {
@@ -7962,6 +8227,7 @@
         titleFontFamily = extractCellFontFamily(titleCell);
         titleFontSize = extractCellFontSize(titleCell);
         titleTextColor = extractCellTextColor(titleCell);
+        titleBorders = extractCellBorders(titleCell);
       }
       tableSourceRows(table.querySelector('tbody[data-table-part="body"]')).forEach(function (tr) {
         var line = [];
@@ -7972,6 +8238,7 @@
         var colorLine = [];
         var spanLine = [];
         var rowSpanLine = [];
+        var borderLine = [];
         tr.querySelectorAll('td').forEach(function (td) {
           line.push(extractCellHtml(td));
           spanLine.push(parseInt(td.getAttribute('colspan') || '1', 10) || 1);
@@ -7985,6 +8252,7 @@
           fontLine.push(extractCellFontFamily(td));
           sizeLine.push(extractCellFontSize(td));
           colorLine.push(extractCellTextColor(td));
+          borderLine.push(extractCellBorders(td));
         });
         if (line.length) {
           rows.push(line);
@@ -7995,6 +8263,7 @@
           cellFontFamily.push(fontLine);
           cellFontSize.push(sizeLine);
           cellTextColor.push(colorLine);
+          cellBorders.push(borderLine);
         }
       });
       table.querySelectorAll('colgroup col').forEach(function (col) {
@@ -8029,6 +8298,9 @@
       cell_font_family: cellFontFamily,
       cell_font_size: cellFontSize,
       cell_text_color: cellTextColor,
+      title_borders: titleBorders,
+      header_borders: headerBorders,
+      cell_borders: cellBorders,
       table_align: tableAlign,
       table_style_kind: tableBlock ? (tableBlock.getAttribute('data-table-style-kind') || 'text') : 'text',
     };
@@ -8397,6 +8669,17 @@
     cell.innerHTML = html || '';
   }
 
+  function replaceCellBorders(cell, borders) {
+    if (!cell) return;
+    ['top', 'right', 'bottom', 'left'].forEach(function (side) {
+      cell.style.removeProperty('border-' + side);
+    });
+    cell.removeAttribute('data-cell-borders');
+    Object.keys(borders || {}).forEach(function (side) {
+      setCellBorderSide(cell, side, borders[side], false);
+    });
+  }
+
   function mergeCellHtml(left, right) {
     left = String(left || '').trim();
     right = String(right || '').trim();
@@ -8439,7 +8722,11 @@
     var next = row.cells[idx + 1];
     var span1 = parseInt(cell.getAttribute('colspan') || '1', 10) || 1;
     var span2 = parseInt(next.getAttribute('colspan') || '1', 10) || 1;
+    var mergedBorders = extractCellBorders(cell);
+    var nextBorders = extractCellBorders(next);
+    if (nextBorders.right) mergedBorders.right = nextBorders.right;
     setCellHtml(cell, mergeCellHtml(extractCellHtml(cell), extractCellHtml(next)));
+    replaceCellBorders(cell, mergedBorders);
     cell.colSpan = span1 + span2;
     next.remove();
     wireTableCellFocus(blockEl);
@@ -8465,15 +8752,26 @@
       setStatus('This cell is not merged', 'error');
       return false;
     }
+    var mergedBorders = extractCellBorders(cell);
     cell.colSpan = 1;
     var insertAfter = cell;
+    var splitCells = [cell];
     for (var i = 1; i < span; i++) {
       var extra = cell.tagName === 'TH'
         ? createTableHeaderCell(cell.cellIndex + i)
         : createTableBodyCell();
       insertAfter.parentElement.insertBefore(extra, insertAfter.nextSibling);
       insertAfter = extra;
+      splitCells.push(extra);
     }
+    splitCells.forEach(function (splitCell, index) {
+      var borders = {};
+      if (mergedBorders.top) borders.top = mergedBorders.top;
+      if (mergedBorders.bottom) borders.bottom = mergedBorders.bottom;
+      if (index === 0 && mergedBorders.left) borders.left = mergedBorders.left;
+      if (index === splitCells.length - 1 && mergedBorders.right) borders.right = mergedBorders.right;
+      replaceCellBorders(splitCell, borders);
+    });
     wireTableCellFocus(blockEl);
     if (cell.tagName === 'TH') {
       wireTableResize(blockEl);
@@ -8567,7 +8865,11 @@
     var rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1);
     var logicalStart = tableCellLogicalStart(cell);
     var target = tableCellAtLogicalStart(rows[rowIndex + rowspan], logicalStart);
+    var mergedBorders = extractCellBorders(cell);
+    var targetBorders = extractCellBorders(target);
+    if (targetBorders.bottom) mergedBorders.bottom = targetBorders.bottom;
     setCellHtml(cell, mergeCellHtml(extractCellHtml(cell), extractCellHtml(target)));
+    replaceCellBorders(cell, mergedBorders);
     cell.rowSpan = rowspan + 1;
     target.setAttribute('data-rowspan-covered', '1');
     target.setAttribute('contenteditable', 'false');
@@ -8594,6 +8896,8 @@
     var rows = tableSourceRows(tbody);
     var rowIndex = rows.indexOf(cell.parentElement);
     var logicalStart = tableCellLogicalStart(cell);
+    var mergedBorders = extractCellBorders(cell);
+    var splitCells = [cell];
     for (var offset = 1; offset < rowspan; offset++) {
       var targetRow = rows[rowIndex + offset];
       var target = tableCellAtLogicalStart(targetRow, logicalStart);
@@ -8603,8 +8907,17 @@
       target.hidden = false;
       target.style.removeProperty('display');
       setCellHtml(target, '');
+      splitCells.push(target);
     }
     cell.rowSpan = 1;
+    splitCells.forEach(function (splitCell, index) {
+      var borders = {};
+      if (mergedBorders.left) borders.left = mergedBorders.left;
+      if (mergedBorders.right) borders.right = mergedBorders.right;
+      if (index === 0 && mergedBorders.top) borders.top = mergedBorders.top;
+      if (index === splitCells.length - 1 && mergedBorders.bottom) borders.bottom = mergedBorders.bottom;
+      replaceCellBorders(splitCell, borders);
+    });
     wireTableCellFocus(blockEl);
     setStatus('Vertical merge removed', 'saved');
     return true;
@@ -11607,6 +11920,15 @@
         uploadImageFile(imageInput.files[0]);
         imageInput.value = '';
       }
+    });
+  }
+
+  if (tableCellImageInput) {
+    tableCellImageInput.addEventListener('change', function () {
+      if (tableCellImageInput.files && tableCellImageInput.files[0]) {
+        uploadTableCellImageFile(tableCellImageInput.files[0]);
+      }
+      tableCellImageInput.value = '';
     });
   }
 

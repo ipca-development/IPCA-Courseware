@@ -11,6 +11,16 @@ final class ControlledPublishingHtmlSanitizer
      */
     public static function sanitizeInline(string $html): string
     {
+        return self::sanitize($html, false);
+    }
+
+    public static function sanitizeTableCell(string $html): string
+    {
+        return self::sanitize($html, true);
+    }
+
+    private static function sanitize(string $html, bool $allowTableImages): string
+    {
         $html = self::stripEditorChrome($html);
         $html = trim($html);
         if ($html === '') {
@@ -18,6 +28,9 @@ final class ControlledPublishingHtmlSanitizer
         }
 
         $allowed = array('b', 'strong', 'i', 'em', 'u', 'br', 'ul', 'ol', 'li', 'p', 'div', 'span', 'a');
+        if ($allowTableImages) {
+            $allowed[] = 'img';
+        }
         $doc = new DOMDocument();
         $prev = libxml_use_internal_errors(true);
         $wrapped = '<?xml encoding="utf-8" ?><div>' . $html . '</div>';
@@ -30,7 +43,7 @@ final class ControlledPublishingHtmlSanitizer
             return htmlspecialchars($html, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         }
 
-        self::sanitizeNode($root, $allowed);
+        self::sanitizeNode($root, $allowed, $allowTableImages);
         self::deduplicateAdjacentHyperlinks($root);
         $out = '';
         foreach ($root->childNodes as $child) {
@@ -85,7 +98,11 @@ final class ControlledPublishingHtmlSanitizer
     /**
      * @param list<string> $allowed
      */
-    private static function sanitizeNode(DOMNode $node, array $allowed): void
+    private static function sanitizeNode(
+        DOMNode $node,
+        array $allowed,
+        bool $allowTableImages = false
+    ): void
     {
         if (!$node->hasChildNodes()) {
             return;
@@ -106,6 +123,19 @@ final class ControlledPublishingHtmlSanitizer
                     $style = (string)$child->getAttribute('style');
                     if (preg_match('/color\s*:\s*(#[0-9a-fA-F]{3,8})/', $style, $m) === 1) {
                         $keepAttrs['style'] = 'color:' . strtolower($m[1]);
+                    }
+                    if ($allowTableImages
+                        && $child->getAttribute('class') === 'cpb-table-cell-image') {
+                        $keepAttrs['class'] = 'cpb-table-cell-image';
+                        $rawWidth = (int)$child->getAttribute('data-width-pct');
+                        $width = $rawWidth > 0 ? max(15, min(100, $rawWidth)) : 50;
+                        $align = strtolower(trim((string)$child->getAttribute('data-align')));
+                        $keepAttrs['data-width-pct'] = (string)$width;
+                        $keepAttrs['data-align'] = in_array(
+                            $align,
+                            array('left', 'center', 'right'),
+                            true
+                        ) ? $align : 'center';
                     }
                 }
                 if (in_array($tag, array('span', 'p', 'div'), true)
@@ -139,18 +169,54 @@ final class ControlledPublishingHtmlSanitizer
                         $keepAttrs['data-section-id'] = $sectionId;
                     }
                 }
+                if ($tag === 'img' && $allowTableImages) {
+                    $src = trim((string)$child->getAttribute('src'));
+                    if (self::isGovernedPublishingImageUrl($src)) {
+                        $keepAttrs['src'] = $src;
+                        $keepAttrs['alt'] = mb_substr(
+                            trim((string)$child->getAttribute('alt')),
+                            0,
+                            500
+                        );
+                    } else {
+                        $remove[] = $child;
+                        continue;
+                    }
+                }
                 while ($child->attributes->length > 0) {
                     $child->removeAttribute($child->attributes->item(0)->name);
                 }
                 foreach ($keepAttrs as $k => $v) {
                     $child->setAttribute($k, $v);
                 }
-                self::sanitizeNode($child, $allowed);
+                self::sanitizeNode($child, $allowed, $allowTableImages);
             }
         }
         foreach ($remove as $n) {
             $node->removeChild($n);
         }
+    }
+
+    private static function isGovernedPublishingImageUrl(string $url): bool
+    {
+        if ($url === '' || filter_var($url, FILTER_VALIDATE_URL) === false) {
+            return false;
+        }
+        $parts = parse_url($url);
+        $host = strtolower((string)($parts['host'] ?? ''));
+        $scheme = strtolower((string)($parts['scheme'] ?? ''));
+        $path = (string)($parts['path'] ?? '');
+        if ($scheme !== 'https' || !str_starts_with($path, '/publishing/')) {
+            return false;
+        }
+        $cdnHost = strtolower((string)parse_url(
+            (string)(getenv('CW_SPACES_CDN_BASE') ?: ''),
+            PHP_URL_HOST
+        ));
+        return $host !== '' && (
+            ($cdnHost !== '' && hash_equals($cdnHost, $host))
+            || str_ends_with($host, '.digitaloceanspaces.com')
+        );
     }
 
     /**

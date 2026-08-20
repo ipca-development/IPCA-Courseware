@@ -390,6 +390,9 @@ try {
         case 'upload_image':
             cp_editor_handle_upload_image($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $uid);
             break;
+        case 'upload_table_cell_image':
+            cp_editor_handle_upload_table_cell_image($foundation);
+            break;
         default:
             cp_editor_json(400, array('ok' => false, 'error' => 'Unknown action.'));
     }
@@ -3185,6 +3188,56 @@ function cp_editor_handle_upload_image(
         'block' => $block,
         'block_html' => $block ? $renderer->renderBlock($block, ControlledPublishingBookRenderer::MODE_EDIT) : '',
     ), cp_editor_numbering_payload($numbering)));
+}
+
+function cp_editor_handle_upload_table_cell_image(
+    ControlledPublishingFoundationService $foundation
+): void {
+    $versionId = (int)($_POST['version_id'] ?? 0);
+    if ($versionId <= 0) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'version_id required'));
+    }
+    $version = $foundation->getVersion($versionId);
+    if ($version === null) {
+        cp_editor_json(404, array('ok' => false, 'error' => 'Version not found'));
+    }
+    cp_editor_require_mutation_scope($version, BooksManualsVersionEditPolicy::ANNEX_CONTENT);
+
+    $file = $_FILES['image'] ?? null;
+    if (!is_array($file) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'A valid image file is required'));
+    }
+    $tmp = (string)($file['tmp_name'] ?? '');
+    $size = (int)($file['size'] ?? 0);
+    if ($tmp === '' || !is_uploaded_file($tmp) || $size <= 0 || $size > 12 * 1024 * 1024) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Image must be smaller than 12 MB'));
+    }
+    $mime = (string)(new finfo(FILEINFO_MIME_TYPE))->file($tmp);
+    $ext = match ($mime) {
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        default => '',
+    };
+    if ($ext === '' || @getimagesize($tmp) === false) {
+        cp_editor_json(400, array('ok' => false, 'error' => 'Only valid JPG, PNG, or WEBP images are allowed'));
+    }
+
+    require_once __DIR__ . '/../../../src/spaces.php';
+    $bytes = file_get_contents($tmp);
+    if ($bytes === false) {
+        cp_editor_json(500, array('ok' => false, 'error' => 'Could not read upload'));
+    }
+    $bookKey = strtolower((string)$version['book_key']);
+    $versionLabel = str_replace('.', '_', (string)$version['version_label']);
+    $objectKey = 'publishing/' . $bookKey . '/' . $versionLabel
+        . '/table_cell_' . bin2hex(random_bytes(12)) . '.' . $ext;
+    $put = cw_spaces_put_object($objectKey, $bytes, $mime);
+    $url = (string)($put['cdn_url'] ?? '');
+    if ($url === '') {
+        cp_editor_json(500, array('ok' => false, 'error' => 'Upload succeeded but CDN URL missing'));
+    }
+    cp_editor_json(200, array('ok' => true, 'url' => $url));
 }
 
 function cp_editor_default_section_id(ControlledPublishingSectionService $sections, int $versionId): int

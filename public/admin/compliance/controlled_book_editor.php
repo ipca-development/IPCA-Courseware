@@ -244,6 +244,37 @@ compliance_page_open(array(
             <button type="button" class="cpb-tool-btn" data-table-action="copy-cells" title="Copy selected cell text" disabled>Copy cell</button>
             <button type="button" class="cpb-tool-btn" data-table-action="paste-cells" title="Paste copied cell text" disabled>Paste cell</button>
           </div>
+          <div class="cpb-toolbar-group" aria-label="Cell image">
+            <span class="cpb-toolbar-table-label">Cell image</span>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-image-insert" title="Insert or replace an image in the selected cell" disabled>Insert</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-image-left" title="Align cell image left" disabled>Left</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-image-center" title="Align cell image center" disabled>Center</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-image-right" title="Align cell image right" disabled>Right</button>
+            <button type="button" class="cpb-tool-btn cpb-tool-btn--danger" data-table-action="cell-image-remove" title="Remove the selected cell image" disabled>Remove</button>
+          </div>
+          <div class="cpb-toolbar-group" aria-label="Cell borders">
+            <span class="cpb-toolbar-table-label">Cell borders</span>
+            <select id="cpbCellBorderStyle" class="cpb-tool-select" title="Cell border style" disabled>
+              <option value="solid">Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="dotted">Dotted</option>
+              <option value="none">None</option>
+            </select>
+            <select id="cpbCellBorderWidth" class="cpb-tool-select" title="Cell border width" disabled>
+              <option value="1">Thin</option>
+              <option value="2">Medium</option>
+              <option value="4">Thick</option>
+            </select>
+            <input type="color" id="cpbCellBorderColor" class="cpb-tool-color" value="#94a3b8" title="Cell border color" disabled>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-border-top" title="Apply to top border" disabled>T</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-border-right" title="Apply to right border" disabled>R</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-border-bottom" title="Apply to bottom border" disabled>B</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-border-left" title="Apply to left border" disabled>L</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-border-all" title="Apply to all four borders" disabled>All</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-border-outer" title="Apply to outer edges of selected cells" disabled>Outer</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-border-inner" title="Apply to internal edges of selected cells" disabled>Inner</button>
+            <button type="button" class="cpb-tool-btn" data-table-action="cell-border-none" title="Remove all borders from selected cells" disabled>None</button>
+          </div>
         </div>
         </div>
         </div>
@@ -288,6 +319,7 @@ compliance_page_open(array(
     </div>
   </div>
   <input type="file" id="cpbImageInput" accept="image/jpeg,image/png,image/webp" hidden>
+  <input type="file" id="cpbTableCellImageInput" accept="image/jpeg,image/png,image/webp" hidden>
   <input type="file" id="cpbHeaderLogoInput" accept="image/jpeg,image/png,image/webp" hidden>
   <input type="file" id="cpbCoverLogoInput" accept="image/jpeg,image/png,image/webp" hidden>
   <input type="file" id="cpbCoverImageInput" accept="image/jpeg,image/png,image/webp" hidden>

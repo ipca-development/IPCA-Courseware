@@ -715,6 +715,16 @@ final class ControlledPublishingBlockService
         $cellFontFamily = $this->normalizeTableOptionalFontGrid($payload, 'cell_font_family', count($normalizedRows), $colCount);
         $cellFontSize = $this->normalizeTableOptionalFontSizeGrid($payload, 'cell_font_size', count($normalizedRows), $colCount);
         $cellTextColor = $this->normalizeTableOptionalColorGrid($payload, 'cell_text_color', count($normalizedRows), $colCount);
+        $titleBorders = $this->normalizeTableCellBorders($payload['title_borders'] ?? array());
+        $headerBorders = $this->normalizeTableBorderRow(
+            $payload['header_borders'] ?? array(),
+            $colCount
+        );
+        $cellBorders = $this->normalizeTableBorderGrid(
+            $payload['cell_borders'] ?? array(),
+            count($normalizedRows),
+            $colCount
+        );
 
         return array(
             'title' => $title,
@@ -743,8 +753,77 @@ final class ControlledPublishingBlockService
             'cell_font_family' => $cellFontFamily,
             'cell_font_size' => $cellFontSize,
             'cell_text_color' => $cellTextColor,
+            'title_borders' => $titleBorders,
+            'header_borders' => $headerBorders,
+            'cell_borders' => $cellBorders,
             'table_align' => $this->normalizeTableCellAlign((string)($payload['table_align'] ?? ''), 'left'),
         );
+    }
+
+    /**
+     * @return array<string,array{style:string,width:int,color:string}>
+     */
+    private function normalizeTableCellBorders(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return array();
+        }
+        $out = array();
+        foreach (array('top', 'right', 'bottom', 'left') as $side) {
+            $spec = $value[$side] ?? null;
+            if (!is_array($spec)) {
+                continue;
+            }
+            $style = strtolower(trim((string)($spec['style'] ?? 'solid')));
+            if (!in_array($style, array('solid', 'dashed', 'dotted', 'none'), true)) {
+                $style = 'solid';
+            }
+            $out[$side] = array(
+                'style' => $style,
+                'width' => $style === 'none'
+                    ? 0
+                    : max(1, min(4, (int)($spec['width'] ?? 1))),
+                'color' => $this->normalizeTableHexColor(
+                    (string)($spec['color'] ?? ''),
+                    '#94a3b8'
+                ),
+            );
+        }
+        return $out;
+    }
+
+    /**
+     * @return list<array<string,array{style:string,width:int,color:string}>>
+     */
+    private function normalizeTableBorderRow(mixed $value, int $colCount): array
+    {
+        $row = array();
+        if (is_array($value)) {
+            foreach ($value as $spec) {
+                $row[] = $this->normalizeTableCellBorders($spec);
+            }
+        }
+        return array_pad(array_slice($row, 0, $colCount), $colCount, array());
+    }
+
+    /**
+     * @return list<list<array<string,array{style:string,width:int,color:string}>>>
+     */
+    private function normalizeTableBorderGrid(
+        mixed $value,
+        int $rowCount,
+        int $colCount
+    ): array {
+        $grid = array();
+        if (is_array($value)) {
+            foreach ($value as $row) {
+                $grid[] = $this->normalizeTableBorderRow($row, $colCount);
+            }
+        }
+        while (count($grid) < $rowCount) {
+            $grid[] = array_fill(0, $colCount, array());
+        }
+        return array_slice($grid, 0, $rowCount);
     }
 
     private function normalizeTableCellAlign(string $align, string $default): string
@@ -793,7 +872,7 @@ final class ControlledPublishingBlockService
             return $cell;
         }
         if (str_contains($cell, '<')) {
-            return ControlledPublishingHtmlSanitizer::sanitizeInline($cell);
+            return ControlledPublishingHtmlSanitizer::sanitizeTableCell($cell);
         }
         return $cell;
     }

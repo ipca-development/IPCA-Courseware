@@ -1766,6 +1766,9 @@ final class ControlledPublishingBookRenderer
         $headerColspans = $table['header_colspans'];
         $rowColspans = $table['row_colspans'];
         $rowRowspans = $table['row_rowspans'];
+        $titleBorders = $table['title_borders'];
+        $headerBorders = $table['header_borders'];
+        $cellBorders = $table['cell_borders'];
         $hasTitleRow = !empty($table['has_title_row']);
         $hasHeaderRow = !empty($table['has_header_row']);
         $tableAlign = (string)$table['table_align'];
@@ -1824,7 +1827,8 @@ final class ControlledPublishingBookRenderer
                 $titleTextColor,
                 $this->normalizeDecorationBool($titleRowStyle['font_bold'] ?? null, true),
                 $this->normalizeDecorationBool($titleRowStyle['font_italic'] ?? null, false),
-                $this->normalizeDecorationBool($titleRowStyle['font_underline'] ?? null, false)
+                $this->normalizeDecorationBool($titleRowStyle['font_underline'] ?? null, false),
+                $titleBorders
             );
             $html .= '<tr class="' . $titleRowClass . '" data-title-row="1">';
             $html .= '<td colspan="' . $colCount . '"' . $titleEdit . $titleVisual
@@ -1863,8 +1867,10 @@ final class ControlledPublishingBookRenderer
                     $effectiveHeaderColor,
                     $headerBold,
                     $headerItalic,
-                    $headerUnderline
-                ) . ' data-col-index="' . $colIndex . '">';
+                    $headerUnderline,
+                    $headerBorders[$headerIndex] ?? array()
+                )
+                    . ' data-col-index="' . $colIndex . '">';
                 $html .= '<span class="cpb-th-text">' . $this->renderTableCellInner((string)$header, $edit, $rows) . '</span>';
                 if ($edit) {
                     $resizeColIndex = $colIndex + $colspan - 1;
@@ -1927,8 +1933,10 @@ final class ControlledPublishingBookRenderer
                     $effectiveCellColor,
                     $cellBold,
                     $cellItalic,
-                    $cellUnderline
-                ) . $formulaAttr . '>'
+                    $cellUnderline,
+                    $cellBorders[$rowIndex][$cellPos] ?? array()
+                )
+                    . $formulaAttr . '>'
                     . $this->renderTableCellInner($rawCell, $edit, $rows) . '</td>';
                 $cellIndex += $colspan;
             }
@@ -2176,6 +2184,13 @@ final class ControlledPublishingBookRenderer
         $cellFontFamily = $this->normalizeTableOptionalFontGrid($payload, 'cell_font_family', count($normalizedRows), $colCount);
         $cellFontSize = $this->normalizeTableOptionalFontSizeGrid($payload, 'cell_font_size', count($normalizedRows), $colCount);
         $cellTextColor = $this->normalizeTableOptionalColorGrid($payload, 'cell_text_color', count($normalizedRows), $colCount);
+        $titleBorders = $this->normalizeTableCellBorders($payload['title_borders'] ?? array());
+        $headerBorders = $this->normalizeTableBorderRow($payload['header_borders'] ?? array(), $colCount);
+        $cellBorders = $this->normalizeTableBorderGrid(
+            $payload['cell_borders'] ?? array(),
+            count($normalizedRows),
+            $colCount
+        );
 
         return array(
             'title' => $title,
@@ -2204,8 +2219,71 @@ final class ControlledPublishingBookRenderer
             'cell_font_family' => $cellFontFamily,
             'cell_font_size' => $cellFontSize,
             'cell_text_color' => $cellTextColor,
+            'title_borders' => $titleBorders,
+            'header_borders' => $headerBorders,
+            'cell_borders' => $cellBorders,
             'table_align' => $this->normalizeTableCellAlign((string)($payload['table_align'] ?? ''), 'left'),
         );
+    }
+
+    /**
+     * @return array<string,array{style:string,width:int,color:string}>
+     */
+    private function normalizeTableCellBorders(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return array();
+        }
+        $out = array();
+        foreach (array('top', 'right', 'bottom', 'left') as $side) {
+            $spec = $value[$side] ?? null;
+            if (!is_array($spec)) {
+                continue;
+            }
+            $style = strtolower(trim((string)($spec['style'] ?? 'solid')));
+            if (!in_array($style, array('solid', 'dashed', 'dotted', 'none'), true)) {
+                $style = 'solid';
+            }
+            $out[$side] = array(
+                'style' => $style,
+                'width' => $style === 'none'
+                    ? 0
+                    : max(1, min(4, (int)($spec['width'] ?? 1))),
+                'color' => $this->normalizeTableHexColor(
+                    (string)($spec['color'] ?? ''),
+                    '#94a3b8'
+                ),
+            );
+        }
+        return $out;
+    }
+
+    private function normalizeTableBorderRow(mixed $value, int $colCount): array
+    {
+        $row = array();
+        if (is_array($value)) {
+            foreach ($value as $spec) {
+                $row[] = $this->normalizeTableCellBorders($spec);
+            }
+        }
+        return array_pad(array_slice($row, 0, $colCount), $colCount, array());
+    }
+
+    private function normalizeTableBorderGrid(
+        mixed $value,
+        int $rowCount,
+        int $colCount
+    ): array {
+        $grid = array();
+        if (is_array($value)) {
+            foreach ($value as $row) {
+                $grid[] = $this->normalizeTableBorderRow($row, $colCount);
+            }
+        }
+        while (count($grid) < $rowCount) {
+            $grid[] = array_fill(0, $colCount, array());
+        }
+        return array_slice($grid, 0, $rowCount);
     }
 
     private function normalizeTableCellAlign(string $align, string $default): string
@@ -2248,7 +2326,8 @@ final class ControlledPublishingBookRenderer
         string $textColor = '',
         ?bool $fontBold = null,
         ?bool $fontItalic = null,
-        ?bool $fontUnderline = null
+        ?bool $fontUnderline = null,
+        array $borders = array()
     ): string {
         $styles = array();
         $attrs = array();
@@ -2290,6 +2369,24 @@ final class ControlledPublishingBookRenderer
             $styles[] = 'text-decoration:' . ($fontUnderline ? 'underline' : 'none') . ' !important';
             $attrs['data-font-underline'] = $fontUnderline ? '1' : '0';
         }
+        if ($borders !== array()) {
+            foreach (array('top', 'right', 'bottom', 'left') as $side) {
+                $spec = $borders[$side] ?? null;
+                if (!is_array($spec)) {
+                    continue;
+                }
+                if ((string)($spec['style'] ?? '') === 'none') {
+                    $styles[] = 'border-' . $side . ':none';
+                    continue;
+                }
+                $styles[] = 'border-' . $side . ':'
+                    . max(1, min(4, (int)($spec['width'] ?? 1))) . 'px '
+                    . (string)($spec['style'] ?? 'solid') . ' '
+                    . (string)($spec['color'] ?? '#94a3b8');
+            }
+            $json = json_encode($borders, JSON_UNESCAPED_SLASHES);
+            $attrs['data-cell-borders'] = is_string($json) ? $json : '{}';
+        }
 
         $html = '';
         if ($styles !== array()) {
@@ -2308,7 +2405,7 @@ final class ControlledPublishingBookRenderer
             return $cell;
         }
         if (str_contains($cell, '<')) {
-            return ControlledPublishingHtmlSanitizer::sanitizeInline($cell);
+            return ControlledPublishingHtmlSanitizer::sanitizeTableCell($cell);
         }
         return $cell;
     }
@@ -2323,7 +2420,7 @@ final class ControlledPublishingBookRenderer
             return h(ControlledPublishingTableFormula::displayValue($raw, $allRows));
         }
         if (str_contains($raw, '<')) {
-            return ControlledPublishingHtmlSanitizer::sanitizeInline($raw);
+            return ControlledPublishingHtmlSanitizer::sanitizeTableCell($raw);
         }
         $raw = html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 

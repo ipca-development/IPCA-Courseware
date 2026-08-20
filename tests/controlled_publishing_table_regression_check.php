@@ -112,6 +112,46 @@ if (!str_contains($verticalEditHtml, 'cpb-table-block--align-left')
     $failures[] = 'Table alignment frame does not retain the authored table width.';
 }
 
+$mediaPayload = table_payload(2);
+$mediaPayload['rows'] = array(array(
+    'Text <span class="cpb-table-cell-image" data-width-pct="42" data-align="right">'
+        . '<img src="https://ipca-test.nyc3.digitaloceanspaces.com/publishing/test/cell.png" alt="Diagram" onerror="alert(1)">'
+        . '</span>',
+    '<span class="cpb-table-cell-image" data-width-pct="50" data-align="center">'
+        . '<img src="https://evil.example/track.png" alt="Unsafe"></span>',
+));
+$mediaPayload['row_colspans'] = array(array(1, 1));
+$mediaPayload['cell_borders'] = array(array(
+    array(
+        'top' => array('style' => 'dashed', 'width' => 2, 'color' => '#123456'),
+        'right' => array('style' => 'none', 'width' => 4, 'color' => '#ffffff'),
+    ),
+    array(),
+));
+$mediaHtml = $renderer->renderBlock(
+    array(
+        'id' => 3,
+        'block_type' => 'table',
+        'stable_anchor' => 'table-media-border-test',
+        'payload_json' => json_encode($mediaPayload, JSON_THROW_ON_ERROR),
+    ),
+    ControlledPublishingBookRenderer::MODE_READ
+);
+if (!str_contains($mediaHtml, 'class="cpb-table-cell-image"')
+    || !str_contains($mediaHtml, 'data-width-pct="42"')
+    || !str_contains($mediaHtml, 'data-align="right"')
+    || !str_contains($mediaHtml, 'alt="Diagram"')) {
+    $failures[] = 'Governed table-cell image markup was not preserved.';
+}
+if (str_contains($mediaHtml, 'evil.example') || str_contains($mediaHtml, 'onerror')) {
+    $failures[] = 'Unsafe table-cell image markup was not rejected.';
+}
+if (!str_contains($mediaHtml, 'border-top:2px dashed #123456')
+    || !str_contains($mediaHtml, 'border-right:none')
+    || !str_contains($mediaHtml, 'data-cell-borders=')) {
+    $failures[] = 'Individual table-cell borders were not rendered.';
+}
+
 $editorPath = dirname(__DIR__) . '/public/assets/controlled_book_editor.js';
 $editorSource = (string)file_get_contents($editorPath);
 $requiredMarkers = array(
@@ -133,6 +173,13 @@ $requiredMarkers = array(
     'function rebuildTableColumnResizeHandles(blockEl)',
     "handle.setAttribute('data-col-index', String(logicalIndex + colspan - 1));",
     "table.querySelectorAll('.cpb-col-resize')",
+    'function wireTableCellImages(blockEl)',
+    'function applyCellBorderAction(blockEl, action)',
+    'function adjacentTableCells(cell, side)',
+    "form.append('action', 'upload_table_cell_image');",
+    'title_borders: titleBorders',
+    'header_borders: headerBorders',
+    'cell_borders: cellBorders',
     'domRange: range.cloneRange()',
 );
 foreach ($requiredMarkers as $marker) {

@@ -2594,6 +2594,53 @@ span.cpb-flow-page-break {
   outline-offset: -2px;
 }
 
+.cpb-table-cell-image {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin-top: 6px;
+  margin-bottom: 6px;
+  line-height: 0;
+}
+
+.cpb-table-cell-image[data-align="left"] {
+  margin-right: auto;
+  margin-left: 0;
+}
+
+.cpb-table-cell-image[data-align="center"] {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.cpb-table-cell-image[data-align="right"] {
+  margin-right: 0;
+  margin-left: auto;
+}
+
+.cpb-table-cell-image > img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.cpb-table-cell-image-resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  padding: 0 !important;
+  border: 2px solid #fff !important;
+  border-radius: 50% !important;
+  background: #2563eb !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+  cursor: nwse-resize;
+}
+
 .cpb-heading {
   font-family: system-ui, sans-serif;
   font-weight: 700;
