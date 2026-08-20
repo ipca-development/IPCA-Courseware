@@ -237,8 +237,24 @@ final class BooksManualsChangeStructureService
             }
         }
         $version = 1;
+        $existingMatch = null;
         foreach ((array)$plan['structure_proposals'] as $existing) {
             $version = max($version, (int)$existing['proposal_version'] + 1);
+            if (hash_equals(
+                (string)($existing['structure_fingerprint'] ?? ''),
+                (string)$proposal['structure_fingerprint']
+            )) {
+                $existingMatch = $existing;
+            }
+        }
+        if (is_array($existingMatch) && (int)($existingMatch['id'] ?? 0) > 0) {
+            return $this->reopenExistingProposal(
+                $planId,
+                (int)$existingMatch['id'],
+                (int)($existingMatch['proposal_version'] ?? 1),
+                $proposal,
+                $actorUserId
+            );
         }
         $proposalId = $this->plans->save('structure_proposals', $planId, array(
             'proposal_uuid' => $this->uuid(),
@@ -249,6 +265,71 @@ final class BooksManualsChangeStructureService
             'structure_fingerprint' => $proposal['structure_fingerprint'],
             'proposed_by' => $actorUserId,
         ));
+        $this->persistProposalAreas($planId, $proposalId, $proposal);
+        $this->recordProposalReady(
+            $planId,
+            $proposalId,
+            $version,
+            $proposal,
+            $actorUserId,
+            false
+        );
+        return $proposalId;
+    }
+
+    /**
+     * Content-addressed proposals are unique per plan. A review-driven rebuild
+     * that produces the same hierarchy must reopen the existing row instead of
+     * inserting a duplicate (plan_id, structure_fingerprint).
+     *
+     * @param array<string,mixed> $proposal
+     */
+    private function reopenExistingProposal(
+        int $planId,
+        int $proposalId,
+        int $proposalVersion,
+        array $proposal,
+        int $actorUserId
+    ): int {
+        $this->pdo->prepare(
+            'UPDATE ipca_manual_ai_architect_structure_proposals
+             SET status=?,title=?,rationale=?,proposed_by=?
+             WHERE id=? AND plan_id=?'
+        )->execute(array(
+            'proposed',
+            $proposal['title'],
+            $proposal['rationale'],
+            $actorUserId,
+            $proposalId,
+            $planId,
+        ));
+        $this->pdo->prepare(
+            'UPDATE ipca_manual_ai_architect_structure_nodes
+             SET decision_status=?,decision_rationale=NULL,decided_by=NULL,decided_at=NULL
+             WHERE structure_proposal_id=?'
+        )->execute(array('proposed', $proposalId));
+        $nodeCount = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM ipca_manual_ai_architect_structure_nodes
+             WHERE structure_proposal_id=?'
+        );
+        $nodeCount->execute(array($proposalId));
+        if ((int)$nodeCount->fetchColumn() === 0) {
+            $this->persistProposalAreas($planId, $proposalId, $proposal);
+        }
+        $this->recordProposalReady(
+            $planId,
+            $proposalId,
+            $proposalVersion,
+            $proposal,
+            $actorUserId,
+            true
+        );
+        return $proposalId;
+    }
+
+    /** @param array<string,mixed> $proposal */
+    private function persistProposalAreas(int $planId, int $proposalId, array $proposal): void
+    {
         $sort = 0;
         foreach ((array)$proposal['areas'] as $area) {
             $this->persistFutureNodes(
@@ -261,18 +342,29 @@ final class BooksManualsChangeStructureService
                 $sort
             );
         }
+    }
+
+    /** @param array<string,mixed> $proposal */
+    private function recordProposalReady(
+        int $planId,
+        int $proposalId,
+        int $proposalVersion,
+        array $proposal,
+        int $actorUserId,
+        bool $reopenedExisting
+    ): void {
         $this->plans->appendEvent($planId, 'STRUCTURE_PROPOSED', 11, array(
             'structure_proposal_id' => $proposalId,
-            'proposal_version' => $version,
+            'proposal_version' => $proposalVersion,
             'structure_fingerprint' => $proposal['structure_fingerprint'],
             'operation_count' => count((array)$proposal['operation_primitives']),
+            'reopened_existing_fingerprint' => $reopenedExisting,
         ), $actorUserId);
         $this->plans->updatePlan($planId, array(
             'stage' => 'structure',
             'status' => 'ready_for_review',
             'updated_by' => $actorUserId,
         ));
-        return $proposalId;
     }
 
     /** @param list<array<string,mixed>> $nodes @return list<array<string,mixed>> */
