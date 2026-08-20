@@ -14,6 +14,7 @@ $pdo = cw_db();
 $sqlFiles = array(
     __DIR__ . '/sql/2026_08_18_annex_book_structure.sql',
     __DIR__ . '/sql/2026_08_18_annex_revision_snapshots.sql',
+    __DIR__ . '/sql/2026_08_19_annex_major_revision.sql',
 );
 foreach ($sqlFiles as $sqlPath) {
     $sql = file_get_contents($sqlPath);

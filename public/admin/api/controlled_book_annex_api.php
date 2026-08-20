@@ -163,6 +163,7 @@ try {
             'annex_number' => (int)($_POST['annex_number'] ?? 0),
             'annex_suffix' => trim((string)($_POST['annex_suffix'] ?? '')),
             'title' => $shortTitle,
+            'revision_change' => trim((string)($_POST['revision_change'] ?? 'minor')),
             'revision_date' => trim((string)($_POST['revision_date'] ?? '')),
         );
 

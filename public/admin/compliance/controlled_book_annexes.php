@@ -193,20 +193,35 @@ compliance_page_open(array(
     text-align: center;
     white-space: nowrap;
   }
-  #cp-annex-manager .cp-annex-action--blue {
-    background: #2563eb;
-    border-color: #2563eb;
-    color: #fff;
+  #cp-annex-manager .cp-annex-action--navy {
+    background: #102440 !important;
+    border-color: #102440 !important;
+    color: #fff !important;
   }
   #cp-annex-manager .cp-annex-action--amber {
-    background: #d97706;
-    border-color: #d97706;
-    color: #fff;
+    background: #d97706 !important;
+    border-color: #d97706 !important;
+    color: #fff !important;
   }
   #cp-annex-manager .cp-annex-action--red {
-    background: #b91c1c;
-    border-color: #b91c1c;
-    color: #fff;
+    background: #b91c1c !important;
+    border-color: #b91c1c !important;
+    color: #fff !important;
+  }
+  #cp-annex-manager .cp-annex-action--navy:hover {
+    background: #17345d !important;
+    border-color: #17345d !important;
+    color: #fff !important;
+  }
+  #cp-annex-manager .cp-annex-action--amber:hover {
+    background: #b45309 !important;
+    border-color: #b45309 !important;
+    color: #fff !important;
+  }
+  #cp-annex-manager .cp-annex-action--red:hover {
+    background: #991b1b !important;
+    border-color: #991b1b !important;
+    color: #fff !important;
   }
   #cp-annex-manager .cp-annex-row-actions .cp-annex-restore-btn {
     grid-column: 1 / -1;
@@ -326,7 +341,7 @@ compliance_page_open(array(
 <dialog class="compliance-modal" id="cp-annex-rename-modal">
   <div class="compliance-modal__panel">
     <div class="compliance-modal__header">
-      <h2 class="compliance-modal__title">Rename Annex</h2>
+      <h2 class="compliance-modal__title">Annex Details</h2>
       <button type="button" class="compliance-modal__close cmp-btn-secondary" data-compliance-modal-close aria-label="Close">&times;</button>
     </div>
     <form id="cp-annex-edit-form">
@@ -338,7 +353,7 @@ compliance_page_open(array(
         </label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <label style="display:grid;gap:6px;">
-            <span style="font-size:13px;font-weight:600;">Base number</span>
+            <span style="font-size:13px;font-weight:600;">Annex Number</span>
             <input type="number" name="annex_number" min="1" required style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
           </label>
           <label style="display:grid;gap:6px;">
@@ -347,6 +362,25 @@ compliance_page_open(array(
           </label>
         </div>
         <p style="margin:0;font-size:12px;color:#64748b;">Example: number <strong>2</strong> + suffix <strong>a</strong> → displayed as <strong>02a</strong>.</p>
+        <fieldset style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin:0;display:grid;gap:10px;">
+          <legend style="font-size:13px;font-weight:600;padding:0 6px;">Revision</legend>
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Current revision</span>
+            <input type="text" name="current_revision" value="" readonly style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#475569;">
+          </label>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;">
+            <input type="radio" name="revision_change" value="minor" checked>
+            <span><strong>Standard revision</strong><br><span id="cp-annex-minor-preview" style="color:#64748b;"></span></span>
+          </label>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;">
+            <input type="radio" name="revision_change" value="major">
+            <span><strong>Major revision</strong><br><span id="cp-annex-major-preview" style="color:#92400e;"></span></span>
+          </label>
+          <label style="display:grid;gap:6px;">
+            <span style="font-size:13px;font-weight:600;">Revision date</span>
+            <input type="date" name="revision_date" required style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;">
+          </label>
+        </fieldset>
       </div>
       <div class="compliance-modal__footer">
         <button type="button" class="cmp-btn-secondary" data-compliance-modal-close id="cp-annex-edit-cancel">Cancel</button>
@@ -588,11 +622,12 @@ compliance_page_open(array(
         + '<td class="cp-annex-icon-cell">' + orientationSymbol(a.orientation) + '</td>'
         + '<td><div class="cp-annex-row-actions">';
       if (!deleted) {
-        html += '<a class="app-btn cp-annex-action--blue" href="' + editUrl + '">Edit</a>';
+        html += '<a class="app-btn cp-annex-action--navy" href="' + editUrl + '">Edit</a>';
         if (canEdit) {
-          html += '<button type="button" class="app-btn cp-annex-action--blue cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
+          html += '<button type="button" class="app-btn cp-annex-action--navy cp-annex-edit-btn" data-section-id="' + a.section_id + '" '
             + 'data-annex-number="' + (a.annex_number || 0) + '" data-annex-suffix="' + (a.annex_suffix || '') + '" '
-            + 'data-short-title="' + escAttr(shortTitle) + '" title="Rename Annex">Rename</button>'
+            + 'data-short-title="' + escAttr(shortTitle) + '" data-revision="' + escAttr(a.revision || '1.0') + '" '
+            + 'title="Edit Annex Details">Details</button>'
             + '<button type="button" class="app-btn cp-annex-action--amber cp-annex-revert-btn" data-section-id="' + a.section_id + '" '
             + 'data-title="' + escAttr(a.title || '') + '">Revert</button>'
             + '<button type="button" class="app-btn cp-annex-action--red cp-annex-delete-btn" data-section-id="' + a.section_id + '" '
@@ -616,6 +651,7 @@ compliance_page_open(array(
           annex_number: parseInt(btn.getAttribute('data-annex-number') || '0', 10),
           annex_suffix: btn.getAttribute('data-annex-suffix') || '',
           annex_short_title: btn.getAttribute('data-short-title') || '',
+          revision: btn.getAttribute('data-revision') || '1.0',
         });
       });
     });
@@ -652,11 +688,40 @@ compliance_page_open(array(
 
   function openEditDialog(annex) {
     if (!editForm) return;
+    var revision = annex.revision || '1.0';
     editForm.querySelector('input[name="section_id"]').value = String(annex.section_id || '');
     editForm.querySelector('input[name="title"]').value = annex.annex_short_title || '';
     editForm.querySelector('input[name="annex_number"]').value = String(annex.annex_number || '');
     editForm.querySelector('input[name="annex_suffix"]').value = annex.annex_suffix || '';
+    editForm.querySelector('input[name="current_revision"]').value = revision;
+    editForm.querySelector('input[name="revision_change"][value="minor"]').checked = true;
+    editForm.querySelector('input[name="revision_date"]').value = localToday();
+    updateRevisionPreviews(revision);
     openModal('cp-annex-rename-modal');
+  }
+
+  function localToday() {
+    var now = new Date();
+    var month = String(now.getMonth() + 1).padStart(2, '0');
+    var day = String(now.getDate()).padStart(2, '0');
+    return now.getFullYear() + '-' + month + '-' + day;
+  }
+
+  function nextMinorRevision(revision) {
+    var match = String(revision || '').trim().match(/^(\d+)\.(\d+)$/);
+    return match ? match[1] + '.' + (parseInt(match[2], 10) + 1) : revision + '.1';
+  }
+
+  function nextMajorRevision(revision) {
+    var match = String(revision || '').trim().match(/^(\d+)(?:\.\d+)?$/);
+    return match ? String(parseInt(match[1], 10) + 1) + '.0' : 'Invalid current revision';
+  }
+
+  function updateRevisionPreviews(revision) {
+    var minorPreview = document.getElementById('cp-annex-minor-preview');
+    var majorPreview = document.getElementById('cp-annex-major-preview');
+    if (minorPreview) minorPreview.textContent = revision + ' → ' + nextMinorRevision(revision);
+    if (majorPreview) majorPreview.textContent = revision + ' → ' + nextMajorRevision(revision);
   }
 
   function openRevertDialog(sectionId) {
@@ -799,8 +864,14 @@ compliance_page_open(array(
       var title = (editForm.querySelector('input[name="title"]').value || '').trim();
       var number = parseInt(editForm.querySelector('input[name="annex_number"]').value || '0', 10);
       var suffix = (editForm.querySelector('input[name="annex_suffix"]').value || '').trim();
+      var revisionChange = editForm.querySelector('input[name="revision_change"]:checked');
+      var revisionDate = editForm.querySelector('input[name="revision_date"]').value || '';
       if (sectionId <= 0 || number <= 0 || title === '') {
         setStatus('Title and annex number are required.', 'error');
+        return;
+      }
+      if (!revisionChange || revisionDate === '') {
+        setStatus('Revision type and revision date are required.', 'error');
         return;
       }
       var fd = new FormData();
@@ -810,6 +881,8 @@ compliance_page_open(array(
       fd.set('title', title);
       fd.set('annex_number', String(number));
       fd.set('annex_suffix', suffix);
+      fd.set('revision_change', revisionChange.value);
+      fd.set('revision_date', revisionDate);
       setStatus('Saving annex…');
       fetch(apiUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
         .then(function (r) { return r.json(); })

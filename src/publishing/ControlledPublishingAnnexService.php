@@ -69,6 +69,15 @@ final class ControlledPublishingAnnexService
         return $currentLabel . '.1';
     }
 
+    public static function nextMajorAnnexRevisionLabel(string $currentLabel): string
+    {
+        $currentLabel = trim($currentLabel);
+        if (preg_match('/^(\d+)(?:\.\d+)?$/', $currentLabel, $match) !== 1) {
+            throw new RuntimeException('Current Annex revision must use major.minor numbering.');
+        }
+        return ((int)$match[1] + 1) . '.0';
+    }
+
     /**
      * Ensure annex register (and, on parent manuals only, cross-ref / highlights) exist.
      *
@@ -973,6 +982,14 @@ final class ControlledPublishingAnnexService
         $annex = is_array($meta['annex'] ?? null) ? $meta['annex'] : array();
         $annex['number'] = $number;
         $annex['suffix'] = $suffix;
+        $revisionChange = strtolower(trim((string)($input['revision_change'] ?? 'minor')));
+        if (!in_array($revisionChange, array('minor', 'major'), true)) {
+            throw new RuntimeException('Revision change must be standard or major.');
+        }
+        $currentRevision = trim((string)($annex['revision'] ?? '1.0')) ?: '1.0';
+        $targetRevision = $revisionChange === 'major'
+            ? self::nextMajorAnnexRevisionLabel($currentRevision)
+            : null;
         $submittedDate = array_key_exists('revision_date', $input)
             ? $this->normalizeAnnexRevisionDate((string)$input['revision_date'])
             : '';
@@ -1008,14 +1025,19 @@ final class ControlledPublishingAnnexService
         $this->recordAnnexRevision(
             $versionId,
             $sectionId,
-            'identity',
+            $revisionChange === 'major' ? 'major_revision' : 'identity',
             $actorUserId,
             true,
-            'Annex identity updated',
-            $submittedDate !== '' ? $submittedDate : null
+            $revisionChange === 'major'
+                ? 'Annex details updated; major revision started'
+                : 'Annex details updated',
+            $submittedDate !== '' ? $submittedDate : null,
+            $targetRevision
         );
         $this->regenerateRegister($versionId, $actorUserId);
 
+        $fresh = $this->sections->getSection($versionId, $sectionId);
+        $freshMeta = is_array($fresh) ? $this->decodeAnnexMeta($fresh) : array();
         return array(
             'section_id' => $sectionId,
             'section_key' => $newSectionKey,
@@ -1023,6 +1045,8 @@ final class ControlledPublishingAnnexService
             'annex_suffix' => $suffix,
             'annex_display_number' => self::formatAnnexDisplayNumber($number, $suffix),
             'title' => $navTitle,
+            'revision' => (string)($freshMeta['revision'] ?? ''),
+            'revision_date' => (string)($freshMeta['revision_date'] ?? ''),
         );
     }
 
@@ -1188,23 +1212,43 @@ final class ControlledPublishingAnnexService
         ?int $actorUserId = null,
         bool $bumpRevision = true,
         ?string $note = null,
-        ?string $revisionDate = null
+        ?string $revisionDate = null,
+        ?string $targetRevision = null
     ): ?array {
         $section = $this->sections->getSection($versionId, $sectionId);
         if ($section === null || !$this->isAnnexContentSection($section)) {
             return null;
         }
 
-        $allowed = array('create', 'content_update', 'reimport', 'identity', 'migrate', 'delete', 'restore', 'revert');
+        $allowed = array(
+            'create',
+            'content_update',
+            'reimport',
+            'identity',
+            'major_revision',
+            'migrate',
+            'delete',
+            'restore',
+            'revert',
+        );
         if (!in_array($source, $allowed, true)) {
             $source = 'content_update';
         }
 
         $meta = $this->decodeAnnexMeta($section);
         $current = trim((string)($meta['revision'] ?? '1.0')) ?: '1.0';
-        $next = $bumpRevision && $source !== 'create'
-            ? self::nextAnnexRevisionLabel($current)
-            : $current;
+        if ($targetRevision !== null) {
+            $targetRevision = trim($targetRevision);
+            if (preg_match('/^\d+\.\d+$/', $targetRevision) !== 1
+                || version_compare($targetRevision, $current, '<=')) {
+                throw new RuntimeException('Target Annex revision must be greater than the current revision.');
+            }
+            $next = $targetRevision;
+        } else {
+            $next = $bumpRevision && $source !== 'create'
+                ? self::nextAnnexRevisionLabel($current)
+                : $current;
+        }
         $authoredDate = $this->normalizeAnnexRevisionDate((string)($revisionDate ?? ''));
         if ($authoredDate === '') {
             $authoredDate = $this->normalizeAnnexRevisionDate((string)($meta['revision_date'] ?? ''));

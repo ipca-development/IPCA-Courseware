@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__);
+require_once $root . '/src/publishing/ControlledPublishingAnnexService.php';
 
 function annex_book_assert(string $label, bool $condition): void
 {
@@ -32,6 +33,9 @@ $blockService = (string)file_get_contents($root . '/src/publishing/ControlledPub
 $livePageMap = (string)file_get_contents($root . '/src/publishing/ControlledPublishingLivePageMapService.php');
 $migration = (string)file_get_contents($root . '/src/publishing/BooksManualsAnnexMigrationService.php');
 $sql = (string)file_get_contents($root . '/scripts/sql/2026_08_18_annex_book_structure.sql');
+$majorRevisionSql = (string)file_get_contents(
+    $root . '/scripts/sql/2026_08_19_annex_major_revision.sql'
+);
 $apply = (string)file_get_contents($root . '/scripts/apply_annex_book_structure.php');
 $foundation = (string)file_get_contents($root . '/src/publishing/ControlledPublishingFoundationService.php');
 
@@ -80,6 +84,16 @@ annex_book_assert(
         && str_contains($annex, "'content_update'")
         && str_contains($annex, "'delete'")
         && str_contains($annex, "'restore'")
+);
+annex_book_assert(
+    'Annex revisions support governed major increments',
+    ControlledPublishingAnnexService::nextMajorAnnexRevisionLabel('1.3') === '2.0'
+        && ControlledPublishingAnnexService::nextMajorAnnexRevisionLabel('7.0') === '8.0'
+        && str_contains($annex, "'major_revision'")
+        && str_contains($annex, '$targetRevision')
+        && str_contains($annexApi, "'revision_change'")
+        && str_contains($majorRevisionSql, "'major_revision'")
+        && str_contains($apply, '2026_08_19_annex_major_revision.sql')
 );
 annex_book_assert(
     'authored annex revision_date is preserved on content save',
@@ -151,12 +165,12 @@ annex_book_assert(
         && !str_contains($editorApi, 'restoreAnnex')
 );
 annex_book_assert(
-    'manage annexes uses hero New Annex plus rename and revert modals',
+    'manage annexes uses hero New Annex plus details and revert modals',
     str_contains($annexManager, '+ New Annex')
         && str_contains($annexManager, 'cp-annex-create-modal')
         && str_contains($annexManager, 'cp-annex-rename-modal')
         && str_contains($annexManager, 'cp-annex-revert-modal')
-        && str_contains($annexManager, 'Rename Annex')
+        && str_contains($annexManager, 'Annex Details')
         && str_contains($annexManager, 'action=revisions')
         && str_contains($annexApi, "action === 'revisions'")
         && str_contains($annexApi, "action === 'revert'")
@@ -183,9 +197,18 @@ annex_book_assert(
         && str_contains($annexManager, 'columnWidthStorageKey')
         && str_contains($annexManager, 'ipca.manageAnnexes.user.')
         && str_contains($annexManager, 'grid-template-columns: repeat(4, minmax(0, 1fr))')
-        && substr_count($annexManager, 'cp-annex-action--blue') >= 3
+        && substr_count($annexManager, 'cp-annex-action--navy') >= 3
         && str_contains($annexManager, 'cp-annex-action--amber')
         && str_contains($annexManager, 'cp-annex-action--red')
+        && str_contains($annexManager, 'background: #102440 !important')
+        && str_contains($annexManager, 'background: #d97706 !important')
+        && str_contains($annexManager, 'background: #b91c1c !important')
+        && str_contains($annexManager, '>Annex Details</h2>')
+        && str_contains($annexManager, '>Annex Number</span>')
+        && str_contains($annexManager, 'name="revision_change" value="minor"')
+        && str_contains($annexManager, 'name="revision_change" value="major"')
+        && str_contains($annexManager, '>Major revision</strong>')
+        && str_contains($annexManager, '>Details</button>')
         && str_contains($annexManager, 'Reset columns')
 );
 annex_book_assert(
