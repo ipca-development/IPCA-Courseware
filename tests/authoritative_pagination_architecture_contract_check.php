@@ -78,6 +78,9 @@ $contracts = array(
         'enforceAuthoritativeEditorSurface',
         'var pages = sectionPages;',
         "content.innerHTML = page.page_html || '';",
+        'scopePublicationCssForEditor',
+        'installEditorPublicationCss',
+        'wireTableResize(blockEl, authoritativeSurface)',
         'wirePaginatedFields();',
         'hasUnsavedCanonicalEdits',
     ),
@@ -284,6 +287,9 @@ foreach (array(
     if (str_contains($editorJs, $forbiddenChrome)) {
         $failures[] = "Authoritative editor still renders non-document page chrome: {$forbiddenChrome}";
     }
+}
+if (str_contains($editorJs, "publicationCssEl.textContent = result.book_style_css")) {
+    $failures[] = 'Authoritative publication CSS is still installed globally in the admin document.';
 }
 
 $architectureDoc = (string)@file_get_contents(

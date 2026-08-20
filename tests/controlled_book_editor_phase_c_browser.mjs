@@ -11,6 +11,7 @@ const requireFromGarmin = createRequire(path.join(root, 'scripts/garmin/package.
 const { chromium } = requireFromGarmin('playwright');
 const editorJs = fs.readFileSync(path.join(root, 'public/assets/controlled_book_editor.js'), 'utf8');
 const editorCss = fs.readFileSync(path.join(root, 'public/assets/controlled_book_editor.css'), 'utf8');
+const readerContentCss = fs.readFileSync(path.join(root, 'public/assets/manual_reader_content.css'), 'utf8');
 const editorShell = fs.readFileSync(
   path.join(root, 'public/admin/compliance/controlled_book_editor.php'),
   'utf8',
@@ -473,6 +474,7 @@ const cases = [];
 const phaseDCases = [];
 const primaryWysiwygCases = new Set([
   'single authoritative WYSIWYG surface has no preview/source or page navigation chrome',
+  'publication CSS stays inside pages and table geometry is immutable on render',
   'authoritative page edits save in place and refresh automatically',
   'automatic repagination preserves the direct editor caret',
   'split paragraph edits merge into the complete source block',
@@ -535,6 +537,53 @@ test('single authoritative WYSIWYG surface has no preview/source or page navigat
     assert.equal(await page.evaluate(() =>
       document.querySelector('#cpbEditorRoot').__cpbPhaseC.enabled
     ), false);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('publication CSS stays inside pages and table geometry is immutable on render', async (browser) => {
+  const initial = splitTablePreviewResult();
+  initial.result.book_style_css = readerContentCss;
+  initial.result.pages.forEach((stored) => {
+    stored.page_html = stored.page_html
+      .replaceAll('style="width:140px"', 'style="width:50%"');
+  });
+  const { page, browserErrors } = await newEditorPage(browser, '', initial);
+  try {
+    assert.deepEqual(await page.evaluate(() => {
+      const table = document.querySelector(
+        '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-table',
+      );
+      const wrap = table.closest('.cpb-table-wrap');
+      const stack = document.querySelector('#cpbCanvas .cpb-pages-stack');
+      return {
+        rootBorder: getComputedStyle(document.documentElement)
+          .getPropertyValue('--cpb-frame-border-color').trim(),
+        pageBorder: getComputedStyle(stack)
+          .getPropertyValue('--cpb-frame-border-color').trim(),
+        tableWidth: table.style.width,
+        wrapWidth: wrap.style.width,
+        columnWidths: Array.from(table.querySelectorAll('col')).map((col) => col.style.width),
+      };
+    }), {
+      rootBorder: '',
+      pageBorder: '#94a3b8',
+      tableWidth: '280px',
+      wrapWidth: '280px',
+      columnWidths: ['50%', '50%'],
+    });
+
+    const tableBlock = page.locator(
+      '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-block--table',
+    );
+    await tableBlock.hover();
+    assert.equal(
+      await tableBlock.locator(':scope > .cpb-block-chrome')
+        .evaluate((node) => getComputedStyle(node).display),
+      'flex',
+    );
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

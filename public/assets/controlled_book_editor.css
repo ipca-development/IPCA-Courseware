@@ -1883,6 +1883,20 @@ body.cpb-browser-fullscreen .cpb-workspace {
   cursor: text;
 }
 
+#cpbEditorRoot.cpb-editor-paginated-mode #cpbCanvas .reader-generated-page .cpb-block > .cpb-block-chrome {
+  display: none !important;
+}
+
+#cpbEditorRoot.cpb-editor-paginated-mode:not(.cpb-editor-readonly) #cpbCanvas .reader-generated-page .cpb-block:hover > .cpb-block-chrome,
+#cpbEditorRoot.cpb-editor-paginated-mode:not(.cpb-editor-readonly) #cpbCanvas .reader-generated-page .cpb-block:focus-within > .cpb-block-chrome {
+  display: flex !important;
+}
+
+#cpbEditorRoot.cpb-editor-paginated-mode:not(.cpb-editor-readonly) #cpbCanvas .reader-generated-page .cpb-image-rotate,
+#cpbEditorRoot.cpb-editor-paginated-mode:not(.cpb-editor-readonly) #cpbCanvas .reader-generated-page .cpb-image-resize {
+  display: block !important;
+}
+
 .cpb-sheet {
   box-sizing: border-box;
   width: 816px;

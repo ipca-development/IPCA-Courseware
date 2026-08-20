@@ -74,6 +74,8 @@
   var pageBreakBtn = document.getElementById('cpbInsertPageBreak');
   var paginationStatusEl = document.getElementById('cpbPaginationStatus');
   var publicationCssEl = document.getElementById('cpbPublicationCss');
+  var editorPublicationCssSource = null;
+  var editorPublicationCssScoped = '';
   var liveProjectionEnabled = false;
   var liveProjectionEl = null;
   var liveProjectionPagesEl = null;
@@ -356,6 +358,94 @@
     if (!saveStatusEl) return;
     saveStatusEl.textContent = text;
     saveStatusEl.className = 'cpb-save-status' + (tone ? ' is-' + tone : '');
+  }
+
+  function splitCssSelectorList(selectorText) {
+    var selectors = [];
+    var start = 0;
+    var depth = 0;
+    var quote = '';
+    var escaped = false;
+    for (var index = 0; index < selectorText.length; index++) {
+      var char = selectorText.charAt(index);
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (quote) {
+        if (char === quote) quote = '';
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        quote = char;
+        continue;
+      }
+      if (char === '(' || char === '[') depth++;
+      else if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
+      else if (char === ',' && depth === 0) {
+        selectors.push(selectorText.slice(start, index).trim());
+        start = index + 1;
+      }
+    }
+    selectors.push(selectorText.slice(start).trim());
+    return selectors.filter(Boolean);
+  }
+
+  function scopePublicationCssForEditor(cssText) {
+    if (!cssText) return '';
+    if (cssText === editorPublicationCssSource) return editorPublicationCssScoped;
+    var parser = document.createElement('style');
+    parser.media = 'not all';
+    parser.textContent = cssText;
+    document.head.appendChild(parser);
+    var scope = '#cpbEditorRoot #cpbCanvas .cpb-pages-stack';
+
+    function scopedSelector(selector) {
+      if (selector === ':root') return scope;
+      if (selector.indexOf(':root') === 0) return scope + selector.slice(5);
+      return scope + ' ' + selector;
+    }
+
+    function serializeRules(rules) {
+      return Array.prototype.slice.call(rules || []).map(function (rule) {
+        if (rule.type === CSSRule.STYLE_RULE) {
+          var selector = splitCssSelectorList(rule.selectorText || '')
+            .map(scopedSelector)
+            .join(',');
+          return selector + '{' + rule.style.cssText + '}';
+        }
+        if (rule.cssRules) {
+          var openingBrace = rule.cssText.indexOf('{');
+          if (openingBrace >= 0) {
+            return rule.cssText.slice(0, openingBrace + 1)
+              + serializeRules(rule.cssRules)
+              + '}';
+          }
+        }
+        return rule.cssText;
+      }).join('\n');
+    }
+
+    var scopedCss = '';
+    try {
+      scopedCss = parser.sheet ? serializeRules(parser.sheet.cssRules) : '';
+    } catch (error) {
+      console.error('Publication CSS could not be isolated in the Editor.', error);
+    } finally {
+      parser.remove();
+    }
+    editorPublicationCssSource = cssText;
+    editorPublicationCssScoped = scopedCss;
+    return scopedCss;
+  }
+
+  function installEditorPublicationCss(cssText) {
+    if (!publicationCssEl) return;
+    publicationCssEl.textContent = scopePublicationCssForEditor(cssText);
   }
 
   function setSectionAssembly(active, label, progress) {
@@ -3346,7 +3436,7 @@
       };
       scheduleLivePagination(repair);
     }
-    if (publicationCssEl) publicationCssEl.textContent = result.book_style_css || '';
+    installEditorPublicationCss(result.book_style_css || '');
     if (pageBreakBtn) {
       pageBreakBtn.disabled = !state.editable || selectedSectionUsesAutomaticPages();
       pageBreakBtn.title = selectedSectionUsesAutomaticPages()
@@ -5923,8 +6013,8 @@
     });
 
     canvasEl.querySelectorAll('.cpb-block--table').forEach(function (blockEl) {
-      normalizeTableTitleRow(blockEl);
-      wireTableResize(blockEl);
+      if (!authoritativeSurface) normalizeTableTitleRow(blockEl);
+      wireTableResize(blockEl, authoritativeSurface);
       wireTableCellFocus(blockEl);
       wireTableCellImages(blockEl);
       syncTableStyleControls(blockEl);
@@ -10124,7 +10214,7 @@
     });
   }
 
-  function wireTableResize(blockEl) {
+  function wireTableResize(blockEl, preserveAuthoritativeGeometry) {
     var table = blockEl.querySelector('table');
     if (!table) return;
     rebuildTableColumnResizeHandles(blockEl);
@@ -10135,7 +10225,7 @@
         handle.remove();
       }
     });
-    syncTableWidth(blockEl);
+    if (!preserveAuthoritativeGeometry) syncTableWidth(blockEl);
   }
 
   function getActiveTableCell() {
