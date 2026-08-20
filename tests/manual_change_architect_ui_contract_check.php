@@ -64,7 +64,9 @@ architect_ui_assert(
         && str_contains($page, 'What must be corrected')
         && str_contains($page, 'Accept Independent Review &amp; Continue')
         && str_contains($page, 'data-mcw-revise-structure')
-        && str_contains($js, 'revise_structure_after_review'),
+        && str_contains($js, 'revise_structure_after_review')
+        && str_contains($api, "\$report['structure_proposals'] = array()")
+        && str_contains($api, "\$architect->buildImpactPresentation(\$report)"),
     'Independent Review must unwrap the prepared result, present blockers, and expose governed correction.'
 );
 architect_ui_assert(

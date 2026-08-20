@@ -3273,6 +3273,15 @@ final class BooksManualsChangeArchitectService
                 && preg_match('/\b(?:(?:corrective|mitigating) actions?|action tracking)\b/iu', $componentText) === 1
                 && preg_match('/\b(?:effectiveness|follow-up|follow up)\b/iu', $componentText) === 1
                 && preg_match('/\bclos(?:e|ed|ure)\b/iu', $componentText) === 1;
+            $governedEndToEndLifecycle =
+                preg_match('/\boccurrence\b/iu', $componentText) === 1
+                && preg_match(
+                    '/\b(?:ecca?irs|external reporting|authority (?:notification|submission|reporting))\b/iu',
+                    $componentText
+                ) === 1
+                && preg_match('/\b(?:follow-up|follow up|intermediate|final)\b/iu', $componentText) === 1
+                && preg_match('/\bclos(?:e|ed|ure)\b/iu', $componentText) === 1;
+            $completeLifecycle = $completeLifecycle || $governedEndToEndLifecycle;
             foreach ($definitions as $definition) {
                 $sourceSupportsPreservation = in_array(
                     $definition['treatment'],

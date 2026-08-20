@@ -218,6 +218,13 @@ function architect_api_ensure_structure(
     bool $forceNewProposal = false
 ): int {
     $report = $architect->getCompleteCheckpointReport($planId);
+    if ($forceNewProposal) {
+        // A review-driven correction must be projected from the accepted
+        // impacts, not from the structure that the Reviewer just rejected.
+        $report['structure_proposals'] = array();
+        $report['structure_nodes'] = array();
+        $report['impact_presentation'] = $architect->buildImpactPresentation($report);
+    }
     $proposals = array_values(array_filter(
         (array)($report['structure_proposals'] ?? array()),
         'is_array'
