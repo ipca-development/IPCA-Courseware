@@ -34,7 +34,7 @@ foreach (array(
     'Proposed Manual Structure',
     'Proposed Manual Amendments',
     'Independent Review',
-    'Create Working Revision',
+    'Apply Accepted Wizard Changes',
 ) as $label) {
     architect_ui_assert(stripos($page, $label) !== false, "Architect wizard label {$label} is missing.");
 }

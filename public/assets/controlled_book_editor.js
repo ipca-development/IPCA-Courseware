@@ -27,6 +27,7 @@
   var tableToolbarEl = document.getElementById('cpbTableToolbar');
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
+  var undoWizardEditBtn = document.getElementById('cpbUndoWizardEdit');
   var editOutlineBtn = document.getElementById('cpbEditOutline');
   var outlinePanelEl = document.getElementById('cpbStructModal');
   var outlineBodyEl = document.getElementById('cpbOutlineBody');
@@ -941,6 +942,31 @@
       return parseApiResponse(r).then(function (result) {
         recordCommittedSourceMutation(action, payload || {}, result || {});
         return result;
+      });
+    });
+  }
+
+  if (undoWizardEditBtn) {
+    undoWizardEditBtn.addEventListener('click', function () {
+      var operationId = parseInt(undoWizardEditBtn.getAttribute('data-operation-id') || '0', 10);
+      if (!operationId) return;
+      if (!window.confirm(
+        'Undo the latest Wizard edit and restore the exact pre-Wizard content? '
+        + 'This will be refused if the affected manual content was edited afterward.'
+      )) return;
+      undoWizardEditBtn.disabled = true;
+      undoWizardEditBtn.textContent = 'Restoring…';
+      apiPost('undo_wizard_edit', {
+        version_id: versionId,
+        operation_id: operationId,
+      }).then(function () {
+        window.location.reload();
+      }).catch(function (error) {
+        undoWizardEditBtn.disabled = false;
+        undoWizardEditBtn.textContent = 'Undo Wizard Edit';
+        window.alert(error && error.message
+          ? error.message
+          : 'The Wizard edit could not be undone.');
       });
     });
   }

@@ -29,6 +29,8 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualPageB
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingPublicationFontService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeApplyService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -158,6 +160,10 @@ $editorNavSvc = new ControlledPublishingEditorNavService($sections, $manualStruc
 $richTextSvc = new ControlledPublishingRichTextService($pdo);
 $manualPageBreakSvc = new ControlledPublishingManualPageBreakService($pdo);
 $readerAnnotationSvc = new ControlledPublishingReaderAnnotationService($pdo);
+$wizardApplySvc = new BooksManualsChangeApplyService(
+    $pdo,
+    new BooksManualsChangePlanService($pdo)
+);
 $annexSvc = new ControlledPublishingAnnexService($pdo, $foundation, $sections, $blocks, new ControlledPublishingDocxImportService(
     $pdo,
     $foundation,
@@ -184,6 +190,17 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 try {
     switch ($action) {
+        case 'undo_wizard_edit':
+            $versionId = (int)($_POST['version_id'] ?? 0);
+            $operationId = (int)($_POST['operation_id'] ?? 0);
+            if ($versionId <= 0 || $operationId <= 0) {
+                throw new InvalidArgumentException('version_id and operation_id are required.');
+            }
+            cp_editor_json(200, array(
+                'ok' => true,
+                'result' => $wizardApplySvc->undo($versionId, $operationId, $uid),
+            ));
+            break;
         case 'review_threads':
             $versionId = (int)($_GET['version_id'] ?? 0);
             if ($versionId <= 0) {

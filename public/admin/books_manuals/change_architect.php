@@ -617,13 +617,14 @@ books_manuals_page_open(array(
 
     <?php if ($step5Complete && $activeStep >= 6): ?>
       <section class="mcw-step mcw-step--active" data-mcw-step="6">
-        <header><span class="mcw-step-number"><?= $step6Complete ? '✓' : '6' ?></span><div><h2><?= $step6Complete ? 'New Working Revision Created' : 'Create Working Revision' ?></h2><p>The accepted amendment is ready to be applied to a new working revision. <?= h((string)($manual['book_key'] ?? 'The source manual')) ?> <?= h((string)($manual['version_label'] ?? '')) ?> will remain unchanged.</p></div></header>
+        <header><span class="mcw-step-number"><?= $step6Complete ? '✓' : '6' ?></span><div><h2><?= $step6Complete ? 'Accepted Wizard Changes Applied' : 'Apply Accepted Wizard Changes' ?></h2><p>The accepted changes will be applied in place to <?= h((string)($manual['book_key'] ?? 'the selected manual')) ?> <?= h((string)($manual['version_label'] ?? '')) ?>. No revision will be created, incremented, approved or transitioned.</p></div></header>
         <?php if ($step6Complete): ?>
-          <?php $result = mcw_array($operation['result_json'] ?? array()); ?><a class="app-btn app-btn--primary mcw-primary-action" href="/admin/compliance/controlled_book_editor.php?version_id=<?= (int)($result['working_revision_id'] ?? 0) ?>">Open Working Revision</a>
+          <?php $result = mcw_array($operation['result_json'] ?? array()); ?><a class="app-btn app-btn--primary mcw-primary-action" href="/admin/compliance/controlled_book_editor.php?version_id=<?= (int)($result['book_version_id'] ?? 0) ?>">Open Updated Manual in Editor</a>
         <?php else: ?>
-          <dl class="mcw-apply-summary"><div><dt>Source</dt><dd><?= h((string)($manual['book_key'] ?? 'Manual')) ?> <?= h((string)($manual['version_label'] ?? '')) ?></dd></div><div><dt>Changes</dt><dd><?= count($amendments) ?> amendment areas</dd></div><div><dt>Independent Review</dt><dd>Ready</dd></div><div><dt>Preserved content</dt><dd>Verified</dd></div></dl>
-          <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-apply>CREATE WORKING REVISION &amp; APPLY ACCEPTED CHANGES</button>
-          <p class="mcw-apply-note">This does not approve, finalize or publish the manual.</p>
+          <dl class="mcw-apply-summary"><div><dt>Selected version</dt><dd><?= h((string)($manual['book_key'] ?? 'Manual')) ?> <?= h((string)($manual['version_label'] ?? '')) ?></dd></div><div><dt>Changes</dt><dd><?= count($amendments) ?> amendment areas</dd></div><div><dt>Independent Review</dt><dd>Ready</dd></div><div><dt>Revision action</dt><dd>None — version and revision remain unchanged</dd></div></dl>
+          <div class="mcw-apply-warning"><strong>This updates the selected Draft / Draft Review in place.</strong><p>The operation is transactional. The Editor will show standard black change bars and provide a guarded Undo Wizard Edit action.</p></div>
+          <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-apply>Apply Accepted Wizard Changes</button>
+          <p class="mcw-apply-note">This does not create, approve, finalize or publish a revision.</p>
         <?php endif; ?>
       </section>
     <?php endif; ?>

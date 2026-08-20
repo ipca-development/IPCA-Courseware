@@ -8,6 +8,8 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsAnnexBookService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeApplyService.php';
 
 $user = compliance_require_access($pdo);
 $foundation = new ControlledPublishingFoundationService($pdo);
@@ -43,6 +45,15 @@ if ($version === null) {
     return;
 }
 $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookVersion($version);
+$wizardUndo = null;
+try {
+    $wizardUndo = (new BooksManualsChangeApplyService(
+        $pdo,
+        new BooksManualsChangePlanService($pdo)
+    ))->availableUndo($versionId);
+} catch (Throwable $e) {
+    $wizardUndo = null;
+}
 
 if ($sectionId <= 0) {
     foreach (array('cover', 'part_1', 'main_content') as $key) {
@@ -115,6 +126,17 @@ compliance_page_open(array(
           <button type="button" class="cpb-tool-btn" id="cpbUndo" title="Undo (Ctrl+Z)">↶</button>
           <button type="button" class="cpb-tool-btn" id="cpbRedo" title="Redo (Ctrl+Shift+Z)">↷</button>
         </div>
+        <?php if (is_array($wizardUndo)): ?>
+        <div class="cpb-toolbar-group">
+          <button type="button"
+                  class="cpb-tool-btn cpb-tool-btn--danger"
+                  id="cpbUndoWizardEdit"
+                  data-operation-id="<?= (int)$wizardUndo['operation_id'] ?>"
+                  title="Restore the exact content from before the latest Wizard application">
+            Undo Wizard Edit
+          </button>
+        </div>
+        <?php endif; ?>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" data-cmd="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
           <button type="button" class="cpb-tool-btn" data-cmd="italic" title="Italic (Ctrl+I)"><em>I</em></button>

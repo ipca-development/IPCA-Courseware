@@ -301,7 +301,7 @@
       ['[data-mcw-accept-drafts]', 'accept_drafts', 'Accepting Amendments…'],
       ['[data-mcw-run-review]', 'run_independent_review', 'Reviewing Resulting Manual…'],
       ['[data-mcw-continue-apply]', 'continue_to_apply', 'Continuing…'],
-      ['[data-mcw-apply]', 'apply_working_revision', 'Creating Working Revision…']
+      ['[data-mcw-apply]', 'apply_accepted_wizard_changes', 'Applying Accepted Changes…']
     ];
     actions.forEach(function (entry) {
       var button = root.querySelector(entry[0]);

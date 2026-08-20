@@ -7,6 +7,8 @@ require_once __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.p
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeArchitectService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeStructureService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeAuthorService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeReviewerService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeApplyService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -57,6 +59,81 @@ function architect_api_csrf(): string
         $_SESSION['books_manuals_ai_csrf'] = bin2hex(random_bytes(32));
     }
     return $_SESSION['books_manuals_ai_csrf'];
+}
+
+function architect_api_uuid(): string
+{
+    $bytes = random_bytes(16);
+    $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+    $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+    $hex = bin2hex($bytes);
+    return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-' . substr($hex, 12, 4)
+        . '-' . substr($hex, 16, 4) . '-' . substr($hex, 20);
+}
+
+function architect_api_prepare_independent_review(
+    PDO $pdo,
+    BooksManualsChangePlanService $plans,
+    BooksManualsChangeReviewerService $reviewer,
+    BooksManualsChangeApplyService $apply,
+    int $planId,
+    int $actorUserId
+): int {
+    $stmt = $pdo->prepare(
+        "SELECT * FROM ipca_manual_ai_architect_drafts
+         WHERE plan_id=? AND status='generated' ORDER BY id DESC LIMIT 1"
+    );
+    $stmt->execute(array($planId));
+    $draft = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($draft)) {
+        throw new RuntimeException('Accepted amendment wording is not available for independent review.');
+    }
+    $proposal = json_decode((string)($draft['draft_payload_json'] ?? ''), true);
+    if (!is_array($proposal) || (string)($proposal['wizard_status'] ?? '') !== 'accepted') {
+        throw new RuntimeException('The amendment wording must be accepted before independent review.');
+    }
+    $wording = $reviewer->verifyReadableAmendmentProposal($proposal);
+    $governance = $reviewer->evaluateGovernanceGate($planId);
+    $operationPackage = $apply->buildPreflightPackage($planId);
+    $issues = array_merge(
+        array_values((array)($wording['issues'] ?? array())),
+        array_values((array)($governance['blockers'] ?? array()))
+    );
+    $prepared = array_replace($wording, array(
+        'status' => $issues === array() ? 'READY' : 'REQUIRES_REVIEW',
+        'issues' => $issues,
+        'governance_gate' => $governance,
+        'operation_package' => $operationPackage,
+        'checks' => array(
+            'Accepted wording passes independent consistency review' => $issues === array(),
+            'Requested change remains within the approved impact scope' =>
+                (string)($governance['status'] ?? '') === 'READY',
+            'No unsupported implementation claims were introduced' =>
+                (array)($wording['unsupported_capability_claims'] ?? array()) === array(),
+            'Preservation and legacy-reference decisions remain accounted for' =>
+                (array)($wording['issues'] ?? array()) === array(),
+            'In-place operation package is source-fingerprinted and creates no revision' =>
+                !empty($operationPackage['package_fingerprint'])
+                && empty($operationPackage['revision_creation_allowed'])
+                && empty($operationPackage['revision_number_change_allowed'])
+                && empty($operationPackage['lifecycle_transition_allowed']),
+        ),
+    ));
+    return $plans->save('reviews', $planId, array(
+        'review_uuid' => architect_api_uuid(),
+        'draft_id' => (int)$draft['id'],
+        'review_type' => 'independent_consistency',
+        'status' => 'requested',
+        'review_payload_json' => json_encode(array(
+            'status' => 'REVIEW_PENDING',
+            'summary' => $issues === array()
+                ? 'The accepted wording passed independent preparation and is ready for human approval.'
+                : 'Independent review identified issues requiring correction.',
+            'prepared_result' => $prepared,
+        ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+        'requested_by' => $actorUserId,
+        'requested_at' => gmdate('Y-m-d H:i:s.v'),
+    ));
 }
 
 /** @param array<string,mixed> $input */
@@ -272,6 +349,8 @@ $plans = new BooksManualsChangePlanService($pdo);
 $architect = new BooksManualsChangeArchitectService($pdo, $plans);
 $structures = new BooksManualsChangeStructureService($pdo, $plans);
 $author = new BooksManualsChangeAuthorService($pdo, $plans);
+$reviewer = new BooksManualsChangeReviewerService($pdo, $plans);
+$apply = new BooksManualsChangeApplyService($pdo, $plans);
 
 try {
     if (!$plans->tablesPresent()) {
@@ -743,12 +822,23 @@ try {
             ));
 
         case 'accept_drafts':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $result = $plans->acceptDrafts($planId, $userId);
+            $reviewId = architect_api_prepare_independent_review(
+                $pdo,
+                $plans,
+                $reviewer,
+                $apply,
+                $planId,
+                $userId
+            );
+            $plans->appendEvent($planId, 'INDEPENDENT_REVIEW_PREPARED', 12, array(
+                'review_id' => $reviewId,
+            ), $userId);
             architect_api_json(200, array(
                 'ok' => true,
-                'result' => $plans->acceptDrafts(
-                    (int)($input['plan_id'] ?? 0),
-                    $userId
-                ),
+                'result' => $result,
+                'review_id' => $reviewId,
                 'csrf_token' => architect_api_csrf(),
             ));
 
@@ -772,27 +862,15 @@ try {
                 'csrf_token' => architect_api_csrf(),
             ));
 
-        case 'apply_working_revision':
+        case 'apply_working_revision': // Backward-compatible action name for open stale pages.
+        case 'apply_accepted_wizard_changes':
             $planId = (int)($input['plan_id'] ?? 0);
-            $plan = $plans->getPlan($planId);
-            if ((int)($plan['owner_id'] ?? 0) !== $userId) {
-                throw new RuntimeException('Only the Change Plan owner can create the working revision.');
-            }
-            $stmt = $pdo->prepare(
-                "SELECT result_json FROM ipca_manual_ai_architect_operations
-                 WHERE plan_id=? AND status='succeeded' ORDER BY id DESC LIMIT 1"
-            );
-            $stmt->execute(array($planId));
-            $result = json_decode((string)$stmt->fetchColumn(), true);
-            if (!is_array($result) || (int)($result['working_revision_id'] ?? 0) <= 0) {
-                throw new RuntimeException(
-                    'The independently reviewed canonical operation package is not ready for controlled application.'
-                );
-            }
+            $result = $apply->apply($planId, $userId);
             architect_api_json(200, array(
                 'ok' => true,
+                'result' => $result,
                 'redirect' => '/admin/compliance/controlled_book_editor.php?version_id='
-                    . (int)$result['working_revision_id'],
+                    . (int)$result['book_version_id'],
                 'csrf_token' => architect_api_csrf(),
             ));
 
