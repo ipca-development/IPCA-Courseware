@@ -498,6 +498,11 @@ final class BooksManualsChangeReviewerService
             'strval',
             (array)($proposal['accepted_structure_nodes'] ?? array())
         )));
+        $acceptedNodeSet = array_fill_keys($acceptedNodes, true);
+        $acceptedImpactSet = array_fill_keys(array_values(array_unique(array_map(
+            'strval',
+            (array)($proposal['accepted_impact_numbers'] ?? array())
+        ))), true);
         $implementedNodes = array_keys($nodes);
         $missingNodes = array_values(array_diff($acceptedNodes, $implementedNodes));
         $unexpectedNodes = array_values(array_diff($implementedNodes, $acceptedNodes));
@@ -668,12 +673,25 @@ final class BooksManualsChangeReviewerService
             array('accepted_structure_nodes')
         );
         foreach (array('3.3', '4.2', '5.6', '5.7', '8.1') as $section) {
+            $checkId = 'evidence.section.' . $this->checkSlug($section) . '.change-accounting';
+            if (!isset($acceptedImpactSet[$section])) {
+                $checks[] = $this->informationalReviewCheck(
+                    $checkId,
+                    'INTEGRITY',
+                    array($section),
+                    array(),
+                    "Section {$section} records preserved, replaced and added content when it is within the accepted amendment scope.",
+                    "Section {$section} is outside the human-accepted amendment scope.",
+                    array('accepted_impact_numbers', 'accepted_structure_nodes')
+                );
+                continue;
+            }
             $draft = (array)($drafts[$section] ?? array());
             $complete = (array)($draft['current_preserved'] ?? array()) !== array()
                 && array_key_exists('current_removed_replaced', $draft)
                 && (array)($draft['new_content_added'] ?? array()) !== array();
             $checks[] = $this->reviewCheck(
-                'evidence.section.' . $this->checkSlug($section) . '.change-accounting',
+                $checkId,
                 'INTEGRITY',
                 'HARD',
                 $complete,
@@ -838,6 +856,26 @@ final class BooksManualsChangeReviewerService
             ),
         );
         foreach ($semantic as $id => [$category, $severity, $text, $sections, $affectedNodes, $patterns, $invariant, $failure]) {
+            $inAcceptedScope = array_values(array_filter(
+                array_map('strval', $affectedNodes),
+                static fn(string $node): bool => isset($acceptedNodeSet[$node])
+            )) !== array()
+                || array_values(array_filter(
+                    array_map('strval', $sections),
+                    static fn(string $section): bool => isset($acceptedImpactSet[$section])
+                )) !== array();
+            if (!$inAcceptedScope) {
+                $checks[] = $this->informationalReviewCheck(
+                    $id,
+                    $category,
+                    $sections,
+                    array(),
+                    $invariant,
+                    'This invariant is outside the human-accepted amendment scope.',
+                    array('accepted_impact_numbers', 'accepted_structure_nodes')
+                );
+                continue;
+            }
             $passed = $this->matchesEvery($text, $patterns);
             $checks[] = $this->reviewCheck(
                 $id,
@@ -997,6 +1035,41 @@ final class BooksManualsChangeReviewerService
             'known_limitations' => str_contains($checkId, 'eccairs')
                 ? array('Automated intermediate/final ECCAIRS amendment functionality is not operational.')
                 : array(),
+        );
+    }
+
+    /**
+     * Retain a stable check identity without treating a human-dismissed
+     * amendment area as missing content.
+     *
+     * @param list<string> $sections
+     * @param list<string> $nodes
+     * @param list<string> $evidence
+     * @return array<string,mixed>
+     */
+    private function informationalReviewCheck(
+        string $checkId,
+        string $category,
+        array $sections,
+        array $nodes,
+        string $invariant,
+        string $observed,
+        array $evidence
+    ): array {
+        return array(
+            'check_id' => $checkId,
+            'check_version' => self::CHECK_VERSION,
+            'category' => $category,
+            'severity' => 'INFORMATIONAL',
+            'status' => 'INFORMATIONAL',
+            'affected_sections' => array_values(array_unique(array_map('strval', $sections))),
+            'affected_nodes' => array_values(array_unique(array_map('strval', $nodes))),
+            'required_invariant' => $invariant,
+            'observed_state' => $observed,
+            'evidence_references' => array_values(array_unique(array_map('strval', $evidence))),
+            'human_explanation' => $observed,
+            'allowed_repair_scope' => array(),
+            'known_limitations' => array(),
         );
     }
 

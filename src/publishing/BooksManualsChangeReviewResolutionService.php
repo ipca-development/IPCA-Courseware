@@ -91,6 +91,101 @@ final class BooksManualsChangeReviewResolutionService
         return $state;
     }
 
+    /**
+     * Reconcile the current accepted candidate after a Reviewer check-version
+     * correction. No Architect stage, draft, baseline, or publishing content
+     * is created or changed.
+     *
+     * @return array<string,mixed>
+     */
+    public function reconcileAcceptedReviewScope(
+        int $planId,
+        int $reviewId,
+        int $actorUserId,
+        BooksManualsChangeReviewerService $reviewer
+    ): array {
+        $plan = $this->plans->getPlan($planId);
+        if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
+            || (string)($plan['stage'] ?? '') !== 'review') {
+            throw new RuntimeException('Accepted-scope reconciliation is limited to the plan owner in Step 5.');
+        }
+        $draft = $this->latestAcceptedDraft($planId);
+        $baselineId = $this->baselineIdForReview($reviewId);
+        if ($draft === null || $baselineId <= 0) {
+            throw new RuntimeException('The accepted review candidate or frozen baseline is unavailable.');
+        }
+        $verification = $reviewer->verifyReadableAmendmentProposal(
+            (array)$draft['draft_payload_json']
+        );
+        $beforeUnresolved = $this->unresolvedCheckIds($planId, $reviewId);
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_ai_architect_plans SET id=id WHERE id=?'
+            )->execute(array($planId));
+            $lockedDraft = $this->latestAcceptedDraft($planId);
+            if ($lockedDraft === null
+                || (int)$lockedDraft['id'] !== (int)$draft['id']
+                || $this->baselineIdForReview($reviewId) !== $baselineId) {
+                throw new RuntimeException(
+                    'The review candidate changed before accepted-scope reconciliation.'
+                );
+            }
+            $reconciliation = $this->reconcileVerificationChecks(
+                $planId,
+                $reviewId,
+                $baselineId,
+                (array)($verification['review_checks'] ?? array()),
+                $actorUserId,
+                array(
+                    'accepted_scope_reconciliation' => true,
+                    'resulting_draft_id' => (int)$draft['id'],
+                )
+            );
+            if ((int)$reconciliation['new_checks'] !== 0
+                || (int)$reconciliation['regressed_checks'] !== 0) {
+                throw new RuntimeException(
+                    'Accepted-scope reconciliation introduced a new or regressed check.'
+                );
+            }
+            $afterUnresolved = $this->unresolvedCheckIds($planId, $reviewId);
+            $this->plans->appendEvent(
+                $planId,
+                'INDEPENDENT_REVIEW_ACCEPTED_SCOPE_RECONCILED',
+                12,
+                array(
+                    'review_id' => $reviewId,
+                    'draft_id' => (int)$draft['id'],
+                    'baseline_id' => $baselineId,
+                    'reconciliation' => $reconciliation,
+                    'architect_rerun_performed' => false,
+                    'manual_content_mutated' => false,
+                    'stage_preserved' => 'review',
+                ),
+                $actorUserId
+            );
+            $this->recordCycle($planId, $reviewId, $baselineId, array(
+                'checks_before' => count($beforeUnresolved),
+                'checks_fixed' => count(array_diff($beforeUnresolved, $afterUnresolved)),
+                'checks_remaining' => count(array_intersect($beforeUnresolved, $afterUnresolved)),
+                'new_checks' => count(array_diff($afterUnresolved, $beforeUnresolved)),
+                'checks_after' => count($afterUnresolved),
+            ));
+            $this->plans->updatePlan($planId, array(
+                'stage' => 'review',
+                'status' => $afterUnresolved === array() ? 'ready_for_review' : 'blocked',
+                'updated_by' => $actorUserId,
+            ));
+            $this->pdo->commit();
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
+        }
+        return $this->state($planId, $reviewId);
+    }
+
     /** @return array<string,mixed> */
     public function state(int $planId, ?int $reviewId = null): array
     {

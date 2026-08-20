@@ -266,6 +266,51 @@ stableCheckAssert(
     'A repairable HARD content requirement was turned into an opaque technical blocker.'
 );
 
+$dismissedScopeCheck = $baseCheck(
+    'evidence.section.8-1.change-accounting',
+    'FAIL',
+    '8.1',
+    'INTEGRITY',
+    'HARD'
+);
+$persist->invoke(
+    $resolution,
+    20,
+    9,
+    1,
+    $dismissedScopeCheck,
+    array('status' => 'REQUIRES_REVIEW'),
+    1
+);
+$dismissedScopeCheck['status'] = 'INFORMATIONAL';
+$dismissedScopeCheck['severity'] = 'INFORMATIONAL';
+$dismissedScopeCheck['affected_nodes'] = array();
+$dismissedScopeCheck['allowed_repair_scope'] = array();
+$dismissedScopeCheck['observed_state'] = 'Section 8.1 is outside the human-accepted amendment scope.';
+$dismissedScopeCheck['human_explanation'] = $dismissedScopeCheck['observed_state'];
+$scopeMetrics = $reconcile->invoke(
+    $resolution,
+    20,
+    9,
+    1,
+    array($dismissedScopeCheck),
+    1,
+    array('accepted_scope_reconciliation' => true)
+);
+$dismissedState = $db->query(
+    "SELECT review_status,resolution_status
+     FROM ipca_manual_ai_architect_review_check_metadata
+     WHERE check_id='evidence.section.8-1.change-accounting'"
+)->fetch(PDO::FETCH_ASSOC);
+stableCheckAssert(
+    $scopeMetrics['checks_fixed'] === 1
+        && $scopeMetrics['new_checks'] === 0
+        && $scopeMetrics['regressed_checks'] === 0
+        && ($dismissedState['review_status'] ?? '') === 'INFORMATIONAL'
+        && ($dismissedState['resolution_status'] ?? '') === 'VERIFIED',
+    'A hard check outside the accepted scope did not reconcile monotonically to informational.'
+);
+
 $repairGroups = new ReflectionMethod($resolution, 'repairGroups');
 $groups = $repairGroups->invoke($resolution, array(
     array(

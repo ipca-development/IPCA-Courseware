@@ -32,6 +32,9 @@ $historicalRepair = file_get_contents(
 $contentPreview = file_get_contents(
     $root . '/scripts/prepare_manual_change_review_patch.php'
 ) ?: '';
+$scopeReconciliation = file_get_contents(
+    $root . '/scripts/reconcile_manual_change_review_scope.php'
+) ?: '';
 $planService = file_get_contents(
     $root . '/src/publishing/BooksManualsChangePlanService.php'
 ) ?: '';
@@ -141,6 +144,12 @@ $checks = array(
         && str_contains($author, 'current_accepted_wording')
         && str_contains($author, 'target_state_evidence')
         && str_contains($author, 'preservation_boundaries'),
+    'accepted-scope reconciliation does not rerun governed stages' =>
+        str_contains($scopeReconciliation, 'reconcileAcceptedReviewScope')
+        && str_contains($scopeReconciliation, 'drafts_unchanged')
+        && str_contains($scopeReconciliation, 'review_baselines_unchanged')
+        && str_contains($scopeReconciliation, "'architect_rerun_performed' => false")
+        && str_contains($scopeReconciliation, "'manual_content_mutated' => false"),
     'READY_TO_APPLY is strict and only moves forward' =>
         str_contains($api, "'outcome' => 'READY_TO_APPLY'")
         && str_contains($api, "'unresolved_material_findings' => 0")

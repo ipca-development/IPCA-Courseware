@@ -36,4 +36,35 @@ readableAssert($review['legacy_reference_status']['remaining_within_accepted_sco
 readableAssert($review['legacy_reference_status']['outside_scope']['count'] === 5, 'Outside-scope governed legacy references were not separately reported.');
 readableAssert($review['production_applied'] === false, 'The readability checkpoint must not apply production content.');
 
+$withoutTraining = $proposal;
+unset($withoutTraining['section_drafts']['8.1']);
+$withoutTraining['accepted_impact_numbers'] = array_values(array_filter(
+    (array)$withoutTraining['accepted_impact_numbers'],
+    static fn(string $section): bool => $section !== '8.1'
+));
+$withoutTraining['accepted_structure_nodes'] = array_values(array_filter(
+    (array)$withoutTraining['accepted_structure_nodes'],
+    static fn(string $node): bool => $node !== '8.1'
+));
+$scopedReview = $reviewer->verifyReadableAmendmentProposal($withoutTraining);
+$scopedChecks = array_column($scopedReview['review_checks'], null, 'check_id');
+readableAssert(
+    (string)($scopedChecks['evidence.section.8-1.change-accounting']['status'] ?? '')
+        === 'INFORMATIONAL',
+    'Reviewer treated human-dismissed Section 8.1 as missing change-accounting evidence.'
+);
+readableAssert(
+    (string)($scopedChecks['training.corrective-action-competence']['status'] ?? '')
+        === 'INFORMATIONAL',
+    'Reviewer silently reopened the human-dismissed training amendment area.'
+);
+readableAssert(
+    !in_array(
+        'Section 8.1 lacks explicit preservation/change evidence.',
+        (array)$scopedReview['issues'],
+        true
+    ),
+    'Human-dismissed Section 8.1 remained a hard integrity blocker.'
+);
+
 echo "PASS: readable amendment proposal preserves canonical SMS controls and remains human-review only.\n";
