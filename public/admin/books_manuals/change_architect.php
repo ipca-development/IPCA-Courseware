@@ -27,6 +27,23 @@ function mcw_text(mixed $value, string $fallback = ''): string
     return $value !== '' ? $value : $fallback;
 }
 
+function mcw_review_issue_text(mixed $issue): string
+{
+    if (is_string($issue)) {
+        return mcw_text($issue, 'Independent review requires correction.');
+    }
+    if (!is_array($issue)) {
+        return 'Independent review requires correction.';
+    }
+    foreach (array('message', 'detail', 'summary', 'reason', 'code') as $field) {
+        $value = mcw_text($issue[$field] ?? '');
+        if ($value !== '') {
+            return $value;
+        }
+    }
+    return 'Independent review requires correction.';
+}
+
 function mcw_treatment_icon(string $treatment): string
 {
     return match (strtoupper($treatment)) {
@@ -253,6 +270,17 @@ foreach ($draftSections as $section) {
 $reviews = array_values(array_filter((array)($report['reviews'] ?? array()), 'is_array'));
 $review = $reviews === array() ? array() : $reviews[array_key_last($reviews)];
 $reviewPayload = mcw_array($review['review_payload_json'] ?? array());
+$preparedReviewPayload = mcw_array($reviewPayload['prepared_result'] ?? array());
+$reviewDisplayPayload = $preparedReviewPayload !== array()
+    ? $preparedReviewPayload
+    : $reviewPayload;
+$reviewStatus = strtoupper((string)(
+    $reviewDisplayPayload['status']
+    ?? $review['status']
+    ?? ''
+));
+$reviewApproved = (string)($review['status'] ?? '') === 'approved';
+$reviewIssues = array_values((array)($reviewDisplayPayload['issues'] ?? array()));
 $operations = array_values(array_filter((array)($report['operations'] ?? array()), 'is_array'));
 $operation = $operations === array() ? array() : $operations[array_key_last($operations)];
 
@@ -268,7 +296,7 @@ $step3Complete = $structure !== array() && (string)($structure['status'] ?? '') 
 $step4Complete = $draft !== array()
     && (string)($draftPayload['wizard_status'] ?? '') === 'accepted';
 $reviewReady = in_array(
-    strtoupper((string)($reviewPayload['status'] ?? $review['status'] ?? '')),
+    $reviewStatus,
     array('READY', 'READY_FOR_HUMAN_REVIEW', 'APPROVED'),
     true
 );
@@ -601,15 +629,29 @@ books_manuals_page_open(array(
         <section class="mcw-step mcw-step--active" data-mcw-step="5">
           <header><span class="mcw-step-number">5</span><div><h2>Independent Review</h2><p>Reviewing the resulting manual for completeness, consistency and unsupported claims.</p></div></header>
           <div class="mcw-review-result <?= $reviewReady ? 'is-ready' : 'is-review' ?>">
-            <h3><?= $reviewReady ? '✓ Ready for Human Approval' : 'Requires Review' ?></h3>
-            <?php $checks = mcw_array($reviewPayload['checks'] ?? $reviewPayload['final_quality_checks'] ?? array()); ?>
+            <h3><?= $reviewReady ? '✓ Ready for Human Approval' : 'Independent Review Found Issues' ?></h3>
+            <?php if (mcw_text($reviewPayload['summary'] ?? '') !== ''): ?>
+              <p><?= h((string)$reviewPayload['summary']) ?></p>
+            <?php endif; ?>
+            <?php $checks = mcw_array($reviewDisplayPayload['checks'] ?? $reviewDisplayPayload['final_quality_checks'] ?? array()); ?>
             <?php if ($checks !== array()): ?><ul><?php foreach ($checks as $label => $result): ?><li><?= !empty($result) ? '✓' : '!' ?> <?= h(is_string($label) ? ucwords(str_replace('_', ' ', $label)) : (string)$result) ?></li><?php endforeach; ?></ul><?php endif; ?>
-            <details><summary>View full review details</summary><pre><?= h(json_encode($reviewPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre></details>
+            <?php if ($reviewIssues !== array()): ?>
+              <div class="mcw-review-issues">
+                <h4>What must be corrected</h4>
+                <ul><?php foreach ($reviewIssues as $issue): ?><li><?= h(mcw_review_issue_text($issue)) ?></li><?php endforeach; ?></ul>
+              </div>
+            <?php endif; ?>
+            <details><summary>Technical review record</summary><pre><?= h(json_encode($reviewDisplayPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre></details>
           </div>
           <?php if ($reviewReady): ?>
-            <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-continue-apply>Continue to Apply</button>
+            <?php if ($reviewApproved): ?>
+              <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-continue-apply>Continue to Apply</button>
+            <?php else: ?>
+              <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-run-review>Accept Independent Review &amp; Continue</button>
+            <?php endif; ?>
           <?php else: ?>
-            <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-run-review>Run Independent Review</button>
+            <p class="mcw-apply-note">The Wizard cannot continue until these review issues are corrected. The quality gate has not been bypassed.</p>
+            <button class="app-btn app-btn--secondary mcw-primary-action" type="button" data-mcw-revise-structure>Revise Proposed Structure</button>
           <?php endif; ?>
         </section>
       <?php endif; ?>

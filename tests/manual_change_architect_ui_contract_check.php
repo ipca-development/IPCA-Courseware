@@ -59,6 +59,19 @@ architect_ui_assert(
     'Annex Books must not appear in the primary-manual selector.'
 );
 architect_ui_assert(str_contains($page, 'data-mcw-accept-impacts'), 'Single impact-analysis continuation action is missing.');
+architect_ui_assert(
+    str_contains($page, "\$reviewPayload['prepared_result']")
+        && str_contains($page, 'What must be corrected')
+        && str_contains($page, 'Accept Independent Review &amp; Continue')
+        && str_contains($page, 'data-mcw-revise-structure')
+        && str_contains($js, 'revise_structure_after_review'),
+    'Independent Review must unwrap the prepared result, present blockers, and expose governed correction.'
+);
+architect_ui_assert(
+    !str_contains($page, 'Run Independent Review')
+        && str_contains($page, 'Technical review record'),
+    'Step 5 must not present completed review preparation as a raw-JSON review action.'
+);
 foreach (array(
     'Why this section is affected',
     'Current manual',

@@ -214,14 +214,15 @@ function architect_api_ensure_structure(
     int $actorUserId,
     BooksManualsChangePlanService $plans,
     BooksManualsChangeArchitectService $architect,
-    BooksManualsChangeStructureService $structures
+    BooksManualsChangeStructureService $structures,
+    bool $forceNewProposal = false
 ): int {
     $report = $architect->getCompleteCheckpointReport($planId);
     $proposals = array_values(array_filter(
         (array)($report['structure_proposals'] ?? array()),
         'is_array'
     ));
-    if ($proposals !== array()) {
+    if (!$forceNewProposal && $proposals !== array()) {
         $latest = $proposals[array_key_last($proposals)];
         $proposalId = (int)($latest['id'] ?? 0);
         foreach ((array)($report['structure_nodes'] ?? array()) as $node) {
@@ -694,6 +695,78 @@ try {
             }
             exit;
 
+        case 'revise_structure_after_review':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $plan = $plans->getPlan($planId);
+            if ((int)($plan['owner_id'] ?? 0) !== $userId) {
+                throw new RuntimeException('Only the Change Plan owner can revise the proposed structure.');
+            }
+            $report = $plans->loadPlan($planId);
+            $reviewRows = array_values(array_filter((array)($report['reviews'] ?? array()), 'is_array'));
+            $latestReview = $reviewRows === array() ? array() : $reviewRows[array_key_last($reviewRows)];
+            $reviewPayload = is_array($latestReview['review_payload_json'] ?? null)
+                ? $latestReview['review_payload_json']
+                : array();
+            $preparedReview = is_array($reviewPayload['prepared_result'] ?? null)
+                ? $reviewPayload['prepared_result']
+                : $reviewPayload;
+            if (strtoupper((string)($preparedReview['status'] ?? '')) !== 'REQUIRES_REVIEW') {
+                throw new RuntimeException('Structure revision is available only for unresolved Independent Review issues.');
+            }
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_reviews
+                     SET status='superseded' WHERE plan_id=? AND status='requested'"
+                )->execute(array($planId));
+                $pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_drafts
+                     SET status='abandoned' WHERE plan_id=? AND status='generated'"
+                )->execute(array($planId));
+                $pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_structure_nodes n
+                     JOIN ipca_manual_ai_architect_structure_proposals p
+                       ON p.id=n.structure_proposal_id
+                     SET n.decision_status='superseded'
+                     WHERE p.plan_id=? AND p.status='approved'"
+                )->execute(array($planId));
+                $pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_structure_proposals
+                     SET status='superseded' WHERE plan_id=? AND status='approved'"
+                )->execute(array($planId));
+                $plans->updatePlan($planId, array(
+                    'stage' => 'structure',
+                    'status' => 'ready_for_review',
+                    'updated_by' => $userId,
+                ));
+                $plans->appendEvent($planId, 'STRUCTURE_REVISION_REQUESTED_BY_REVIEW', 12, array(
+                    'review_id' => (int)($latestReview['id'] ?? 0),
+                    'issues' => array_values((array)($preparedReview['issues'] ?? array())),
+                ), $userId);
+                $proposalId = architect_api_ensure_structure(
+                    $planId,
+                    $userId,
+                    $plans,
+                    $architect,
+                    $structures,
+                    true
+                );
+                $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $error;
+            }
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => array(
+                    'stage' => 'structure',
+                    'structure_proposal_id' => $proposalId,
+                ),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
         case 'generate_drafts':
             $planId = (int)($input['plan_id'] ?? 0);
             $plan = $plans->getPlan($planId);
@@ -843,12 +916,12 @@ try {
             ));
 
         case 'run_independent_review':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $reviewResult = $plans->runIndependentReview($planId, $userId);
+            $continueResult = $plans->continueToApply($planId, $userId);
             architect_api_json(200, array(
                 'ok' => true,
-                'result' => $plans->runIndependentReview(
-                    (int)($input['plan_id'] ?? 0),
-                    $userId
-                ),
+                'result' => array_merge($reviewResult, $continueResult),
                 'csrf_token' => architect_api_csrf(),
             ));
 
