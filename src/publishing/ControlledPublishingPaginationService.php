@@ -178,6 +178,12 @@ final class ControlledPublishingPaginationService
                     }
                 }
                 $entry['units'] = $this->unitsFromRenderedBody($parsed['body'], $section, $flags);
+                if ($sectionBlocks !== array() && $entry['units'] === array()) {
+                    throw new RuntimeException(
+                        'Pagination source contains governed blocks but no renderable units for section '
+                        . $sectionId . ' (' . (string)($section['title'] ?? $section['section_key'] ?? '') . ').'
+                    );
+                }
                 if (
                     !empty($flags['force_page_break_before'])
                     && isset($entry['units'][0])
@@ -262,7 +268,8 @@ final class ControlledPublishingPaginationService
         } elseif ($isAnnexSection) {
             $isMajorSectionStart = true;
         }
-        $pageBreakBefore = $isCover || $isAnnexCover || $isPart0 || $isAnnexSection;
+        $pageBreakBefore = $isCover || $isAnnexCover || $isPart0
+            || $isAnnexRegister || $isAnnexSection;
 
         return array(
             'is_cover' => $isCover,
@@ -434,7 +441,7 @@ final class ControlledPublishingPaginationService
         $sectionId = (int)($section['id'] ?? 0);
         $sectionKey = (string)($section['section_key'] ?? '');
         $bodyHtml = trim($bodyHtml);
-        if ($bodyHtml === '' || trim(strip_tags($bodyHtml)) === '') {
+        if (!$this->htmlHasPaginableContent($bodyHtml)) {
             return array();
         }
 
@@ -582,7 +589,7 @@ final class ControlledPublishingPaginationService
         }
 
         $authority = $this->paginationAuthority($section);
-        if ($bodyWithoutPart0Headings === '' || trim(strip_tags($bodyWithoutPart0Headings)) === '') {
+        if (!$this->htmlHasPaginableContent($bodyWithoutPart0Headings)) {
             return $units;
         }
         $units[] = array(
@@ -598,6 +605,25 @@ final class ControlledPublishingPaginationService
         );
 
         return $units;
+    }
+
+    private function htmlHasPaginableContent(string $html): bool
+    {
+        $html = trim($html);
+        if ($html === '') {
+            return false;
+        }
+        $text = html_entity_decode(
+            strip_tags($html),
+            ENT_QUOTES | ENT_HTML5,
+            'UTF-8'
+        );
+        $text = preg_replace('/[\p{Z}\s]+/u', '', $text) ?? $text;
+        if ($text !== '') {
+            return true;
+        }
+
+        return preg_match('/<(?:img|svg|canvas|video|table|hr)\b/i', $html) === 1;
     }
 
     /**

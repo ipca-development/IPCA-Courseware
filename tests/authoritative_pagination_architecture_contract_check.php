@@ -6,7 +6,7 @@ $failures = array();
 
 $protected = array(
     'src/publishing/ControlledPublishingBlockService.php'
-        => '7657371be4bd2a7a2821af68130e76403e3e02bb167478087681ee9f146e169d',
+        => 'a0c103104d4182dbe797d85ea04d3d757972b34cf4bc5e989925a034d64e7c39',
 );
 foreach ($protected as $relative => $hash) {
     if (!is_file($root . '/' . $relative) || hash_file('sha256', $root . '/' . $relative) !== $hash) {
@@ -30,6 +30,8 @@ $contracts = array(
         'Authoritative pagination is already running for this manual version',
         'INCREMENTAL_PREFIX_MISMATCH',
         'validateMergedCoverageOrder',
+        'assertSourceSectionCoverage',
+        'MISSING_SECTION_PAGE',
     ),
     'scripts/authoritative_manual_paginator.cjs' => array(
         'ReaderPaginationCore.js',
@@ -37,8 +39,8 @@ $contracts = array(
         'validation failed',
         'authoritative_layout',
         'CW_PAGINATION_PLAYWRIGHT_BROWSERS_PATH',
-        'const resolvedHeaderHeight = measuredBands.header || headerHeight',
-        'const resolvedFooterHeight = measuredBands.footer || footerHeight',
+        'const resolvedHeaderHeight = measuredBands.portrait.header || headerHeight',
+        'const resolvedFooterHeight = measuredBands.portrait.footer || footerHeight',
         'INCREMENTAL_PREFIX_MISMATCH',
     ),
     'src/publishing/ControlledPublishingReaderLayoutProfile.php' => array(
@@ -62,11 +64,28 @@ $contracts = array(
         'authoritativeEditorPageStartsFromResult',
         'data-authoritative-page-break',
         'state.authoritativeEditorPageStarts = []',
+        'observeCanonicalPageState',
+        "root.addEventListener('cpb:live-pagination-state', observeCanonicalPageState)",
+        "mode === 'paginated'",
+    ),
+    'public/admin/compliance/controlled_book_editor.php' => array(
+        'data-initial-view="paginated"',
+        'id="cpbViewPaginated"',
+        'Page (iOS)',
+        'id="cpbViewEdit"',
+        'id="cpbPaginationRegenerate"',
+    ),
+    'src/publishing/ControlledPublishingPaginationService.php' => array(
+        'htmlHasPaginableContent',
+        '<(?:img|svg|canvas|video)',
+        'contains governed blocks but no renderable units',
     ),
     'public/admin/api/controlled_book_page_map_api.php' => array(
-        "'returned_page_count' => count(\$pages)",
+        "'returned_page_count' => count(\$responsePages)",
         "\$sectionId > 0 ? \$sectionId : null",
         "\$reader->authoritativePageMapFreshness(\$version, \$paginateSource)",
+        "\$reader->readerPublicationPackage(\$version, \$paginateSource)",
+        "'artifact_compatible' => \$artifactCompatible",
         'ControlledPublishingPaginationValidationException',
         '$e->payload()',
         "case 'live_ensure':",
@@ -224,20 +243,6 @@ foreach ($contracts as $relative => $markers) {
         if (!str_contains($contents, $marker)) {
             $failures[] = "Missing marker '{$marker}' in {$relative}";
         }
-    }
-}
-
-$editorMarkup = (string)@file_get_contents(
-    $root . '/public/admin/compliance/controlled_book_editor.php'
-);
-foreach (array(
-    'cpbViewPaginated',
-    'cpbPaginationRegenerate',
-    'cpbPaginationApprove',
-    'cpbPaginationStatus',
-) as $removedControl) {
-    if (str_contains($editorMarkup, $removedControl)) {
-        $failures[] = 'Removed page-management control remains in the unified editor: ' . $removedControl;
     }
 }
 

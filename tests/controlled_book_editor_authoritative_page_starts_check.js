@@ -75,14 +75,29 @@ const result = {
 assert.deepStrictEqual(
   JSON.parse(JSON.stringify(context.authoritativeEditorPageStartsFromResult(result, 9))),
   [
-    { pageNumber: 11, sourceFragmentId: "section-9/comment-form/root" },
-    { pageNumber: 14, sourceFragmentId: "section-9/final-paragraph/root" },
+    {
+      pageNumber: 11,
+      sourceFragmentId: "section-9/comment-form/root",
+      rowIndex: null,
+      kind: "block",
+    },
+    {
+      pageNumber: 14,
+      sourceFragmentId: "section-9/final-paragraph/root",
+      rowIndex: null,
+      kind: "block",
+    },
   ],
   "Only safe whole-block starts after the section's first page should be projected."
 );
 
 context.state.authoritativeEditorPageStarts = [
-  { pageNumber: 11, sourceFragmentId: "section-9/comment-form/root" },
+  {
+    pageNumber: 11,
+    sourceFragmentId: "section-9/comment-form/root",
+    rowIndex: null,
+    kind: "block",
+  },
 ];
 const blocks = ["first", "comment-form", "comment"].map((anchor) => ({
   getAttribute(name) {

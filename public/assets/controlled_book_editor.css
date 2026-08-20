@@ -913,6 +913,7 @@
 .cpb-workspace {
   display: flex;
   flex-direction: column;
+  container-type: inline-size;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1119,6 +1120,51 @@
   height: 23px;
   overflow-x: hidden;
   overflow-y: hidden;
+}
+
+@container (max-width: 1050px) {
+  .cpb-toolbar {
+    flex-wrap: wrap;
+    align-content: flex-start;
+    min-height: 93px;
+    max-height: 42vh;
+    padding-bottom: 3px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .cpb-toolbar-main {
+    flex: 0 0 100%;
+    order: 2;
+    height: auto;
+  }
+
+  .cpb-toolbar-row {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 23px;
+    overflow: visible;
+  }
+
+  .cpb-table-toolbar {
+    flex: 0 0 auto;
+    height: auto;
+  }
+
+  .cpb-editor-root:not(.cpb-editor-toc-mode):not(.cpb-form-editor-root) .cpb-toolbar-shared {
+    position: static;
+    order: 1;
+    flex: 1 1 auto;
+    min-height: 23px;
+    margin: 0;
+  }
+
+  .cpb-editor-root:not(.cpb-editor-toc-mode):not(.cpb-form-editor-root) .cpb-save-status {
+    position: static;
+    order: 1;
+    align-self: center;
+    margin-left: auto;
+  }
 }
 
 .cpb-toolbar-row--primary {
@@ -1577,7 +1623,6 @@ body.cpb-browser-fullscreen .cpb-workspace {
   background: #e7e9ed;
 }
 
-.cpb-editor-root.cpb-editor-paginated-mode .cpb-toolbar-main,
 .cpb-editor-root.cpb-editor-paginated-mode .cpb-toolbar-toc,
 .cpb-editor-root.cpb-editor-paginated-mode .cpb-toolbar-lep,
 .cpb-editor-root.cpb-editor-paginated-mode .cpb-toolbar-part0 {
@@ -1601,10 +1646,61 @@ body.cpb-browser-fullscreen .cpb-workspace {
   min-width: 816px;
   height: 1056px;
   min-height: 1056px;
-  overflow: visible;
+  overflow: hidden;
   background: #fff;
   border: 1px solid #c8cdd4;
   box-shadow: 0 5px 18px rgba(37, 43, 52, .25);
+}
+
+.cpb-canonical-page__frame {
+  display: block;
+  border: 0;
+  background: #fff;
+  pointer-events: none;
+}
+
+button.cpb-canonical-page__edit-portal {
+  position: absolute !important;
+  left: var(--cpb-canonical-portal-left) !important;
+  top: var(--cpb-canonical-portal-top) !important;
+  width: var(--cpb-canonical-portal-width) !important;
+  height: var(--cpb-canonical-portal-height) !important;
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  transform: none !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+}
+
+button.cpb-canonical-page__edit-portal:hover,
+button.cpb-canonical-page__edit-portal:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, .55) !important;
+  outline-offset: -2px !important;
+  background: rgba(37, 99, 235, .045) !important;
+}
+
+button.cpb-canonical-page__edit-portal:hover::after,
+button.cpb-canonical-page__edit-portal:focus-visible::after {
+  content: "Edit";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: #1e3c72;
+  color: #fff;
+  font: 600 9px/1.2 system-ui, sans-serif;
 }
 
 .cpb-paginated-page-label {
@@ -1792,12 +1888,23 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-paginated-block-dialog {
-  width: min(760px, 92vw);
+  width: min(1100px, 96vw);
   max-height: 86vh;
   overflow: auto;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 22px 70px rgba(0, 0, 0, .35);
+}
+
+.cpb-paginated-block-dialog > .cpb-toolbar-main {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  max-height: 42vh;
+  overflow: auto;
+  padding: 8px;
+  border-bottom: 1px solid #cbd5e1;
+  background: #f8fafc;
 }
 
 .cpb-paginated-block-dialog__head,
