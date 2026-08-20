@@ -820,7 +820,7 @@ final class BooksManualsChangeReviewerService
             ),
             'monitoring.aggregate-assurance' => array(
                 'MONITORING', 'MATERIAL', (string)($nodes['5.7.3'] ?? ''), array('5.7'), array('5.7.3'),
-                array('/(?:aggregate|systemic|quarterly|periodic.{0,40}reconciliation)/isu', '/(?:trends?|discrepanc)/iu', '/(?:individual occurrences|occurrence records)/iu'),
+                array('/(?:aggregate|systemic|quarterly|periodic.{0,40}reconciliation)/isu', '/(?:trends?|discrepanc)/iu', '/(?:individual occurrences|reportable occurrences|occurrence(?:-management)? records)/iu'),
                 'Section 5.7 provides aggregate/systemic assurance without replacing occurrence-level control.',
                 'Aggregate assurance is incomplete in Section 5.7.'
             ),

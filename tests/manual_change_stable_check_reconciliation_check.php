@@ -85,7 +85,7 @@ $semanticEquivalent['section_drafts']['5.6']['nodes']['5.6.8'] =
     'The Safety Manager shall maintain the ECCAIRS Follow-up Control Log for reportable occurrences. '
     . 'The log shall track each deadline, reporting stage, action status, investigation and supporting evidence.';
 $semanticEquivalent['section_drafts']['5.7']['nodes']['5.7.3'] =
-    'A periodic reconciliation, conducted at least quarterly, shall compare occurrence records and ECCAIRS records. '
+    'A periodic reconciliation, conducted at least quarterly, shall compare reportable occurrences and ECCAIRS records. '
     . 'Discrepancies and adverse trends shall be reported for systemic action without replacing occurrence-level control.';
 $semanticEquivalent['section_drafts']['4.2']['nodes']['4.2'] =
     'Evidence of external submissions, receipt or acceptance shall be retained with investigation content, '
