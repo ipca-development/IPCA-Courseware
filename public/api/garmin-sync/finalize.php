@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/_bootstrap.php';
 require_once __DIR__ . '/../../../src/GarminSyncFileClassificationService.php';
+require_once __DIR__ . '/../../../src/GarminSyncPowerUpAnalysisService.php';
 
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -17,10 +18,15 @@ try {
     $objectUuid = trim((string)($result['receipt']['object_id'] ?? ''));
     if ($objectUuid !== '') {
         try {
-            (new GarminSyncFileClassificationService($pdo))->classifyObjectUuid($objectUuid);
+            $classification = (new GarminSyncFileClassificationService($pdo))
+                ->classifyObjectUuid($objectUuid);
+            if (($classification['source_kind'] ?? '') === GarminSyncFileClassificationService::FLIGHT_CSV) {
+                (new GarminSyncPowerUpAnalysisService($pdo))
+                    ->analyzeArchiveId((int)($classification['archive_file_id'] ?? 0));
+            }
         } catch (Throwable $classificationError) {
-            // Derived classification must never invalidate an already verified archive receipt.
-            error_log('Garmin Sync classification deferred: ' . $classificationError->getMessage());
+            // Derived metadata must never invalidate an already verified archive receipt.
+            error_log('Garmin Sync derived analysis deferred: ' . $classificationError->getMessage());
         }
     }
     garmin_sync_json(200, $result);

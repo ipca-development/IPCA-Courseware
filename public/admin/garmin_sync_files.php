@@ -65,6 +65,9 @@ $stats = array(
     'flight_csv' => 0,
     'junk' => 0,
     'unclassified' => 0,
+    'power_up' => 0,
+    'flight' => 0,
+    'activity_pending' => 0,
 );
 
 try {
@@ -107,6 +110,23 @@ try {
     $classificationStmt->execute(array($organizationId));
     $stats = array_merge($stats, $classificationStmt->fetch(PDO::FETCH_ASSOC) ?: array());
 
+    $activityStmt = $pdo->prepare(
+        "SELECT COALESCE(SUM(activity.activity_kind = 'POWER_UP'), 0) AS power_up,
+                COALESCE(SUM(activity.activity_kind = 'FLIGHT'), 0) AS flight,
+                COALESCE(SUM(c.source_kind = 'GARMIN_FLIGHT_CSV' AND activity.id IS NULL), 0) AS activity_pending
+         FROM (
+             SELECT DISTINCT archive_file_id
+             FROM ipca_garmin_sync_upload_sessions
+             WHERE organization_id = ? AND archive_file_id IS NOT NULL
+         ) owned
+         LEFT JOIN ipca_garmin_sync_file_classifications c
+           ON c.archive_file_id = owned.archive_file_id
+         LEFT JOIN ipca_garmin_sync_file_activity_analyses activity
+           ON activity.archive_file_id = owned.archive_file_id"
+    );
+    $activityStmt->execute(array($organizationId));
+    $stats = array_merge($stats, $activityStmt->fetch(PDO::FETCH_ASSOC) ?: array());
+
     $where = array('s.organization_id = ?');
     $params = array($organizationId);
     if ($status !== 'all') {
@@ -146,6 +166,10 @@ try {
                 d.device_uuid, d.display_name AS device_name,
                 c.source_kind, c.analysis_eligible, c.aircraft_registration,
                 c.product, c.system_identifier, c.classification_reason,
+                activity.activity_kind, activity.duration_seconds,
+                activity.maximum_rpm, activity.maximum_ground_speed_kt,
+                activity.maximum_airspeed_kt, activity.maximum_position_radius_nm,
+                activity.analysis_reason,
                 EXISTS(
                     SELECT 1 FROM ipca_aircraft_devices fleet
                     WHERE UPPER(fleet.registration) = UPPER(c.aircraft_registration)
@@ -154,6 +178,7 @@ try {
          FROM ipca_garmin_sync_upload_sessions s
          LEFT JOIN ipca_garmin_sync_archive_files a ON a.id = s.archive_file_id
          LEFT JOIN ipca_garmin_sync_file_classifications c ON c.archive_file_id = a.id
+         LEFT JOIN ipca_garmin_sync_file_activity_analyses activity ON activity.archive_file_id = a.id
          LEFT JOIN ipca_garmin_sync_devices d
            ON d.id = s.device_id AND d.organization_id = s.organization_id
          WHERE {$whereSql}
@@ -213,6 +238,10 @@ cw_header('Garmin Sync uploaded files');
 .gs-kind--junk { background:#fee2e2; color:#991b1b; }
 .gs-kind--pending { background:#e2e8f0; color:#475569; }
 .gs-registration { font-size:1rem; font-weight:900; color:#0f172a; }
+.gs-activity { display:inline-block; border-radius:999px; padding:5px 10px; font-size:.78rem; font-weight:900; text-transform:uppercase; }
+.gs-activity--power-up { background:#dc2626; color:#fff; }
+.gs-activity--flight { background:#16a34a; color:#fff; }
+.gs-activity--pending { background:#64748b; color:#fff; }
 .gs-error { margin:16px 0; padding:12px; border:1px solid #fecaca; border-radius:10px; color:#991b1b; background:#fef2f2; }
 .gs-pagination { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:14px; }
 @media (max-width:700px) { .gs-files { padding:14px; } }
@@ -238,6 +267,8 @@ cw_header('Garmin Sync uploaded files');
       <div class="gs-stat"><strong><?= number_format((int)$stats['flight_csv']) ?></strong><span>Garmin flight CSVs</span></div>
       <div class="gs-stat"><strong><?= number_format((int)$stats['junk']) ?></strong><span>Junk / unsupported</span></div>
       <div class="gs-stat"><strong><?= number_format((int)$stats['unclassified']) ?></strong><span>Awaiting classification</span></div>
+      <div class="gs-stat"><strong><?= number_format((int)$stats['power_up']) ?></strong><span>Power-up only</span></div>
+      <div class="gs-stat"><strong><?= number_format((int)$stats['flight']) ?></strong><span>Flight evidence</span></div>
       <div class="gs-stat"><strong><?= garmin_sync_files_format_bytes((int)$stats['unique_bytes']) ?></strong><span>Verified archive size</span></div>
       <div class="gs-stat"><strong><?= number_format((int)$stats['completed']) ?></strong><span>Completed uploads</span></div>
       <div class="gs-stat"><strong><?= number_format((int)$stats['receiving']) ?></strong><span>Receiving</span></div>
@@ -283,6 +314,7 @@ cw_header('Garmin Sync uploaded files');
             <th>Filename</th>
             <th>File type</th>
             <th>Airplane registration</th>
+            <th>Activity</th>
             <th>Status</th>
             <th>Size / received</th>
             <th>Device</th>
@@ -294,7 +326,7 @@ cw_header('Garmin Sync uploaded files');
         </thead>
         <tbody>
           <?php if ($rows === array()): ?>
-            <tr><td colspan="10" class="gs-muted">No Garmin Sync uploads match this view.</td></tr>
+            <tr><td colspan="11" class="gs-muted">No Garmin Sync uploads match this view.</td></tr>
           <?php endif; ?>
           <?php foreach ($rows as $row): ?>
             <?php
@@ -307,6 +339,7 @@ cw_header('Garmin Sync uploaded files');
               $receivedChunkCount = is_array($receivedChunks) ? count($receivedChunks) : 0;
               $sourceKind = trim((string)($row['source_kind'] ?? ''));
               $isFlightCsv = $sourceKind === 'GARMIN_FLIGHT_CSV';
+              $activityKind = trim((string)($row['activity_kind'] ?? ''));
             ?>
             <tr>
               <td class="gs-name"><?= h((string)$row['original_filename']) ?></td>
@@ -328,6 +361,20 @@ cw_header('Garmin Sync uploaded files');
                   <?php if (empty($row['registration_in_active_fleet'])): ?><br><span class="gs-muted">Not in active fleet</span><?php endif; ?>
                 <?php else: ?>
                   <span class="gs-muted"><?= $isFlightCsv ? 'Not identified' : '—' ?></span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <?php if ($activityKind === 'POWER_UP'): ?>
+                  <span class="gs-activity gs-activity--power-up">Power-up</span>
+                <?php elseif ($activityKind === 'FLIGHT'): ?>
+                  <span class="gs-activity gs-activity--flight">Flight</span>
+                <?php elseif ($isFlightCsv): ?>
+                  <span class="gs-activity gs-activity--pending">Pending</span>
+                <?php else: ?>
+                  <span class="gs-muted">—</span>
+                <?php endif; ?>
+                <?php if (!empty($row['analysis_reason'])): ?>
+                  <br><span class="gs-muted"><?= h((string)$row['analysis_reason']) ?></span>
                 <?php endif; ?>
               </td>
               <td><span class="gs-status gs-status--<?= h($rowStatus) ?>"><?= h($rowStatus) ?></span></td>
