@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/_bootstrap.php';
 require_once __DIR__ . '/../../../src/GarminSyncFileClassificationService.php';
 require_once __DIR__ . '/../../../src/GarminSyncPowerUpAnalysisService.php';
+require_once __DIR__ . '/../../../src/GarminSyncAirportAnalysisService.php';
 
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -21,8 +22,12 @@ try {
             $classification = (new GarminSyncFileClassificationService($pdo))
                 ->classifyObjectUuid($objectUuid);
             if (($classification['source_kind'] ?? '') === GarminSyncFileClassificationService::FLIGHT_CSV) {
-                (new GarminSyncPowerUpAnalysisService($pdo))
+                $activity = (new GarminSyncPowerUpAnalysisService($pdo))
                     ->analyzeArchiveId((int)($classification['archive_file_id'] ?? 0));
+                if (($activity['activity_kind'] ?? '') === GarminSyncPowerUpAnalysisService::FLIGHT) {
+                    (new GarminSyncAirportAnalysisService($pdo))
+                        ->analyzeArchiveId((int)($classification['archive_file_id'] ?? 0));
+                }
             }
         } catch (Throwable $classificationError) {
             // Derived metadata must never invalidate an already verified archive receipt.

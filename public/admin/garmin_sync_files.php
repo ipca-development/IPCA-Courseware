@@ -158,9 +158,9 @@ try {
         $where[] = "c.source_kind = 'GARMIN_FLIGHT_CSV' AND activity.id IS NULL";
     }
     if ($search !== '') {
-        $where[] = '(s.original_filename LIKE ? OR s.upload_uuid LIKE ? OR s.expected_sha256 LIKE ? OR a.object_uuid LIKE ? OR c.aircraft_registration LIKE ?)';
+        $where[] = '(s.original_filename LIKE ? OR s.upload_uuid LIKE ? OR s.expected_sha256 LIKE ? OR a.object_uuid LIKE ? OR c.aircraft_registration LIKE ? OR airports.departure_airport_code LIKE ? OR airports.arrival_airport_code LIKE ?)';
         $like = '%' . $search . '%';
-        array_push($params, $like, $like, $like, $like, $like);
+        array_push($params, $like, $like, $like, $like, $like, $like, $like);
     }
     $whereSql = implode(' AND ', $where);
 
@@ -170,6 +170,7 @@ try {
          LEFT JOIN ipca_garmin_sync_archive_files a ON a.id = s.archive_file_id
          LEFT JOIN ipca_garmin_sync_file_classifications c ON c.archive_file_id = a.id
          LEFT JOIN ipca_garmin_sync_file_activity_analyses activity ON activity.archive_file_id = a.id
+         LEFT JOIN ipca_garmin_sync_file_airport_analyses airports ON airports.archive_file_id = a.id
          WHERE {$whereSql}"
     );
     $countStmt->execute($params);
@@ -188,6 +189,11 @@ try {
                 activity.maximum_rpm, activity.maximum_ground_speed_kt,
                 activity.maximum_airspeed_kt, activity.maximum_position_radius_nm,
                 activity.analysis_reason,
+                airports.departure_airport_code, airports.departure_airport_name,
+                airports.departure_distance_nm, airports.arrival_airport_code,
+                airports.arrival_airport_name, airports.arrival_distance_nm,
+                airports.derivation_status AS airport_derivation_status,
+                airports.confidence AS airport_confidence,
                 EXISTS(
                     SELECT 1 FROM ipca_aircraft_devices fleet
                     WHERE UPPER(fleet.registration) = UPPER(c.aircraft_registration)
@@ -197,6 +203,7 @@ try {
          LEFT JOIN ipca_garmin_sync_archive_files a ON a.id = s.archive_file_id
          LEFT JOIN ipca_garmin_sync_file_classifications c ON c.archive_file_id = a.id
          LEFT JOIN ipca_garmin_sync_file_activity_analyses activity ON activity.archive_file_id = a.id
+         LEFT JOIN ipca_garmin_sync_file_airport_analyses airports ON airports.archive_file_id = a.id
          LEFT JOIN ipca_garmin_sync_devices d
            ON d.id = s.device_id AND d.organization_id = s.organization_id
          WHERE {$whereSql}
@@ -260,6 +267,7 @@ cw_header('Garmin Sync uploaded files');
 .gs-activity--power-up { background:#dc2626; color:#fff; }
 .gs-activity--flight { background:#16a34a; color:#fff; }
 .gs-activity--pending { background:#64748b; color:#fff; }
+.gs-airport { font-size:1rem; font-weight:900; color:#0f172a; }
 .gs-error { margin:16px 0; padding:12px; border:1px solid #fecaca; border-radius:10px; color:#991b1b; background:#fef2f2; }
 .gs-pagination { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:14px; }
 @media (max-width:700px) { .gs-files { padding:14px; } }
@@ -319,7 +327,7 @@ cw_header('Garmin Sync uploaded files');
         </select>
       </label>
       <label>
-        Filename, registration, upload ID, object ID, or SHA-256
+        Filename, registration, airport, upload ID, object ID, or SHA-256
         <input type="search" name="q" value="<?= h($search) ?>" size="42" placeholder="Search received files">
       </label>
       <button class="btn btn-primary" type="submit">Filter</button>
@@ -341,6 +349,8 @@ cw_header('Garmin Sync uploaded files');
             <th>File type</th>
             <th>Airplane registration</th>
             <th>Activity</th>
+            <th>Departure</th>
+            <th>Arrival</th>
             <th>Status</th>
             <th>Size / received</th>
             <th>Device</th>
@@ -352,7 +362,7 @@ cw_header('Garmin Sync uploaded files');
         </thead>
         <tbody>
           <?php if ($rows === array()): ?>
-            <tr><td colspan="11" class="gs-muted">No Garmin Sync uploads match this view.</td></tr>
+            <tr><td colspan="13" class="gs-muted">No Garmin Sync uploads match this view.</td></tr>
           <?php endif; ?>
           <?php foreach ($rows as $row): ?>
             <?php
@@ -401,6 +411,24 @@ cw_header('Garmin Sync uploaded files');
                 <?php endif; ?>
                 <?php if (!empty($row['analysis_reason'])): ?>
                   <br><span class="gs-muted"><?= h((string)$row['analysis_reason']) ?></span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <?php if (!empty($row['departure_airport_code'])): ?>
+                  <span class="gs-airport"><?= h((string)$row['departure_airport_code']) ?></span>
+                  <br><span class="gs-muted"><?= h((string)$row['departure_airport_name']) ?></span>
+                  <br><span class="gs-muted"><?= h(number_format((float)$row['departure_distance_nm'], 1)) ?> NM from start</span>
+                <?php else: ?>
+                  <span class="gs-muted">Unknown</span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <?php if (!empty($row['arrival_airport_code'])): ?>
+                  <span class="gs-airport"><?= h((string)$row['arrival_airport_code']) ?></span>
+                  <br><span class="gs-muted"><?= h((string)$row['arrival_airport_name']) ?></span>
+                  <br><span class="gs-muted"><?= h(number_format((float)$row['arrival_distance_nm'], 1)) ?> NM from end</span>
+                <?php else: ?>
+                  <span class="gs-muted">Unknown</span>
                 <?php endif; ?>
               </td>
               <td><span class="gs-status gs-status--<?= h($rowStatus) ?>"><?= h($rowStatus) ?></span></td>
