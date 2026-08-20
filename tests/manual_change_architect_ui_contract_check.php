@@ -154,7 +154,8 @@ architect_ui_assert(
         && str_contains($page, 'data-drafting-pending')
         && str_contains($page, 'Drafting authorized manual amendments')
         && str_contains($js, "request('generate_drafts'")
-        && str_contains($js, "request('draft_status'"),
+        && str_contains($js, "request('draft_status'")
+        && str_contains($js, 'response.result || response'),
     'Step 3 acceptance must generate, validate, persist, and progressively reveal Step 4 drafts.'
 );
 architect_ui_assert(

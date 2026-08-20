@@ -477,7 +477,8 @@
       if (polling) return;
       polling = true;
       try {
-        var result = await request('draft_status');
+        var response = await request('draft_status');
+        var result = response.result || response;
         status = String(result.draft_status || 'not_started');
         render(result.progress, result.message);
         if (status === 'generated') {
