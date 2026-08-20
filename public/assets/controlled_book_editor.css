@@ -2683,18 +2683,30 @@ span.cpb-flow-page-break {
   padding: 0 !important;
 }
 
+.cmp-page .cpb-editor-root button.cpb-table-cell-image-resize,
 .cpb-table-cell-image-resize {
   position: absolute;
-  right: -5px;
-  bottom: -5px;
-  width: 12px;
-  height: 12px;
+  right: -4px !important;
+  bottom: -4px !important;
+  width: 14px !important;
+  min-width: 14px !important;
+  max-width: 14px !important;
+  height: 14px !important;
+  min-height: 14px !important;
+  max-height: 14px !important;
   padding: 0 !important;
-  border: 2px solid #fff !important;
-  border-radius: 50% !important;
-  background: #2563eb !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
-  cursor: nwse-resize;
+  border: 2px solid #1e3c72 !important;
+  border-radius: 2px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+  cursor: nwse-resize !important;
+  touch-action: none;
+  z-index: 2;
+}
+
+.cmp-page .cpb-editor-root button.cpb-table-cell-image-resize:hover,
+.cpb-table-cell-image-resize:hover {
+  background: #eff6ff !important;
 }
 
 .cpb-heading {
@@ -3669,9 +3681,50 @@ ol.cpb-list > li[data-indent-level="8"] {
 
 .cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-toolbar-table-label,
 .cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-table-toolbar__color,
+.cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-table-image-size,
+.cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-table-image-lock,
+.cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-toolbar-toc-label,
+.cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-toolbar-lep-label,
 .cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-zoom-label,
 .cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-save-status {
-  font-size: 8px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+  font-size: 8px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+}
+
+.cmp-page .cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-table-image-size input[type="number"],
+.cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-table-image-size input[type="number"] {
+  width: 36px !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  padding: 0 2px !important;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+  font-size: 8px !important;
+  font-weight: 600 !important;
+  line-height: 18px !important;
+}
+
+.cmp-page .cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar button.cpb-table-image-step,
+.cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar button.cpb-table-image-step {
+  width: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  padding: 0 !important;
+  font-size: 8px !important;
+  line-height: 18px !important;
+}
+
+.cmp-page .cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-table-image-lock input[type="checkbox"],
+.cpb-editor-root:not(.cpb-form-editor-root) .cpb-toolbar .cpb-table-image-lock input[type="checkbox"] {
+  width: 10px !important;
+  min-width: 10px !important;
+  height: 10px !important;
+  min-height: 10px !important;
 }
 
 .cmp-page .cpb-editor-root .cpb-toolbar button.cpb-tool-btn--warning {

@@ -157,6 +157,9 @@ if (!str_contains($mediaHtml, 'border-top:2px dashed #123456')
 
 $editorPath = dirname(__DIR__) . '/public/assets/controlled_book_editor.js';
 $editorSource = (string)file_get_contents($editorPath);
+$editorCss = (string)file_get_contents(
+    dirname(__DIR__) . '/public/assets/controlled_book_editor.css'
+);
 $requiredMarkers = array(
     'function normalizeTableTitleRow(blockEl)',
     'titleCell.colSpan = tableColCount(blockEl);',
@@ -189,6 +192,21 @@ foreach ($requiredMarkers as $marker) {
     if (!str_contains($editorSource, $marker)) {
         $failures[] = "Editor is missing required regression marker: {$marker}";
     }
+}
+if (!preg_match(
+    '/cpb-table-cell-image-resize[\s\S]*?width:\s*14px\s*!important[\s\S]*?'
+        . 'height:\s*14px\s*!important[\s\S]*?border:\s*2px solid #1e3c72\s*!important[\s\S]*?'
+        . 'border-radius:\s*2px\s*!important[\s\S]*?background:\s*#fff\s*!important/',
+    $editorCss
+)) {
+    $failures[] = 'Table-cell image resize handle does not match the standard image resize handle.';
+}
+if (!preg_match(
+    '/cpb-table-image-size input\[type="number"\][\s\S]*?height:\s*18px\s*!important'
+        . '[\s\S]*?font-size:\s*8px\s*!important/',
+    $editorCss
+)) {
+    $failures[] = 'Table-cell image size fields do not use compact toolbar typography.';
 }
 
 if (!preg_match(
