@@ -62,6 +62,77 @@ final class BooksManualsChangeReviewerService
         $status = $unexplainedHits === array() && $unresolvedBoundaries === array()
             ? self::READY
             : self::REQUIRES_REVIEW;
+        $governanceChecks = array();
+        foreach ($unexplainedHits as $hit) {
+            $hitId = (int)($hit['id'] ?? 0);
+            $identity = trim((string)(
+                $hit['matched_identity']
+                ?? $hit['legacy_identity']
+                ?? $hit['matched_text']
+                ?? 'legacy reference'
+            ));
+            $section = trim((string)(
+                $hit['section_number']
+                ?? $hit['canonical_section_number']
+                ?? ''
+            ));
+            $entityKey = $hitId > 0
+                ? (string)$hitId
+                : substr(hash('sha256', $this->json($hit)), 0, 24);
+            $governanceChecks[] = array(
+                'check_id' => 'governance.legacy-hit.' . $entityKey,
+                'check_version' => self::CHECK_VERSION,
+                'category' => 'SCOPE',
+                'severity' => 'HARD',
+                'status' => 'FAIL',
+                'affected_sections' => $section === '' ? array() : array($section),
+                'affected_nodes' => $section === '' ? array() : array($section),
+                'required_invariant' =>
+                    'Every exact in-scope legacy reference has an accepted human disposition.',
+                'observed_state' => 'Legacy reference awaiting disposition: ' . $identity,
+                'evidence_references' => array(
+                    'legacy_hit:' . $entityKey,
+                    'accepted_impact_analysis',
+                ),
+                'human_explanation' =>
+                    'An exact legacy reference still lacks its governed disposition'
+                    . ($section === '' ? '.' : ' in ' . $section . '.'),
+                'allowed_repair_scope' => array(),
+                'known_limitations' => array(),
+            );
+        }
+        foreach ($unresolvedBoundaries as $boundary) {
+            $boundaryId = (int)($boundary['id'] ?? 0);
+            $section = trim((string)(
+                $boundary['section_number']
+                ?? $boundary['scope_key']
+                ?? ''
+            ));
+            $entityKey = $boundaryId > 0
+                ? (string)$boundaryId
+                : substr(hash('sha256', $this->json($boundary)), 0, 24);
+            $governanceChecks[] = array(
+                'check_id' => 'governance.review-boundary.' . $entityKey,
+                'check_version' => self::CHECK_VERSION,
+                'category' => 'SCOPE',
+                'severity' => 'HARD',
+                'status' => 'FAIL',
+                'affected_sections' => $section === '' ? array() : array($section),
+                'affected_nodes' => $section === '' ? array() : array($section),
+                'required_invariant' =>
+                    'Every REVIEW_SEPARATELY boundary has an accepted disposition before Step 5.',
+                'observed_state' => 'An accepted-scope review boundary remains active.',
+                'evidence_references' => array(
+                    'review_boundary:' . $entityKey,
+                    'accepted_impact_analysis',
+                ),
+                'human_explanation' =>
+                    'A REVIEW_SEPARATELY boundary remains unresolved'
+                    . ($section === '' ? '.' : ' for ' . $section . '.'),
+                'allowed_repair_scope' => array(),
+                'known_limitations' => array(),
+            );
+        }
 
         return array(
             'schema' => 'ipca.manual-change-independent-review.v1',
@@ -70,6 +141,11 @@ final class BooksManualsChangeReviewerService
             'prompt_version' => self::PROMPT_VERSION,
             'status' => $status,
             'ready_rule' => 'READY requires zero unexplained exact legacy hits and zero unresolved review boundaries.',
+            'blockers' => array_values(array_map(
+                static fn(array $check): string => (string)$check['human_explanation'],
+                $governanceChecks
+            )),
+            'review_checks' => $governanceChecks,
             'unexplained_exact_legacy_hits' => $unexplainedHits,
             'unresolved_review_boundaries' => $unresolvedBoundaries,
             'accepted_review_exceptions' => $acceptedReviewExceptions,

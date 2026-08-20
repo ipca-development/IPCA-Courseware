@@ -66,7 +66,8 @@ final class BooksManualsChangeApplyService
             array($planId)
         );
         $reviewPayload = $this->decode($review['review_payload_json'] ?? null);
-        if (strtoupper((string)($reviewPayload['status'] ?? '')) !== 'READY') {
+        if (strtoupper((string)($reviewPayload['status'] ?? '')) !== 'READY'
+            || (string)($reviewPayload['outcome'] ?? '') !== 'READY_TO_APPLY') {
             throw new RuntimeException('The independently reviewed wording is not approved for application.');
         }
         $reviewedPackage = (array)($reviewPayload['operation_package'] ?? array());
@@ -78,22 +79,6 @@ final class BooksManualsChangeApplyService
             throw new RuntimeException(
                 'The in-place operation package differs from the independently reviewed package.'
             );
-        }
-
-        $existing = $this->latestRow(
-            'SELECT * FROM ipca_manual_ai_architect_operations
-             WHERE plan_id=? AND operation_type=\'apply_accepted_wizard_changes\'
-               AND status IN (\'running\',\'succeeded\')
-             ORDER BY id DESC LIMIT 1',
-            array($planId),
-            false
-        );
-        if ($existing !== null) {
-            $result = $this->decode($existing['result_json'] ?? null);
-            if ((string)($existing['status'] ?? '') === 'succeeded') {
-                return $result;
-            }
-            throw new RuntimeException('This Wizard application is already running.');
         }
 
         $targets = $this->buildTargets($planId, $versionId, $sectionDrafts);
@@ -112,40 +97,126 @@ final class BooksManualsChangeApplyService
                 $targets
             ),
         )));
-        $operationUuid = $this->uuid();
-        $operationId = $this->plans->save('operations', $planId, array(
-            'operation_uuid' => $operationUuid,
-            'draft_id' => (int)$draft['id'],
-            'review_id' => (int)$review['id'],
-            'operation_type' => 'apply_accepted_wizard_changes',
-            'idempotency_key' => hash('sha256', 'wizard-apply|' . $planId . '|' . $requestFingerprint),
-            'status' => 'running',
-            'request_fingerprint' => $requestFingerprint,
-            'operation_payload_json' => $this->json(array(
-                'schema' => 'ipca.manual-change-in-place-apply.v1',
-                'plan_id' => $planId,
-                'book_version_id' => $versionId,
-                'revision_creation_allowed' => false,
-                'lifecycle_transition_allowed' => false,
-                'independently_reviewed_package' => $preflightPackage,
-                'target_contexts' => array_map(
-                    static fn(array $target): array => array(
-                        'section_number' => $target['section_number'],
-                        'section_id' => $target['section_id'],
-                        'context_key' => $target['context_key'],
-                        'context_hash' => $target['context_hash'],
-                    ),
-                    $targets
+        $operationPayload = $this->json(array(
+            'schema' => 'ipca.manual-change-in-place-apply.v1',
+            'plan_id' => $planId,
+            'book_version_id' => $versionId,
+            'revision_creation_allowed' => false,
+            'lifecycle_transition_allowed' => false,
+            'independently_reviewed_package' => $preflightPackage,
+            'target_contexts' => array_map(
+                static fn(array $target): array => array(
+                    'section_number' => $target['section_number'],
+                    'section_id' => $target['section_id'],
+                    'context_key' => $target['context_key'],
+                    'context_hash' => $target['context_hash'],
                 ),
-            )),
-            'requested_by' => $actorUserId,
-            'started_at' => gmdate('Y-m-d H:i:s.v'),
+                $targets
+            ),
         ));
+
+        $this->pdo->beginTransaction();
+        try {
+            $lockedPlan = $this->latestRow(
+                'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
+                 WHERE id=? FOR UPDATE',
+                array($planId)
+            );
+            if ((int)($lockedPlan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($lockedPlan['stage'] ?? '') !== 'operations') {
+                throw new RuntimeException(
+                    'The Change Plan changed before the Wizard application was claimed.'
+                );
+            }
+            // Lock in the same order as the mutation transaction. If an older
+            // worker is active, this waits for its definitive operation status.
+            $this->lockEditableVersion($versionId);
+            $operationsStmt = $this->pdo->prepare(
+                "SELECT * FROM ipca_manual_ai_architect_operations
+                 WHERE plan_id=? AND operation_type='apply_accepted_wizard_changes'
+                 ORDER BY id DESC FOR UPDATE"
+            );
+            $operationsStmt->execute(array($planId));
+            $priorOperations = $operationsStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            foreach ($priorOperations as $priorOperation) {
+                $priorStatus = (string)($priorOperation['status'] ?? '');
+                if ($priorStatus === 'succeeded') {
+                    $result = $this->decode($priorOperation['result_json'] ?? null);
+                    $this->pdo->commit();
+                    return $result;
+                }
+                if ($priorStatus !== 'running') {
+                    continue;
+                }
+                $startedRaw = trim((string)($priorOperation['started_at'] ?? ''));
+                $startedAt = $startedRaw === ''
+                    ? false
+                    : strtotime($startedRaw . ' UTC');
+                if ($startedAt !== false && $startedAt > time() - 300) {
+                    throw new RuntimeException('This Wizard application is already running.');
+                }
+                $this->pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_operations
+                     SET status='failed',
+                         error_message='Stale Wizard application claim recovered safely.',
+                         completed_at=CURRENT_TIMESTAMP(3)
+                     WHERE id=? AND status='running'"
+                )->execute(array((int)$priorOperation['id']));
+                $this->plans->appendEvent(
+                    $planId,
+                    'WIZARD_APPLICATION_STALE_CLAIM_RECOVERED',
+                    13,
+                    array(
+                        'operation_id' => (int)$priorOperation['id'],
+                        'stale_after_seconds' => 300,
+                        'manual_content_mutated' => false,
+                    ),
+                    $actorUserId
+                );
+            }
+            $attemptNumber = count($priorOperations) + 1;
+            $operationId = $this->plans->save('operations', $planId, array(
+                'operation_uuid' => $this->uuid(),
+                'draft_id' => (int)$draft['id'],
+                'review_id' => (int)$review['id'],
+                'operation_type' => 'apply_accepted_wizard_changes',
+                'idempotency_key' => hash(
+                    'sha256',
+                    'wizard-apply|' . $planId . '|' . $requestFingerprint
+                        . '|attempt:' . $attemptNumber
+                ),
+                'status' => 'running',
+                'request_fingerprint' => $requestFingerprint,
+                'operation_payload_json' => $operationPayload,
+                'requested_by' => $actorUserId,
+                'started_at' => gmdate('Y-m-d H:i:s.v'),
+            ));
+            $this->pdo->commit();
+        } catch (Throwable $claimError) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $claimError;
+        }
 
         try {
             $this->pdo->beginTransaction();
             $version = $this->lockEditableVersion($versionId);
-            $before = $this->snapshotsForTargets($targets);
+            $claimedOperation = $this->latestRow(
+                "SELECT id,status,request_fingerprint
+                 FROM ipca_manual_ai_architect_operations WHERE id=? FOR UPDATE",
+                array($operationId)
+            );
+            if ((string)($claimedOperation['status'] ?? '') !== 'running'
+                || !hash_equals(
+                    $requestFingerprint,
+                    (string)($claimedOperation['request_fingerprint'] ?? '')
+                )) {
+                throw new RuntimeException(
+                    'The Wizard application claim expired before content mutation.'
+                );
+            }
+            $before = $this->snapshotsForTargets($targets, true);
             $this->assertTargetsUnchanged($targets, $before);
             $this->replaceTargetRanges(
                 $planId,
@@ -192,6 +263,7 @@ final class BooksManualsChangeApplyService
                     static fn(array $target): string => (string)$target['section_number'],
                     $targets
                 )),
+                'review_guidance' => $this->reviewGuidance($reviewPayload),
                 'applied_at' => gmdate(DATE_ATOM),
                 'applied_by' => $actorUserId,
                 'undo_available' => true,
@@ -246,15 +318,23 @@ final class BooksManualsChangeApplyService
      *
      * @return array<string,mixed>
      */
-    public function buildPreflightPackage(int $planId): array
+    public function buildPreflightPackage(int $planId, bool $forUpdate = false): array
     {
+        if ($forUpdate && !$this->pdo->inTransaction()) {
+            throw new RuntimeException('A locked operation package requires an active transaction.');
+        }
+        $lockClause = $forUpdate
+            && (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite'
+            ? ' FOR UPDATE'
+            : '';
         $plan = $this->plans->getPlan($planId);
         $versionId = $this->plans->primaryVersionId($plan);
         if ($versionId <= 0) {
             throw new RuntimeException('The Change Plan does not identify its original manual version.');
         }
         $version = $this->latestRow(
-            'SELECT id,version_label,lifecycle_status FROM ipca_publishing_book_versions WHERE id=?',
+            'SELECT id,version_label,lifecycle_status
+             FROM ipca_publishing_book_versions WHERE id=?' . $lockClause,
             array($versionId)
         );
         if (!in_array((string)($version['lifecycle_status'] ?? ''), array('draft', 'in_review'), true)) {
@@ -263,7 +343,8 @@ final class BooksManualsChangeApplyService
         $draft = $this->latestRow(
             "SELECT id,content_fingerprint,draft_payload_json
              FROM ipca_manual_ai_architect_drafts
-             WHERE plan_id=? AND status='generated' ORDER BY id DESC LIMIT 1",
+             WHERE plan_id=? AND status='generated' ORDER BY id DESC LIMIT 1"
+                . $lockClause,
             array($planId)
         );
         $proposal = $this->decode($draft['draft_payload_json'] ?? null);
@@ -275,7 +356,7 @@ final class BooksManualsChangeApplyService
             'is_array'
         ));
         $targets = $this->buildTargets($planId, $versionId, $sectionDrafts);
-        $snapshots = $this->snapshotsForTargets($targets);
+        $snapshots = $this->snapshotsForTargets($targets, $forUpdate);
         $this->assertTargetsUnchanged($targets, $snapshots);
         $titles = $this->structureTitles($planId);
         $replacements = array();
@@ -350,30 +431,307 @@ final class BooksManualsChangeApplyService
     }
 
     /**
+     * Return the latest Wizard application as independently reversible Editor
+     * items. An item is one physical controlled section; reverting it never
+     * restores or overwrites another affected section.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function editorChanges(int $versionId, ?int $actorUserId = null): ?array
+    {
+        $driver = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $sql = "SELECT o.*,p.title plan_title,p.owner_id plan_owner_id
+                FROM ipca_manual_ai_architect_operations o
+                JOIN ipca_manual_ai_architect_plans p ON p.id=o.plan_id
+                WHERE o.operation_type='apply_accepted_wizard_changes'
+                  AND o.status='succeeded'";
+        $params = array();
+        if ($driver === 'mysql') {
+            $sql .= " AND CAST(JSON_UNQUOTE(JSON_EXTRACT(
+                          o.result_json,'$.book_version_id'
+                      )) AS UNSIGNED)=?";
+            $params[] = $versionId;
+        }
+        $sql .= ' ORDER BY o.id DESC';
+        if ($driver === 'mysql') {
+            $sql .= ' LIMIT 100';
+        }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $applications = array();
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+            $candidate = $this->decode($row['result_json'] ?? null);
+            if ((int)($candidate['book_version_id'] ?? 0) === $versionId) {
+                $before = (array)($candidate['before_sections'] ?? array());
+                $after = (array)($candidate['after_sections'] ?? array());
+                if ($before !== array() && $after !== array()) {
+                    $applications[] = array(
+                        'operation' => $row,
+                        'result' => $candidate,
+                        'payload' => $this->decode($row['operation_payload_json'] ?? null),
+                        'before' => $before,
+                        'after' => $after,
+                    );
+                }
+            }
+        }
+        if ($applications === array()) {
+            return null;
+        }
+
+        $planIds = array_values(array_unique(array_map(
+            static fn(array $application): int =>
+                (int)$application['operation']['plan_id'],
+            $applications
+        )));
+        $revertedItems = array();
+        if ($planIds !== array()) {
+            $placeholders = implode(',', array_fill(0, count($planIds), '?'));
+            $revertStmt = $this->pdo->prepare(
+                "SELECT operation_payload_json
+                 FROM ipca_manual_ai_architect_operations
+                 WHERE plan_id IN ({$placeholders})
+                   AND operation_type='revert_wizard_change_item'
+                   AND status='succeeded' ORDER BY id"
+            );
+            $revertStmt->execute($planIds);
+            foreach ($revertStmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $revertRow) {
+                $revertPayload = $this->decode($revertRow['operation_payload_json'] ?? null);
+                $key = (int)($revertPayload['original_operation_id'] ?? 0)
+                    . '-' . (int)($revertPayload['section_id'] ?? 0);
+                $revertedItems[$key] = true;
+            }
+        }
+
+        $sectionIds = array();
+        foreach ($applications as $application) {
+            foreach (array_keys((array)$application['after']) as $sectionId) {
+                $sectionIds[(int)$sectionId] = true;
+            }
+        }
+        $sectionIds = array_keys($sectionIds);
+        $current = $this->snapshotsForSectionIds($sectionIds);
+        $version = $this->latestRow(
+            'SELECT lifecycle_status FROM ipca_publishing_book_versions WHERE id=?',
+            array($versionId)
+        );
+        $editable = in_array(
+            (string)($version['lifecycle_status'] ?? ''),
+            array('draft', 'in_review'),
+            true
+        );
+        $titleStmt = $this->pdo->prepare(
+            'SELECT title FROM ipca_publishing_book_sections WHERE id=? AND book_version_id=?'
+        );
+        $items = array();
+        $guidance = array();
+        $applicationSummaries = array();
+        $newerSectionSeen = array();
+        foreach ($applications as $application) {
+            $operation = (array)$application['operation'];
+            $result = (array)$application['result'];
+            $before = (array)$application['before'];
+            $after = (array)$application['after'];
+            $numbersBySection = array();
+            foreach ((array)($application['payload']['target_contexts'] ?? array()) as $target) {
+                if (!is_array($target)) {
+                    continue;
+                }
+                $targetSectionId = (int)($target['section_id'] ?? 0);
+                $number = trim((string)($target['section_number'] ?? ''));
+                if ($targetSectionId > 0 && $number !== '') {
+                    $numbersBySection[$targetSectionId][$number] = true;
+                }
+            }
+            $applicationSummaries[] = array(
+                'operation_id' => (int)$operation['id'],
+                'plan_id' => (int)$operation['plan_id'],
+                'plan_title' => (string)($operation['plan_title'] ?? 'Manual Change Wizard'),
+                'applied_at' => (string)($result['applied_at'] ?? $operation['completed_at'] ?? ''),
+            );
+            foreach ((array)($result['review_guidance'] ?? array()) as $note) {
+                if (!is_array($note)
+                    || (array_key_exists('show_in_editor', $note) && empty($note['show_in_editor']))) {
+                    continue;
+                }
+                $note['operation_id'] = (int)$operation['id'];
+                $note['plan_id'] = (int)$operation['plan_id'];
+                $note['plan_title'] = (string)($operation['plan_title'] ?? 'Manual Change Wizard');
+                $guidanceKey = (array)($note['check_ids'] ?? array()) !== array()
+                    ? 'checks:' . implode('|', array_map('strval', (array)$note['check_ids']))
+                    : 'answer:' . (int)($note['answer_id'] ?? 0);
+                if (!isset($guidance[$guidanceKey])) {
+                    $guidance[$guidanceKey] = $note;
+                }
+            }
+            foreach (array_keys($after) as $rawSectionId) {
+                $sectionId = (int)$rawSectionId;
+                $titleStmt->execute(array($sectionId, $versionId));
+                $title = (string)($titleStmt->fetchColumn() ?: 'Manual section');
+                $changeId = (int)$operation['id'] . '-' . $sectionId;
+                $reverted = isset($revertedItems[$changeId]);
+                $superseded = isset($newerSectionSeen[$sectionId]);
+                $afterFingerprint = (string)($after[$sectionId]['fingerprint'] ?? '');
+                $currentFingerprint = (string)($current[$sectionId]['fingerprint'] ?? '');
+                $modified = !$reverted && !$superseded && ($afterFingerprint === ''
+                    || !hash_equals($afterFingerprint, $currentFingerprint));
+                $ownedByActor = $actorUserId === null
+                    || (int)($operation['plan_owner_id'] ?? 0) === $actorUserId;
+                $numbers = array_keys((array)($numbersBySection[$sectionId] ?? array()));
+                sort($numbers, SORT_NATURAL);
+                $differencePreviews = $this->snapshotDifferencePreviews(
+                    (array)$before[$sectionId],
+                    (array)$after[$sectionId]
+                );
+                $items[] = array(
+                    'change_id' => $changeId,
+                    'operation_id' => (int)$operation['id'],
+                    'plan_id' => (int)$operation['plan_id'],
+                    'plan_title' => (string)($operation['plan_title'] ?? 'Manual Change Wizard'),
+                    'applied_at' => (string)($result['applied_at'] ?? $operation['completed_at'] ?? ''),
+                    'section_id' => $sectionId,
+                    'section_numbers' => $numbers,
+                    'title' => $title,
+                    'status' => $superseded
+                        ? 'SUPERSEDED'
+                        : ($reverted ? 'REVERTED' : ($modified ? 'MANUALLY_EDITED' : 'APPLIED')),
+                    'manual_edits_detected' => $modified,
+                    'can_revert' => $editable && $ownedByActor && !$reverted && !$superseded,
+                    'current_fingerprint' => $currentFingerprint,
+                    'original_preview' => $differencePreviews['before'],
+                    'applied_preview' => $differencePreviews['after'],
+                );
+                $newerSectionSeen[$sectionId] = true;
+            }
+        }
+        $latest = (array)$applications[0];
+        $latestOperation = (array)$latest['operation'];
+        $latestResult = (array)$latest['result'];
+        return array(
+            'operation_id' => (int)$latestOperation['id'],
+            'plan_id' => (int)$latestOperation['plan_id'],
+            'plan_title' => count($applications) === 1
+                ? (string)($latestOperation['plan_title'] ?? 'Manual Change Wizard')
+                : 'Manual Change Wizard history',
+            'applied_at' => (string)(
+                $latestResult['applied_at']
+                ?? $latestOperation['completed_at']
+                ?? ''
+            ),
+            'applications' => $applicationSummaries,
+            'items' => $items,
+            'review_guidance' => array_values($guidance),
+        );
+    }
+
+    /**
+     * Carry governed Independent Review answers into the Editor without
+     * generating or applying another Author patch.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function reviewGuidance(array $reviewPayload): array
+    {
+        $state = (array)($reviewPayload['review_state'] ?? array());
+        $guidance = array();
+        foreach ((array)($state['answers'] ?? array()) as $answer) {
+            if (!is_array($answer)) {
+                continue;
+            }
+            $question = is_array($answer['question_snapshot_json'] ?? null)
+                ? $answer['question_snapshot_json']
+                : $this->decode($answer['question_snapshot_json'] ?? null);
+            $selected = is_array($answer['selected_answer_json'] ?? null)
+                ? $answer['selected_answer_json']
+                : $this->decode($answer['selected_answer_json'] ?? null);
+            $fact = is_array($answer['governed_fact_json'] ?? null)
+                ? $answer['governed_fact_json']
+                : $this->decode($answer['governed_fact_json'] ?? null);
+            $sections = is_array($answer['affected_sections_json'] ?? null)
+                ? $answer['affected_sections_json']
+                : $this->decode($answer['affected_sections_json'] ?? null);
+            $consequence = (string)($answer['consequence'] ?? '');
+            $checkIds = array_values(array_unique(array_map(
+                'strval',
+                (array)($fact['check_ids'] ?? array())
+            )));
+            sort($checkIds, SORT_STRING);
+            $guidanceKey = $checkIds === array()
+                ? 'finding:' . (int)($answer['finding_id'] ?? 0)
+                : 'checks:' . implode('|', $checkIds);
+            $guidance[$guidanceKey] = array(
+                'answer_id' => (int)($answer['id'] ?? 0),
+                'question_id' => (int)($answer['question_id'] ?? 0),
+                'title' => (string)($question['title'] ?? 'Independent Review guidance'),
+                'prompt' => (string)($question['prompt'] ?? ''),
+                'selected_labels' => array_values(array_filter(array_map(
+                    static fn(mixed $choice): string =>
+                        is_array($choice) ? (string)($choice['label'] ?? '') : '',
+                    (array)$selected
+                ))),
+                'instruction' => trim((string)($answer['explanation'] ?? '')),
+                'governed_fact' => (string)($fact['statement'] ?? ''),
+                'check_ids' => $checkIds,
+                'affected_sections' => array_values(array_map('strval', (array)$sections)),
+                'consequence' => $consequence,
+                'show_in_editor' => $consequence !== 'NO_MANUAL_CHANGE_REQUIRED',
+                'advisory' => true,
+                'editor_action_required' => false,
+            );
+        }
+        return array_values($guidance);
+    }
+
+    /**
      * @return array<string,mixed>
      */
     public function undo(int $versionId, int $operationId, int $actorUserId): array
     {
+        $operationReference = $this->latestRow(
+            "SELECT plan_id,result_json FROM ipca_manual_ai_architect_operations
+             WHERE id=? AND operation_type='apply_accepted_wizard_changes'",
+            array($operationId)
+        );
+        $referenceResult = $this->decode($operationReference['result_json'] ?? null);
+        if ((int)($referenceResult['book_version_id'] ?? 0) !== $versionId) {
+            throw new RuntimeException('This Wizard edit does not belong to the open manual version.');
+        }
         $this->pdo->beginTransaction();
         try {
+            $planOwner = $this->latestRow(
+                'SELECT owner_id FROM ipca_manual_ai_architect_plans WHERE id=? FOR UPDATE',
+                array((int)$operationReference['plan_id'])
+            );
+            if ((int)($planOwner['owner_id'] ?? 0) !== $actorUserId) {
+                throw new RuntimeException(
+                    'Only the Change Plan owner can undo its Wizard changes.'
+                );
+            }
+            $this->lockEditableVersion($versionId);
             $operation = $this->latestRow(
                 "SELECT * FROM ipca_manual_ai_architect_operations
                  WHERE id=? AND operation_type='apply_accepted_wizard_changes'
-                   AND status='succeeded' FOR UPDATE",
+                 FOR UPDATE",
                 array($operationId)
             );
+            if ((int)$operation['plan_id'] !== (int)$operationReference['plan_id']
+                || (string)($operation['status'] ?? '') !== 'succeeded') {
+                throw new RuntimeException('This Wizard edit has already been undone or is unavailable.');
+            }
             $result = $this->decode($operation['result_json'] ?? null);
             if ((int)($result['book_version_id'] ?? 0) !== $versionId) {
-                throw new RuntimeException('This Wizard edit does not belong to the open manual version.');
+                throw new RuntimeException('This Wizard edit changed before undo.');
             }
-            $this->lockEditableVersion($versionId);
             $before = (array)($result['before_sections'] ?? array());
             $after = (array)($result['after_sections'] ?? array());
             if ($before === array() || $after === array()) {
                 throw new RuntimeException('The Wizard edit does not contain a complete recovery snapshot.');
             }
 
-            $current = $this->snapshotsForSectionIds(array_map('intval', array_keys($after)));
+            $current = $this->snapshotsForSectionIds(
+                array_map('intval', array_keys($after)),
+                true
+            );
             foreach ($after as $sectionId => $snapshot) {
                 $actual = (array)($current[(int)$sectionId] ?? array());
                 if (!hash_equals(
@@ -439,6 +797,261 @@ final class BooksManualsChangeApplyService
                 $response
             );
             return $response;
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Revert one Wizard-applied section. If that same section was edited after
+     * application, the caller must explicitly confirm the exact current
+     * fingerprint; changes in all other sections remain untouched.
+     *
+     * @return array<string,mixed>
+     */
+    public function revertEditorChange(
+        int $versionId,
+        int $operationId,
+        int $sectionId,
+        int $actorUserId,
+        bool $force = false,
+        string $expectedCurrentFingerprint = ''
+    ): array {
+        if ($versionId <= 0 || $operationId <= 0 || $sectionId <= 0) {
+            throw new InvalidArgumentException(
+                'version_id, operation_id and section_id are required.'
+            );
+        }
+        $operationReference = $this->latestRow(
+            "SELECT plan_id,result_json FROM ipca_manual_ai_architect_operations
+             WHERE id=? AND operation_type='apply_accepted_wizard_changes'",
+            array($operationId)
+        );
+        $referenceResult = $this->decode($operationReference['result_json'] ?? null);
+        if ((int)($referenceResult['book_version_id'] ?? 0) !== $versionId) {
+            throw new RuntimeException(
+                'This Wizard change does not belong to the open manual version.'
+            );
+        }
+        if (!isset(
+            ((array)($referenceResult['before_sections'] ?? array()))[$sectionId],
+            ((array)($referenceResult['after_sections'] ?? array()))[$sectionId]
+        )) {
+            throw new RuntimeException('This section is not part of the Wizard application.');
+        }
+        $this->pdo->beginTransaction();
+        try {
+            $planOwner = $this->latestRow(
+                'SELECT owner_id FROM ipca_manual_ai_architect_plans WHERE id=? FOR UPDATE',
+                array((int)$operationReference['plan_id'])
+            );
+            if ((int)($planOwner['owner_id'] ?? 0) !== $actorUserId) {
+                throw new RuntimeException(
+                    'Only the Change Plan owner can revert its Wizard changes.'
+                );
+            }
+            $this->lockEditableVersion($versionId);
+            $operation = $this->latestRow(
+                "SELECT * FROM ipca_manual_ai_architect_operations
+                 WHERE id=? AND operation_type='apply_accepted_wizard_changes'
+                 FOR UPDATE",
+                array($operationId)
+            );
+            if ((int)$operation['plan_id'] !== (int)$operationReference['plan_id']
+                || (string)($operation['status'] ?? '') !== 'succeeded') {
+                throw new RuntimeException(
+                    'This Wizard change has already been undone or is unavailable.'
+                );
+            }
+            $result = $this->decode($operation['result_json'] ?? null);
+            if ((int)($result['book_version_id'] ?? 0) !== $versionId) {
+                throw new RuntimeException('This Wizard change changed before revert.');
+            }
+            $before = (array)($result['before_sections'] ?? array());
+            $after = (array)($result['after_sections'] ?? array());
+            if (!isset($before[$sectionId], $after[$sectionId])) {
+                throw new RuntimeException('This Wizard section changed before revert.');
+            }
+            $newerApplications = $this->pdo->prepare(
+                "SELECT id,result_json
+                 FROM ipca_manual_ai_architect_operations
+                 WHERE id>? AND operation_type='apply_accepted_wizard_changes'
+                   AND status='succeeded' ORDER BY id FOR UPDATE"
+            );
+            $newerApplications->execute(array($operationId));
+            foreach ($newerApplications->fetchAll(PDO::FETCH_ASSOC) ?: array() as $newer) {
+                $newerResult = $this->decode($newer['result_json'] ?? null);
+                if ((int)($newerResult['book_version_id'] ?? 0) === $versionId
+                    && isset(((array)($newerResult['after_sections'] ?? array()))[$sectionId])) {
+                    throw new RuntimeException(
+                        'This Wizard change was superseded by a later application to the same section.'
+                    );
+                }
+            }
+
+            $existingStmt = $this->pdo->prepare(
+                "SELECT operation_payload_json,result_json
+                 FROM ipca_manual_ai_architect_operations
+                 WHERE plan_id=? AND operation_type='revert_wizard_change_item'
+                   AND status='succeeded' ORDER BY id"
+            );
+            $existingStmt->execute(array((int)$operation['plan_id']));
+            foreach ($existingStmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $existingRow) {
+                $existingPayload = $this->decode($existingRow['operation_payload_json'] ?? null);
+                if ((int)($existingPayload['original_operation_id'] ?? 0) === $operationId
+                    && (int)($existingPayload['section_id'] ?? 0) === $sectionId) {
+                    $this->pdo->commit();
+                    return $this->decode($existingRow['result_json'] ?? null);
+                }
+            }
+
+            $current = $this->snapshotsForSectionIds(array($sectionId), true);
+            $currentSnapshot = (array)($current[$sectionId] ?? array());
+            $currentFingerprint = (string)($currentSnapshot['fingerprint'] ?? '');
+            $appliedFingerprint = (string)($after[$sectionId]['fingerprint'] ?? '');
+            $manualEdits = $appliedFingerprint === ''
+                || !hash_equals($appliedFingerprint, $currentFingerprint);
+            if ($manualEdits && !$force) {
+                throw new RuntimeException(
+                    'CONFIRM_REVERT: This section was edited after the Wizard application. '
+                    . 'Reverting it will replace those later edits, while all other sections remain unchanged.',
+                    409
+                );
+            }
+            if ($manualEdits && ($expectedCurrentFingerprint === ''
+                || !hash_equals($currentFingerprint, $expectedCurrentFingerprint))) {
+                throw new RuntimeException(
+                    'The section changed again before the confirmed revert. Review it and try again.',
+                    409
+                );
+            }
+
+            $requestFingerprint = hash('sha256', $this->json(array(
+                'original_operation_id' => $operationId,
+                'section_id' => $sectionId,
+                'current_fingerprint' => $currentFingerprint,
+                'restore_fingerprint' => (string)$before[$sectionId]['fingerprint'],
+            )));
+            $revertOperationId = $this->plans->save('operations', (int)$operation['plan_id'], array(
+                'operation_uuid' => $this->uuid(),
+                'draft_id' => (int)($operation['draft_id'] ?? 0) ?: null,
+                'review_id' => (int)($operation['review_id'] ?? 0) ?: null,
+                'operation_type' => 'revert_wizard_change_item',
+                'idempotency_key' => hash(
+                    'sha256',
+                    'wizard-revert-item|' . $operationId . '|' . $sectionId
+                ),
+                'status' => 'running',
+                'request_fingerprint' => $requestFingerprint,
+                'operation_payload_json' => $this->json(array(
+                    'schema' => 'ipca.manual-change-editor-revert.v1',
+                    'original_operation_id' => $operationId,
+                    'book_version_id' => $versionId,
+                    'section_id' => $sectionId,
+                    'manual_edits_overwrite_confirmed' => $manualEdits && $force,
+                    'current_fingerprint' => $currentFingerprint,
+                    'restore_fingerprint' => (string)$before[$sectionId]['fingerprint'],
+                )),
+                'requested_by' => $actorUserId,
+                'started_at' => gmdate('Y-m-d H:i:s.v'),
+            ));
+
+            $this->restoreSectionSnapshot(
+                $sectionId,
+                (array)$before[$sectionId],
+                $actorUserId
+            );
+            $restored = $this->snapshotsForSectionIds(array($sectionId));
+            $restoredFingerprint = (string)($restored[$sectionId]['fingerprint'] ?? '');
+            if (!hash_equals(
+                (string)$before[$sectionId]['fingerprint'],
+                $restoredFingerprint
+            )) {
+                throw new RuntimeException('The section did not restore to its exact pre-Wizard state.');
+            }
+            $highlightsRefresh = (new ControlledPublishingRevisionService(
+                $this->pdo
+            ))->regenerateHighlightsSection(
+                $versionId,
+                $actorUserId
+            );
+            $tocRefresh = (new ControlledPublishingTocService(
+                $this->pdo
+            ))->regenerateTocSection(
+                $versionId,
+                $actorUserId
+            );
+            (new BooksManualsWorkflowService($this->pdo))->syncUpdateIdentity($versionId);
+            $this->appendSectionEditEvents(
+                (int)$operation['plan_id'],
+                $revertOperationId,
+                'revert',
+                array($sectionId => $currentSnapshot),
+                array($sectionId => (array)$restored[$sectionId]),
+                $actorUserId
+            );
+
+            $revertResult = array(
+                'schema' => 'ipca.manual-change-editor-revert-result.v1',
+                'original_operation_id' => $operationId,
+                'revert_operation_id' => $revertOperationId,
+                'book_version_id' => $versionId,
+                'section_id' => $sectionId,
+                'restored_fingerprint' => $restoredFingerprint,
+                'overwritten_section' => $currentSnapshot,
+                'restored_section' => (array)$restored[$sectionId],
+                'manual_edits_overwritten' => $manualEdits,
+                'other_authored_sections_changed' => false,
+                'derived_sections_refreshed' => array_values(array_unique(array_filter(array(
+                    (int)($highlightsRefresh['section_id'] ?? 0),
+                    (int)($tocRefresh['section_id'] ?? 0),
+                )))),
+                'reverted_at' => gmdate(DATE_ATOM),
+                'reverted_by' => $actorUserId,
+            );
+            $this->pdo->prepare(
+                "UPDATE ipca_manual_ai_architect_operations
+                 SET status='succeeded',result_json=?,result_fingerprint=?,
+                     completed_at=CURRENT_TIMESTAMP(3)
+                 WHERE id=? AND status='running'"
+            )->execute(array(
+                $this->json($revertResult),
+                hash('sha256', $this->json($revertResult)),
+                $revertOperationId,
+            ));
+            $this->plans->appendEvent(
+                (int)$operation['plan_id'],
+                'WIZARD_EDITOR_CHANGE_REVERTED',
+                13,
+                array(
+                    'original_operation_id' => $operationId,
+                    'revert_operation_id' => $revertOperationId,
+                    'book_version_id' => $versionId,
+                    'section_id' => $sectionId,
+                    'manual_edits_overwritten' => $manualEdits,
+                    'other_authored_sections_changed' => false,
+                    'derived_sections_refreshed' => $revertResult['derived_sections_refreshed'],
+                ),
+                $actorUserId
+            );
+            $this->pdo->commit();
+            $revertResult['derived_refresh_warnings'] = $this->refreshPostCommitArtifacts(
+                $versionId,
+                $actorUserId,
+                'manual_change_architect_editor_revert'
+            );
+            $this->recordGlobalAudit(
+                'manual_change_architect.revert_wizard_change',
+                (int)$operation['plan_id'],
+                $revertOperationId,
+                $versionId,
+                $actorUserId,
+                $revertResult
+            );
+            return $revertResult;
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -545,25 +1158,26 @@ final class BooksManualsChangeApplyService
      * @param list<array<string,mixed>> $targets
      * @return array<int,array<string,mixed>>
      */
-    private function snapshotsForTargets(array $targets): array
+    private function snapshotsForTargets(array $targets, bool $forUpdate = false): array
     {
         return $this->snapshotsForSectionIds(array_values(array_unique(array_map(
             static fn(array $target): int => (int)$target['section_id'],
             $targets
-        ))));
+        ))), $forUpdate);
     }
 
     /**
      * @param list<int> $sectionIds
      * @return array<int,array<string,mixed>>
      */
-    private function snapshotsForSectionIds(array $sectionIds): array
+    private function snapshotsForSectionIds(array $sectionIds, bool $forUpdate = false): array
     {
         $snapshots = array();
         foreach ($sectionIds as $sectionId) {
             $stmt = $this->pdo->prepare(
                 'SELECT * FROM ipca_publishing_book_blocks
                  WHERE section_id=? ORDER BY sort_order,id'
+                    . ($forUpdate ? ' FOR UPDATE' : '')
             );
             $stmt->execute(array($sectionId));
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
@@ -956,6 +1570,11 @@ final class BooksManualsChangeApplyService
             }
             $stmt->execute($values);
         }
+        $this->pdo->prepare(
+            'UPDATE ipca_publishing_book_blocks
+             SET updated_by=?,updated_at=CURRENT_TIMESTAMP
+             WHERE section_id=?'
+        )->execute(array($actorUserId, $sectionId));
     }
 
     /**
@@ -1113,6 +1732,96 @@ final class BooksManualsChangeApplyService
             ),
             $rows
         )));
+    }
+
+    /**
+     * Show the authored rows that actually differ, rather than the beginning
+     * of a potentially long physical section.
+     *
+     * @return array{before:string,after:string}
+     */
+    private function snapshotDifferencePreviews(array $before, array $after): array
+    {
+        $beforeById = array();
+        foreach ((array)($before['rows'] ?? array()) as $row) {
+            $beforeById[(int)($row['id'] ?? 0)] = $row;
+        }
+        $afterById = array();
+        foreach ((array)($after['rows'] ?? array()) as $row) {
+            $afterById[(int)($row['id'] ?? 0)] = $row;
+        }
+        $changedBefore = array();
+        $changedAfter = array();
+        foreach (array_values(array_unique(array_merge(
+            array_keys($beforeById),
+            array_keys($afterById)
+        ))) as $blockId) {
+            $beforeRow = $beforeById[(int)$blockId] ?? null;
+            $afterRow = $afterById[(int)$blockId] ?? null;
+            $sameAuthoredContent = is_array($beforeRow)
+                && is_array($afterRow)
+                && (string)($beforeRow['block_type'] ?? '')
+                    === (string)($afterRow['block_type'] ?? '')
+                && (string)($beforeRow['payload_json'] ?? '')
+                    === (string)($afterRow['payload_json'] ?? '')
+                && (string)($beforeRow['content_hash'] ?? '')
+                    === (string)($afterRow['content_hash'] ?? '');
+            if ($sameAuthoredContent) {
+                continue;
+            }
+            if (is_array($beforeRow)) {
+                $changedBefore[] = $beforeRow;
+            }
+            if (is_array($afterRow)) {
+                $changedAfter[] = $afterRow;
+            }
+        }
+        $sortRows = static function (array &$rows): void {
+            usort(
+                $rows,
+                static fn(array $left, array $right): int =>
+                    ((int)($left['sort_order'] ?? 0) <=> (int)($right['sort_order'] ?? 0))
+                    ?: ((int)($left['id'] ?? 0) <=> (int)($right['id'] ?? 0))
+            );
+        };
+        $sortRows($changedBefore);
+        $sortRows($changedAfter);
+        return array(
+            'before' => $this->snapshotPreview(array(
+                'rows' => $changedBefore !== array()
+                    ? $changedBefore
+                    : (array)($before['rows'] ?? array()),
+            )),
+            'after' => $this->snapshotPreview(array(
+                'rows' => $changedAfter !== array()
+                    ? $changedAfter
+                    : (array)($after['rows'] ?? array()),
+            )),
+        );
+    }
+
+    private function snapshotPreview(array $snapshot): string
+    {
+        $parts = array();
+        foreach ((array)($snapshot['rows'] ?? array()) as $row) {
+            $payload = $this->decode($row['payload_json'] ?? null);
+            $html = (string)($payload['html'] ?? '');
+            if ($html === '') {
+                continue;
+            }
+            $text = trim((string)preg_replace(
+                '/\s+/u',
+                ' ',
+                html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+            ));
+            if ($text !== '') {
+                $parts[] = $text;
+            }
+        }
+        $preview = implode("\n", $parts);
+        return mb_strlen($preview) > 900
+            ? mb_substr($preview, 0, 897) . '…'
+            : $preview;
     }
 
     /**

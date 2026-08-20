@@ -844,7 +844,10 @@ final class BooksManualsChangePlanService
         }
         $draftId = (int)$draft['id'];
         $payload['wizard_status'] = 'accepted';
-        $this->pdo->beginTransaction();
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
         try {
             $this->pdo->prepare(
                 'UPDATE ' . self::TABLES['drafts']
@@ -859,9 +862,11 @@ final class BooksManualsChangePlanService
             $this->appendEvent($planId, 'DRAFT_AMENDMENTS_ACCEPTED', 12, array(
                 'draft_id' => $draftId,
             ), $actorUserId);
-            $this->pdo->commit();
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
         } catch (Throwable $e) {
-            if ($this->pdo->inTransaction()) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
             throw $e;
@@ -919,8 +924,12 @@ final class BooksManualsChangePlanService
         );
         $payload = $review === null ? array() : $this->decodeJson($review['review_payload_json'] ?? null);
         $status = strtoupper((string)($payload['status'] ?? $review['status'] ?? ''));
-        if (!in_array($status, array('READY', 'READY_FOR_HUMAN_REVIEW', 'APPROVED'), true)) {
-            throw new RuntimeException('Independent Review must be READY before continuing.');
+        if ((string)($review['status'] ?? '') !== 'approved'
+            || $status !== 'READY'
+            || (string)($payload['outcome'] ?? '') !== 'READY_TO_APPLY') {
+            throw new RuntimeException(
+                'Independent Review must complete governed clarification before continuing.'
+            );
         }
         $this->updatePlan($planId, array('stage' => 'operations', 'updated_by' => $actorUserId));
         $this->appendEvent($planId, 'REVIEW_ACCEPTED_FOR_APPLY', 13, array(

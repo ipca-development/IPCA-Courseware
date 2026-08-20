@@ -104,9 +104,21 @@ function architect_api_prepare_independent_review(
         array_values((array)($wording['issues'] ?? array())),
         array_values((array)($governance['blockers'] ?? array()))
     );
+    $reviewCheckMap = array();
+    foreach (array_merge(
+        (array)($wording['review_checks'] ?? array()),
+        (array)($governance['review_checks'] ?? array())
+    ) as $check) {
+        if (!is_array($check) || trim((string)($check['check_id'] ?? '')) === '') {
+            continue;
+        }
+        $reviewCheckMap[(string)$check['check_id']] = $check;
+    }
+    $reviewChecks = array_values($reviewCheckMap);
     $prepared = array_replace($wording, array(
         'status' => $issues === array() ? 'READY' : 'REQUIRES_REVIEW',
         'issues' => $issues,
+        'review_checks' => $reviewChecks,
         'governance_gate' => $governance,
         'operation_package' => $operationPackage,
         'checks' => array(
@@ -124,23 +136,37 @@ function architect_api_prepare_independent_review(
                 && empty($operationPackage['lifecycle_transition_allowed']),
         ),
     ));
-    $reviewId = $plans->save('reviews', $planId, array(
-        'review_uuid' => architect_api_uuid(),
-        'draft_id' => (int)$draft['id'],
-        'review_type' => 'independent_consistency',
-        'status' => 'requested',
-        'review_payload_json' => json_encode(array(
-            'status' => 'REVIEW_PENDING',
-            'summary' => $issues === array()
-                ? 'The accepted wording passed independent preparation and is ready for human approval.'
-                : 'Independent review identified issues requiring correction.',
-            'prepared_result' => $prepared,
-        ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-        'requested_by' => $actorUserId,
-        'requested_at' => gmdate('Y-m-d H:i:s.v'),
-    ));
-    $reviewResolution->initializeReview($planId, $reviewId, $prepared, $actorUserId);
-    return $reviewId;
+    $ownsTransaction = !$pdo->inTransaction();
+    if ($ownsTransaction) {
+        $pdo->beginTransaction();
+    }
+    try {
+        $reviewId = $plans->save('reviews', $planId, array(
+            'review_uuid' => architect_api_uuid(),
+            'draft_id' => (int)$draft['id'],
+            'review_type' => 'independent_consistency',
+            'status' => 'requested',
+            'review_payload_json' => json_encode(array(
+                'status' => 'REVIEW_PENDING',
+                'summary' => $issues === array()
+                    ? 'The accepted wording passed independent preparation and is ready for human approval.'
+                    : 'Independent review identified issues requiring clarification.',
+                'prepared_result' => $prepared,
+            ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'requested_by' => $actorUserId,
+            'requested_at' => gmdate('Y-m-d H:i:s.v'),
+        ));
+        $reviewResolution->initializeReview($planId, $reviewId, $prepared, $actorUserId);
+        if ($ownsTransaction) {
+            $pdo->commit();
+        }
+        return $reviewId;
+    } catch (Throwable $error) {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $error;
+    }
 }
 
 /** @param array<string,mixed> $input */
@@ -904,19 +930,64 @@ try {
 
         case 'accept_drafts':
             $planId = (int)($input['plan_id'] ?? 0);
-            $result = $plans->acceptDrafts($planId, $userId);
-            $reviewId = architect_api_prepare_independent_review(
-                $pdo,
-                $plans,
-                $reviewer,
-                $apply,
-                $reviewResolution,
-                $planId,
-                $userId
-            );
-            $plans->appendEvent($planId, 'INDEPENDENT_REVIEW_PREPARED', 12, array(
-                'review_id' => $reviewId,
-            ), $userId);
+            $pdo->beginTransaction();
+            try {
+                $lockedPlanStmt = $pdo->prepare(
+                    'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
+                     WHERE id=? FOR UPDATE'
+                );
+                $lockedPlanStmt->execute(array($planId));
+                $lockedPlan = $lockedPlanStmt->fetch(PDO::FETCH_ASSOC);
+                if (!is_array($lockedPlan)
+                    || (int)($lockedPlan['owner_id'] ?? 0) !== $userId) {
+                    throw new RuntimeException(
+                        'Only the Change Plan owner can accept amendment wording.'
+                    );
+                }
+                $existingReviewStmt = $pdo->prepare(
+                    'SELECT id,draft_id FROM ipca_manual_ai_architect_reviews
+                     WHERE plan_id=? ORDER BY id DESC LIMIT 1 FOR UPDATE'
+                );
+                $existingReviewStmt->execute(array($planId));
+                $existingReview = $existingReviewStmt->fetch(PDO::FETCH_ASSOC);
+                if ((string)($lockedPlan['stage'] ?? '') === 'review'
+                    && is_array($existingReview)) {
+                    $reviewId = (int)$existingReview['id'];
+                    $result = array(
+                        'draft_id' => (int)$existingReview['draft_id'],
+                        'stage' => 'review',
+                    );
+                } else {
+                    if (!in_array(
+                        (string)($lockedPlan['stage'] ?? ''),
+                        array('drafting', 'review'),
+                        true
+                    )) {
+                        throw new RuntimeException(
+                            'The Change Plan is no longer awaiting amendment acceptance.'
+                        );
+                    }
+                    $result = $plans->acceptDrafts($planId, $userId);
+                    $reviewId = architect_api_prepare_independent_review(
+                        $pdo,
+                        $plans,
+                        $reviewer,
+                        $apply,
+                        $reviewResolution,
+                        $planId,
+                        $userId
+                    );
+                    $plans->appendEvent($planId, 'INDEPENDENT_REVIEW_PREPARED', 12, array(
+                        'review_id' => $reviewId,
+                    ), $userId);
+                }
+                $pdo->commit();
+            } catch (Throwable $error) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $error;
+            }
             architect_api_json(200, array(
                 'ok' => true,
                 'result' => $result,
@@ -925,9 +996,10 @@ try {
             ));
 
         case 'review_state':
+            $planId = (int)($input['plan_id'] ?? 0);
             architect_api_json(200, array(
                 'ok' => true,
-                'result' => $reviewResolution->state((int)($input['plan_id'] ?? 0)),
+                'result' => $reviewResolution->prepareClarificationQueue($planId, $userId),
                 'csrf_token' => architect_api_csrf(),
             ));
 
@@ -1095,51 +1167,25 @@ try {
 
         case 'run_independent_review':
             $planId = (int)($input['plan_id'] ?? 0);
-            $state = $reviewResolution->state($planId);
-            if (empty($state['ready_to_apply'])) {
-                throw new RuntimeException('Independent Review still has unresolved decisions or defects.');
-            }
-            $reviewId = (int)$state['review_id'];
-            $operationPackage = $apply->buildPreflightPackage($planId);
-            $readyPayload = array(
-                'schema' => 'ipca.manual-change-convergent-independent-review.v1',
-                'status' => 'READY',
-                'outcome' => 'READY_TO_APPLY',
-                'review_state' => $state,
-                'operation_package' => $operationPackage,
-                'completed_at' => gmdate(DATE_ATOM),
-            );
-            $pdo->prepare(
-                "UPDATE ipca_manual_ai_architect_reviews
-                 SET status='approved',review_payload_json=?,reviewer_id=?,
-                     completed_at=CURRENT_TIMESTAMP(3)
-                 WHERE id=? AND plan_id=?"
-            )->execute(array(
-                json_encode($readyPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-                $userId,
-                $reviewId,
+            $result = $reviewResolution->approveForApply(
                 $planId,
-            ));
-            $plans->appendEvent($planId, 'INDEPENDENT_REVIEW_CONVERGED', 12, array(
-                'review_id' => $reviewId,
-                'outcome' => 'READY_TO_APPLY',
-                'unresolved_material_findings' => 0,
-                'automatic_backward_transition_performed' => false,
-            ), $userId);
-            $reviewResult = array('review_id' => $reviewId, 'status' => 'READY');
-            $continueResult = $plans->continueToApply($planId, $userId);
+                $userId,
+                $apply
+            );
             architect_api_json(200, array(
                 'ok' => true,
-                'result' => array_merge($reviewResult, $continueResult),
+                'result' => $result,
                 'csrf_token' => architect_api_csrf(),
             ));
 
         case 'continue_to_apply':
+            $planId = (int)($input['plan_id'] ?? 0);
             architect_api_json(200, array(
                 'ok' => true,
-                'result' => $plans->continueToApply(
-                    (int)($input['plan_id'] ?? 0),
-                    $userId
+                'result' => $reviewResolution->approveForApply(
+                    $planId,
+                    $userId,
+                    $apply
                 ),
                 'csrf_token' => architect_api_csrf(),
             ));

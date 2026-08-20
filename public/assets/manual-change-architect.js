@@ -335,12 +335,24 @@
           toast('Select an answer before continuing.', true);
           return;
         }
+        var explanationField = question.querySelector('[data-mcw-review-answer-explanation]');
+        var explanation = String((explanationField || {}).value || '').trim();
+        var requiresExplanation = Array.prototype.slice.call(
+          question.querySelectorAll('input[name="mcw-review-choice"]:checked')
+        ).some(function (input) {
+          return input.getAttribute('data-requires-explanation') === '1';
+        });
+        if (requiresExplanation && !explanation) {
+          toast('Provide the requested instruction before continuing.', true);
+          if (explanationField) explanationField.focus();
+          return;
+        }
         busy(answerButton, true, 'Recording Decision…');
         try {
           await request('answer_review_question', {
             question_id: Number(question.dataset.mcwReviewQuestion || 0),
             selected_choice_ids: selected,
-            explanation: String((question.querySelector('[data-mcw-review-answer-explanation]') || {}).value || '')
+            explanation: explanation
           });
           window.location.reload();
         } catch (error) {

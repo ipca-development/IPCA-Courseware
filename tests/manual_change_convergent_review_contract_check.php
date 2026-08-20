@@ -95,7 +95,12 @@ $checks = array(
         str_contains($migration, 'governed_fact_json JSON NOT NULL')
         && str_contains($migration, 'UNIQUE KEY uk_imaa_review_answer_question')
         && str_contains($api, 'answer_review_question')
-        && str_contains($api, 'selected_choice_ids'),
+        && str_contains($api, 'selected_choice_ids')
+        && str_contains($resolutionService, '$rawConsequences')
+        && str_contains(
+            $resolutionService,
+            "'wording_change_required' => \$consequence === 'STRUCTURAL_CONSEQUENCE'"
+        ),
     'automatic Step 5 backward transition endpoint is disabled' =>
         str_contains($api, 'cannot automatically reopen or regenerate accepted Steps 2–4')
         && !str_contains($api, 'AMENDMENT_REVISION_REQUESTED_BY_REVIEW')
@@ -159,20 +164,27 @@ $checks = array(
         str_contains($api, '$reviewResolution->reconcileAcceptedReviewScope(')
         && str_contains($api, "'reconciled_without_patch' => true"),
     'READY_TO_APPLY is strict and only moves forward' =>
-        str_contains($api, "'outcome' => 'READY_TO_APPLY'")
-        && str_contains($api, "'unresolved_material_findings' => 0")
-        && str_contains($api, '$continueResult = $plans->continueToApply')
-        && str_contains($api, "'automatic_backward_transition_performed' => false"),
-    'Step 5 is one-question-at-a-time with targeted correction preview' =>
+        str_contains($api, '$reviewResolution->approveForApply(')
+        && str_contains($resolutionService, "'outcome' => 'READY_TO_APPLY'")
+        && str_contains($resolutionService, "empty(\$state['ready_to_apply'])")
+        && str_contains($resolutionService, "'stage' => 'operations'")
+        && str_contains($resolutionService, "'status' => 'ready_to_apply'")
+        && str_contains($resolutionService, "\$planStage === 'operations'")
+        && str_contains($resolutionService, "\$existingPayload['outcome']")
+        && str_contains($api, 'Independent Review cannot automatically reopen'),
+    'Step 5 is one-question-at-a-time without an Author correction loop' =>
         str_contains($ui, 'Question <?= $questionPosition ?> of')
-        && str_contains($ui, 'Current accepted wording')
-        && str_contains($ui, 'Proposed minimal correction')
+        && str_contains($ui, 'Additional instruction (required for “Other”)')
         && str_contains($ui, 'Historical Scope Repair')
         && str_contains($ui, 'Content Correction')
         && str_contains($ui, 'Review Details')
         && str_contains($js, 'answer_review_question')
-        && str_contains($js, 'generate_targeted_correction')
-        && str_contains($js, 'accept_targeted_correction'),
+        && !str_contains($ui, 'Generate Correction for Remaining Issues')
+        && str_contains($resolutionService, 'synchronizeClarificationQuestions')
+        && str_contains($resolutionService, '$maxQuestions = 8')
+        && str_contains($resolutionService, 'bounded-review-summary|')
+        && str_contains($resolutionService, 'EDITOR_FOLLOW_UP_REQUIRED')
+        && str_contains($resolutionService, "'author_correction_generated' => false"),
     'recovery is metadata-only and fingerprints accepted baselines' =>
         str_contains($recovery, "'manual_content_mutated' => false")
         && str_contains($recovery, "'architect_rerun_performed' => false")

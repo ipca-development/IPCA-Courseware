@@ -9,7 +9,9 @@
   var apiBase = root.getAttribute('data-api-base') || '/admin/api/controlled_book_editor_api.php';
   var documentType = root.getAttribute('data-document-type') || 'manual';
   var isAnnexBook = root.getAttribute('data-annex-book') === '1';
-  var initialViewMode = root.getAttribute('data-initial-view') === 'paginated' ? 'paginated' : 'edit';
+  var initialViewMode = root.getAttribute('data-initial-view') === 'edit'
+    ? 'edit'
+    : 'paginated';
   var formSelectedBlockId = 0;
 
   var treeEl = document.getElementById('cpbSectionTree');
@@ -28,6 +30,10 @@
   var saveStatusEl = document.getElementById('cpbSaveStatus');
   var addSubBtn = document.getElementById('cpbAddSubsection');
   var undoWizardEditBtn = document.getElementById('cpbUndoWizardEdit');
+  var sidebarTabsEl = document.getElementById('cpbSidebarTabs');
+  var wizardChangesEl = document.getElementById('cpbWizardChanges');
+  var wizardChangeCountEl = document.getElementById('cpbWizardChangeCount');
+  var treeActionsEl = document.getElementById('cpbTreeActions');
   var editOutlineBtn = document.getElementById('cpbEditOutline');
   var outlinePanelEl = document.getElementById('cpbStructModal');
   var outlineBodyEl = document.getElementById('cpbOutlineBody');
@@ -158,6 +164,7 @@
     sectionNumberDisplay: {},
     suggestedRegulatoryRefs: {},
     manualCode: '',
+    wizardChanges: null,
     undoStack: [],
     redoStack: [],
     layoutTimer: null,
@@ -970,7 +977,14 @@
       apiPost('undo_wizard_edit', {
         version_id: versionId,
         operation_id: operationId,
-      }).then(function () {
+      }).then(function (response) {
+        if (!response || response.ok !== true) {
+          throw new Error(
+            response && response.error
+              ? response.error
+              : 'The Wizard edit could not be undone.'
+          );
+        }
         window.location.reload();
       }).catch(function (error) {
         undoWizardEditBtn.disabled = false;
@@ -979,6 +993,235 @@
           ? error.message
           : 'The Wizard edit could not be undone.');
       });
+    });
+  }
+
+  function setSidebarTab(tab) {
+    var showingChanges = tab === 'changes';
+    if (!sidebarTabsEl || !wizardChangesEl) return;
+    var sidebarPanel = sidebarTabsEl.closest('.cpb-tree-panel');
+    if (sidebarPanel) sidebarPanel.classList.toggle('is-showing-wizard-changes', showingChanges);
+    sidebarTabsEl.querySelectorAll('[data-cpb-sidebar-tab]').forEach(function (button) {
+      button.classList.toggle(
+        'is-active',
+        button.getAttribute('data-cpb-sidebar-tab') === (showingChanges ? 'changes' : 'sections')
+      );
+    });
+    if (treeEl) treeEl.hidden = showingChanges;
+    wizardChangesEl.hidden = !showingChanges;
+    if (treeActionsEl) treeActionsEl.hidden = showingChanges;
+    if (treeToggleAllBtn) treeToggleAllBtn.hidden = showingChanges;
+    if (treeHeadTitleEl) {
+      treeHeadTitleEl.textContent = showingChanges ? 'Wizard changes' : 'Manual sections';
+    }
+  }
+
+  function wizardChangeStatusLabel(status) {
+    if (status === 'REVERTED') return 'Reverted to original';
+    if (status === 'SUPERSEDED') return 'Superseded by later Wizard change';
+    if (status === 'MANUALLY_EDITED') return 'Edited after Wizard';
+    return 'Applied';
+  }
+
+  function renderWizardChanges(changes) {
+    if (!sidebarTabsEl || !wizardChangesEl) return;
+    var firstSuccessfulLoad = state.wizardChanges === null;
+    state.wizardChanges = changes || null;
+    var items = changes && Array.isArray(changes.items) ? changes.items : [];
+    var guidance = changes && Array.isArray(changes.review_guidance)
+      ? changes.review_guidance
+      : [];
+    if (!items.length && !guidance.length) {
+      sidebarTabsEl.hidden = true;
+      wizardChangesEl.innerHTML = '<p class="cpb-wizard-changes__empty">'
+        + 'No Wizard changes are attached to this draft.</p>';
+      setSidebarTab('sections');
+      return;
+    }
+
+    sidebarTabsEl.hidden = false;
+    if (wizardChangeCountEl) wizardChangeCountEl.textContent = String(items.length);
+    var html = '<h3 class="cpb-wizard-changes__heading">'
+      + escapeHtml(String(changes.plan_title || 'Manual Change Wizard')) + '</h3>'
+      + '<p class="cpb-wizard-changes__meta">'
+      + 'Open, refine, or revert each Wizard-applied section independently.</p>';
+    items.forEach(function (item) {
+      var numbers = Array.isArray(item.section_numbers) ? item.section_numbers.join(' · ') : '';
+      var status = String(item.status || 'APPLIED');
+      var statusClass = status === 'REVERTED'
+        ? ' is-reverted'
+        : (status === 'MANUALLY_EDITED' || status === 'SUPERSEDED' ? ' is-warning' : '');
+      html += '<article class="cpb-wizard-change">'
+        + '<div class="cpb-wizard-change__head"><strong>'
+        + escapeHtml((numbers ? numbers + ' · ' : '') + String(item.title || 'Manual section'))
+        + '</strong><span class="cpb-wizard-change__status' + statusClass + '">'
+        + escapeHtml(wizardChangeStatusLabel(status)) + '</span></div>'
+        + '<div class="cpb-wizard-change__diff"><div><b>Original</b><p>'
+        + escapeHtml(String(item.original_preview || 'No text preview available.'))
+        + '</p></div><div><b>Wizard change</b><p>'
+        + escapeHtml(String(item.applied_preview || 'No text preview available.'))
+        + '</p></div></div>'
+        + '<div class="cpb-wizard-change__actions">'
+        + '<button type="button" data-cpb-open-wizard-change data-section-id="'
+        + Number(item.section_id || 0) + '">Open</button>';
+      if (item.can_revert) {
+        html += '<button type="button" class="is-danger" data-cpb-revert-wizard-change'
+          + ' data-operation-id="' + Number(item.operation_id || 0) + '"'
+          + ' data-section-id="' + Number(item.section_id || 0) + '">Revert</button>';
+      }
+      html += '</div></article>';
+    });
+    if (guidance.length) {
+      html += '<h3 class="cpb-wizard-changes__heading">Independent Review guidance</h3>';
+      guidance.forEach(function (note) {
+        var labels = Array.isArray(note.selected_labels) ? note.selected_labels.join(' · ') : '';
+        html += '<article class="cpb-wizard-guidance"><strong>'
+          + escapeHtml(String(note.title || 'Review note')) + '</strong>'
+          + (note.prompt ? '<p>' + escapeHtml(String(note.prompt)) + '</p>' : '')
+          + (labels ? '<p><b>Owner answer:</b> ' + escapeHtml(labels) + '</p>' : '')
+          + (note.instruction ? '<p><b>Instruction:</b> '
+            + escapeHtml(String(note.instruction)) + '</p>' : '')
+          + '<small>Advisory review note — edit the manual directly if refinement is needed.</small>'
+          + '</article>';
+      });
+    }
+    wizardChangesEl.innerHTML = html;
+    if (firstSuccessfulLoad) setSidebarTab('changes');
+  }
+
+  function renderWizardChangesError(message) {
+    if (!sidebarTabsEl || !wizardChangesEl) return;
+    sidebarTabsEl.hidden = false;
+    if (wizardChangeCountEl) wizardChangeCountEl.textContent = '!';
+    wizardChangesEl.innerHTML = '<article class="cpb-wizard-change">'
+      + '<strong>Changes unavailable</strong><p>'
+      + escapeHtml(String(message || 'The Wizard change history could not be loaded.'))
+      + '</p><div class="cpb-wizard-change__actions">'
+      + '<button type="button" data-cpb-retry-wizard-changes>Retry</button>'
+      + '</div></article>';
+  }
+
+  function loadWizardChanges() {
+    return apiGet(
+      apiBase + '?action=wizard_changes&version_id=' + encodeURIComponent(String(versionId))
+    ).then(function (response) {
+      if (!response.ok) throw new Error(response.error || 'Wizard changes could not be loaded.');
+      renderWizardChanges(response.changes || null);
+      return response.changes || null;
+    });
+  }
+
+  function submitWizardChangeRevert(item, force, fingerprint) {
+    return apiPost('revert_wizard_change', {
+      version_id: versionId,
+      operation_id: Number(item.operation_id || 0),
+      section_id: Number(item.section_id || 0),
+      force: force ? 1 : 0,
+      expected_current_fingerprint: fingerprint || '',
+    }).then(function (response) {
+      if (response.requires_confirmation) {
+        if (!window.confirm(
+          'This section was edited after the Wizard applied it. Reverting will replace those later '
+          + 'manual edits with the exact pre-Wizard wording. Continue?'
+        )) return false;
+        return submitWizardChangeRevert(item, true, response.current_fingerprint || '');
+      }
+      if (!response.ok) throw new Error(response.error || 'The Wizard change could not be reverted.');
+      if (response.changes) {
+        renderWizardChanges(response.changes);
+      } else {
+        loadWizardChanges().catch(function (error) {
+          renderWizardChangesError(error.message);
+        });
+      }
+      var warnings = response.result && Array.isArray(response.result.derived_refresh_warnings)
+        ? response.result.derived_refresh_warnings.slice()
+        : [];
+      if (response.sidebar_refresh_warning) warnings.push(String(response.sidebar_refresh_warning));
+      if (warnings.length) {
+        window.alert(
+          'The section was reverted, but a derived document refresh needs attention:\n\n'
+          + warnings.join('\n')
+        );
+      }
+      if (undoWizardEditBtn) undoWizardEditBtn.remove();
+      if (state.viewMode === 'paginated') {
+        return loadPaginatedView().then(function () { return true; });
+      }
+      var derivedSectionIds = response.result
+        && Array.isArray(response.result.derived_sections_refreshed)
+        ? response.result.derived_sections_refreshed.map(Number)
+        : [];
+      if (state.sectionId === Number(item.section_id || 0)
+        || derivedSectionIds.indexOf(Number(state.sectionId || 0)) !== -1) {
+        return loadSection(state.sectionId).then(function () { return true; });
+      }
+      return true;
+    });
+  }
+
+  function openWizardChangeSection(sectionId) {
+    if (state.viewMode === 'paginated') {
+      state.sectionId = sectionId;
+      state.sectionPageIndex = 0;
+      renderTree(state.sectionsTree, state.sectionId);
+      return loadPaginatedView().then(function () {
+        canvasEl.scrollTop = 0;
+      });
+    }
+    return loadSection(sectionId);
+  }
+
+  if (sidebarTabsEl) {
+    sidebarTabsEl.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-cpb-sidebar-tab]');
+      if (!button) return;
+      setSidebarTab(button.getAttribute('data-cpb-sidebar-tab') || 'sections');
+    });
+  }
+
+  if (wizardChangesEl) {
+    wizardChangesEl.addEventListener('click', function (event) {
+      var retryButton = event.target.closest('[data-cpb-retry-wizard-changes]');
+      if (retryButton) {
+        retryButton.disabled = true;
+        loadWizardChanges().catch(function (error) {
+          renderWizardChangesError(error.message);
+        });
+        return;
+      }
+      var openButton = event.target.closest('[data-cpb-open-wizard-change]');
+      if (openButton) {
+        var openSectionId = parseInt(openButton.getAttribute('data-section-id') || '0', 10);
+        if (openSectionId > 0) openWizardChangeSection(openSectionId).catch(showError);
+        return;
+      }
+      var revertButton = event.target.closest('[data-cpb-revert-wizard-change]');
+      if (!revertButton) return;
+      var item = {
+        operation_id: parseInt(revertButton.getAttribute('data-operation-id') || '0', 10),
+        section_id: parseInt(revertButton.getAttribute('data-section-id') || '0', 10),
+      };
+      if (!item.operation_id || !item.section_id) return;
+      if (!window.confirm(
+        'Revert only this Wizard-applied section to its exact original wording? '
+        + 'Other authored sections remain unchanged; generated TOC and Highlight of Changes pages '
+        + 'refresh automatically.'
+      )) return;
+      revertButton.disabled = true;
+      revertButton.textContent = 'Reverting…';
+      submitWizardChangeRevert(item, false, '')
+        .then(function (completed) {
+          if (completed === false) {
+            revertButton.disabled = false;
+            revertButton.textContent = 'Revert';
+          }
+        })
+        .catch(function (error) {
+          revertButton.disabled = false;
+          revertButton.textContent = 'Revert';
+          showError(error);
+        });
     });
   }
 
@@ -12597,6 +12840,14 @@
     .then(function () { return loadSection(initialSectionId || 0); })
     .then(function () {
       if (initialViewMode === 'paginated') return setViewMode('paginated');
+    })
+    .then(function () {
+      return loadWizardChanges().catch(function (error) {
+        renderWizardChangesError(error.message);
+        if (window.console && console.warn) {
+          console.warn('Wizard change sidebar unavailable:', error);
+        }
+      });
     })
     .catch(showError);
 })();

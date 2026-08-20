@@ -110,7 +110,7 @@ try {
             ->getCompleteCheckpointReport($planId);
         if ((array)($report['reviews'] ?? array()) !== array()) {
             $reviewResolutionState = (new BooksManualsChangeReviewResolutionService($pdo, $plans))
-                ->state($planId);
+                ->prepareClarificationQueue($planId, $userId);
         }
         $versionId = (int)($report['primary_manual_version_id'] ?? 0);
         $stmt = $pdo->prepare(
@@ -707,20 +707,22 @@ books_manuals_page_open(array(
         <details class="mcw-step mcw-step--complete"><summary><span class="mcw-check">✓</span><span><strong>5. Independent Review</strong><small>Ready for human approval</small></span><span>View</span></summary></details>
       <?php elseif ($activeStep === 5): ?>
         <section class="mcw-step mcw-step--active" data-mcw-step="5">
-          <header><span class="mcw-step-number">5</span><div><h2>Independent Review</h2><p>Resolve only material review findings. Accepted scope, structure and unaffected wording remain frozen.</p></div></header>
+          <header><span class="mcw-step-number">5</span><div><h2>Independent Review</h2><p>Review material points through short human questions. Answers are carried into the Editor; no automatic correction loop runs.</p></div></header>
           <?php $reviewCounts = mcw_array($reviewResolutionState['counts'] ?? array()); ?>
           <?php $reviewCheckCounts = mcw_array($reviewResolutionState['check_counts'] ?? array()); ?>
           <?php $reviewResolutionCounts = mcw_array($reviewResolutionState['resolution_counts'] ?? array()); ?>
-          <?php $questionCount = (int)($reviewCounts['HUMAN_DECISION_REQUIRED'] ?? 0); ?>
+          <?php $questionCount = count((array)($reviewResolutionState['questions'] ?? array())); ?>
           <?php $answeredCount = count((array)($reviewResolutionState['answers'] ?? array())); ?>
+          <?php $pendingQuestionCount = count(array_filter((array)($reviewResolutionState['questions'] ?? array()), static fn(array $question): bool => (string)($question['status'] ?? '') === 'pending')); ?>
           <?php $remainingCorrections = (int)($reviewResolutionCounts['UNRESOLVED'] ?? 0); ?>
+          <?php $acknowledgedReviewItems = (int)($reviewResolutionCounts['ACKNOWLEDGED'] ?? 0); ?>
           <?php $verifiedCorrections = $reviewVerifiedCorrections; ?>
           <div class="mcw-review-summary">
             <strong><?= $reviewResolutionReady ? 'Independent Review Complete' : 'Independent Review' ?></strong>
             <span>✓ <?= (int)($reviewCheckCounts['PASS'] ?? 0) ?> checks passed</span>
-            <span>✓ <?= $verifiedCorrections ?> correction<?= $verifiedCorrections === 1 ? '' : 's' ?> verified</span>
-            <span>⚠ <?= $remainingCorrections ?> content correction<?= $remainingCorrections === 1 ? '' : 's' ?> remaining</span>
-            <span>⚠ <?= max(0, $questionCount - $answeredCount) ?> human decisions required</span>
+            <span>✓ <?= $acknowledgedReviewItems ?> review item<?= $acknowledgedReviewItems === 1 ? '' : 's' ?> acknowledged for the Editor</span>
+            <span>⚠ <?= $remainingCorrections ?> clarification<?= $remainingCorrections === 1 ? '' : 's' ?> remaining</span>
+            <span>⚠ <?= $pendingQuestionCount ?> human answer<?= $pendingQuestionCount === 1 ? '' : 's' ?> required</span>
             <span>✕ <?= (int)($reviewResolutionState['hard_blockers'] ?? 0) ?> hard integrity blockers</span>
           </div>
           <?php if ($reviewLatestPatchStatus === 'VERIFICATION_FAILED'): ?>
@@ -769,12 +771,12 @@ books_manuals_page_open(array(
               <div class="mcw-review-choices">
                 <?php foreach ($questionChoices as $choice): ?>
                   <?php if (!is_array($choice)) continue; ?>
-                  <label><input type="<?= (string)$reviewPendingQuestion['question_type'] === 'MULTIPLE_CHOICE' ? 'checkbox' : 'radio' ?>" name="mcw-review-choice" value="<?= h((string)($choice['id'] ?? '')) ?>"> <span><?= h((string)($choice['label'] ?? '')) ?></span></label>
+                  <label><input type="<?= (string)$reviewPendingQuestion['question_type'] === 'MULTIPLE_CHOICE' ? 'checkbox' : 'radio' ?>" name="mcw-review-choice" value="<?= h((string)($choice['id'] ?? '')) ?>" data-requires-explanation="<?= !empty($choice['requires_explanation']) ? '1' : '0' ?>"> <span><?= h((string)($choice['label'] ?? '')) ?></span></label>
                 <?php endforeach; ?>
               </div>
               <details><summary>Why are we asking this?</summary><p><?= h((string)$reviewPendingQuestion['why_asking']) ?></p></details>
               <p><strong>Affected sections</strong><br><?= h(implode(' · ', array_map('strval', $questionSections))) ?></p>
-              <label class="mcw-field"><span>Optional explanation</span><textarea rows="3" data-mcw-review-answer-explanation></textarea></label>
+              <label class="mcw-field"><span>Additional instruction (required for “Other”)</span><textarea rows="3" data-mcw-review-answer-explanation></textarea></label>
               <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-answer-review-question>Continue</button>
             </section>
           <?php elseif ($reviewPendingPatches !== array()): ?>
@@ -801,21 +803,11 @@ books_manuals_page_open(array(
               </section>
             <?php endforeach; ?>
           <?php elseif ($reviewResolutionReady): ?>
-            <div class="mcw-review-result is-ready"><h3>✓ No unresolved issues</h3><ul><li>✓ Accepted requirements represented</li><li>✓ Human decisions resolved</li><li>✓ Targeted corrections verified</li><li>✓ Known limitations correctly represented</li><li>✓ Accepted structure preserved</li><li>✓ Unaffected wording unchanged</li><li>✓ No integrity blockers</li></ul></div>
+            <div class="mcw-review-result is-ready"><h3>✓ Independent Review recorded</h3><ul><li>✓ Human clarifications recorded</li><li>✓ Selected review notes will be shown in the Editor</li><li>✓ Review notes remain advisory while editing</li><li>✓ No repeated Author or Reviewer correction loop</li><li>✓ Accepted structure preserved</li><li>✓ No technical integrity blockers</li></ul></div>
             <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-run-review>Continue to Apply</button>
           <?php else: ?>
-            <?php $patchableFindings = array_values(array_filter($reviewFindings, static fn(array $finding): bool => strtoupper((string)($finding['resolution_status'] ?? '')) === 'UNRESOLVED')); ?>
             <?php $scopeDefects = array_values(array_filter($reviewFindings, static fn(array $finding): bool => (string)($finding['finding_class'] ?? '') === 'POTENTIAL_SCOPE_DEFECT' && !in_array((string)($finding['status'] ?? ''), array('closed', 'verified'), true))); ?>
-            <div class="mcw-review-decisions"><h3>Review Decisions &amp; Remaining Corrections</h3><p><?= $answeredCount ?> human decisions recorded · <?= count($patchableFindings) ?> content checks unresolved</p></div>
-            <?php foreach ($reviewRepairGroups as $group): ?>
-              <section class="mcw-review-result is-review">
-                <h3><?= h((string)($group['label'] ?? 'Targeted correction')) ?></h3>
-                <p><strong>Affected nodes:</strong> <?= h(implode(' · ', array_map('strval', (array)($group['affected_nodes'] ?? array())))) ?></p>
-                <ul><?php foreach ((array)($group['issues'] ?? array()) as $issue): ?><li><?= h((string)$issue) ?></li><?php endforeach; ?></ul>
-                <?php if ($scopeDefects === array()): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-generate-targeted-patch data-finding-ids="<?= h(implode(',', array_map('intval', (array)($group['finding_ids'] ?? array())))) ?>">Generate Correction for This Group</button><?php endif; ?>
-              </section>
-            <?php endforeach; ?>
-            <?php if ($patchableFindings !== array() && $scopeDefects === array()): ?><button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-generate-targeted-patch>Generate Correction for Remaining Issues</button><?php elseif ($scopeDefects !== array()): ?><p class="mcw-apply-note">Resolve the potential scope issue before generating a wording correction.</p><?php endif; ?>
+            <div class="mcw-review-decisions"><h3>Independent Review needs attention</h3><p><?= $answeredCount ?> human answer<?= $answeredCount === 1 ? '' : 's' ?> recorded. Content review points are handled by questions, not automatic rewriting.</p></div>
             <?php foreach ($reviewFindings as $finding): ?>
               <?php if (!in_array((string)($finding['finding_class'] ?? ''), array('HARD_INTEGRITY_BLOCKER', 'POTENTIAL_SCOPE_DEFECT'), true) || in_array((string)($finding['status'] ?? ''), array('closed', 'verified'), true)) continue; ?>
               <div class="mcw-review-result is-review"><h3><?= h((string)$finding['title']) ?></h3><p><?= h((string)$finding['human_explanation']) ?></p><p><?= (string)$finding['finding_class'] === 'HARD_INTEGRITY_BLOCKER' ? 'This is a technical integrity failure. The protected state must be restored before the Wizard can continue.' : 'This is a content-integrity requirement. The wording must be corrected before the Wizard can continue.' ?></p><?php if ((string)$finding['finding_class'] === 'POTENTIAL_SCOPE_DEFECT'): ?><div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-scope-follow-up="<?= (int)$finding['id'] ?>">Record as Separate Follow-up</button><button class="app-btn app-btn--secondary" type="button" data-mcw-explicit-reopen="reopen_impact_analysis">Reopen Impact Analysis</button></div><?php elseif ((string)($finding['category'] ?? '') === 'SCOPE'): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-explicit-reopen="reopen_impact_analysis">Resolve Exceptional Scope Contradiction</button><?php elseif ((string)($finding['category'] ?? '') === 'STRUCTURE'): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-explicit-reopen="reopen_proposed_structure">Resolve Exceptional Structure Contradiction</button><?php endif; ?></div>
@@ -833,7 +825,7 @@ books_manuals_page_open(array(
           <?php $result = mcw_array($operation['result_json'] ?? array()); ?><a class="app-btn app-btn--primary mcw-primary-action" href="/admin/compliance/controlled_book_editor.php?version_id=<?= (int)($result['book_version_id'] ?? 0) ?>">Open Updated Manual in Editor</a>
         <?php else: ?>
           <dl class="mcw-apply-summary"><div><dt>Selected version</dt><dd><?= h((string)($manual['book_key'] ?? 'Manual')) ?> <?= h((string)($manual['version_label'] ?? '')) ?></dd></div><div><dt>Changes</dt><dd><?= count($amendments) ?> amendment areas</dd></div><div><dt>Independent Review</dt><dd>Ready</dd></div><div><dt>Revision action</dt><dd>None — version and revision remain unchanged</dd></div></dl>
-          <div class="mcw-apply-warning"><strong>This updates the selected Draft / Draft Review in place.</strong><p>The operation is transactional. The Editor will show standard black change bars and provide a guarded Undo Wizard Edit action.</p></div>
+          <div class="mcw-apply-warning"><strong>This updates the selected Draft / Draft Review in place.</strong><p>The operation is transactional. The Editor opens with its normal section view and adds a black Changes sidebar with per-section Open and guarded Revert actions.</p></div>
           <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-apply>Apply Accepted Wizard Changes</button>
           <p class="mcw-apply-note">This does not create, approve, finalize or publish a revision.</p>
         <?php endif; ?>

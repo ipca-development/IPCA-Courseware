@@ -47,10 +47,22 @@ if ($version === null) {
 $isAnnexBook = BooksManualsAnnexBookService::isAnnexBookVersion($version);
 $wizardUndo = null;
 try {
-    $wizardUndo = (new BooksManualsChangeApplyService(
+    $wizardApply = new BooksManualsChangeApplyService(
         $pdo,
         new BooksManualsChangePlanService($pdo)
-    ))->availableUndo($versionId);
+    );
+    $wizardChanges = $wizardApply->editorChanges($versionId, (int)$user['id']);
+    $allWizardChangesPristine = is_array($wizardChanges)
+        && (array)($wizardChanges['items'] ?? array()) !== array()
+        && count(array_filter(
+            (array)$wizardChanges['items'],
+            static fn(array $item): bool =>
+                (string)($item['status'] ?? '') !== 'APPLIED'
+                || empty($item['can_revert'])
+        )) === 0;
+    $wizardUndo = $allWizardChangesPristine
+        ? $wizardApply->availableUndo($versionId)
+        : null;
 } catch (Throwable $e) {
     $wizardUndo = null;
 }
@@ -108,10 +120,17 @@ compliance_page_open(array(
         <h2 id="cpbTreeHeadTitle">Manual sections</h2>
         <button type="button" id="cpbTreeToggleAll" class="cpb-tree-toggle-all" aria-pressed="false" title="Expand or collapse all sections">Expand all</button>
       </div>
+      <div class="cpb-sidebar-tabs" id="cpbSidebarTabs" hidden>
+        <button type="button" class="is-active" data-cpb-sidebar-tab="sections">Sections</button>
+        <button type="button" data-cpb-sidebar-tab="changes">Changes <span id="cpbWizardChangeCount">0</span></button>
+      </div>
       <div class="cpb-tree-scroll" id="cpbSectionTree">
         <p style="padding:12px 16px;margin:0;font-size:12px;color:#94a3b8;">Loading outline…</p>
       </div>
-      <div class="cpb-tree-actions">
+      <div class="cpb-wizard-changes" id="cpbWizardChanges" hidden>
+        <p class="cpb-wizard-changes__empty">No Wizard changes are attached to this draft.</p>
+      </div>
+      <div class="cpb-tree-actions" id="cpbTreeActions">
         <?php if (!$isAnnexBook): ?>
         <button type="button" id="cpbEditOutline" class="cpb-tree-outline-btn" title="Edit PART and MAIN chapter titles">Edit outline</button>
         <?php endif; ?>

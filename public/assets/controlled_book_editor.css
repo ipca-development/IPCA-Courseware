@@ -121,6 +121,10 @@
   border-bottom-left-radius: 20px;
 }
 
+.cpb-tree-panel.is-showing-wizard-changes {
+  background: #080b10;
+}
+
 .cpb-tree-head {
   display: flex;
   align-items: center;
@@ -145,6 +149,172 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.cpb-sidebar-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cpb-sidebar-tabs[hidden] {
+  display: none !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-sidebar-tabs button {
+  display: block !important;
+  box-sizing: border-box;
+  width: 100% !important;
+  min-height: 28px !important;
+  padding: 5px 8px !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: #94a3b8 !important;
+  font: 700 10px/1.2 system-ui, sans-serif !important;
+  text-align: center !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-sidebar-tabs button:hover,
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-sidebar-tabs button.is-active {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #fff !important;
+}
+
+.cpb-wizard-changes {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+
+.cpb-wizard-changes[hidden] {
+  display: none !important;
+}
+
+.cpb-wizard-changes__heading {
+  margin: 2px 2px 8px;
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.cpb-wizard-changes__meta,
+.cpb-wizard-changes__empty {
+  margin: 0 2px 10px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.cpb-wizard-change,
+.cpb-wizard-guidance {
+  margin: 0 0 8px;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.cpb-wizard-change strong,
+.cpb-wizard-guidance strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 11px;
+}
+
+.cpb-wizard-change__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cpb-wizard-change__head strong {
+  min-width: 0;
+}
+
+.cpb-wizard-change p,
+.cpb-wizard-guidance p {
+  margin: 5px 0;
+  color: #cbd5e1;
+  font-size: 10px;
+}
+
+.cpb-wizard-change__status {
+  display: inline-block;
+  margin-top: 5px;
+  color: #93c5fd;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cpb-wizard-change__status.is-warning {
+  color: #fbbf24;
+}
+
+.cpb-wizard-change__status.is-reverted {
+  color: #86efac;
+}
+
+.cpb-wizard-change__diff {
+  margin-top: 7px;
+  color: #cbd5e1;
+  font-size: 10px;
+}
+
+.cpb-wizard-change__diff summary {
+  color: #93c5fd;
+  cursor: pointer;
+}
+
+.cpb-wizard-change__diff p {
+  max-height: 120px;
+  overflow: auto;
+  padding-left: 6px;
+  border-left: 2px solid rgba(255, 255, 255, 0.14);
+  white-space: pre-wrap;
+}
+
+.cpb-wizard-change__actions {
+  display: flex;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-wizard-change__actions button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 26px !important;
+  padding: 4px 7px !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 5px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+  font: 700 9px/1 system-ui, sans-serif !important;
+  cursor: pointer !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-wizard-change__actions button:hover {
+  background: rgba(255, 255, 255, 0.16) !important;
+  color: #fff !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-wizard-change__actions button[data-cpb-revert-wizard-change] {
+  border-color: rgba(248, 113, 113, 0.4) !important;
+  color: #fecaca !important;
+}
+
+.cmp-page .cpb-editor-root .cpb-tree-panel .cpb-wizard-change__actions button:disabled {
+  opacity: 0.45;
+  cursor: default !important;
 }
 
 .cpb-tree-toggle-all {

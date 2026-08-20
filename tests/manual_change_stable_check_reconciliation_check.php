@@ -267,10 +267,50 @@ $db->exec(
 $db->exec(
     'CREATE TABLE ipca_manual_ai_architect_review_baselines (
         id INTEGER PRIMARY KEY,
+        review_id INTEGER NOT NULL,
         draft_baseline_json TEXT NOT NULL
     )'
 );
-$db->exec("INSERT INTO ipca_manual_ai_architect_review_baselines (id,draft_baseline_json) VALUES (1,'{}')");
+$db->exec(
+    'CREATE TABLE ipca_manual_ai_architect_review_questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question_uuid TEXT NOT NULL,
+        plan_id INTEGER NOT NULL,
+        finding_id INTEGER NOT NULL,
+        question_fingerprint TEXT NOT NULL,
+        question_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        choices_json TEXT NOT NULL,
+        recommendation_json TEXT,
+        why_asking TEXT NOT NULL,
+        affected_sections_json TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(plan_id, question_fingerprint)
+    )'
+);
+$db->exec(
+    'CREATE TABLE ipca_manual_ai_architect_review_patches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id INTEGER NOT NULL,
+        baseline_id INTEGER NOT NULL,
+        status TEXT NOT NULL
+    )'
+);
+$db->exec(
+    'CREATE TABLE ipca_manual_ai_architect_review_answers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question_id INTEGER NOT NULL,
+        consequence TEXT NOT NULL,
+        governed_fact_json TEXT NOT NULL
+    )'
+);
+$db->exec(
+    "INSERT INTO ipca_manual_ai_architect_review_baselines
+     (id,review_id,draft_baseline_json) VALUES (1,9,'{}')"
+);
 
 $resolution = new BooksManualsChangeReviewResolutionService(
     $db,
@@ -342,6 +382,47 @@ stableCheckAssert($states['check.b'] === 'UNRESOLVED', 'An unfixed finding did n
 stableCheckAssert($states['check.pass'] === 'VERIFIED', 'A failed patch reopened an omitted verified finding.');
 stableCheckAssert($states['check.hard'] === 'BLOCKED', 'A hard integrity blocker became overridable.');
 stableCheckAssert($states['check.new'] === 'UNRESOLVED', 'A genuinely new defect did not receive a new identity.');
+$questions = $db->query(
+    'SELECT question_type,choices_json,evidence_json
+     FROM ipca_manual_ai_architect_review_questions
+     WHERE status=\'pending\' ORDER BY id'
+)->fetchAll(PDO::FETCH_ASSOC) ?: array();
+stableCheckAssert(
+    count($questions) === 2,
+    'Ordinary failures were not reduced to one bounded question per exact repair scope.'
+);
+foreach ($questions as $question) {
+    $choices = json_decode((string)$question['choices_json'], true);
+    stableCheckAssert(
+        (string)$question['question_type'] === 'SINGLE_CHOICE'
+            && is_array($choices)
+            && array_column($choices, 'id') === array(
+                'yes-editor-review-note',
+                'no-current-wording-sufficient',
+                'other',
+            ),
+        'A review clarification is not a deterministic yes/no/other choice.'
+    );
+}
+$questionClasses = $db->query(
+    "SELECT m.check_id,f.finding_class,f.status,f.blocking
+     FROM ipca_manual_ai_architect_review_findings f
+     JOIN ipca_manual_ai_architect_review_check_metadata m ON m.finding_id=f.id
+     WHERE m.check_id IN ('check.b','check.new','check.hard')
+     ORDER BY m.check_id"
+)->fetchAll(PDO::FETCH_ASSOC) ?: array();
+$questionClassById = array_column($questionClasses, null, 'check_id');
+stableCheckAssert(
+    (string)$questionClassById['check.b']['finding_class']
+        === BooksManualsChangeReviewResolutionService::HUMAN_DECISION_REQUIRED
+        && (string)$questionClassById['check.new']['status'] === 'question_pending'
+        && (int)$questionClassById['check.b']['blocking'] === 0
+        && (int)$questionClassById['check.new']['blocking'] === 0
+        && (string)$questionClassById['check.hard']['finding_class']
+            === BooksManualsChangeReviewResolutionService::HARD_INTEGRITY_BLOCKER
+        && (int)$questionClassById['check.hard']['blocking'] === 1,
+    'Question-first review weakened a technical blocker or left content in an Author loop.'
+);
 
 $reconcile->invoke(
     $resolution,
@@ -484,6 +565,17 @@ $groups = $repairGroups->invoke($resolution, array(
 stableCheckAssert(
     count($groups) === 2 && count((array)$groups[0]['check_ids']) === 2,
     'Corrections were not grouped only by coherent repair scope.'
+);
+
+$reviewPlanStatus = new ReflectionMethod($resolution, 'reviewPlanStatus');
+stableCheckAssert(
+    $reviewPlanStatus->invoke($resolution, array(
+        'counts' => array('hard_blockers' => 0, 'questions_pending' => 2),
+    )) === 'ready_for_review'
+        && $reviewPlanStatus->invoke($resolution, array(
+            'counts' => array('hard_blockers' => 1, 'questions_pending' => 0),
+        )) === 'blocked',
+    'Ordinary clarification questions still place the Change Plan in a blocked state.'
 );
 
 $resolutionSource = file_get_contents(
