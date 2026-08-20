@@ -78,7 +78,11 @@ function storedPage(sectionId, pageNumber, marker, width = 640, height = 900) {
     </article>`,
     metadata: {
       metrics: {
+        page_width: width,
+        page_height: height,
+        header_frame: { x: 32, y: 20, width: width - 64, height: 50 },
         content_frame: { x: 32, y: 90, width: width - 64, height: height - 160 },
+        footer_frame: { x: 32, y: height - 50, width: width - 64, height: 30 },
         block_measurements: [{
           source_fragment_id: fragmentId,
           semantic_type: 'paragraph',
@@ -223,6 +227,8 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
             title: `Section ${sectionId}`,
           },
           version: { id: 7, book_key: 'phase-c-book', status: 'draft' },
+          authoritative_editor_page_starts_enabled:
+            new URLSearchParams(location.search).get('authoritative_starts') === '1',
           page_html: `<div class="cpb-sheet"><div class="cpb-sheet-body" data-blocks-root="1">${sourceBlocks}</div></div>`,
           section_number_display: {},
           suggested_regulatory_refs: {},
@@ -455,6 +461,73 @@ test('a slower prior section response cannot replace the newest selected section
       status: 'Ready',
       busy: 'false',
     });
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('authoritative table-row boundaries and content frame drive editor pages', async (browser) => {
+  const first = storedPage(11, 41, 'table-row-first', 816, 1056);
+  const second = storedPage(11, 42, 'table-row-second', 816, 1056);
+  [first, second].forEach((stored) => {
+    stored.metadata.metrics.content_frame = { x: 56, y: 140, width: 704, height: 760 };
+    stored.metadata.metrics.header_frame = { x: 56, y: 48, width: 704, height: 72 };
+    stored.metadata.metrics.footer_frame = { x: 56, y: 924, width: 704, height: 32 };
+  });
+  first.metadata.coverage = [{
+    source_fragment_id: 'section-11/table-3/table-row-0',
+    section_id: 11,
+    range_start: 0,
+    presentation_copy: false,
+  }];
+  second.metadata.coverage = [{
+    source_fragment_id: 'section-11/table-3/table-row-1',
+    section_id: 11,
+    range_start: 0,
+    presentation_copy: false,
+  }];
+  const preview = {
+    ok: true,
+    result: {
+      pages: [first, second],
+      freshness: { is_current: true },
+      book_style_css: '',
+    },
+  };
+  const tableOnly = sourceBlocks.slice(sourceBlocks.indexOf(
+    '<div class="cpb-block cpb-block--table"'
+  ));
+  const { page, browserErrors } = await newEditorPage(
+    browser,
+    'authoritative_starts=1',
+    preview,
+    null,
+    tableOnly,
+  );
+  try {
+    const observed = await page.evaluate(() => {
+      const sheet = document.querySelector('#cpbCanvas .cpb-sheet');
+      const tbody = document.querySelector('#cpbCanvas [data-block-id="3"] tbody');
+      const sourceRows = Array.from(tbody.rows).filter((row) =>
+        row.getAttribute('data-auto-page-break') !== '1'
+      );
+      const secondRowTop = (
+        sourceRows[1].getBoundingClientRect().top - sheet.getBoundingClientRect().top
+      );
+      return {
+        projectedBreaks: tbody.querySelectorAll(
+          'tr[data-authoritative-page-break="1"]'
+        ).length,
+        secondRowLocalTop: secondRowTop - (1056 + 28),
+        contentTop: sheet.style.getPropertyValue('--cpb-print-content-top'),
+        contentWidth: sheet.style.getPropertyValue('--cpb-print-content-width'),
+      };
+    });
+    assert.equal(observed.projectedBreaks, 1);
+    assert.ok(Math.abs(observed.secondRowLocalTop - 140) <= 2, JSON.stringify(observed));
+    assert.equal(observed.contentTop, '140px');
+    assert.equal(observed.contentWidth, '704px');
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

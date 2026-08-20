@@ -148,6 +148,7 @@
     publicationFontCSS: '',
     authoritativeEditorPageStartsEnabled: false,
     authoritativeEditorPageStarts: [],
+    authoritativeEditorGeometry: null,
     authoritativeEditorPageStartsVersionId: 0,
     authoritativeEditorPageStartsSectionId: 0,
     sectionTitle: '',
@@ -1206,29 +1207,81 @@
       var breakPage = Math.max(0, Math.floor(breakTop / stride));
       target = (breakPage + 1) * stride + PRINT_PAGE.contentTop;
       if (target <= breakTop + 1) continue;
-      var repeatedRows = tableRepeatedHeaderRows(block);
-      var table = block.querySelector('table');
-      var tableHead = table ? table.querySelector('thead') : null;
-      var repeatedHeight = tableHead
-        ? Math.max(0, tableHead.getBoundingClientRect().height / printScale())
-        : 0;
-      var spacerRow = document.createElement('tr');
-      spacerRow.className = 'cpb-table-page-spacer';
-      spacerRow.setAttribute('data-auto-page-break', '1');
-      spacerRow.setAttribute('data-editor-only', '1');
-      spacerRow.setAttribute('contenteditable', 'false');
-      var spacerCell = document.createElement('td');
-      spacerCell.colSpan = colCount;
-      spacerCell.setAttribute('contenteditable', 'false');
-      spacerCell.style.cssText = 'height:' + Math.max(1, target - breakTop - repeatedHeight)
-        + 'px!important;padding:0!important;border:0!important;line-height:0!important;'
-        + 'background:transparent!important;';
-      spacerRow.appendChild(spacerCell);
-      tbody.insertBefore(spacerRow, breakRow);
-      repeatedRows.forEach(function (repeatedRow) {
-        tbody.insertBefore(repeatedRow, breakRow);
-      });
-      return true;
+      return insertTablePageSpacer(block, tbody, breakRow, colCount, target, false);
+    }
+    return false;
+  }
+
+  function insertTablePageSpacer(block, tbody, breakRow, colCount, target, authoritative) {
+    if (!block || !tbody || !breakRow) return false;
+    var breakTop = printY(breakRow, block.closest('.cpb-sheet'));
+    var repeatedRows = tableRepeatedHeaderRows(block);
+    var table = block.querySelector('table');
+    var tableHead = table ? table.querySelector('thead') : null;
+    var repeatedHeight = tableHead
+      ? Math.max(0, tableHead.getBoundingClientRect().height / printScale())
+      : 0;
+    if (target <= breakTop + 1) return false;
+    var spacerRow = document.createElement('tr');
+    spacerRow.className = 'cpb-table-page-spacer';
+    spacerRow.setAttribute('data-auto-page-break', '1');
+    spacerRow.setAttribute('data-editor-only', '1');
+    spacerRow.setAttribute('contenteditable', 'false');
+    if (authoritative) spacerRow.setAttribute('data-authoritative-page-break', '1');
+    var spacerCell = document.createElement('td');
+    spacerCell.colSpan = colCount;
+    spacerCell.setAttribute('contenteditable', 'false');
+    spacerCell.style.cssText = 'height:' + Math.max(1, target - breakTop - repeatedHeight)
+      + 'px!important;padding:0!important;border:0!important;line-height:0!important;'
+      + 'background:transparent!important;';
+    spacerRow.appendChild(spacerCell);
+    tbody.insertBefore(spacerRow, breakRow);
+    repeatedRows.forEach(function (repeatedRow) {
+      tbody.insertBefore(repeatedRow, breakRow);
+    });
+    return true;
+  }
+
+  function hasPrecedingTablePageSpacer(row, authoritativeOnly) {
+    var sibling = row ? row.previousElementSibling : null;
+    while (sibling && sibling.getAttribute('data-auto-page-break') === '1') {
+      if (
+        sibling.classList.contains('cpb-table-page-spacer')
+        && (!authoritativeOnly
+          || sibling.getAttribute('data-authoritative-page-break') === '1')
+      ) return true;
+      sibling = sibling.previousElementSibling;
+    }
+    return false;
+  }
+
+  function insertAuthoritativeTableRowPageBreak(block, sheet, rowIndexes) {
+    if (!Array.isArray(rowIndexes) || !rowIndexes.length) return false;
+    var tbody = tableBody(block);
+    if (!tbody) return false;
+    var rows = tableSourceRows(tbody);
+    var colCount = Math.max(1, tableColCount(block));
+    var stride = PRINT_PAGE.height + PRINT_PAGE.gap;
+    for (var cursor = 0; cursor < rowIndexes.length; cursor++) {
+      var index = parseInt(rowIndexes[cursor], 10);
+      if (index < 0 || index >= rows.length) continue;
+      var breakRow = tableContinuationGroupStart(rows, index, colCount);
+      if (hasPrecedingTablePageSpacer(breakRow, true)) continue;
+      var breakTop = printY(breakRow, sheet);
+      var pageIndex = Math.max(0, Math.floor(breakTop / stride));
+      var contentTop = pageIndex * stride + PRINT_PAGE.contentTop;
+      if (Math.abs(breakTop - contentTop) <= 1) continue;
+      var target = breakTop < contentTop - 1
+        ? contentTop
+        : (pageIndex + 1) * stride + PRINT_PAGE.contentTop;
+      if (insertTablePageSpacer(
+        block,
+        tbody,
+        breakRow,
+        colCount,
+        target,
+        true
+      )) return true;
     }
     return false;
   }
@@ -1458,22 +1511,57 @@
       }
       var first = sectionCoverage[0];
       var fragmentId = String(first.source_fragment_id || '');
+      var tableRowMatch = fragmentId.match(/\/table-row-(\d+)$/);
       if (
         parseInt(first.range_start || '0', 10) === 0
-        && /\/root$/.test(fragmentId)
+        && (/\/root$/.test(fragmentId) || tableRowMatch)
       ) {
         starts.push({
           pageNumber: parseInt(pages[index].page_number || '0', 10) || 0,
           sourceFragmentId: fragmentId,
+          rowIndex: tableRowMatch ? parseInt(tableRowMatch[1], 10) : null,
+          kind: tableRowMatch ? 'table-row' : 'block',
         });
       }
     }
     return starts;
   }
 
+  function authoritativeEditorGeometryFromResult(result, sectionId) {
+    if (!result || !result.freshness || result.freshness.is_current !== true) return null;
+    var pages = result && Array.isArray(result.pages) ? result.pages : [];
+    var page = pages.find(function (candidate) {
+      return parseInt(candidate.section_id || '0', 10) === sectionId
+        && candidate.metadata
+        && candidate.metadata.metrics;
+    });
+    var metrics = page && page.metadata ? page.metadata.metrics : null;
+    var content = metrics && metrics.content_frame ? metrics.content_frame : null;
+    if (!metrics || !content) return null;
+    var geometry = {
+      pageWidth: parseFloat(metrics.page_width || '0'),
+      pageHeight: parseFloat(metrics.page_height || '0'),
+      contentX: parseFloat(content.x || '0'),
+      contentWidth: parseFloat(content.width || '0'),
+      contentTop: parseFloat(content.y || '0'),
+      contentHeight: parseFloat(content.height || '0'),
+      headerTop: parseFloat(metrics.header_frame && metrics.header_frame.y || '0'),
+      headerHeight: parseFloat(metrics.header_frame && metrics.header_frame.height || '0'),
+      footerTop: parseFloat(metrics.footer_frame && metrics.footer_frame.y || '0'),
+      footerHeight: parseFloat(metrics.footer_frame && metrics.footer_frame.height || '0'),
+    };
+    return geometry.pageWidth > 0
+      && geometry.pageHeight > 0
+      && geometry.contentWidth > 0
+      && geometry.contentHeight > 0
+      ? geometry
+      : null;
+  }
+
   function loadAuthoritativeEditorPageStarts() {
     if (!authoritativeEditorPageStartsEnabled()) {
       state.authoritativeEditorPageStarts = [];
+      state.authoritativeEditorGeometry = null;
       state.authoritativeEditorPageStartsVersionId = 0;
       state.authoritativeEditorPageStartsSectionId = 0;
       return Promise.resolve(true);
@@ -1484,13 +1572,19 @@
     ) {
       return Promise.resolve(true);
     }
+    state.authoritativeEditorGeometry = null;
     var url = '/admin/api/controlled_book_page_map_api.php?action=stored_preview'
       + '&book_version_id=' + state.versionId
       + '&section_id=' + state.sectionId
       + '&include_style=0&check_freshness=1';
     return paginationRequest(url).then(function (response) {
+      var result = response.result || {};
       state.authoritativeEditorPageStarts = authoritativeEditorPageStartsFromResult(
-        response.result || {},
+        result,
+        state.sectionId
+      );
+      state.authoritativeEditorGeometry = authoritativeEditorGeometryFromResult(
+        result,
         state.sectionId
       );
       state.authoritativeEditorPageStartsVersionId = state.versionId;
@@ -1514,6 +1608,26 @@
       }
     });
     return anchors;
+  }
+
+  function authoritativeEditorTableRowStarts(body) {
+    if (!authoritativeEditorPageStartsEnabled() || !body) return {};
+    var starts = (state.authoritativeEditorPageStarts || []).filter(function (start) {
+      return start.kind === 'table-row' && Number.isInteger(start.rowIndex);
+    });
+    var rowsByAnchor = {};
+    body.querySelectorAll(':scope > .cpb-block[data-stable-anchor]').forEach(function (block) {
+      var anchor = String(block.getAttribute('data-stable-anchor') || '');
+      if (!anchor) return;
+      var marker = '/' + anchor + '/';
+      var indexes = starts.filter(function (start) {
+        return String(start.sourceFragmentId || '').indexOf(marker) !== -1;
+      }).map(function (start) {
+        return start.rowIndex;
+      });
+      if (indexes.length) rowsByAnchor[anchor] = indexes;
+    });
+    return rowsByAnchor;
   }
 
   function measurePrintFurnitureGeometry(sheet) {
@@ -1586,6 +1700,13 @@
     var landscape = !!(state.pageLayout && state.pageLayout.orientation === 'landscape');
     PRINT_PAGE.width = landscape ? 1056 : 816;
     PRINT_PAGE.height = landscape ? 816 : 1056;
+    if (!state.authoritativeEditorGeometry) {
+      PRINT_PAGE.side = 56;
+      PRINT_PAGE.headerTop = 48;
+      PRINT_PAGE.headerGap = 20;
+      PRINT_PAGE.footerGap = 24;
+      PRINT_PAGE.bottomMargin = 64;
+    }
     if (!sheet) return;
     sheet.classList.toggle('cpb-sheet--landscape', landscape);
     sheet.style.setProperty('--cpb-print-page-width', PRINT_PAGE.width + 'px');
@@ -1594,6 +1715,34 @@
       '--cpb-print-content-width',
       (PRINT_PAGE.width - PRINT_PAGE.side * 2) + 'px'
     );
+    sheet.style.setProperty('--cpb-print-content-side', PRINT_PAGE.side + 'px');
+  }
+
+  function applyAuthoritativeEditorGeometry(sheet) {
+    var geometry = state.authoritativeEditorGeometry;
+    if (!sheet || !geometry) return false;
+    PRINT_PAGE.width = geometry.pageWidth;
+    PRINT_PAGE.height = geometry.pageHeight;
+    PRINT_PAGE.side = geometry.contentX;
+    PRINT_PAGE.contentTop = geometry.contentTop;
+    PRINT_PAGE.contentHeight = geometry.contentHeight;
+    PRINT_PAGE.headerTop = geometry.headerTop;
+    PRINT_PAGE.headerHeight = geometry.headerHeight;
+    PRINT_PAGE.footerTop = geometry.footerTop;
+    PRINT_PAGE.footerHeight = geometry.footerHeight;
+    PRINT_PAGE.bottomMargin = Math.max(
+      0,
+      geometry.pageHeight - geometry.footerTop - geometry.footerHeight
+    );
+    sheet.style.setProperty('--cpb-print-page-width', PRINT_PAGE.width + 'px');
+    sheet.style.setProperty('--cpb-print-page-height', PRINT_PAGE.height + 'px');
+    sheet.style.setProperty('--cpb-print-content-width', geometry.contentWidth + 'px');
+    sheet.style.setProperty('--cpb-print-content-side', PRINT_PAGE.side + 'px');
+    sheet.style.setProperty('--cpb-print-content-top', PRINT_PAGE.contentTop + 'px');
+    sheet.style.setProperty('--cpb-print-header-height', PRINT_PAGE.headerHeight + 'px');
+    sheet.style.setProperty('--cpb-print-footer-top', PRINT_PAGE.footerTop + 'px');
+    sheet.style.setProperty('--cpb-print-footer-height', PRINT_PAGE.footerHeight + 'px');
+    return true;
   }
 
   function applyUnifiedPrintLayout() {
@@ -1605,7 +1754,7 @@
     sheet.classList.add('cpb-print-layout');
     syncPrintPageGeometry(sheet);
     applyStoredTableWidths();
-    measurePrintFurnitureGeometry(sheet);
+    if (!applyAuthoritativeEditorGeometry(sheet)) measurePrintFurnitureGeometry(sheet);
     var blocks = Array.prototype.slice.call(body.querySelectorAll(':scope > .cpb-block'));
     var manualAnchors = {};
     state.manualBreaks.forEach(function (row) {
@@ -1614,6 +1763,7 @@
       }
     });
     var authoritativePageStartAnchors = authoritativeEditorPageStartAnchors(body);
+    var authoritativeTableRowStarts = authoritativeEditorTableRowStarts(body);
     var inserted = true;
     var attempts = 0;
     while (inserted && attempts < 200) {
@@ -1664,6 +1814,17 @@
         }
         var isTableBlock = (block.getAttribute('data-block-type') || '') === 'table'
           || !!block.querySelector('.cpb-table tbody[data-table-part="body"]');
+        if (
+          isTableBlock
+          && insertAuthoritativeTableRowPageBreak(
+            block,
+            sheet,
+            authoritativeTableRowStarts[anchor] || []
+          )
+        ) {
+          inserted = true;
+          break;
+        }
         if (isTableBlock && insertTableRowPageBreak(block, sheet)) {
           inserted = true;
           break;
@@ -2533,6 +2694,7 @@
   function markPaginationChanged() {
     state.paginationStale = true;
     state.authoritativeEditorPageStarts = [];
+    state.authoritativeEditorGeometry = null;
     state.authoritativeEditorPageStartsVersionId = 0;
     state.authoritativeEditorPageStartsSectionId = 0;
     scheduleUnifiedPrintLayout(450);

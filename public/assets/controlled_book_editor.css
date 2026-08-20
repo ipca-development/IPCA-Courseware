@@ -1883,7 +1883,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
   display: grid;
   width: var(--cpb-print-content-width, 704px);
   max-width: var(--cpb-print-content-width, 704px);
-  margin: 0 56px;
+  margin: 0 var(--cpb-print-content-side, 56px);
   padding: var(--cpb-print-content-top, 152px) 0 0;
   box-sizing: border-box;
 }
