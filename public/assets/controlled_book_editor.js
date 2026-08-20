@@ -137,6 +137,8 @@
     pending: {},
     inFlightSaves: {},
     saveFailures: {},
+    editorMutationDepth: 0,
+    editorMutationWasInert: false,
     expanded: {},
     outlineOpen: false,
     pageLayout: {},
@@ -1069,20 +1071,22 @@
       )) return;
       undoWizardEditBtn.disabled = true;
       undoWizardEditBtn.textContent = 'Restoring…';
-      flushAllPendingSaves().then(function () {
-        return apiPost('undo_wizard_edit', {
-          version_id: versionId,
-          operation_id: operationId,
+      withEditorMutationLock(function () {
+        return flushAllPendingSaves().then(function () {
+          return apiPost('undo_wizard_edit', {
+            version_id: versionId,
+            operation_id: operationId,
+          });
+        }).then(function (response) {
+          if (!response || response.ok !== true) {
+            throw new Error(
+              response && response.error
+                ? response.error
+                : 'The Wizard edit could not be undone.'
+            );
+          }
+          window.location.reload();
         });
-      }).then(function (response) {
-        if (!response || response.ok !== true) {
-          throw new Error(
-            response && response.error
-              ? response.error
-              : 'The Wizard edit could not be undone.'
-          );
-        }
-        window.location.reload();
       }).catch(function (error) {
         undoWizardEditBtn.disabled = false;
         undoWizardEditBtn.textContent = 'Undo Wizard Edit';
@@ -1231,60 +1235,64 @@
   }
 
   function submitWizardChangeRevert(item, force, fingerprint) {
-    return flushAllPendingSaves().then(function () {
-      return apiPost('revert_wizard_change', {
-        version_id: versionId,
-        operation_id: Number(item.operation_id || 0),
-        section_id: Number(item.section_id || 0),
-        force: force ? 1 : 0,
-        expected_current_fingerprint: fingerprint || '',
-      });
-    }).then(function (response) {
-      if (response.requires_confirmation) {
-        if (!window.confirm(
-          'This section was edited after the Wizard applied it. Reverting will replace those later '
-          + 'manual edits with the exact pre-Wizard wording. Continue?'
-        )) return false;
-        return submitWizardChangeRevert(item, true, response.current_fingerprint || '');
-      }
-      if (!response.ok) throw new Error(response.error || 'The Wizard change could not be reverted.');
-      if (response.changes) {
-        renderWizardChanges(response.changes);
-      } else {
-        loadWizardChanges().catch(function (error) {
-          renderWizardChangesError(error.message);
+    return withEditorMutationLock(function () {
+      return flushAllPendingSaves().then(function () {
+        return apiPost('revert_wizard_change', {
+          version_id: versionId,
+          operation_id: Number(item.operation_id || 0),
+          section_id: Number(item.section_id || 0),
+          force: force ? 1 : 0,
+          expected_current_fingerprint: fingerprint || '',
         });
-      }
-      var warnings = response.result && Array.isArray(response.result.derived_refresh_warnings)
-        ? response.result.derived_refresh_warnings.slice()
-        : [];
-      if (response.sidebar_refresh_warning) warnings.push(String(response.sidebar_refresh_warning));
-      if (warnings.length) {
-        window.alert(
-          'The section was reverted, but a derived document refresh needs attention:\n\n'
-          + warnings.join('\n')
-        );
-      }
-      if (undoWizardEditBtn) undoWizardEditBtn.remove();
-      if (state.viewMode === 'paginated') {
-        return loadPaginatedView().then(function () { return true; });
-      }
-      var derivedSectionIds = response.result
-        && Array.isArray(response.result.derived_sections_refreshed)
-        ? response.result.derived_sections_refreshed.map(Number)
-        : [];
-      if (state.sectionId === Number(item.section_id || 0)
-        || derivedSectionIds.indexOf(Number(state.sectionId || 0)) !== -1) {
-        return loadSection(state.sectionId).then(function () { return true; });
-      }
-      return true;
+      }).then(function (response) {
+        if (response.requires_confirmation) {
+          if (!window.confirm(
+            'This section was edited after the Wizard applied it. Reverting will replace those later '
+            + 'manual edits with the exact pre-Wizard wording. Continue?'
+          )) return false;
+          return submitWizardChangeRevert(item, true, response.current_fingerprint || '');
+        }
+        if (!response.ok) throw new Error(response.error || 'The Wizard change could not be reverted.');
+        if (response.changes) {
+          renderWizardChanges(response.changes);
+        } else {
+          loadWizardChanges().catch(function (error) {
+            renderWizardChangesError(error.message);
+          });
+        }
+        var warnings = response.result && Array.isArray(response.result.derived_refresh_warnings)
+          ? response.result.derived_refresh_warnings.slice()
+          : [];
+        if (response.sidebar_refresh_warning) warnings.push(String(response.sidebar_refresh_warning));
+        if (warnings.length) {
+          window.alert(
+            'The section was reverted, but a derived document refresh needs attention:\n\n'
+            + warnings.join('\n')
+          );
+        }
+        if (undoWizardEditBtn) undoWizardEditBtn.remove();
+        if (state.viewMode === 'paginated') {
+          return loadPaginatedView().then(function () { return true; });
+        }
+        var derivedSectionIds = response.result
+          && Array.isArray(response.result.derived_sections_refreshed)
+          ? response.result.derived_sections_refreshed.map(Number)
+          : [];
+        if (state.sectionId === Number(item.section_id || 0)
+          || derivedSectionIds.indexOf(Number(state.sectionId || 0)) !== -1) {
+          return loadSection(state.sectionId).then(function () { return true; });
+        }
+        return true;
+      });
     });
   }
 
   function openWizardChangeSection(sectionId) {
-    return flushAllPendingSaves().then(function () {
-      return loadSection(sectionId).then(function () {
-        canvasEl.scrollTop = 0;
+    return withEditorMutationLock(function () {
+      return flushAllPendingSaves().then(function () {
+        return loadSection(sectionId).then(function () {
+          canvasEl.scrollTop = 0;
+        });
       });
     });
   }
@@ -3265,6 +3273,12 @@
     if (!blockEl || blockEl.getAttribute('data-fragment-dirty') !== '1') {
       return Promise.resolve();
     }
+    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+    var blockType = blockEl.getAttribute('data-block-type') || '';
+    var sectionId = state.sectionId;
+    if (!blockId || !sectionId || ['table', 'list'].indexOf(blockType) < 0) {
+      return Promise.reject(new Error('The page fragment cannot be mapped to its source block.'));
+    }
     blockEl.removeAttribute('data-fragment-dirty');
     var dirtyFields = Array.prototype.slice.call(
       blockEl.querySelectorAll('[data-fragment-dirty="1"]')
@@ -3272,40 +3286,36 @@
     dirtyFields.forEach(function (field) {
       field.removeAttribute('data-fragment-dirty');
     });
-    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
-    var blockType = blockEl.getAttribute('data-block-type') || '';
-    var sectionId = state.sectionId;
     clearPendingForBlock(blockId);
-    if (!blockId || !sectionId || ['table', 'list'].indexOf(blockType) < 0) {
-      return Promise.reject(new Error('The page fragment cannot be mapped to its source block.'));
-    }
     setStatus('Saving…', 'saving');
-    return apiGet(
-      apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
-    ).then(function (response) {
-      if (!response.ok) throw new Error(response.error || 'Source block load failed');
-      var holder = document.createElement('div');
-      holder.innerHTML = response.page_html || '';
-      var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
-      if (!sourceBlock) throw new Error('The complete source block could not be found.');
-      if (blockType === 'table') mergePaginatedTableFragment(blockEl, sourceBlock);
-      else mergePaginatedListFragment(blockEl, sourceBlock);
-      return apiPost('update_block', {
-        version_id: state.versionId,
-        block_id: blockId,
-        payload: extractPayload(sourceBlock, blockType),
+    return trackBlockSave(blockId, function () {
+      return apiGet(
+        apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
+      ).then(function (response) {
+        if (!response.ok) throw new Error(response.error || 'Source block load failed');
+        var holder = document.createElement('div');
+        holder.innerHTML = response.page_html || '';
+        var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
+        if (!sourceBlock) throw new Error('The complete source block could not be found.');
+        if (blockType === 'table') mergePaginatedTableFragment(blockEl, sourceBlock);
+        else mergePaginatedListFragment(blockEl, sourceBlock);
+        return apiPost('update_block', {
+          version_id: state.versionId,
+          block_id: blockId,
+          payload: extractPayload(sourceBlock, blockType),
+        });
+      }).then(function (response) {
+        if (!response.ok) throw new Error(response.error || 'Page edit save failed');
+        state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
+        setStatus('Saved', 'saved');
+        markPaginationChanged();
+      }).catch(function (error) {
+        blockEl.setAttribute('data-fragment-dirty', '1');
+        dirtyFields.forEach(function (field) {
+          field.setAttribute('data-fragment-dirty', '1');
+        });
+        throw error;
       });
-    }).then(function (response) {
-      if (!response.ok) throw new Error(response.error || 'Page edit save failed');
-      state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
-      setStatus('Saved', 'saved');
-      markPaginationChanged();
-    }).catch(function (error) {
-      blockEl.setAttribute('data-fragment-dirty', '1');
-      dirtyFields.forEach(function (field) {
-        field.setAttribute('data-fragment-dirty', '1');
-      });
-      showError(error);
     });
   }
 
@@ -6112,6 +6122,31 @@
     return tracked;
   }
 
+  function withEditorMutationLock(work) {
+    state.editorMutationDepth += 1;
+    if (state.editorMutationDepth === 1) {
+      state.editorMutationWasInert = root.hasAttribute('inert');
+      root.setAttribute('inert', '');
+      root.classList.add('is-wizard-mutation-locked');
+    }
+    return Promise.resolve().then(work).finally(function () {
+      state.editorMutationDepth = Math.max(0, state.editorMutationDepth - 1);
+      if (state.editorMutationDepth === 0) {
+        if (!state.editorMutationWasInert) root.removeAttribute('inert');
+        root.classList.remove('is-wizard-mutation-locked');
+      }
+    });
+  }
+
+  function hasPendingSaveWork() {
+    var connectedPending = Object.keys(state.pending).some(function (id) {
+      return isConnectedEl(state.pending[id]);
+    });
+    return connectedPending
+      || Object.keys(state.inFlightSaves).length > 0
+      || !!canvasEl.querySelector('[data-fragment-dirty="1"]');
+  }
+
   function flushAllPendingSaves() {
     clearTimeout(state.saveTimer);
     state.saveTimer = null;
@@ -6159,6 +6194,14 @@
           throw new Error(
             'A manual edit did not save. Resolve the save error before opening or reverting Wizard changes.'
           );
+        }
+        return new Promise(function (resolve) {
+          window.setTimeout(resolve, 0);
+        });
+      })
+      .then(function () {
+        if (hasPendingSaveWork()) {
+          return flushAllPendingSaves();
         }
       });
   }

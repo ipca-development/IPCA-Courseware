@@ -316,6 +316,42 @@ $resolution = new BooksManualsChangeReviewResolutionService(
     $db,
     new BooksManualsChangePlanService($db)
 );
+$assertPreparedPackage = new ReflectionMethod(
+    $resolution,
+    'assertPreparedOperationPackageCurrent'
+);
+$preparedFingerprint = str_repeat('a', 64);
+stableCheckAssert(
+    $assertPreparedPackage->invoke(
+        $resolution,
+        array('prepared_result' => array(
+            'operation_package' => array('package_fingerprint' => $preparedFingerprint),
+        )),
+        array('package_fingerprint' => $preparedFingerprint)
+    ) === $preparedFingerprint,
+    'An unchanged prepared operation package was not accepted.'
+);
+$packageDriftBlocked = false;
+try {
+    $assertPreparedPackage->invoke(
+        $resolution,
+        array('prepared_result' => array(
+            'operation_package' => array('package_fingerprint' => $preparedFingerprint),
+        )),
+        array('package_fingerprint' => str_repeat('b', 64))
+    );
+} catch (ReflectionException $error) {
+    throw $error;
+} catch (Throwable $error) {
+    $packageDriftBlocked = str_contains(
+        $error->getMessage(),
+        'changed after Independent Review was prepared'
+    );
+}
+stableCheckAssert(
+    $packageDriftBlocked,
+    'Approval did not block operation-package drift after Independent Review preparation.'
+);
 $persist = new ReflectionMethod($resolution, 'persistReviewCheck');
 $reconcile = new ReflectionMethod($resolution, 'reconcileVerificationChecks');
 $baseCheck = static function (

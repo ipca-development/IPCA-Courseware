@@ -343,7 +343,11 @@ final class BooksManualsChangeReviewResolutionService
                 );
             }
             $operationPackage = $apply->buildPreflightPackage($planId, true);
-            $readyPayload = array(
+            $preparedPackageFingerprint = $this->assertPreparedOperationPackageCurrent(
+                $existingPayload,
+                $operationPackage
+            );
+            $readyPayload = array_replace($existingPayload, array(
                 'schema' => 'ipca.manual-change-question-guided-independent-review.v1',
                 'status' => 'READY',
                 'outcome' => 'READY_TO_APPLY',
@@ -351,7 +355,7 @@ final class BooksManualsChangeReviewResolutionService
                 'review_state' => $state,
                 'operation_package' => $operationPackage,
                 'completed_at' => gmdate(DATE_ATOM),
-            );
+            ));
             $update = $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_architect_reviews
                  SET status='approved',review_payload_json=?,reviewer_id=?,
@@ -382,6 +386,7 @@ final class BooksManualsChangeReviewResolutionService
                     'clarifications_recorded' => count((array)($state['answers'] ?? array())),
                     'technical_integrity_blockers' => 0,
                     'author_correction_loop_performed' => false,
+                    'prepared_operation_package_fingerprint' => $preparedPackageFingerprint,
                 ),
                 $actorUserId
             );
@@ -1093,7 +1098,6 @@ final class BooksManualsChangeReviewResolutionService
             array_values((array)($patch['scope_json']['nodes'] ?? $patchPayload['allowed_repair_nodes'] ?? array())),
             $targetCheckIds
         );
-        $encoded = $this->json($candidate);
         $reviewId = (int)($this->row(
             'SELECT review_id FROM ipca_manual_ai_architect_review_findings
              WHERE plan_id=? AND id=?',
@@ -1175,7 +1179,7 @@ final class BooksManualsChangeReviewResolutionService
                 'draft_version' => $draftVersion,
                 'status' => 'generated',
                 'source_fingerprint' => $parentDraft['source_fingerprint'],
-                'content_fingerprint' => hash('sha256', $encoded),
+                'content_fingerprint' => $this->plans->draftPayloadFingerprint($candidate),
                 'draft_payload_json' => $candidate,
                 'created_by' => $actorUserId,
             ));
@@ -1748,7 +1752,7 @@ final class BooksManualsChangeReviewResolutionService
                 'draft_version' => $draftVersion,
                 'status' => 'generated',
                 'source_fingerprint' => $currentDraft['source_fingerprint'],
-                'content_fingerprint' => hash('sha256', $this->json($candidate)),
+                'content_fingerprint' => $this->plans->draftPayloadFingerprint($candidate),
                 'draft_payload_json' => $candidate,
                 'created_by' => $actorUserId,
             ));
@@ -2133,6 +2137,27 @@ final class BooksManualsChangeReviewResolutionService
             : 'ready_for_review';
     }
 
+    /** @param array<string,mixed> $reviewPayload @param array<string,mixed> $currentPackage */
+    private function assertPreparedOperationPackageCurrent(
+        array $reviewPayload,
+        array $currentPackage
+    ): string {
+        $preparedResult = (array)($reviewPayload['prepared_result'] ?? array());
+        $preparedPackage = (array)($preparedResult['operation_package'] ?? array());
+        $preparedFingerprint = (string)($preparedPackage['package_fingerprint'] ?? '');
+        if ($preparedFingerprint === ''
+            || !hash_equals(
+                $preparedFingerprint,
+                (string)($currentPackage['package_fingerprint'] ?? '')
+            )) {
+            throw new RuntimeException(
+                'The operation package changed after Independent Review was prepared. '
+                . 'Prepare a new Independent Review before approval.'
+            );
+        }
+        return $preparedFingerprint;
+    }
+
     private function assertFrozenDraftCurrent(int $planId, int $reviewId): void
     {
         $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
@@ -2165,13 +2190,17 @@ final class BooksManualsChangeReviewResolutionService
             );
         }
         $payload = (array)($currentDraft['draft_payload_json'] ?? array());
-        $payloadFingerprint = hash('sha256', $this->json($payload));
+        $frozenPayload = is_array($frozenDraft['draft_payload_json'] ?? null)
+            ? $frozenDraft['draft_payload_json']
+            : $this->decode((string)($frozenDraft['draft_payload_json'] ?? ''));
+        $payloadFingerprint = $this->plans->draftPayloadFingerprint($payload);
+        $frozenPayloadFingerprint = $this->plans->draftPayloadFingerprint($frozenPayload);
         $frozenFingerprint = (string)($frozenDraft['content_fingerprint'] ?? '');
         $currentFingerprint = (string)($currentDraft['content_fingerprint'] ?? '');
         if ($frozenFingerprint === ''
             || $currentFingerprint === ''
             || !hash_equals($frozenFingerprint, $currentFingerprint)
-            || !hash_equals($currentFingerprint, $payloadFingerprint)
+            || !hash_equals($frozenPayloadFingerprint, $payloadFingerprint)
             || (string)($frozenDraft['source_fingerprint'] ?? '')
                 !== (string)($currentDraft['source_fingerprint'] ?? '')) {
             throw new RuntimeException(

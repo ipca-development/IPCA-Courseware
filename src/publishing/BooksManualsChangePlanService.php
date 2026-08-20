@@ -857,7 +857,7 @@ final class BooksManualsChangePlanService
                 . ' SET draft_payload_json=?,content_fingerprint=? WHERE id=? AND plan_id=?'
             )->execute(array(
                 $payloadJson,
-                hash('sha256', $payloadJson),
+                $this->draftPayloadFingerprint($payload),
                 $draftId,
                 $planId,
             ));
@@ -926,11 +926,15 @@ final class BooksManualsChangePlanService
                         );
                     }
                 }
-                $acceptedJson = $this->json($payload);
-                if (!hash_equals(
-                    (string)($draft['content_fingerprint'] ?? ''),
-                    hash('sha256', $acceptedJson)
-                )) {
+                $storedFingerprint = (string)($draft['content_fingerprint'] ?? '');
+                $canonicalFingerprint = $this->draftPayloadFingerprint($payload);
+                if (!hash_equals($storedFingerprint, $canonicalFingerprint)
+                    && !$this->matchesFrozenReviewDraft(
+                        $planId,
+                        $draftId,
+                        $payload,
+                        $storedFingerprint
+                    )) {
                     throw new RuntimeException(
                         'Accepted Step 4 wording no longer matches its recorded fingerprint.'
                     );
@@ -959,7 +963,7 @@ final class BooksManualsChangePlanService
                 . ' SET draft_payload_json=?,content_fingerprint=? WHERE id=? AND plan_id=?'
             )->execute(array(
                 $payloadJson,
-                hash('sha256', $payloadJson),
+                $this->draftPayloadFingerprint($payload),
                 $draftId,
                 $planId,
             ));
@@ -1293,6 +1297,59 @@ final class BooksManualsChangePlanService
     private function json(mixed $value): string
     {
         return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
+    public function draftPayloadFingerprint(mixed $payload): string
+    {
+        return hash('sha256', $this->json($this->canonicalizeJsonValue($payload)));
+    }
+
+    private function matchesFrozenReviewDraft(
+        int $planId,
+        int $draftId,
+        array $currentPayload,
+        string $storedFingerprint
+    ): bool {
+        $baseline = $this->row(
+            'SELECT draft_baseline_json FROM ' . self::TABLES['review_baselines']
+            . ' WHERE plan_id=? ORDER BY id DESC LIMIT 1',
+            array($planId)
+        );
+        if ($baseline === null) {
+            return false;
+        }
+        $frozenDraft = $this->decodeJson($baseline['draft_baseline_json'] ?? null);
+        $frozenPayload = $this->decodeJson($frozenDraft['draft_payload_json'] ?? null);
+        return (int)($frozenDraft['id'] ?? 0) === $draftId
+            && $storedFingerprint !== ''
+            && hash_equals(
+                (string)($frozenDraft['content_fingerprint'] ?? ''),
+                $storedFingerprint
+            )
+            && hash_equals(
+                $this->draftPayloadFingerprint($frozenPayload),
+                $this->draftPayloadFingerprint($currentPayload)
+            );
+    }
+
+    private function canonicalizeJsonValue(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        if (array_is_list($value)) {
+            return array_map(
+                fn(mixed $item): mixed => $this->canonicalizeJsonValue($item),
+                $value
+            );
+        }
+        $keys = array_keys($value);
+        sort($keys, SORT_STRING);
+        $canonical = array();
+        foreach ($keys as $key) {
+            $canonical[$key] = $this->canonicalizeJsonValue($value[$key]);
+        }
+        return $canonical;
     }
 
     private function uuid(): string

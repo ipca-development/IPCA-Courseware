@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/src/publishing/BooksManualsChangePlanService.php';
+require_once dirname(__DIR__) . '/src/publishing/BooksManualsChangeReviewResolutionService.php';
 
 function frozenStep4Assert(bool $condition, string $message): void
 {
@@ -55,7 +56,16 @@ $db->exec(
         decision_status TEXT
     )'
 );
+$db->exec(
+    'CREATE TABLE ipca_manual_ai_architect_review_baselines (
+        id INTEGER PRIMARY KEY,
+        plan_id INTEGER NOT NULL,
+        review_id INTEGER NOT NULL,
+        draft_baseline_json TEXT NOT NULL
+    )'
+);
 
+$plans = new BooksManualsChangePlanService($db);
 $payload = array(
     'section_drafts' => array(
         '5.6' => array('section_number' => '5.6', 'nodes' => array('5.6.3' => 'Text')),
@@ -77,7 +87,7 @@ $db->prepare(
     'INSERT INTO ipca_manual_ai_architect_drafts
      (id,plan_id,draft_version,status,source_fingerprint,content_fingerprint,draft_payload_json)
      VALUES (15,20,15,\'generated\',\'source\',?,?)'
-)->execute(array(hash('sha256', $payloadJson), $payloadJson));
+)->execute(array($plans->draftPayloadFingerprint($payload), $payloadJson));
 $db->exec(
     "INSERT INTO ipca_manual_ai_architect_structure_proposals
      (id,plan_id,proposal_version,status) VALUES (3,20,1,'approved')"
@@ -87,7 +97,6 @@ $db->exec(
      (id,structure_proposal_id,decision_status) VALUES (4,3,'accepted')"
 );
 
-$plans = new BooksManualsChangePlanService($db);
 $structureBlocked = false;
 try {
     $plans->acceptStructure(20, 7);
@@ -120,16 +129,60 @@ frozenStep4Assert(
     'Step 4 decisions remained mutable after Independent Review began.'
 );
 
+$mysqlNormalizedPayload = array(
+    'decisions' => array(
+        '5.6' => array('actor_id' => 7, 'decision' => 'accepted'),
+    ),
+    'section_drafts' => array(
+        '5.6' => array('nodes' => array('5.6.3' => 'Text'), 'section_number' => '5.6'),
+    ),
+    'wizard_status' => 'accepted',
+);
+$mysqlNormalizedJson = json_encode(
+    $mysqlNormalizedPayload,
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+);
+$db->prepare(
+    'UPDATE ipca_manual_ai_architect_drafts SET draft_payload_json=? WHERE id=15'
+)->execute(array($mysqlNormalizedJson));
 $replay = $plans->acceptDrafts(20, 7);
 frozenStep4Assert(
     (int)($replay['draft_id'] ?? 0) === 15
         && (string)($replay['stage'] ?? '') === 'review'
+        && $plans->draftPayloadFingerprint($payload)
+            === $plans->draftPayloadFingerprint($mysqlNormalizedPayload)
         && (int)$db->query(
             "SELECT COUNT(*) FROM ipca_manual_ai_architect_decision_events
              WHERE event_type='DRAFT_AMENDMENTS_ACCEPTED'"
         )->fetchColumn() === 0,
-    'Repeated Step 4 acceptance was not an idempotent read of accepted state.'
+    'A MySQL-normalized Step 4 payload was not an idempotent read of accepted state.'
 );
+
+$legacyFingerprint = hash('sha256', $payloadJson);
+$legacyBaseline = array(
+    'id' => 15,
+    'source_fingerprint' => 'source',
+    'content_fingerprint' => $legacyFingerprint,
+    'draft_payload_json' => $mysqlNormalizedPayload,
+);
+$db->prepare(
+    'UPDATE ipca_manual_ai_architect_drafts SET content_fingerprint=? WHERE id=15'
+)->execute(array($legacyFingerprint));
+$db->prepare(
+    'INSERT INTO ipca_manual_ai_architect_review_baselines
+     (id,plan_id,review_id,draft_baseline_json) VALUES (1,20,9,?)'
+)->execute(array(json_encode(
+    $legacyBaseline,
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+)));
+$legacyReplay = $plans->acceptDrafts(20, 7);
+frozenStep4Assert(
+    (int)($legacyReplay['draft_id'] ?? 0) === 15,
+    'A legacy accepted fingerprint did not validate against its frozen semantic baseline.'
+);
+$resolution = new BooksManualsChangeReviewResolutionService($db, $plans);
+$assertFrozen = new ReflectionMethod($resolution, 'assertFrozenDraftCurrent');
+$assertFrozen->invoke($resolution, 20, 9);
 
 $tamperedPayload = $payload;
 $tamperedPayload['decisions']['5.6']['decision'] = 'rejected';

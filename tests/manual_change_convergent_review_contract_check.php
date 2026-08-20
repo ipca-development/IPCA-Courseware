@@ -176,6 +176,9 @@ $checks = array(
         && str_contains($resolutionService, "'status' => 'ready_to_apply'")
         && str_contains($resolutionService, "\$planStage === 'operations'")
         && str_contains($resolutionService, "\$existingPayload['outcome']")
+        && str_contains($resolutionService, 'assertPreparedOperationPackageCurrent')
+        && str_contains($resolutionService, 'array_replace($existingPayload')
+        && str_contains($api, '$apply->buildPreflightPackage($planId, true)')
         && str_contains($api, 'Independent Review cannot automatically reopen'),
     'Step 5 is one-question-at-a-time without an Author correction loop' =>
         str_contains($ui, 'Question <?= $questionPosition ?> of')

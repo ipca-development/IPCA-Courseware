@@ -53,6 +53,11 @@ wizard_apply_assert(
     str_contains($service, 'context_hash')
         && str_contains($service, 'assertTargetsUnchanged')
         && str_contains($service, 'buildPreflightPackage')
+        && str_contains(
+            $service,
+            '$this->buildTargets($planId, $versionId, $sectionDrafts, $forUpdate)'
+        )
+        && str_contains($service, '$this->structureTitles($planId, $forUpdate)')
         && str_contains($service, 'independently_reviewed_package')
         && str_contains($service, 'The selected manual changed after impact analysis'),
     'Wizard apply must build and revalidate the independently reviewed operation package.'

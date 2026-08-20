@@ -409,6 +409,12 @@ final class BooksManualsChangeApplyService
             && (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite'
             ? ' FOR UPDATE'
             : '';
+        if ($forUpdate) {
+            $this->latestRow(
+                'SELECT id FROM ipca_manual_ai_architect_plans WHERE id=?' . $lockClause,
+                array($planId)
+            );
+        }
         $plan = $this->plans->getPlan($planId);
         $versionId = $this->plans->primaryVersionId($plan);
         if ($versionId <= 0) {
@@ -445,10 +451,10 @@ final class BooksManualsChangeApplyService
                 );
             }
         }
-        $targets = $this->buildTargets($planId, $versionId, $sectionDrafts);
+        $targets = $this->buildTargets($planId, $versionId, $sectionDrafts, $forUpdate);
         $snapshots = $this->snapshotsForTargets($targets, $forUpdate);
         $this->assertTargetsUnchanged($targets, $snapshots);
-        $titles = $this->structureTitles($planId);
+        $titles = $this->structureTitles($planId, $forUpdate);
         $replacements = array();
         foreach ($sectionDrafts as $sectionDraft) {
             $generated = $this->generatedParagraphs($sectionDraft, $titles);
@@ -1180,8 +1186,16 @@ final class BooksManualsChangeApplyService
      * @param list<array<string,mixed>> $sectionDrafts
      * @return list<array<string,mixed>>
      */
-    private function buildTargets(int $planId, int $versionId, array $sectionDrafts): array
-    {
+    private function buildTargets(
+        int $planId,
+        int $versionId,
+        array $sectionDrafts,
+        bool $forUpdate = false
+    ): array {
+        $lock = $forUpdate
+            && (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite'
+                ? ' FOR UPDATE'
+                : '';
         $draftByNumber = array();
         foreach ($sectionDrafts as $draft) {
             $number = trim((string)($draft['section_number'] ?? ''));
@@ -1193,7 +1207,7 @@ final class BooksManualsChangeApplyService
             "SELECT section_id,section_number,canonical_evidence_json
              FROM ipca_manual_ai_architect_impacts
              WHERE plan_id=? AND status='approved'
-             ORDER BY id"
+             ORDER BY id" . $lock
         );
         $stmt->execute(array($planId));
         $targets = array();
@@ -1209,7 +1223,12 @@ final class BooksManualsChangeApplyService
             if ($sectionId <= 0 || $contextHash === '') {
                 throw new RuntimeException("Accepted impact {$number} lacks a canonical application boundary.");
             }
-            $range = $this->resolveContextRange($versionId, $sectionId, $contextKey);
+            $range = $this->resolveContextRange(
+                $versionId,
+                $sectionId,
+                $contextKey,
+                $forUpdate
+            );
             $targets[] = array(
                 'section_number' => $number,
                 'section_id' => $sectionId,
@@ -1228,16 +1247,30 @@ final class BooksManualsChangeApplyService
     /**
      * @return list<array<string,mixed>>
      */
-    private function resolveContextRange(int $versionId, int $sectionId, string $contextKey): array
-    {
+    private function resolveContextRange(
+        int $versionId,
+        int $sectionId,
+        string $contextKey,
+        bool $forUpdate = false
+    ): array {
+        $lock = $forUpdate
+            && (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite'
+                ? ' FOR UPDATE'
+                : '';
         $section = $this->latestRow(
-            'SELECT id FROM ipca_publishing_book_sections WHERE id=? AND book_version_id=? LIMIT 1',
+            'SELECT id FROM ipca_publishing_book_sections
+             WHERE id=? AND book_version_id=? LIMIT 1' . $lock,
             array($sectionId, $versionId)
         );
         if ((int)$section['id'] !== $sectionId) {
             throw new RuntimeException('A canonical target no longer belongs to the selected manual version.');
         }
-        $blocks = (new ControlledPublishingBlockService($this->pdo))->listSectionBlocks($sectionId);
+        $blocksStmt = $this->pdo->prepare(
+            'SELECT * FROM ipca_publishing_book_blocks
+             WHERE section_id=? ORDER BY sort_order,id' . $lock
+        );
+        $blocksStmt->execute(array($sectionId));
+        $blocks = $blocksStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         if ($blocks === array()) {
             throw new RuntimeException('A canonical target section has no controlled blocks.');
         }
@@ -1557,8 +1590,12 @@ final class BooksManualsChangeApplyService
     /**
      * @return array<string,string>
      */
-    private function structureTitles(int $planId): array
+    private function structureTitles(int $planId, bool $forUpdate = false): array
     {
+        $lock = $forUpdate
+            && (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite'
+                ? ' FOR UPDATE'
+                : '';
         $stmt = $this->pdo->prepare(
             "SELECT n.title
              FROM ipca_manual_ai_architect_structure_nodes n
@@ -1566,7 +1603,7 @@ final class BooksManualsChangeApplyService
                ON p.id=n.structure_proposal_id
              WHERE p.plan_id=? AND p.status='approved'
                AND n.decision_status='accepted'
-             ORDER BY n.sort_order,n.id"
+             ORDER BY n.sort_order,n.id" . $lock
         );
         $stmt->execute(array($planId));
         $titles = array();

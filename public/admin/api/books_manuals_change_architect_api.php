@@ -81,66 +81,71 @@ function architect_api_prepare_independent_review(
     int $planId,
     int $actorUserId
 ): int {
-    $stmt = $pdo->prepare(
-        "SELECT * FROM ipca_manual_ai_architect_drafts
-         WHERE id=(
-             SELECT MAX(id) FROM ipca_manual_ai_architect_drafts
-             WHERE plan_id=? AND status='generated'
-         )"
-    );
-    $stmt->execute(array($planId));
-    $draft = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!is_array($draft)) {
-        throw new RuntimeException('Accepted amendment wording is not available for independent review.');
-    }
-    $proposal = json_decode((string)($draft['draft_payload_json'] ?? ''), true);
-    if (!is_array($proposal) || (string)($proposal['wizard_status'] ?? '') !== 'accepted') {
-        throw new RuntimeException('The amendment wording must be accepted before independent review.');
-    }
-    $wording = $reviewer->verifyReadableAmendmentProposal($proposal);
-    $governance = $reviewer->evaluateGovernanceGate($planId);
-    $operationPackage = $apply->buildPreflightPackage($planId);
-    $issues = array_merge(
-        array_values((array)($wording['issues'] ?? array())),
-        array_values((array)($governance['blockers'] ?? array()))
-    );
-    $reviewCheckMap = array();
-    foreach (array_merge(
-        (array)($wording['review_checks'] ?? array()),
-        (array)($governance['review_checks'] ?? array())
-    ) as $check) {
-        if (!is_array($check) || trim((string)($check['check_id'] ?? '')) === '') {
-            continue;
-        }
-        $reviewCheckMap[(string)$check['check_id']] = $check;
-    }
-    $reviewChecks = array_values($reviewCheckMap);
-    $prepared = array_replace($wording, array(
-        'status' => $issues === array() ? 'READY' : 'REQUIRES_REVIEW',
-        'issues' => $issues,
-        'review_checks' => $reviewChecks,
-        'governance_gate' => $governance,
-        'operation_package' => $operationPackage,
-        'checks' => array(
-            'Accepted wording passes independent consistency review' => $issues === array(),
-            'Requested change remains within the approved impact scope' =>
-                (string)($governance['status'] ?? '') === 'READY',
-            'No unsupported implementation claims were introduced' =>
-                (array)($wording['unsupported_capability_claims'] ?? array()) === array(),
-            'Preservation and legacy-reference decisions remain accounted for' =>
-                (array)($wording['issues'] ?? array()) === array(),
-            'In-place operation package is source-fingerprinted and creates no revision' =>
-                !empty($operationPackage['package_fingerprint'])
-                && empty($operationPackage['revision_creation_allowed'])
-                && empty($operationPackage['revision_number_change_allowed'])
-                && empty($operationPackage['lifecycle_transition_allowed']),
-        ),
-    ));
     $ownsTransaction = !$pdo->inTransaction();
     if ($ownsTransaction) {
         $pdo->beginTransaction();
     }
+    $lock = (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+        ? ''
+        : ' FOR UPDATE';
     try {
+        $stmt = $pdo->prepare(
+            "SELECT * FROM ipca_manual_ai_architect_drafts
+             WHERE id=(
+                 SELECT MAX(id) FROM ipca_manual_ai_architect_drafts
+                 WHERE plan_id=? AND status='generated'
+             )" . $lock
+        );
+        $stmt->execute(array($planId));
+        $draft = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($draft)) {
+            throw new RuntimeException(
+                'Accepted amendment wording is not available for independent review.'
+            );
+        }
+        $proposal = json_decode((string)($draft['draft_payload_json'] ?? ''), true);
+        if (!is_array($proposal) || (string)($proposal['wizard_status'] ?? '') !== 'accepted') {
+            throw new RuntimeException('The amendment wording must be accepted before independent review.');
+        }
+        $wording = $reviewer->verifyReadableAmendmentProposal($proposal);
+        $governance = $reviewer->evaluateGovernanceGate($planId);
+        $operationPackage = $apply->buildPreflightPackage($planId, true);
+        $issues = array_merge(
+            array_values((array)($wording['issues'] ?? array())),
+            array_values((array)($governance['blockers'] ?? array()))
+        );
+        $reviewCheckMap = array();
+        foreach (array_merge(
+            (array)($wording['review_checks'] ?? array()),
+            (array)($governance['review_checks'] ?? array())
+        ) as $check) {
+            if (!is_array($check) || trim((string)($check['check_id'] ?? '')) === '') {
+                continue;
+            }
+            $reviewCheckMap[(string)$check['check_id']] = $check;
+        }
+        $reviewChecks = array_values($reviewCheckMap);
+        $prepared = array_replace($wording, array(
+            'status' => $issues === array() ? 'READY' : 'REQUIRES_REVIEW',
+            'issues' => $issues,
+            'review_checks' => $reviewChecks,
+            'governance_gate' => $governance,
+            'operation_package' => $operationPackage,
+            'checks' => array(
+                'Accepted wording passes independent consistency review' => $issues === array(),
+                'Requested change remains within the approved impact scope' =>
+                    (string)($governance['status'] ?? '') === 'READY',
+                'No unsupported implementation claims were introduced' =>
+                    (array)($wording['unsupported_capability_claims'] ?? array()) === array(),
+                'Preservation and legacy-reference decisions remain accounted for' =>
+                    (array)($wording['issues'] ?? array()) === array(),
+                'In-place operation package is source-fingerprinted and creates no revision' =>
+                    !empty($operationPackage['package_fingerprint'])
+                    && empty($operationPackage['revision_creation_allowed'])
+                    && empty($operationPackage['revision_number_change_allowed'])
+                    && empty($operationPackage['lifecycle_transition_allowed']),
+            ),
+        ));
         $reviewId = $plans->save('reviews', $planId, array(
             'review_uuid' => architect_api_uuid(),
             'draft_id' => (int)$draft['id'],

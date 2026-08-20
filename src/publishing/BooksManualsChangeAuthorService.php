@@ -180,7 +180,12 @@ final class BooksManualsChangeAuthorService
                 "UPDATE ipca_manual_ai_architect_drafts
                     SET status='generated',draft_payload_json=?,content_fingerprint=?
                   WHERE id=? AND plan_id=?"
-            )->execute(array($encoded, hash('sha256', $encoded), $draftId, $planId));
+            )->execute(array(
+                $encoded,
+                $this->plans->draftPayloadFingerprint($proposal),
+                $draftId,
+                $planId,
+            ));
             $this->plans->updatePlan($planId, array(
                 'stage' => 'drafting',
                 'status' => 'ready_for_review',
@@ -203,18 +208,27 @@ final class BooksManualsChangeAuthorService
             if ($controlledReviewFailures === array()) {
                 $controlledReviewFailures = $this->correctableDraftFailures($error);
             }
-            $payload = json_encode(array(
+            $failurePayload = array(
                 'schema' => 'ipca.manual-change-amendment-generation.v1',
                 'generation_status' => 'failed',
                 'failure_message' => $error->getMessage(),
                 'controlled_review_failures' => $controlledReviewFailures,
                 'failed_at' => gmdate(DATE_ATOM),
-            ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            );
+            $payload = json_encode(
+                $failurePayload,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            );
             $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_architect_drafts
                     SET status='abandoned',draft_payload_json=?,content_fingerprint=?
                   WHERE id=? AND plan_id=?"
-            )->execute(array($payload, hash('sha256', $payload), $draftId, $planId));
+            )->execute(array(
+                $payload,
+                $this->plans->draftPayloadFingerprint($failurePayload),
+                $draftId,
+                $planId,
+            ));
             $this->plans->updatePlan($planId, array(
                 'stage' => 'drafting',
                 'status' => 'blocked',

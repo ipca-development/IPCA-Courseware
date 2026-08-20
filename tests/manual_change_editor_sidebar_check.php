@@ -318,6 +318,14 @@ wizardEditorAssert(
             < strpos($applyService, '$newerApplications = $this->pdo->prepare(')
         && str_contains($editorJs, 'function trackBlockSave(')
         && str_contains($editorJs, 'return flushAllPendingSaves().then(function () {')
+        && str_contains($editorJs, 'function withEditorMutationLock(')
+        && str_contains($editorJs, "root.setAttribute('inert', '')")
+        && str_contains($editorJs, 'function hasPendingSaveWork(')
+        && str_contains($editorJs, 'return flushAllPendingSaves();')
+        && substr_count(
+            $editorJs,
+            'return trackBlockSave(blockId, function () {'
+        ) >= 2
         && str_contains($editorJs, 'requestPayload.csrf_token = csrfToken')
         && str_contains($editorApi, 'cp_editor_require_csrf($_POST);')
         && str_contains($editorPage, 'data-csrf-token="<?= h($editorCsrfToken) ?>"'),

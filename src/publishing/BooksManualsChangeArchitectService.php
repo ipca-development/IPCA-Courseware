@@ -115,6 +115,11 @@ final class BooksManualsChangeArchitectService
         $this->progress($options, 5, 'understanding_change', 'Understanding requested change');
         $this->pdo->beginTransaction();
         try {
+            // Keep the global lock order plan -> checkpoint rows. Review
+            // preflight uses the same order before locking accepted impacts.
+            $this->pdo->prepare(
+                'UPDATE ipca_manual_ai_architect_plans SET id=id WHERE id=?'
+            )->execute(array($planId));
             $this->plans->clearCheckpointData($planId);
 
             // Stage 2: evidence and structured change intent.
