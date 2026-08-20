@@ -83,6 +83,13 @@ $contracts = array(
         'wireTableResize(blockEl, authoritativeSurface)',
         'wirePaginatedFields();',
         'hasUnsavedCanonicalEdits',
+        'waitForAuthoritativeSurfaceReady',
+        'waitForAuthoritativeGeometry',
+        'markManualBreaksInPages',
+        'cpb-canonical-manual-break-control',
+        'fallbackMutation.content_change === false',
+        "setSectionAssembly(true, 'Loading fonts and images…', 72)",
+        "setSectionAssembly(true, 'Stabilizing exact page geometry…', 92)",
     ),
     'public/admin/compliance/controlled_book_editor.php' => array(
         'id="cpbEditorRoot"',
@@ -194,6 +201,8 @@ $contracts = array(
         "case 'split_block_page_break':",
         'cp_editor_handle_split_block_page_break',
         'ControlledPublishingManualPageBreakService',
+        "unset(\$priorPayload['col_widths'], \$nextPayload['col_widths'])",
+        "'content_change' => \$contentChange",
     ),
     'src/publishing/ControlledPublishingPaginationService.php' => array(
         'exact browser measurement',

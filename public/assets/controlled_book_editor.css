@@ -1800,6 +1800,7 @@ body.cpb-browser-fullscreen .cpb-workspace {
 }
 
 .cpb-pages-stack {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1881,6 +1882,57 @@ body.cpb-browser-fullscreen .cpb-workspace {
 
 .cpb-paginated-piece--editable [contenteditable="true"] {
   cursor: text;
+}
+
+.cpb-canonical-manual-break-control {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transform: translateY(-50%);
+  color: #1e5f9e;
+  font: 600 9px/1.2 system-ui, sans-serif;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.cpb-canonical-manual-break-control::before,
+.cpb-canonical-manual-break-control::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px dashed #1e73be;
+}
+
+.cpb-canonical-manual-break-control span,
+.cmp-page .cpb-editor-root .cpb-canonical-manual-break-control button {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  min-width: 0 !important;
+  min-height: 18px !important;
+  height: 18px !important;
+  margin: 0 !important;
+  padding: 3px 7px !important;
+  border: 1px solid #1e73be !important;
+  border-radius: 3px !important;
+  background: #e8f2ff !important;
+  color: #1e5f9e !important;
+  font: 600 9px/1.1 system-ui, sans-serif !important;
+  line-height: 10px !important;
+  white-space: nowrap;
+}
+
+.cmp-page .cpb-editor-root .cpb-canonical-manual-break-control button {
+  background: #1e73be !important;
+  color: #fff !important;
+  cursor: pointer;
+}
+
+.cmp-page .cpb-editor-root .cpb-canonical-manual-break-control button:hover,
+.cmp-page .cpb-editor-root .cpb-canonical-manual-break-control button:focus-visible {
+  background: #155f9f !important;
+  outline: 2px solid rgba(30, 115, 190, .3);
+  outline-offset: 1px;
 }
 
 #cpbEditorRoot.cpb-editor-paginated-mode #cpbCanvas .reader-generated-page .cpb-block > .cpb-block-chrome {

@@ -6,6 +6,7 @@ require_once $root . '/src/publishing/ControlledPublishingRevisionService.php';
 
 $pdo = new PDO('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$pdo->exec('PRAGMA foreign_keys = ON');
 $pdo->exec('CREATE TABLE ipca_publishing_books (id INTEGER PRIMARY KEY, book_key TEXT NOT NULL)');
 $pdo->exec('CREATE TABLE ipca_publishing_book_versions (
     id INTEGER PRIMARY KEY, book_id INTEGER NOT NULL, version_label TEXT,
@@ -204,6 +205,7 @@ if ($labelMethod->invoke($service, 11) !== '6.1' || $labelMethod->invoke($servic
 $pdo->exec('ALTER TABLE ipca_publishing_book_blocks ADD COLUMN is_system_managed INTEGER DEFAULT 0');
 $pdo->exec('ALTER TABLE ipca_publishing_book_blocks ADD COLUMN created_by INTEGER NULL');
 $pdo->exec('ALTER TABLE ipca_publishing_book_blocks ADD COLUMN updated_by INTEGER NULL');
+$pdo->exec('ALTER TABLE ipca_publishing_book_blocks ADD COLUMN updated_at TEXT NULL');
 $pdo->exec("INSERT INTO ipca_publishing_book_sections VALUES
     (111, 11, 'highlights', 'Highlight of Changes', 5, NULL),
     (112, 11, 'part_2', 'PART 2 – Technical', 1,
@@ -264,6 +266,54 @@ if (
     || str_contains(json_encode($generatedPayloads), 'governed section change(s)')
 ) {
     throw new RuntimeException('Highlight regeneration did not create the revision title and bullet list.');
+}
+
+$protectedId = (int)$pdo->query(
+    "SELECT id FROM ipca_publishing_book_blocks
+     WHERE section_id=111 AND block_key LIKE 'highlights_part_%' LIMIT 1"
+)->fetchColumn();
+$pdo->exec(
+    'CREATE TABLE ipca_manual_ai_architect_legacy_hits (
+        id INTEGER PRIMARY KEY,
+        block_id INTEGER NOT NULL,
+        FOREIGN KEY (block_id) REFERENCES ipca_publishing_book_blocks(id)
+            ON DELETE RESTRICT ON UPDATE CASCADE
+    )'
+);
+$pdo->prepare(
+    'INSERT INTO ipca_manual_ai_architect_legacy_hits (id,block_id) VALUES (?,?)'
+)->execute(array(1, $protectedId));
+$pdo->prepare(
+    'INSERT INTO ipca_publishing_book_blocks
+      (id,book_version_id,section_id,block_key,stable_anchor,block_type,sort_order,
+       payload_json,content_hash,is_system_managed)
+     VALUES (?,?,?,?,?,?,?,?,?,1)'
+)->execute(array(
+    1200,
+    11,
+    111,
+    'highlights_obsolete',
+    'OM-6_1-HIGHLIGHTS-BLOCK-OBSOLETE',
+    'paragraph',
+    999,
+    '{"html":"<p>Historical generated evidence</p>"}',
+    'historical',
+));
+$pdo->prepare(
+    'INSERT INTO ipca_manual_ai_architect_legacy_hits (id,block_id) VALUES (?,?)'
+)->execute(array(2, 1200));
+$service->regenerateHighlightsSection(11, 1);
+$preservedId = (int)$pdo->query(
+    "SELECT id FROM ipca_publishing_book_blocks
+     WHERE section_id=111 AND block_key LIKE 'highlights_part_%' LIMIT 1"
+)->fetchColumn();
+if ($protectedId <= 0 || $preservedId !== $protectedId) {
+    throw new RuntimeException('Highlight regeneration must preserve governed block identities.');
+}
+if ((int)$pdo->query(
+    'SELECT COUNT(*) FROM ipca_publishing_book_blocks WHERE id=1200'
+)->fetchColumn() !== 1) {
+    throw new RuntimeException('Obsolete governed generated blocks must not be deleted.');
 }
 
 echo "Controlled publishing revision highlights: PASS\n";

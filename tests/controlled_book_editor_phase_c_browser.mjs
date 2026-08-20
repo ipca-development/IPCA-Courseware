@@ -122,7 +122,15 @@ function splitTablePreviewResult(sectionId = 11) {
     section_id: sectionId,
     page_number: pageNumber,
     page_html: `<article class="reader-generated-page" style="width:640px;height:900px">
-      <header class="reader-page-header">Header</header>
+      <div class="reader-page-header-region" style="position:absolute;left:40px;top:30px;width:560px;height:75px">
+        <header class="cpb-page-header" style="height:100%">
+          <table class="cpb-page-header-table"><tbody><tr>
+            <td style="padding:5px 8px;vertical-align:middle">Logo</td>
+            <td class="cpb-page-header-cell--center" style="padding:5px 8px;vertical-align:middle">Manual<br>PART 1</td>
+            <td style="padding:5px 8px;vertical-align:middle">Page: ${pageNumber}<br>Revision: 1<br>Date:</td>
+          </tr></tbody></table>
+        </header>
+      </div>
       <main class="reader-page-body">
         <div class="reader-semantic-piece reader-table-group cpb-block cpb-block--table"
           data-block-id="3" data-block-type="table" data-stable-anchor="table-3"
@@ -257,8 +265,9 @@ function renderDocument(search = '') {
         #cpbCanvas{height:260px;overflow-y:auto;overflow-anchor:none;flex:none}
         .cpb-editor-source-mode .cpb-sheet{min-height:1100px}
         .cpb-editor-source-mode .cpb-block{box-sizing:border-box;min-height:430px;margin:0}
+        .cmp-page section table td{padding:12px 14px!important;vertical-align:top!important}
       </style>
-      </head><body>${shell}</body></html>`,
+      </head><body class="cmp-page">${shell}</body></html>`,
     url: base,
   };
 }
@@ -283,6 +292,7 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
       pendingLoads: [],
       pageRulePlans: [],
       pendingPageRules: [],
+      updatePlans: [],
       rendered: [],
       activated: [],
       queuePreview(plan) { this.previewPlans.push(plan); },
@@ -290,6 +300,7 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
       queueLoad(plan) { this.loadPlans.push(plan); },
       resolveLoad(index) { this.pendingLoads[index].deferred.resolve(); },
       queuePageRules(plan) { this.pageRulePlans.push(plan); },
+      queueUpdate(plan) { this.updatePlans.push(plan); },
       resolvePageRules(index, payload) {
         this.pendingPageRules[index].deferred.resolve(payload || { ok: true, breaks: [], candidates: [] });
       },
@@ -384,7 +395,10 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
       if (action === 'live_ensure' || action === 'live_status' || action === 'live_retry') {
         return jsonResponse({ ok: true, result: { status: 'current' } });
       }
-      if (action === 'update_block') return jsonResponse({ ok: true });
+      if (action === 'update_block') {
+        const plan = window.__phaseC.updatePlans.shift() || {};
+        return jsonResponse(plan.payload || { ok: true });
+      }
       if (action === 'create_block' && payload.block_type === 'table') {
         const holder = document.createElement('div');
         holder.innerHTML = sourceBlocks;
@@ -476,11 +490,14 @@ const primaryWysiwygCases = new Set([
   'single authoritative WYSIWYG surface has no preview/source or page navigation chrome',
   'publication CSS stays inside pages and table geometry is immutable on render',
   'authoritative page edits save in place and refresh automatically',
+  'layout-only block saves repaginate without regenerating revision highlights',
   'automatic repagination preserves the direct editor caret',
   'split paragraph edits merge into the complete source block',
   'split list edits preserve surrounding items and inserted rows',
   'automatic repagination preserves a split table cell caret',
   'split authoritative table fragments save only their mapped source rows',
+  'authoritative canvas remains hidden until all page assets and geometry settle',
+  'manual page breaks remain visible inside the authoritative page',
 ]);
 function test(name, run) {
   if (
@@ -543,6 +560,79 @@ test('single authoritative WYSIWYG surface has no preview/source or page navigat
   }
 });
 
+test('manual page breaks remain visible inside the authoritative page', async (browser) => {
+  const initial = previewResult();
+  const secondPage = storedPage(11, 42, 'second-page');
+  secondPage.page_html = secondPage.page_html.replaceAll(
+    'data-stable-anchor="paragraph-2"',
+    'data-stable-anchor="paragraph-second"',
+  );
+  initial.result.pages.push(secondPage);
+  const pageRules = {
+    ok: true,
+    breaks: [{
+      id: 91,
+      section_id: 11,
+      before_block_anchor: 'paragraph-second',
+    }],
+    candidates: [],
+  };
+  const { page, browserErrors } = await newEditorPage(
+    browser,
+    '',
+    initial,
+    pageRules,
+  );
+  try {
+    const control = page.locator('#cpbCanvas .cpb-canonical-manual-break-control');
+    await control.waitFor();
+    assert.deepEqual(await control.evaluate((marker) => {
+      const line = getComputedStyle(marker, '::before');
+      const label = getComputedStyle(marker.querySelector('span'));
+      const button = marker.querySelector('button');
+      const buttonRect = button.getBoundingClientRect();
+      const pages = Array.from(marker.parentElement.querySelectorAll('.cpb-paginated-page'));
+      const firstRect = pages[0].getBoundingClientRect();
+      const secondRect = pages[1].getBoundingClientRect();
+      const markerRect = marker.getBoundingClientRect();
+      return {
+        lineStyle: line.borderTopStyle,
+        lineColor: line.borderTopColor,
+        label: marker.querySelector('span').textContent,
+        labelBackground: label.backgroundColor,
+        labelColor: label.color,
+        buttonText: button.textContent,
+        buttonVisible: buttonRect.width > 20 && buttonRect.height >= 18,
+        centeredInGap: Math.abs(
+          (markerRect.top + markerRect.height / 2)
+          - (firstRect.bottom + secondRect.top) / 2
+        ) < 2,
+      };
+    }), {
+      lineStyle: 'dashed',
+      lineColor: 'rgb(30, 115, 190)',
+      label: 'Manual Page Break',
+      labelBackground: 'rgb(232, 242, 255)',
+      labelColor: 'rgb(30, 95, 158)',
+      buttonText: 'Remove',
+      buttonVisible: true,
+      centeredInGap: true,
+    });
+    await control.getByRole('button', { name: 'Remove manual page break' }).click();
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'remove' && Number(request.payload.break_id) === 91
+      )
+      && !document.querySelector('#cpbCanvas .cpb-canonical-manual-break-control')
+    );
+    assert.equal(await page.locator('#cpbCanvas .cpb-pagination-panel').count(), 0);
+    assert.equal(await page.locator('#cpbCanvas .cpb-pagination-page-navigation').count(), 0);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
 test('publication CSS stays inside pages and table geometry is immutable on render', async (browser) => {
   const initial = splitTablePreviewResult();
   initial.result.book_style_css = readerContentCss;
@@ -574,6 +664,23 @@ test('publication CSS stays inside pages and table geometry is immutable on rend
       wrapWidth: '280px',
       columnWidths: ['50%', '50%'],
     });
+    assert.deepEqual(await page.locator(
+      '#cpbCanvas .cpb-paginated-page[data-page-number="51"]',
+    ).evaluate((frame) => {
+      const center = frame.querySelector('.cpb-page-header-cell--center');
+      const style = getComputedStyle(center);
+      return {
+        frameTag: frame.tagName,
+        paddingTop: style.paddingTop,
+        paddingBottom: style.paddingBottom,
+        verticalAlign: style.verticalAlign,
+      };
+    }), {
+      frameTag: 'DIV',
+      paddingTop: '5px',
+      paddingBottom: '5px',
+      verticalAlign: 'middle',
+    });
 
     const tableBlock = page.locator(
       '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-block--table',
@@ -584,6 +691,31 @@ test('publication CSS stays inside pages and table geometry is immutable on rend
         .evaluate((node) => getComputedStyle(node).display),
       'flex',
     );
+
+    const updateCount = await page.evaluate(() => window.__phaseC.requests
+      .filter((request) => request.action === 'update_block').length);
+    const resizeHandle = tableBlock.locator('.cpb-col-resize').first();
+    await resizeHandle.dispatchEvent('mousedown', { clientX: 410, clientY: 240 });
+    await page.evaluate(() => {
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: 410,
+        clientY: 240,
+      }));
+    });
+    await tableBlock.locator('tbody td').first().click({ position: { x: 12, y: 12 } });
+    await page.waitForTimeout(800);
+    assert.equal(await page.evaluate(() => window.__phaseC.requests
+      .filter((request) => request.action === 'update_block').length), updateCount);
+    assert.deepEqual(await tableBlock.locator('.cpb-table').evaluate((table) => ({
+      tableWidth: table.style.width,
+      wrapWidth: table.closest('.cpb-table-wrap').style.width,
+      columnWidths: Array.from(table.querySelectorAll('col')).map((col) => col.style.width),
+    })), {
+      tableWidth: '280px',
+      wrapWidth: '280px',
+      columnWidths: ['50%', '50%'],
+    });
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();
@@ -642,6 +774,33 @@ test('authoritative page edits save in place and refresh automatically', async (
       ),
       true,
     );
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('layout-only block saves repaginate without regenerating revision highlights', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    await page.evaluate((refreshed) => {
+      window.__phaseC.queueUpdate({ payload: { ok: true, content_change: false } });
+      window.__phaseC.queuePreview({ payload: refreshed });
+    }, previewResult(11, 'layout-only refresh', 41));
+    const field = page.locator(
+      '#cpbCanvas .reader-semantic-piece[data-block-id="1"] .cpb-paragraph',
+    ).first();
+    await field.fill('Layout-only response fixture');
+    await field.blur();
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) => request.action === 'live_ensure')
+    );
+    await page.waitForTimeout(900);
+    assert.equal(await page.evaluate(() =>
+      window.__phaseC.requests.filter((request) =>
+        request.action === 'regenerate_highlights'
+      ).length
+    ), 0);
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();
@@ -759,7 +918,7 @@ test('split authoritative table fragments save only their mapped source rows', a
   try {
     assert.equal(await page.locator('#cpbCanvas .cpb-paginated-page').count(), 2);
     const firstBodyCell = page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="51"] tbody td',
+      '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-block--table tbody td',
     ).first();
     assert.equal(await firstBodyCell.getAttribute('contenteditable'), 'true');
     assert.equal(
@@ -800,7 +959,7 @@ test('automatic repagination preserves a split table cell caret', async (browser
     await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }), refreshed);
 
     const pageTwoCell = page.locator(
-      '#cpbCanvas .cpb-paginated-page[data-page-number="52"] tbody td',
+      '#cpbCanvas .cpb-paginated-page[data-page-number="52"] .cpb-block--table tbody td',
     ).first();
     await pageTwoCell.evaluate((cell) => {
       cell.textContent = 'A2 focused';
@@ -830,18 +989,19 @@ test('automatic repagination preserves a split table cell caret', async (browser
   }
 });
 
-test('section canvas stays covered until fonts, page rules, and final geometry are ready', async (browser) => {
+test('authoritative canvas remains hidden until all page assets and geometry settle', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
-    await page.evaluate(() => {
+    await page.evaluate((payload) => {
       window.__phaseC.assemblies = [];
       document.querySelector('#cpbEditorRoot').addEventListener(
         'cpb:section-assembly-complete',
         (event) => window.__phaseC.assemblies.push(structuredClone(event.detail)),
       );
+      window.__phaseC.queuePreview({ payload });
       window.__phaseC.queuePageRules({ defer: true });
       document.querySelector('#cpbCanvas').scrollTop = 480;
-    });
+    }, previewResult(12, 'section-twelve', 72));
     await page.getByTitle('Section Twelve').click();
     await page.waitForFunction(() => window.__phaseC.pendingPageRules.length === 1);
     const loading = await page.evaluate(() => {
@@ -860,7 +1020,7 @@ test('section canvas stays covered until fonts, page rules, and final geometry a
     assert.equal(loading.overlayVisible, true);
     assert.ok(loading.progress >= 52, JSON.stringify(loading));
     assert.equal(loading.canvasVisibility, 'hidden');
-    assert.match(loading.label, /fonts|images|page rules/i);
+    assert.match(loading.label, /loading|fonts|images|geometry/i);
 
     await page.evaluate(() => window.__phaseC.resolvePageRules(0));
     await page.waitForFunction(() =>
@@ -870,15 +1030,17 @@ test('section canvas stays covered until fonts, page rules, and final geometry a
     );
     const ready = await page.evaluate(() => ({
       activeSection: document.querySelector('.cpb-tree-link.is-active')?.title,
-      printLayout: document.querySelector('#cpbCanvas .cpb-sheet')?.classList.contains('cpb-print-layout'),
-      furniture: document.querySelectorAll('#cpbCanvas .cpb-print-furniture-layer').length,
+      canonicalPages: document.querySelectorAll('#cpbCanvas .reader-generated-page').length,
+      pageWrapperTag: document.querySelector('#cpbCanvas .cpb-paginated-page')?.tagName,
+      canvasVisibility: getComputedStyle(document.querySelector('#cpbCanvas')).visibility,
       status: document.querySelector('#cpbSaveStatus').textContent,
       scrollTop: document.querySelector('#cpbCanvas').scrollTop,
       assembly: window.__phaseC.assemblies[0],
     }));
     assert.equal(ready.activeSection, 'Section Twelve');
-    assert.equal(ready.printLayout, true);
-    assert.ok(ready.furniture >= 1);
+    assert.equal(ready.canonicalPages, 1);
+    assert.equal(ready.pageWrapperTag, 'DIV');
+    assert.equal(ready.canvasVisibility, 'visible');
     assert.equal(ready.status, 'Ready');
     assert.equal(ready.scrollTop, 0);
     assert.equal(ready.assembly.section_id, 12);

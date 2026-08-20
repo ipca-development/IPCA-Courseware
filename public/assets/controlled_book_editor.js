@@ -511,6 +511,59 @@
     }));
   }
 
+  function authoritativeGeometrySnapshot() {
+    return Array.prototype.map.call(
+      canvasEl.querySelectorAll(
+        '.reader-generated-page,'
+        + '.reader-page-header-region,.reader-page-body,.reader-page-footer-region,'
+        + '.reader-generated-page img'
+      ),
+      function (element) {
+        var rect = element.getBoundingClientRect();
+        return [
+          Math.round(rect.left * 10) / 10,
+          Math.round(rect.top * 10) / 10,
+          Math.round(rect.width * 10) / 10,
+          Math.round(rect.height * 10) / 10,
+        ].join(':');
+      }
+    ).join('|');
+  }
+
+  function waitForAuthoritativeGeometry() {
+    var previous = '';
+    var stableFrames = 0;
+    var frames = 0;
+    return new Promise(function (resolve) {
+      function inspect() {
+        window.requestAnimationFrame(function () {
+          frames++;
+          var current = authoritativeGeometrySnapshot();
+          stableFrames = current !== '' && current === previous ? stableFrames + 1 : 0;
+          previous = current;
+          if (stableFrames >= 2 || frames >= 24) {
+            resolve();
+            return;
+          }
+          inspect();
+        });
+      }
+      inspect();
+    });
+  }
+
+  function waitForAuthoritativeSurfaceReady() {
+    var fontsReady = document.fonts && document.fonts.ready
+      ? Promise.resolve(document.fonts.ready)
+      : Promise.resolve();
+    return Promise.all([
+      fontsReady,
+      waitForCanvasImages(),
+    ]).then(function () {
+      return waitForAuthoritativeGeometry();
+    });
+  }
+
   function isConnectedEl(el) {
     return !!(el && document.body && document.body.contains(el));
   }
@@ -762,6 +815,7 @@
     // Annex Books maintain their per-Annex revision register server-side.
     // The Highlight of Changes generator belongs only to Books/Manuals.
     if (isAnnexBook) return false;
+    if (fallbackMutation && fallbackMutation.content_change === false) return false;
     if (!AUTO_HIGHLIGHT_ACTIONS[action] || !state.editable || state.versionId <= 0) return false;
     setLivePaginationState('pending', { retryAvailable: false, lastError: '' });
     if (autoHighlightsTimer) clearTimeout(autoHighlightsTimer);
@@ -845,6 +899,7 @@
       stable_anchor: stableAnchor,
       mutation_kind: String(overrides.mutation_kind || action || 'source_mutation'),
       layout_impact: String(overrides.layout_impact || SOURCE_MUTATION_ACTIONS[action] || 'suffix'),
+      content_change: result && result.content_change === false ? false : true,
     };
   }
 
@@ -3427,6 +3482,59 @@
     });
   }
 
+  function markManualBreaksInPages() {
+    canvasEl.querySelectorAll('.cpb-canonical-manual-break-control').forEach(function (node) {
+      node.remove();
+    });
+    var stack = canvasEl.querySelector('.cpb-pages-stack');
+    if (!stack) return;
+    state.manualBreaks.forEach(function (row) {
+      if (parseInt(row.section_id || '0', 10) !== state.sectionId) return;
+      var anchor = String(row.before_block_anchor || '');
+      if (!anchor) return;
+      var targets = Array.prototype.slice.call(
+        canvasEl.querySelectorAll('.cpb-block[data-stable-anchor]')
+      ).filter(function (target) {
+        if (target.getAttribute('data-stable-anchor') !== anchor) return false;
+        var piece = target.closest('[data-presentation-copy]');
+        return !piece || piece.getAttribute('data-presentation-copy') !== '1';
+      });
+      if (!targets.length) return;
+      var page = targets[0].closest('.cpb-paginated-page');
+      if (!page) return;
+      var control = document.createElement('div');
+      control.className = 'cpb-canonical-manual-break-control';
+      control.setAttribute('data-editor-only', '1');
+      control.setAttribute('contenteditable', 'false');
+      control.setAttribute('data-break-id', String(row.id || ''));
+      control.style.top = (page.offsetTop - 10) + 'px';
+      control.style.left = page.offsetLeft + 'px';
+      control.style.width = page.offsetWidth + 'px';
+      var label = document.createElement('span');
+      label.textContent = 'Manual Page Break';
+      control.appendChild(label);
+      if (state.editable && row.id) {
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'Remove';
+        remove.setAttribute('aria-label', 'Remove manual page break');
+        remove.addEventListener('click', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          remove.disabled = true;
+          remove.textContent = 'Removing…';
+          mutateManualBreak({
+            action: 'remove',
+            book_version_id: state.versionId,
+            break_id: row.id,
+          });
+        });
+        control.appendChild(remove);
+      }
+      stack.appendChild(control);
+    });
+  }
+
   function renderPaginatedView(result) {
     state.paginatedResult = result;
     state.canonicalRefreshPending = false;
@@ -3473,7 +3581,10 @@
       var stack = document.createElement('div');
       stack.className = 'cpb-pages-stack';
       pages.forEach(function (page) {
-        var frame = document.createElement('section');
+        // A compliance-page <section> activates host-shell table rules with
+        // !important padding and top alignment. Canonical reader pages must
+        // remain outside that selector or their header/footer geometry drifts.
+        var frame = document.createElement('div');
         frame.className = 'cpb-paginated-page';
         frame.setAttribute('data-page-number', String(page.page_number || 0));
         frame.setAttribute('data-section-id', String(page.section_id || 0));
@@ -3495,6 +3606,7 @@
     }
     applyAuthoringChromeToCanonicalPages();
     applyAuthoringSpecialFieldsToCanonicalPages();
+    markManualBreaksInPages();
     wirePaginatedFields();
     wireCanvas();
     refreshCalloutTypographyFromBookStyles();
@@ -3655,13 +3767,13 @@
 
   function mutateManualBreak(payload) {
     return paginationRequest('/admin/api/controlled_book_page_break_api.php', payload)
-      .then(function (result) {
-        recordCommittedSourceMutation('manual_page_break', payload, result || { ok: true }, {
-          mutation_kind: 'manual_page_break',
-          layout_impact: 'global',
-        });
+      .then(function () {
         markPaginationChanged();
         return loadUnifiedManualBreaks();
+      })
+      .then(function (result) {
+        markManualBreaksInPages();
+        return result;
       })
       .catch(showError);
   }
@@ -4307,6 +4419,14 @@
         enforceAuthoritativeEditorSurface();
         setSectionAssembly(true, 'Loading authoritative pages…', 52);
         return loadPaginatedView().then(function () {
+          if (loadSequence !== state.sectionLoadSequence) return false;
+          setSectionAssembly(true, 'Loading fonts and images…', 72);
+          return waitForAuthoritativeSurfaceReady();
+        }).then(function () {
+          if (loadSequence !== state.sectionLoadSequence) return false;
+          setSectionAssembly(true, 'Stabilizing exact page geometry…', 92);
+          return waitForAuthoritativeGeometry();
+        }).then(function () {
           if (loadSequence !== state.sectionLoadSequence) return false;
           setSectionAssembly(true, 'Pages ready', 100);
           return nextAnimationFrame().then(function () {
@@ -5798,7 +5918,6 @@
         ? handle.closest('.cpb-table-wrap')
         : handle.closest('.cpb-block--table');
       if (!blockEl) return;
-      pushUndo();
       var colIndex = parseInt(handle.getAttribute('data-col-index') || '0', 10);
       var table = blockEl.querySelector('table');
       if (!table) return;
@@ -5807,14 +5926,20 @@
       if (!col) return;
       var nextCol = cols[colIndex + 1] || null;
       var startX = e.clientX;
-      var startW = part0Resize ? col.getBoundingClientRect().width : colWidthPx(col);
-      var startNextW = nextCol
-        ? (part0Resize ? nextCol.getBoundingClientRect().width : colWidthPx(nextCol))
-        : 0;
       var zoomScale = Math.max(0.1, state.canvasZoom / 100);
+      var startW = col.getBoundingClientRect().width / zoomScale;
+      var startNextW = nextCol
+        ? (nextCol.getBoundingClientRect().width / zoomScale)
+        : 0;
       var hint = ensureResizeHint();
+      var moved = false;
 
       function onMove(ev) {
+        if (Math.abs(ev.clientX - startX) < 1) return;
+        if (!moved) {
+          moved = true;
+          pushUndo();
+        }
         var desired = startW + ((ev.clientX - startX) / zoomScale);
         var w;
         if (nextCol) {
@@ -5836,6 +5961,7 @@
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
         hint.style.display = 'none';
+        if (!moved) return;
         if (part0Resize) {
           var totalWidth = Math.max(1, table.getBoundingClientRect().width);
           cols.forEach(function (item) {
@@ -10131,8 +10257,15 @@
 
   function colWidthPx(col) {
     if (!col) return 140;
-    var w = parseInt(String(col.style.width || '140').replace('px', ''), 10);
-    return isNaN(w) ? 140 : w;
+    var raw = String(col.style.width || '').trim();
+    if (/^-?\d+(?:\.\d+)?px$/i.test(raw)) {
+      return Math.max(0, parseFloat(raw) || 0);
+    }
+    var zoomScale = Math.max(0.1, state.canvasZoom / 100);
+    var rendered = col.getBoundingClientRect().width / zoomScale;
+    if (rendered > 0) return rendered;
+    var parsed = parseFloat(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 140;
   }
 
   function tablePageContentMaxWidth() {
@@ -10180,9 +10313,14 @@
     var table = blockEl.querySelector('table');
     if (!table) return 0;
     var total = 0;
-    table.querySelectorAll('colgroup col').forEach(function (col) {
+    var columns = table.querySelectorAll('colgroup col');
+    columns.forEach(function (col) {
       total += colWidthPx(col);
     });
+    if (!columns.length || total <= 0) {
+      var zoomScale = Math.max(0.1, state.canvasZoom / 100);
+      total = table.getBoundingClientRect().width / zoomScale;
+    }
     return total;
   }
 

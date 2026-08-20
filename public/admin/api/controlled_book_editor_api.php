@@ -2946,6 +2946,14 @@ function cp_editor_handle_update_block(
             $numbering = cp_editor_configure_renderer($renderer, $styleSvc, $version, $numberSvc);
         }
     }
+    $contentChange = true;
+    if ($row !== null && (string)($row['block_type'] ?? '') === 'table') {
+        $priorPayload = json_decode((string)($row['payload_json'] ?? '{}'), true);
+        $priorPayload = is_array($priorPayload) ? $priorPayload : array();
+        $nextPayload = $payload;
+        unset($priorPayload['col_widths'], $nextPayload['col_widths']);
+        $contentChange = $priorPayload != $nextPayload;
+    }
 
     $blocks->updateBlock($blockId, $payload, $uid);
     $block = $blocks->getBlock($blockId);
@@ -2960,6 +2968,7 @@ function cp_editor_handle_update_block(
 
     $response = array_merge(array(
         'ok' => true,
+        'content_change' => $contentChange,
         'block' => $block,
         'block_html' => $renderer->renderBlock($block, ControlledPublishingBookRenderer::MODE_EDIT),
     ), cp_editor_numbering_payload($numbering));
