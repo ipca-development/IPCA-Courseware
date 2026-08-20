@@ -301,8 +301,22 @@ $reviewPatches = array_values(array_filter(
 ));
 $reviewPendingPatch = array_values(array_filter(
     $reviewPatches,
-    static fn(array $patch): bool => (string)($patch['status'] ?? '') === 'proposed'
+    static fn(array $patch): bool => in_array(
+        strtoupper((string)($patch['status'] ?? '')),
+        array('PROPOSED', 'HUMAN_ACCEPTED_PENDING_VERIFICATION'),
+        true
+    )
 ))[0] ?? array();
+$reviewLatestPatch = $reviewPatches === array() ? array() : $reviewPatches[array_key_last($reviewPatches)];
+$reviewLatestPatchStatus = strtoupper((string)($reviewLatestPatch['status'] ?? ''));
+$reviewLatestPatchVerification = mcw_array($reviewLatestPatch['verification_json'] ?? array());
+$reviewLatestPatchReconciliation = mcw_array(
+    $reviewLatestPatchVerification['reconciliation'] ?? array()
+);
+$reviewRepairGroups = array_values(array_filter(
+    (array)($reviewResolutionState['repair_groups'] ?? array()),
+    'is_array'
+));
 $reviewNeedsStructureRevision = false;
 foreach ($reviewIssues as $reviewIssue) {
     if (preg_match(
@@ -678,17 +692,33 @@ books_manuals_page_open(array(
         <section class="mcw-step mcw-step--active" data-mcw-step="5">
           <header><span class="mcw-step-number">5</span><div><h2>Independent Review</h2><p>Resolve only material review findings. Accepted scope, structure and unaffected wording remain frozen.</p></div></header>
           <?php $reviewCounts = mcw_array($reviewResolutionState['counts'] ?? array()); ?>
+          <?php $reviewCheckCounts = mcw_array($reviewResolutionState['check_counts'] ?? array()); ?>
+          <?php $reviewResolutionCounts = mcw_array($reviewResolutionState['resolution_counts'] ?? array()); ?>
           <?php $questionCount = (int)($reviewCounts['HUMAN_DECISION_REQUIRED'] ?? 0); ?>
           <?php $answeredCount = count((array)($reviewResolutionState['answers'] ?? array())); ?>
+          <?php $remainingCorrections = (int)($reviewResolutionCounts['UNRESOLVED'] ?? 0); ?>
+          <?php $verifiedCorrections = (int)($reviewLatestPatchReconciliation['checks_fixed'] ?? 0); ?>
           <div class="mcw-review-summary">
             <strong><?= $reviewResolutionReady ? 'Independent Review Complete' : 'Independent Review' ?></strong>
-            <span>✓ <?= count(array_filter(mcw_array($reviewDisplayPayload['checks'] ?? array()))) ?> checks passed</span>
-            <span>⚠ <?= max(0, $questionCount - $answeredCount) ?> decisions need your input</span>
-            <span>✕ <?= (int)($reviewResolutionState['hard_blockers'] ?? 0) ?> blocking defects</span>
+            <span>✓ <?= (int)($reviewCheckCounts['PASS'] ?? 0) ?> checks passed</span>
+            <span>✓ <?= $verifiedCorrections ?> correction<?= $verifiedCorrections === 1 ? '' : 's' ?> verified</span>
+            <span>⚠ <?= $remainingCorrections ?> content correction<?= $remainingCorrections === 1 ? '' : 's' ?> remaining</span>
+            <span>⚠ <?= max(0, $questionCount - $answeredCount) ?> human decisions required</span>
+            <span>✕ <?= (int)($reviewResolutionState['hard_blockers'] ?? 0) ?> hard integrity blockers</span>
           </div>
+          <?php if ($reviewLatestPatchStatus === 'VERIFICATION_FAILED'): ?>
+            <div class="mcw-review-result is-review"><h3>Correction accepted, but Independent Review found <?= (int)($reviewLatestPatchReconciliation['checks_after'] ?? $remainingCorrections) ?> remaining issue<?= (int)($reviewLatestPatchReconciliation['checks_after'] ?? $remainingCorrections) === 1 ? '' : 's' ?>.</h3><p>The human acceptance is preserved. Only checks that independently passed were retained as verified.</p></div>
+          <?php endif; ?>
 
           <?php if (!empty($reviewResolutionState['review_divergence_detected'])): ?>
-            <div class="mcw-review-result is-review"><h3>Review divergence detected</h3><p>Automatic correction has stopped because unresolved material findings increased across consecutive review cycles. Review Details contains the diagnostic state.</p></div>
+            <div class="mcw-review-result is-review"><h3>Review divergence detected</h3><p>Automatic correction has stopped because the accepted patch changed wording outside the reconstructed repair scope. Review Details contains the diagnostic state.</p></div>
+            <?php foreach ($reviewRepairGroups as $group): ?>
+              <section class="mcw-review-result is-review">
+                <h3><?= h((string)($group['label'] ?? 'Remaining correction')) ?></h3>
+                <p><strong>Affected nodes:</strong> <?= h(implode(' · ', array_map('strval', (array)($group['affected_nodes'] ?? array())))) ?></p>
+                <ul><?php foreach ((array)($group['issues'] ?? array()) as $issue): ?><li><?= h((string)$issue) ?></li><?php endforeach; ?></ul>
+              </section>
+            <?php endforeach; ?>
           <?php elseif ($reviewPendingQuestion !== array()): ?>
             <?php
               $pendingQuestions = array_values(array_filter(
@@ -722,8 +752,9 @@ books_manuals_page_open(array(
             </section>
           <?php elseif ($reviewPendingPatch !== array()): ?>
             <?php $patchPayload = mcw_array($reviewPendingPatch['proposed_payload_json'] ?? array()); ?>
+            <?php $patchAwaitingVerification = strtoupper((string)($reviewPendingPatch['status'] ?? '')) === 'HUMAN_ACCEPTED_PENDING_VERIFICATION'; ?>
             <section class="mcw-targeted-patch" data-mcw-targeted-patch="<?= (int)$reviewPendingPatch['id'] ?>">
-              <span class="mcw-kicker">Targeted correction</span>
+              <span class="mcw-kicker"><?= $patchAwaitingVerification ? 'Correction accepted · verification pending' : 'Targeted correction' ?></span>
               <?php foreach ((array)($patchPayload['changed_sections'] ?? array()) as $section => $change): ?>
                 <?php if (!is_array($change)) continue; ?>
                 <h3><?= h((string)$section) ?></h3>
@@ -733,19 +764,27 @@ books_manuals_page_open(array(
                 <pre><?= h(implode("\n\n", array_map('strval', (array)($change['after']['nodes'] ?? array())))) ?></pre>
                 <h4>Why this correction is required</h4><p><?= h((string)($change['reason'] ?? 'Resolve the identified Independent Review finding.')) ?></p>
               <?php endforeach; ?>
-              <div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-request-patch-adjustment>Request Adjustment</button><button class="app-btn app-btn--primary" type="button" data-mcw-accept-targeted-patch>Accept Correction</button></div>
+              <div class="mcw-step-actions"><?php if (!$patchAwaitingVerification): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-request-patch-adjustment>Request Adjustment</button><?php endif; ?><button class="app-btn app-btn--primary" type="button" data-mcw-accept-targeted-patch><?= $patchAwaitingVerification ? 'Retry Verification' : 'Accept Correction' ?></button></div>
             </section>
           <?php elseif ($reviewResolutionReady): ?>
             <div class="mcw-review-result is-ready"><h3>✓ No unresolved issues</h3><ul><li>✓ Accepted requirements represented</li><li>✓ Human decisions resolved</li><li>✓ Targeted corrections verified</li><li>✓ Known limitations correctly represented</li><li>✓ Accepted structure preserved</li><li>✓ Unaffected wording unchanged</li><li>✓ No integrity blockers</li></ul></div>
             <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-run-review>Continue to Apply</button>
           <?php else: ?>
-            <?php $patchableFindings = array_values(array_filter($reviewFindings, static fn(array $finding): bool => in_array((string)($finding['status'] ?? ''), array('patch_pending', 'blocked'), true) && !in_array((string)($finding['finding_class'] ?? ''), array('POTENTIAL_SCOPE_DEFECT', 'HUMAN_DECISION_REQUIRED'), true))); ?>
+            <?php $patchableFindings = array_values(array_filter($reviewFindings, static fn(array $finding): bool => strtoupper((string)($finding['resolution_status'] ?? '')) === 'UNRESOLVED')); ?>
             <?php $scopeDefects = array_values(array_filter($reviewFindings, static fn(array $finding): bool => (string)($finding['finding_class'] ?? '') === 'POTENTIAL_SCOPE_DEFECT' && !in_array((string)($finding['status'] ?? ''), array('closed', 'verified'), true))); ?>
-            <div class="mcw-review-decisions"><h3>Review Decisions</h3><p><?= $answeredCount ?> decisions recorded · <?= count($patchableFindings) ?> targeted corrections required</p></div>
-            <?php if ($patchableFindings !== array() && $scopeDefects === array()): ?><button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-generate-targeted-patch>Generate Targeted Correction</button><?php elseif ($scopeDefects !== array()): ?><p class="mcw-apply-note">Resolve the potential scope issue before generating a wording correction.</p><?php endif; ?>
+            <div class="mcw-review-decisions"><h3>Review Decisions &amp; Remaining Corrections</h3><p><?= $answeredCount ?> human decisions recorded · <?= count($patchableFindings) ?> content checks unresolved</p></div>
+            <?php foreach ($reviewRepairGroups as $group): ?>
+              <section class="mcw-review-result is-review">
+                <h3><?= h((string)($group['label'] ?? 'Targeted correction')) ?></h3>
+                <p><strong>Affected nodes:</strong> <?= h(implode(' · ', array_map('strval', (array)($group['affected_nodes'] ?? array())))) ?></p>
+                <ul><?php foreach ((array)($group['issues'] ?? array()) as $issue): ?><li><?= h((string)$issue) ?></li><?php endforeach; ?></ul>
+                <?php if ($scopeDefects === array()): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-generate-targeted-patch data-finding-ids="<?= h(implode(',', array_map('intval', (array)($group['finding_ids'] ?? array())))) ?>">Generate Correction for This Group</button><?php endif; ?>
+              </section>
+            <?php endforeach; ?>
+            <?php if ($patchableFindings !== array() && $scopeDefects === array()): ?><button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-generate-targeted-patch>Generate Correction for Remaining Issues</button><?php elseif ($scopeDefects !== array()): ?><p class="mcw-apply-note">Resolve the potential scope issue before generating a wording correction.</p><?php endif; ?>
             <?php foreach ($reviewFindings as $finding): ?>
               <?php if (!in_array((string)($finding['finding_class'] ?? ''), array('HARD_INTEGRITY_BLOCKER', 'POTENTIAL_SCOPE_DEFECT'), true) || in_array((string)($finding['status'] ?? ''), array('closed', 'verified'), true)) continue; ?>
-              <div class="mcw-review-result is-review"><h3><?= h((string)$finding['title']) ?></h3><p><?= h((string)$finding['human_explanation']) ?></p><p>This cannot be dismissed through a questionnaire.</p><?php if ((string)$finding['finding_class'] === 'POTENTIAL_SCOPE_DEFECT'): ?><div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-scope-follow-up="<?= (int)$finding['id'] ?>">Record as Separate Follow-up</button><button class="app-btn app-btn--secondary" type="button" data-mcw-explicit-reopen="reopen_impact_analysis">Reopen Impact Analysis</button></div><?php endif; ?></div>
+              <div class="mcw-review-result is-review"><h3><?= h((string)$finding['title']) ?></h3><p><?= h((string)$finding['human_explanation']) ?></p><p><?= (string)$finding['finding_class'] === 'HARD_INTEGRITY_BLOCKER' ? 'This is a technical integrity failure. The protected state must be restored before the Wizard can continue.' : 'This is a content-integrity requirement. The wording must be corrected before the Wizard can continue.' ?></p><?php if ((string)$finding['finding_class'] === 'POTENTIAL_SCOPE_DEFECT'): ?><div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-scope-follow-up="<?= (int)$finding['id'] ?>">Record as Separate Follow-up</button><button class="app-btn app-btn--secondary" type="button" data-mcw-explicit-reopen="reopen_impact_analysis">Reopen Impact Analysis</button></div><?php elseif ((string)($finding['category'] ?? '') === 'SCOPE'): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-explicit-reopen="reopen_impact_analysis">Resolve Exceptional Scope Contradiction</button><?php elseif ((string)($finding['category'] ?? '') === 'STRUCTURE'): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-explicit-reopen="reopen_proposed_structure">Resolve Exceptional Structure Contradiction</button><?php endif; ?></div>
             <?php endforeach; ?>
           <?php endif; ?>
           <details class="mcw-review-details"><summary>Review Details</summary><pre><?= h(json_encode(array('review' => $reviewDisplayPayload, 'resolution' => $reviewResolutionState), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre></details>

@@ -9,6 +9,7 @@ require_once __DIR__ . '/BooksManualsChangePlanService.php';
 final class BooksManualsChangeReviewerService
 {
     public const PROMPT_VERSION = 'manual-change-independent-reviewer-v1';
+    public const CHECK_VERSION = '2';
     public const READY = 'READY';
     public const REQUIRES_REVIEW = 'REQUIRES_REVIEW';
 
@@ -436,15 +437,585 @@ final class BooksManualsChangeReviewerService
             'final_quality_checks' => $finalQualityResults,
         );
         $verification['legacy_reference_status'] = $legacyStatus;
-        $verification['readability_issues'] = $readabilityIssues;
-        $verification['issues'] = array_values(array_unique(array_merge(
-            (array)$verification['issues'],
-            $readabilityIssues
-        )));
+        $verification['legacy_regex_diagnostics'] = array(
+            'readability' => $verification['readability'],
+            'readability_issues' => $readabilityIssues,
+            'issues' => array_values(array_unique(array_merge(
+                (array)$verification['issues'],
+                $readabilityIssues
+            ))),
+        );
+        $reviewChecks = $this->buildStructuredReviewChecks($proposal, $verification);
+        $verification['review_checks'] = $reviewChecks;
+        $verification['readability'] = $this->structuredReadabilityProjection($reviewChecks, count($nodes56));
+        $verification['readability_issues'] = array_values(array_map(
+            static fn(array $check): string => (string)$check['human_explanation'],
+            array_filter(
+                $reviewChecks,
+                static fn(array $check): bool => (string)$check['status'] === 'FAIL'
+                    && !in_array((string)$check['category'], array('STRUCTURE', 'INTEGRITY'), true)
+            )
+        ));
+        $verification['issues'] = array_values(array_map(
+            static fn(array $check): string => (string)$check['human_explanation'],
+            array_filter(
+                $reviewChecks,
+                static fn(array $check): bool => (string)$check['status'] === 'FAIL'
+            )
+        ));
         $verification['status'] = $verification['issues'] === array()
             ? 'READY_FOR_HUMAN_REVIEW'
             : self::REQUIRES_REVIEW;
         return $verification;
+    }
+
+    /**
+     * Stable, semantic checks are the authoritative Independent Review result.
+     * Regex-only results above are retained as diagnostics for old review rows.
+     *
+     * @param array<string,mixed> $proposal
+     * @param array<string,mixed> $legacyVerification
+     * @return list<array<string,mixed>>
+     */
+    private function buildStructuredReviewChecks(array $proposal, array $legacyVerification): array
+    {
+        $drafts = (array)($proposal['section_drafts'] ?? array());
+        $nodes = array();
+        $allText = '';
+        foreach ($drafts as $section => $draft) {
+            foreach ((array)($draft['nodes'] ?? array()) as $number => $content) {
+                $nodes[(string)$number] = (string)$content;
+                $allText .= "\n" . (string)$content;
+            }
+        }
+        $text56 = implode("\n", array_map('strval', (array)($drafts['5.6']['nodes'] ?? array())));
+        $followUp = (string)($nodes['5.6.7'] ?? '');
+        $closure = (string)($nodes['5.6.9'] ?? '');
+        $initial = (string)($nodes['5.6.4'] ?? $nodes['5.6.4.1'] ?? '');
+        $checks = array();
+
+        $acceptedNodes = array_values(array_unique(array_map(
+            'strval',
+            (array)($proposal['accepted_structure_nodes'] ?? array())
+        )));
+        $implementedNodes = array_keys($nodes);
+        $missingNodes = array_values(array_diff($acceptedNodes, $implementedNodes));
+        $unexpectedNodes = array_values(array_diff($implementedNodes, $acceptedNodes));
+        $checks[] = $this->reviewCheck(
+            'structure.accepted-nodes.complete',
+            'STRUCTURE',
+            'HARD',
+            $missingNodes === array(),
+            array_keys($drafts),
+            $missingNodes,
+            'Every accepted structure node is implemented once.',
+            $missingNodes === array() ? 'All accepted nodes are present.' : 'Missing nodes: ' . implode(', ', $missingNodes),
+            'One or more accepted structure nodes are missing.',
+            array_keys($drafts),
+            array('accepted_structure_nodes')
+        );
+        $checks[] = $this->reviewCheck(
+            'structure.unaccepted-nodes.absent',
+            'STRUCTURE',
+            'HARD',
+            $unexpectedNodes === array(),
+            array_keys($drafts),
+            $unexpectedNodes,
+            'No node outside the accepted structure is drafted.',
+            $unexpectedNodes === array() ? 'No unaccepted nodes are present.' : 'Unexpected nodes: ' . implode(', ', $unexpectedNodes),
+            'One or more unaccepted structure nodes were drafted.',
+            array(),
+            array('accepted_structure_nodes')
+        );
+        foreach ((array)($proposal['accepted_impact_numbers'] ?? array()) as $section) {
+            $section = (string)$section;
+            $implemented = (array)($drafts[$section]['nodes'] ?? array()) !== array();
+            $checks[] = $this->reviewCheck(
+                'impact.' . $this->checkSlug($section) . '.implemented',
+                'SCOPE',
+                'HARD',
+                $implemented,
+                array($section),
+                array_keys((array)($drafts[$section]['nodes'] ?? array())),
+                "The accepted amendment area {$section} is implemented.",
+                $implemented ? "Section {$section} contains accepted-node wording." : "Section {$section} has no accepted-node wording.",
+                "Accepted amendment area {$section} is not implemented.",
+                array($section),
+                array('accepted_impact_numbers')
+            );
+        }
+        foreach (array('5.2.5.2', '5.9', '6.4') as $section) {
+            $preserved = !isset($drafts[$section]);
+            $checks[] = $this->reviewCheck(
+                'integrity.protected-section.' . $this->checkSlug($section),
+                'INTEGRITY',
+                'HARD',
+                $preserved,
+                array($section),
+                array($section),
+                "Protected Section {$section} remains outside the amendment package.",
+                $preserved ? 'The protected section is absent from proposed amendments.' : 'The protected section was drafted.',
+                "Protected Section {$section} was improperly drafted.",
+                array(),
+                array('protected_sections')
+            );
+        }
+        $legacyPatterns = array(
+            'pipedrive' => '/\bPipedrive\b/iu',
+            'online-sms' => '/\bOnline\s+Safety\s+Management\s+System\b/iu',
+            'legacy-sms-portal' => '/\b(?:sms|safety)\.europilotcenter\.be\b/iu',
+            'e-or' => '/\bE\s*[-–—]\s*OR\b/iu',
+            'aviationreporting-eu' => '/\baviationreporting\.eu\b/iu',
+            'legacy-anonymous-portal' => '/\b(?:anoymous|anonymous)\.europilotcenter\.be\b/iu',
+        );
+        foreach ($legacyPatterns as $identity => $pattern) {
+            $absent = preg_match($pattern, $allText) !== 1;
+            $checks[] = $this->reviewCheck(
+                'integrity.legacy-reference.' . $identity . '.absent',
+                'INTEGRITY',
+                'HARD',
+                $absent,
+                array_keys($drafts),
+                array_keys($nodes),
+                "The obsolete {$identity} reference does not appear inside accepted amendment scope.",
+                $absent ? 'No obsolete reference was found.' : 'The obsolete reference is still present.',
+                'Legacy occurrence-workflow references remain in proposed wording.',
+                array_keys($drafts),
+                array('legacy_reference_scan')
+            );
+        }
+        $checks[] = $this->reviewCheck(
+            'integrity.unsupported-automation-claim.absent',
+            'INTEGRITY',
+            'HARD',
+            preg_match('/automated?\s+(?:intermediate|final).{0,100}(?:is|are)\s+(?:now\s+)?operational/iu', $allText) !== 1
+                || preg_match('/(?:until|while).{0,120}(?:automatic|automated).{0,120}operational|automated?.{0,120}not\s+operational/isu', $allText) === 1,
+            array_keys($drafts),
+            array_keys($nodes),
+            'The amendment does not claim unsupported automated ECCAIRS follow-up capability.',
+            'No affirmative unsupported automation claim was detected.',
+            'Unsupported ECCAIRS automation was represented as operational.',
+            array_keys($drafts),
+            array('known_system_limitations')
+        );
+        $checks[] = $this->reviewCheck(
+            'integrity.implementation-detail.absent',
+            'INTEGRITY',
+            'HARD',
+            preg_match('/\b(?:screen|button|database table|JSON|API endpoint|REST envelope|field schema)\b/iu', $allText) !== 1,
+            array_keys($drafts),
+            array_keys($nodes),
+            'Controlled wording contains no software implementation internals.',
+            'No implementation-internal terminology was detected.',
+            'Software implementation detail leaked into controlled wording.',
+            array_keys($drafts),
+            array('controlled_manual_boundary')
+        );
+        $checks[] = $this->reviewCheck(
+            'integrity.static-eccairs-field-schema.absent',
+            'INTEGRITY',
+            'HARD',
+            preg_match('/\b(?:field-by-field|individual ECCAIRS fields|static field list)\b/iu', $allText) !== 1,
+            array('5.6'),
+            array('5.6.4'),
+            'The manual governs information controls without freezing an ECCAIRS field schema.',
+            'No static ECCAIRS field schema was detected.',
+            'A static ECCAIRS field schema was introduced.',
+            array('5.6.4'),
+            array('known_system_limitations')
+        );
+        foreach ((array)($proposal['lifecycle'] ?? array()) as $state) {
+            if (!is_array($state)) {
+                continue;
+            }
+            $name = (string)($state['state'] ?? 'unknown');
+            $missing = array();
+            foreach (array('accountable_role', 'required_evidence', 'deadline_control', 'closure_gate') as $field) {
+                if (trim((string)($state[$field] ?? '')) === '') {
+                    $missing[] = $field;
+                }
+            }
+            $checks[] = $this->reviewCheck(
+                'lifecycle.' . $this->checkSlug($name) . '.governed',
+                'INTEGRITY',
+                'HARD',
+                $missing === array(),
+                array_keys($drafts),
+                array(),
+                "Lifecycle state {$name} defines role, evidence, deadline and closure controls.",
+                $missing === array() ? 'All lifecycle governance attributes are present.' : 'Missing: ' . implode(', ', $missing),
+                "Lifecycle state {$name} lacks required governance attributes.",
+                array_keys($drafts),
+                array('accepted_lifecycle')
+            );
+        }
+
+        $requiredHeadings = array(
+            '5.6', '5.6.1', '5.6.2', '5.6.3', '5.6.4',
+            '5.6.5', '5.6.6', '5.6.7', '5.6.8', '5.6.9',
+        );
+        $checks[] = $this->reviewCheck(
+            'structure.5-6.accepted-hierarchy',
+            'STRUCTURE',
+            'HARD',
+            array_keys((array)($drafts['5.6']['nodes'] ?? array())) === $requiredHeadings,
+            array('5.6'),
+            $requiredHeadings,
+            'Section 5.6 uses the accepted consolidated hierarchy without additions or omissions.',
+            'Compared the resulting 5.6 node sequence with the accepted structure.',
+            'Section 5.6 does not use the accepted consolidated hierarchy.',
+            array(),
+            array('accepted_structure_nodes')
+        );
+        foreach (array('3.3', '4.2', '5.6', '5.7', '8.1') as $section) {
+            $draft = (array)($drafts[$section] ?? array());
+            $complete = (array)($draft['current_preserved'] ?? array()) !== array()
+                && array_key_exists('current_removed_replaced', $draft)
+                && (array)($draft['new_content_added'] ?? array()) !== array();
+            $checks[] = $this->reviewCheck(
+                'evidence.section.' . $this->checkSlug($section) . '.change-accounting',
+                'INTEGRITY',
+                'HARD',
+                $complete,
+                array($section),
+                array_keys((array)($draft['nodes'] ?? array())),
+                "Section {$section} records preserved, replaced and added content.",
+                $complete ? 'Change-accounting evidence is complete.' : 'Change-accounting evidence is incomplete.',
+                "Section {$section} lacks explicit preservation/change evidence.",
+                array($section),
+                array('draft_change_evidence')
+            );
+        }
+
+        $preservationChecks = array(
+            'regulation-376-2014' => array('Regulation (EU) No 376/2014', array('/Regulation\s*\(EU\)\s*No\s*376\/2014/iu')),
+            'regulation-2015-1018' => array('Implementing Regulation (EU) 2015/1018', array('/Implementing Regulation\s*\(EU\)\s*2015\/1018/iu')),
+            'bcaa-mas-01' => array('BCAA Circular MAS-01', array('/BCAA\s+Circular\s+MAS-01/iu')),
+            'initial-72-hour-deadline' => array('the initial 72-hour deadline', array('/(?:not later than|within)\s+72\s+hours/iu')),
+            'preliminary-30-day-deadline' => array('the preliminary 30-day deadline', array('/(?:within|not later than)\s+30\s+days/iu')),
+            'final-three-month-timing' => array('the final three-month timing', array('/(?:not later than|within)\s+three\s+months/iu')),
+            'mandatory-voluntary-distinction' => array('the mandatory and voluntary reporting distinction', array('/mandatory(?:\s+occurrence)?[-\s]reporting/iu', '/voluntary(?:\s+occurrence)?[-\s]reporting/iu')),
+            'reporter-protection-just-culture' => array('reporter protection and just culture', array('/(?:reporter\s+protection|protect(?:s|ion).{0,30}reporter|reporter.{0,30}protect)/iu', '/just[-\s]culture/iu')),
+            'causal-contributing-factors' => array('causal and contributing factors', array('/causal\s+(?:and|or)\s+contributing\s+factors/iu')),
+        );
+        foreach ($preservationChecks as $key => [$label, $patterns]) {
+            $passed = $this->matchesEvery($text56, $patterns);
+            $checks[] = $this->reviewCheck(
+                'preservation.' . $key,
+                'PRESERVATION',
+                'MATERIAL',
+                $passed,
+                array('5.6'),
+                array_keys((array)($drafts['5.6']['nodes'] ?? array())),
+                "The resulting procedure preserves {$label}.",
+                $passed ? "The {$label} control is present." : "The {$label} control was not found.",
+                "Existing valid requirement was not preserved: {$label}.",
+                array_keys((array)($drafts['5.6']['nodes'] ?? array())),
+                array('accepted_impact_baseline', 'canonical_source')
+            );
+        }
+
+        $semantic = array(
+            'eccairs.initial.stage-information' => array(
+                'ECCAIRS_INITIAL', 'MATERIAL', $initial . "\n" . (string)($nodes['5.6.3'] ?? ''), array('5.6.4'), array('5.6.3', '5.6.4'),
+                array('/(?:initial|applicable)\s+reporting\s+stage/iu', '/(?:unknown|unavailable|not-yet-confirmed)/iu', '/(?:shall not.{0,30}delay|without\s+delay)/isu', '/(?:applicable|reporting)\s+deadline/iu'),
+                'Initial ECCAIRS information is governed by the applicable stage and unavailable information does not delay the deadline.',
+                'Initial ECCAIRS information wording is not appropriately stage-based.'
+            ),
+            'eccairs.initial.governance-complete' => array(
+                'ECCAIRS_INITIAL', 'MATERIAL', $initial, array('5.6.4'), array('5.6.4'),
+                array('/Safety Manager/iu', '/(?:information required|required information)/iu', '/(?:unknown|unavailable)/iu', '/review.{0,60}approv|approv.{0,60}transmission/isu', '/retain.{0,240}(?:submission|authority|evidence)/isu'),
+                'Initial ECCAIRS preparation covers required information, unavailable information, Safety Manager approval and retained evidence.',
+                'Initial ECCAIRS governance requirements are incomplete.'
+            ),
+            'eccairs.follow-up.initial-not-completion' => array(
+                'ECCAIRS_FOLLOW_UP', 'MATERIAL', $text56, array('5.6'), array('5.6.3', '5.6.7'),
+                array('/(?:submission|submitting).{0,60}(?:initial\s+(?:occurrence|report)).{0,100}(?:does not|shall not|cannot).{0,60}(?:complete|completion)/isu'),
+                'Initial occurrence submission is explicitly not treated as completion of authority reporting.',
+                'Intermediate/final ECCAIRS control is incomplete: initial submission is not process completion.'
+            ),
+            'eccairs.follow-up.findings-conclusions' => array(
+                'INVESTIGATION', 'MATERIAL', $followUp, array('5.6'), array('5.6.7'),
+                array('/findings/iu', '/conclusions/iu'),
+                'Required follow-up can include both findings and conclusions.',
+                'Intermediate/final ECCAIRS control is incomplete: findings and conclusions.'
+            ),
+            'eccairs.follow-up.causal-contributing' => array(
+                'INVESTIGATION', 'MATERIAL', $followUp, array('5.6'), array('5.6.7'),
+                array('/causal(?:\s+and\s+contributing)?\s+(?:factors?|causes?)/iu', '/contributing\s+factors?/iu'),
+                'Required follow-up can include causal and contributing factors.',
+                'Intermediate/final ECCAIRS control is incomplete: causal and contributing factors.'
+            ),
+            'eccairs.follow-up.actions-evidence-effectiveness' => array(
+                'CORRECTIVE_ACTION', 'MATERIAL', $followUp, array('5.6'), array('5.6.7'),
+                array('/corrective\s+or\s+mitigating\s+actions?/iu', '/implementation\s+(?:information|evidence)/iu', '/effectiveness\s+(?:information|evidence|review)/iu'),
+                'Required follow-up can include actions, implementation evidence and effectiveness information.',
+                'Intermediate/final ECCAIRS control is incomplete: actions and implementation/effectiveness.'
+            ),
+            'eccairs.follow-up.approved-authority-process' => array(
+                'ECCAIRS_FOLLOW_UP', 'MATERIAL', $followUp, array('5.6'), array('5.6.7'),
+                array('/(?:enter(?:ed|ing)?|performed)\s+(?:required\s+[^.]{0,80})?directly\s+in(?:to)?\s+ECCAIRS/iu', '/(?:competent authority|authority reporting|Article 13|applicable authority)/iu', '/Safety Manager/iu'),
+                'Required intermediate and final updates use the applicable authority process under Safety Manager control.',
+                'Intermediate/final ECCAIRS control is incomplete: approved authority follow-up process.'
+            ),
+            'eccairs.follow-up.preliminary-30-day-risk-trigger' => array(
+                'ECCAIRS_FOLLOW_UP', 'MATERIAL', (string)($nodes['5.6.3'] ?? '') . "\n" . $followUp, array('5.6'), array('5.6.3', '5.6.7'),
+                array('/actual\s+or\s+potential\s+(?:aviation\s+)?safety\s+risk/iu', '/preliminary\s+results?/iu', '/(?:within|not later than)\s+30\s+days/iu'),
+                'A preliminary report is required within 30 days when analysis identifies actual or potential aviation safety risk.',
+                'The preliminary 30-day reporting control does not retain its substantive risk trigger.'
+            ),
+            'eccairs.follow-up.intermediate-separated' => array(
+                'ECCAIRS_FOLLOW_UP', 'MATERIAL', $text56, array('5.6'), array('5.6.3', '5.6.7'),
+                array('/additional\s+intermediate\s+information/iu', '/preliminary\s+(?:results?|reporting)|30-day\s+(?:preliminary|reporting)/iu'),
+                'Other intermediate updates remain distinct from the preliminary 30-day report.',
+                'Intermediate updates are not clearly separated from the preliminary 30-day rule.'
+            ),
+            'eccairs.follow-up.final-three-month' => array(
+                'ECCAIRS_FOLLOW_UP', 'MATERIAL', $text56, array('5.6'), array('5.6.3', '5.6.7'),
+                array('/final\s+(?:results?|reporting|information)/iu', '/(?:not later than|within)\s+three\s+months/iu'),
+                'Required final results are reported as soon as available and in principle within three months.',
+                'The final three-month reporting control is incomplete.'
+            ),
+            'eccairs.limitation.manual-control' => array(
+                'KNOWN_LIMITATION', 'HARD', $allText, array('3.3', '4.2', '5.6', '5.7'), array('3.3.2', '4.2', '5.6.7', '5.6.8', '5.6.9', '5.7.3'),
+                array('/(?:until|while).{0,100}(?:automatic|automated).{0,100}(?:operational|available)|(?:automatic|automated).{0,100}(?:not operational|unavailable)/isu', '/Safety Manager/iu', '/directly\s+in(?:to)?\s+ECCAIRS/iu', '/(?:evidence|follow-up control log)/iu', '/(?:closure.{0,160}ECCAIRS|ECCAIRS.{0,160}closure)/isu'),
+                'The manual states that automated intermediate/final follow-up is unavailable, assigns direct authority follow-up to the Safety Manager, retains evidence and prevents premature closure.',
+                'The accepted intermediate/final ECCAIRS limitation is not explicit and complete.'
+            ),
+            'closure.authority-follow-up-gate' => array(
+                'CLOSURE', 'MATERIAL', $closure, array('5.6'), array('5.6.9'),
+                array('/closure\s+shall\s+not\s+be\s+approved|before\s+approving.{0,120}closure|does\s+not\s+permit\s+closure/isu', '/intermediate.{0,80}final.{0,100}ECCAIRS|ECCAIRS\s+follow-up/isu', '/(?:submission|acceptance)\s+evidence/iu'),
+                'Required authority follow-up and evidence are explicit prerequisites to closure.',
+                'Investigation completion can bypass required ECCAIRS follow-up.'
+            ),
+            'closure.no-further-update-determination' => array(
+                'CLOSURE', 'MATERIAL', $closure, array('5.6'), array('5.6.9'),
+                array('/documented\s+(?:Safety Manager\s+)?(?:justification|determination).{0,100}no further ECCAIRS update/isu'),
+                'A no-further-update disposition is documented before closure.',
+                'The no-further-ECCAIRS-update determination is not documented.'
+            ),
+            'monitoring.occurrence-level' => array(
+                'MONITORING', 'MATERIAL', (string)($nodes['5.6.8'] ?? ''), array('5.6'), array('5.6.8'),
+                array('/(?:monitor|review)\s+open\s+(?:reportable\s+)?occurrences/iu', '/(?:deadline|reporting stage)/iu', '/actions?/iu', '/(?:evidence|investigation)/iu'),
+                'Occurrence-level deadlines, investigations, actions and evidence remain monitored in Section 5.6.',
+                'Occurrence-level monitoring is incomplete in 5.6.8.'
+            ),
+            'monitoring.aggregate-assurance' => array(
+                'MONITORING', 'MATERIAL', (string)($nodes['5.7.3'] ?? ''), array('5.7'), array('5.7.3'),
+                array('/(?:aggregate|systemic|quarterly reconciliation)/iu', '/(?:trends?|discrepanc)/iu', '/(?:individual occurrences|occurrence records)/iu'),
+                'Section 5.7 provides aggregate/systemic assurance without replacing occurrence-level control.',
+                'Aggregate assurance is incomplete in Section 5.7.'
+            ),
+            'roles.safety-manager.residual-risk-authority' => array(
+                'RESPONSIBILITY', 'MATERIAL', (string)($nodes['3.3.2'] ?? ''), array('3.3'), array('3.3.2'),
+                array('/Safety Manager/iu', '/residual[-\s]risk/iu', '/acceptance\s+where\s+required|authorized\s+level/iu'),
+                'Safety Manager duties align residual-risk review with required acceptance authority.',
+                'Safety Manager authority is inconsistent with the residual-risk gate.'
+            ),
+            'records.occurrence-evidence-complete' => array(
+                'RECORDS', 'MATERIAL', (string)($nodes['4.2'] ?? ''), array('4.2'), array('4.2'),
+                array('/(?:authority|ECCAIRS)\s+(?:submission|status|update)/iu', '/(?:acknowledgement|acceptance|follow-up)\s+evidence/iu', '/investigation\s+(?:records?|evidence)|findings/iu', '/implementation\s+(?:status|evidence)/iu', '/closure\s+(?:rationale|approval|authorization)/iu'),
+                'Control of Records retains authority, investigation, action and closure evidence.',
+                'Section 4.2 does not control all required occurrence evidence.'
+            ),
+            'training.corrective-action-competence' => array(
+                'TRAINING', 'MATERIAL', (string)($nodes['8.1'] ?? ''), array('8.1'), array('8.1'),
+                array('/corrective\s+(?:or|and)\s+mitigating\s+action/iu', '/Action Owners?/iu', '/implementation|completion\s+evidence/iu', '/effectiveness/iu'),
+                'Training covers action ownership, implementation evidence and effectiveness control.',
+                'Section 8.1 does not include corrective-action competence.'
+            ),
+            'reporting.missing-information-deadline' => array(
+                'ECCAIRS_INITIAL', 'MATERIAL', $text56, array('5.6'), array('5.6.3', '5.6.4'),
+                array('/(?:absence|unknown|unavailable|not-yet-confirmed).{0,120}information/isu', '/(?:shall not|without)\s+(?:by itself\s+)?delay/iu', '/(?:applicable\s+)?(?:reporting\s+)?deadline/iu'),
+                'Unavailable information is identified and does not itself delay the applicable deadline.',
+                'Missing-information deadline wording is not adequately qualified.'
+            ),
+            'eccairs.follow-up.article-13-conditioned' => array(
+                'ECCAIRS_FOLLOW_UP', 'MATERIAL', $text56, array('5.6'), array('5.6.3', '5.6.7'),
+                array('/(?:Article\s+13|other\s+reportable\s+occurrences)/iu', '/(?:where|required by).{0,120}(?:competent authority|authority reporting condition)|competent authority.{0,120}(?:where|required)/isu'),
+                'Other Article 13 follow-up remains conditioned by the competent authority.',
+                'Other Article 13 follow-up is not authority-conditioned.'
+            ),
+        );
+        foreach ($semantic as $id => [$category, $severity, $text, $sections, $affectedNodes, $patterns, $invariant, $failure]) {
+            $passed = $this->matchesEvery($text, $patterns);
+            $checks[] = $this->reviewCheck(
+                $id,
+                $category,
+                $severity,
+                $passed,
+                $sections,
+                $affectedNodes,
+                $invariant,
+                $passed ? 'The candidate wording contains every required control concept.' : 'One or more required control concepts are absent or unclear.',
+                $failure,
+                $affectedNodes !== array() ? $affectedNodes : $sections,
+                array('accepted_impact_baseline', 'canonical_source', 'known_system_limitations')
+            );
+        }
+
+        $negativeChecks = array(
+            'content.validation-labels.absent' => array('/\b(?:accountable_role|required_evidence|closure_gate)\b/iu', 'Validation-matrix labels do not appear in controlled wording.', 'Validation-matrix implementation labels leaked into controlled manual wording.'),
+            'content.omission-placeholders.absent' => array('/\[PRESERVE|existing approved content remains unchanged|all existing approved .* remains unchanged/iu', 'No omission placeholder substitutes for complete wording.', 'The final proposed wording still contains an omission placeholder.'),
+            'content.change-plan-terminology.absent' => array('/\b(?:REVIEW_SEPARATELY|PRESERVE_WITH_JUSTIFICATION|accepted scope|legacy disposition|Change Plan|human-approved impact|structure node)\b/iu', 'Internal Change Plan terminology does not appear in controlled wording.', 'Change Plan governance terminology leaked into proposed canonical content.'),
+            'training.no-duplicated-lifecycle-catalogue' => array('/reportability and authority-deadline control.{0,400}closure authorization/isu', 'Section 3.3.3 does not duplicate the complete Section 8.1 lifecycle catalogue.', 'Section 3.3.3 unnecessarily duplicates the full role-based training catalogue in Section 8.1.'),
+        );
+        foreach ($negativeChecks as $id => [$pattern, $invariant, $failure]) {
+            $target = $id === 'training.no-duplicated-lifecycle-catalogue'
+                ? (string)($nodes['3.3.3'] ?? '')
+                : $allText;
+            $passed = preg_match($pattern, $target) !== 1;
+            $checks[] = $this->reviewCheck(
+                $id,
+                'READABILITY',
+                'MATERIAL',
+                $passed,
+                array_keys($drafts),
+                $id === 'training.no-duplicated-lifecycle-catalogue' ? array('3.3.3') : array_keys($nodes),
+                $invariant,
+                $passed ? 'No prohibited wording pattern was detected.' : 'A prohibited wording pattern was detected.',
+                $failure,
+                $id === 'training.no-duplicated-lifecycle-catalogue' ? array('3.3.3') : array_keys($nodes),
+                array('controlled_manual_boundary')
+            );
+        }
+        $legacyStatus = (array)($proposal['validation_evidence']['legacy_status'] ?? array());
+        $legacyAccounted = (int)($legacyStatus['remaining_within_accepted_scope'] ?? -1) === 0
+            && (int)($legacyStatus['outside_scope']['count'] ?? 0) >= 1;
+        $checks[] = $this->reviewCheck(
+            'integrity.legacy-scope.accounted',
+            'INTEGRITY',
+            'HARD',
+            $legacyAccounted,
+            array_keys($drafts),
+            array(),
+            'Legacy references are separated between accepted amendment scope and governed outside scope.',
+            $legacyAccounted ? 'No accepted-scope legacy reference remains and outside-scope items are retained.' : 'Legacy-reference scope accounting is incomplete.',
+            'Legacy-reference status is not separated between accepted and outside scope.',
+            array(),
+            array('legacy_reference_status')
+        );
+        $checks[] = $this->reviewCheck(
+            'eccairs.follow-up.no-universal-30-day-deadline',
+            'ECCAIRS_FOLLOW_UP',
+            'MATERIAL',
+            preg_match('/(?:all|each)\s+intermediate.{0,100}(?:within|not later than)\s+30\s+days|intermediate.{0,80}universally.{0,80}30\s+days/isu', $text56) !== 1,
+            array('5.6'),
+            array('5.6.3', '5.6.7'),
+            'The 30-day preliminary deadline is not applied universally to every intermediate update.',
+            'No universal 30-day intermediate deadline was detected.',
+            'The 30-day preliminary requirement was incorrectly applied to all intermediate updates.',
+            array('5.6.3', '5.6.7'),
+            array('canonical_source')
+        );
+
+        return array_values($checks);
+    }
+
+    /** @param list<array<string,mixed>> $checks @return array<string,mixed> */
+    private function structuredReadabilityProjection(array $checks, int $nodeCount): array
+    {
+        $byId = array_column($checks, null, 'check_id');
+        $result = static fn(string $id): bool => (string)($byId[$id]['status'] ?? '') === 'PASS';
+        return array(
+            'section_5_6_node_count' => $nodeCount,
+            'maximum_node_count' => 10,
+            'preservation_checks' => array(
+                'Regulation (EU) No 376/2014' => $result('preservation.regulation-376-2014'),
+                'Implementing Regulation (EU) 2015/1018' => $result('preservation.regulation-2015-1018'),
+                'BCAA Circular MAS-01' => $result('preservation.bcaa-mas-01'),
+                'initial 72-hour deadline' => $result('preservation.initial-72-hour-deadline'),
+                'intermediate 30-day deadline' => $result('preservation.preliminary-30-day-deadline'),
+                'final three-month timing' => $result('preservation.final-three-month-timing'),
+                'mandatory and voluntary distinction' => $result('preservation.mandatory-voluntary-distinction'),
+                'reporter protection and just culture' => $result('preservation.reporter-protection-just-culture'),
+                'investigation causal and contributing factors' => $result('preservation.causal-contributing-factors'),
+            ),
+            'eccairs_stage_information_wording' => $result('eccairs.initial.stage-information'),
+            'intermediate_final_follow_up_checks' => array(
+                'initial submission is not process completion' => $result('eccairs.follow-up.initial-not-completion'),
+                'findings and conclusions' => $result('eccairs.follow-up.findings-conclusions'),
+                'causal and contributing factors' => $result('eccairs.follow-up.causal-contributing'),
+                'actions and implementation/effectiveness' => $result('eccairs.follow-up.actions-evidence-effectiveness'),
+                'direct ECCAIRS follow-up' => $result('eccairs.follow-up.approved-authority-process'),
+            ),
+            'validation_matrix_kept_out_of_manual' => $result('content.validation-labels.absent'),
+            'final_quality_checks' => array(
+                'preliminary 30-day rule preserved' => $result('eccairs.follow-up.preliminary-30-day-risk-trigger'),
+                'intermediate updates separated from 30-day rule' => $result('eccairs.follow-up.intermediate-separated'),
+                'final three-month rule preserved exactly' => $result('eccairs.follow-up.final-three-month'),
+                'investigation completion cannot bypass ECCAIRS follow-up' => $result('closure.authority-follow-up-gate'),
+                'no-further-update determination is documented' => $result('closure.no-further-update-determination'),
+                'occurrence-level monitoring remains in 5.6.8' => $result('monitoring.occurrence-level'),
+                'aggregate assurance remains in 5.7' => $result('monitoring.aggregate-assurance'),
+                'Safety Manager authority agrees with residual-risk gate' => $result('roles.safety-manager.residual-risk-authority'),
+                '4.2 controls Section 5.6 evidence' => $result('records.occurrence-evidence-complete'),
+                '8.1 includes corrective-action competence' => $result('training.corrective-action-competence'),
+                'missing-information deadline wording is qualified' => $result('reporting.missing-information-deadline'),
+                'other Article 13 follow-up remains authority-conditioned' => $result('eccairs.follow-up.article-13-conditioned'),
+                'no universal 30-day intermediate deadline' => $result('eccairs.follow-up.no-universal-30-day-deadline'),
+                'complete wording contains no omission placeholders' => $result('content.omission-placeholders.absent'),
+                'no Change Plan governance terminology in canonical content' => $result('content.change-plan-terminology.absent'),
+                '3.3.3 avoids duplicating the full 8.1 lifecycle catalogue' => $result('training.no-duplicated-lifecycle-catalogue'),
+            ),
+        );
+    }
+
+    /**
+     * @param list<string> $sections
+     * @param list<string> $nodes
+     * @param list<string> $repairScope
+     * @param list<string> $evidence
+     * @return array<string,mixed>
+     */
+    private function reviewCheck(
+        string $checkId,
+        string $category,
+        string $severity,
+        bool $passed,
+        array $sections,
+        array $nodes,
+        string $invariant,
+        string $observed,
+        string $failureExplanation,
+        array $repairScope,
+        array $evidence
+    ): array {
+        return array(
+            'check_id' => $checkId,
+            'check_version' => self::CHECK_VERSION,
+            'category' => $category,
+            'severity' => $severity,
+            'status' => $passed ? 'PASS' : 'FAIL',
+            'affected_sections' => array_values(array_unique(array_map('strval', $sections))),
+            'affected_nodes' => array_values(array_unique(array_map('strval', $nodes))),
+            'required_invariant' => $invariant,
+            'observed_state' => $observed,
+            'evidence_references' => array_values(array_unique(array_map('strval', $evidence))),
+            'human_explanation' => $passed ? $invariant : $failureExplanation,
+            'allowed_repair_scope' => array_values(array_unique(array_map('strval', $repairScope))),
+            'known_limitations' => str_contains($checkId, 'eccairs')
+                ? array('Automated intermediate/final ECCAIRS amendment functionality is not operational.')
+                : array(),
+        );
+    }
+
+    /** @param list<string> $patterns */
+    private function matchesEvery(string $text, array $patterns): bool
+    {
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $text) !== 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function checkSlug(string $value): string
+    {
+        $slug = strtolower(trim($value));
+        $slug = preg_replace('/[^a-z0-9]+/', '-', $slug) ?? '';
+        return trim($slug, '-');
     }
 
     /**
@@ -460,25 +1031,42 @@ final class BooksManualsChangeReviewerService
     public function verifyTargetedPatch(
         array $acceptedProposal,
         array $candidateProposal,
-        array $scopeSections
+        array $scopeSections,
+        array $scopeNodes = array(),
+        array $targetCheckIds = array()
     ): array {
         $scope = array_fill_keys(array_map('strval', $scopeSections), true);
+        $allowedNodes = array_fill_keys(array_map('strval', $scopeNodes), true);
         $before = (array)($acceptedProposal['section_drafts'] ?? array());
         $after = (array)($candidateProposal['section_drafts'] ?? array());
         $unchanged = array();
+        $unchangedNodes = array();
         $scopeViolations = array();
         foreach ($before as $section => $draft) {
-            if (isset($scope[(string)$section])) {
-                continue;
-            }
             $beforeJson = $this->json($draft);
             $afterJson = $this->json($after[$section] ?? null);
             $matches = hash_equals(hash('sha256', $beforeJson), hash('sha256', $afterJson));
-            $unchanged[(string)$section] = $matches;
-            if (!$matches) {
+            if (!isset($scope[(string)$section])) {
+                $unchanged[(string)$section] = $matches;
+            }
+            if (!isset($scope[(string)$section]) && !$matches) {
                 $scopeViolations[] = (string)$section;
             }
+            foreach ((array)($draft['nodes'] ?? array()) as $number => $content) {
+                if (isset($allowedNodes[(string)$number])) {
+                    continue;
+                }
+                $nodeMatches = hash_equals(
+                    hash('sha256', $this->json($content)),
+                    hash('sha256', $this->json($after[$section]['nodes'][$number] ?? null))
+                );
+                $unchangedNodes[(string)$number] = $nodeMatches;
+                if (!$nodeMatches) {
+                    $scopeViolations[] = (string)$number;
+                }
+            }
         }
+        $scopeViolations = array_values(array_unique($scopeViolations));
         $structureBefore = array_map(
             static fn(array $draft): array => array_keys((array)($draft['nodes'] ?? array())),
             $before
@@ -496,12 +1084,78 @@ final class BooksManualsChangeReviewerService
         if (!$structurePreserved) {
             $issues[] = 'Targeted correction changed the accepted structure.';
         }
+        $reviewChecks = array_values((array)($verification['review_checks'] ?? array()));
+        $checkMap = array_column($reviewChecks, null, 'check_id');
+        $targetedResults = array();
+        foreach (array_values(array_unique(array_map('strval', $targetCheckIds))) as $checkId) {
+            $targetedResults[$checkId] = $checkMap[$checkId] ?? array(
+                'check_id' => $checkId,
+                'check_version' => self::CHECK_VERSION,
+                'status' => 'FAIL',
+                'category' => 'INTEGRITY',
+                'severity' => 'HARD',
+                'required_invariant' => 'The targeted check remains independently verifiable.',
+                'observed_state' => 'The check identity was absent from reverification.',
+                'human_explanation' => "Targeted review check {$checkId} was not reverified.",
+                'affected_sections' => array_keys($scope),
+                'affected_nodes' => array_keys($allowedNodes),
+                'allowed_repair_scope' => array_keys($allowedNodes),
+                'evidence_references' => array('targeted_patch'),
+                'known_limitations' => array(),
+            );
+        }
+        $preservationCheck = array(
+            'check_id' => 'integrity.targeted-patch.frozen-nodes',
+            'check_version' => self::CHECK_VERSION,
+            'category' => 'INTEGRITY',
+            'severity' => 'HARD',
+            'status' => $scopeViolations === array() ? 'PASS' : 'FAIL',
+            'affected_sections' => array_keys($scope),
+            'affected_nodes' => array_keys($allowedNodes),
+            'required_invariant' => 'A targeted correction changes only explicitly authorized nodes.',
+            'observed_state' => $scopeViolations === array()
+                ? 'Every frozen node and unaffected section remained byte-identical.'
+                : 'Changed outside repair scope: ' . implode(', ', $scopeViolations),
+            'evidence_references' => array('parent_draft', 'candidate_draft'),
+            'human_explanation' => $scopeViolations === array()
+                ? 'Targeted patch preservation passed.'
+                : 'Targeted correction changed unrelated accepted wording.',
+            'allowed_repair_scope' => array_keys($allowedNodes),
+            'known_limitations' => array(),
+        );
+        $structureCheck = array(
+            'check_id' => 'integrity.targeted-patch.structure-preserved',
+            'check_version' => self::CHECK_VERSION,
+            'category' => 'INTEGRITY',
+            'severity' => 'HARD',
+            'status' => $structurePreserved ? 'PASS' : 'FAIL',
+            'affected_sections' => array_keys($scope),
+            'affected_nodes' => array_keys($allowedNodes),
+            'required_invariant' => 'A targeted correction preserves the accepted structure.',
+            'observed_state' => $structurePreserved
+                ? 'The node hierarchy is unchanged.'
+                : 'The candidate node hierarchy differs from the accepted structure.',
+            'evidence_references' => array('accepted_structure'),
+            'human_explanation' => $structurePreserved
+                ? 'Accepted structure remains unchanged.'
+                : 'Targeted correction changed the accepted structure.',
+            'allowed_repair_scope' => array(),
+            'known_limitations' => array(),
+        );
+        $reviewChecks[] = $preservationCheck;
+        $reviewChecks[] = $structureCheck;
         return array(
             'schema' => 'ipca.manual-change-targeted-reverification.v1',
             'status' => $issues === array() ? 'VERIFIED' : self::REQUIRES_REVIEW,
             'scope_sections' => array_keys($scope),
+            'scope_nodes' => array_keys($allowedNodes),
+            'targeted_check_ids' => array_keys($targetedResults),
+            'targeted_check_results' => $targetedResults,
+            'review_checks' => $reviewChecks,
             'unaffected_sections_byte_unchanged' => !in_array(false, $unchanged, true),
             'unaffected_section_results' => $unchanged,
+            'frozen_nodes_byte_unchanged' => !in_array(false, $unchangedNodes, true),
+            'frozen_node_results' => $unchangedNodes,
             'accepted_structure_preserved' => $structurePreserved,
             'known_limitations_checked' =>
                 (array)($verification['unsupported_capability_claims'] ?? array()) === array(),

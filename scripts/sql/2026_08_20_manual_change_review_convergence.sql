@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_patches (
   proposed_payload_json JSON NOT NULL,
   unchanged_fingerprints_json JSON NOT NULL,
   patch_fingerprint CHAR(64) NOT NULL,
-  status VARCHAR(24) NOT NULL DEFAULT 'proposed' COMMENT 'proposed | adjustment_requested | accepted | verified | rejected',
+  status VARCHAR(40) NOT NULL DEFAULT 'PROPOSED' COMMENT 'PROPOSED | HUMAN_ACCEPTED_PENDING_VERIFICATION | VERIFIED | VERIFICATION_FAILED | ADJUSTMENT_REQUESTED | SUPERSEDED',
   verification_json JSON NULL,
   proposed_by INT NOT NULL,
   accepted_by INT NULL,
@@ -184,4 +184,41 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_cycles (
     FOREIGN KEY (review_id) REFERENCES ipca_manual_ai_architect_reviews(id) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT fk_imaa_review_cycle_baseline
     FOREIGN KEY (baseline_id) REFERENCES ipca_manual_ai_architect_review_baselines(id) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE ipca_manual_ai_architect_review_patches
+  MODIFY COLUMN status VARCHAR(40) NOT NULL DEFAULT 'PROPOSED'
+  COMMENT 'PROPOSED | HUMAN_ACCEPTED_PENDING_VERIFICATION | VERIFIED | VERIFICATION_FAILED | ADJUSTMENT_REQUESTED | SUPERSEDED';
+
+CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_check_metadata (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  check_uuid CHAR(36) NOT NULL,
+  plan_id BIGINT UNSIGNED NOT NULL,
+  review_id BIGINT UNSIGNED NOT NULL,
+  finding_id BIGINT UNSIGNED NOT NULL,
+  check_id VARCHAR(191) NOT NULL,
+  check_version VARCHAR(32) NOT NULL,
+  category VARCHAR(64) NOT NULL,
+  severity VARCHAR(32) NOT NULL,
+  review_status VARCHAR(24) NOT NULL COMMENT 'PASS | FAIL | INFORMATIONAL',
+  resolution_status VARCHAR(24) NOT NULL COMMENT 'UNRESOLVED | VERIFIED | BLOCKED',
+  affected_nodes_json JSON NOT NULL,
+  required_invariant TEXT NOT NULL,
+  observed_state TEXT NOT NULL,
+  evidence_references_json JSON NOT NULL,
+  allowed_repair_scope_json JSON NOT NULL,
+  known_limitations_json JSON NOT NULL,
+  first_seen_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  last_verified_at DATETIME(3) NULL,
+  verified_at DATETIME(3) NULL,
+  UNIQUE KEY uk_imaa_review_check_uuid (check_uuid),
+  UNIQUE KEY uk_imaa_review_check_identity (plan_id, review_id, check_id),
+  UNIQUE KEY uk_imaa_review_check_finding (finding_id),
+  KEY idx_imaa_review_check_state (plan_id, review_id, resolution_status, category),
+  CONSTRAINT fk_imaa_review_check_plan
+    FOREIGN KEY (plan_id) REFERENCES ipca_manual_ai_architect_plans(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_imaa_review_check_review
+    FOREIGN KEY (review_id) REFERENCES ipca_manual_ai_architect_reviews(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_imaa_review_check_finding
+    FOREIGN KEY (finding_id) REFERENCES ipca_manual_ai_architect_review_findings(id) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -61,14 +61,17 @@ $questionConsequences = array_column((array)($hostingQuestion['choices'] ?? arra
 
 $checks = array(
     'migration is additive and defines all review artifacts' =>
-        substr_count($migration, 'CREATE TABLE IF NOT EXISTS ') === 6
-        && !preg_match('/\b(?:DROP|TRUNCATE)\s+TABLE\b|\bDELETE\s+FROM\b|\bALTER\s+TABLE\b/i', $migration)
+        substr_count($migration, 'CREATE TABLE IF NOT EXISTS ') === 7
+        && !preg_match('/\b(?:DROP|TRUNCATE)\s+TABLE\b|\bDELETE\s+FROM\b/i', $migration)
+        && substr_count($migration, 'ALTER TABLE ') === 1
+        && str_contains($migration, 'MODIFY COLUMN status VARCHAR(40)')
         && str_contains($migration, 'ipca_manual_ai_architect_review_baselines')
         && str_contains($migration, 'ipca_manual_ai_architect_review_findings')
         && str_contains($migration, 'ipca_manual_ai_architect_review_questions')
         && str_contains($migration, 'ipca_manual_ai_architect_review_answers')
         && str_contains($migration, 'ipca_manual_ai_architect_review_patches')
-        && str_contains($migration, 'ipca_manual_ai_architect_review_cycles'),
+        && str_contains($migration, 'ipca_manual_ai_architect_review_cycles')
+        && str_contains($migration, 'ipca_manual_ai_architect_review_check_metadata'),
     'five finding classes and potential scope defect are explicit' =>
         $classificationsCorrect
         && str_contains($migration, 'HARD_INTEGRITY_BLOCKER')
@@ -108,7 +111,17 @@ $checks = array(
     'Reviewer performs targeted reverification and scope checks' =>
         str_contains($reviewer, 'verifyTargetedPatch')
         && str_contains($reviewer, 'Targeted correction changed unrelated accepted wording')
+        && str_contains($reviewer, "'review_checks' => \$reviewChecks")
+        && str_contains($reviewer, 'frozen_nodes_byte_unchanged')
         && str_contains($reviewer, "'architect_rerun_performed' => false"),
+    'stable checks and patch verification states are persisted separately' =>
+        str_contains($migration, 'check_id VARCHAR(191) NOT NULL')
+        && str_contains($migration, 'resolution_status VARCHAR(24) NOT NULL')
+        && str_contains($migration, 'HUMAN_ACCEPTED_PENDING_VERIFICATION')
+        && str_contains($migration, 'VERIFICATION_FAILED')
+        && str_contains($resolutionService, 'reconcileVerificationChecks')
+        && str_contains($resolutionService, 'checks_fixed')
+        && str_contains($resolutionService, 'new_checks'),
     'READY_TO_APPLY is strict and only moves forward' =>
         str_contains($api, "'outcome' => 'READY_TO_APPLY'")
         && str_contains($api, "'unresolved_material_findings' => 0")

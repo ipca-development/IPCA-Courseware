@@ -11,10 +11,12 @@ RuntimeSecrets::ensureCliEnvLoaded();
 require_once __DIR__ . '/../src/db.php';
 require_once __DIR__ . '/../src/publishing/BooksManualsChangePlanService.php';
 require_once __DIR__ . '/../src/publishing/BooksManualsChangeReviewResolutionService.php';
+require_once __DIR__ . '/../src/publishing/BooksManualsChangeReviewerService.php';
 
-$options = getopt('', array('plan-id:', 'actor-id:', 'recover'));
+$options = getopt('', array('plan-id:', 'actor-id:', 'patch-id:', 'recover'));
 $planId = (int)($options['plan-id'] ?? 0);
 $actorId = (int)($options['actor-id'] ?? 0);
+$patchId = (int)($options['patch-id'] ?? 0);
 $recover = array_key_exists('recover', $options);
 $pdo = cw_db();
 $plans = new BooksManualsChangePlanService($pdo);
@@ -111,12 +113,25 @@ if ($review === array()) {
 $state = array();
 if ($recover && $regressions === array()) {
     $resolution = new BooksManualsChangeReviewResolutionService($pdo, $plans);
-    $state = $resolution->initializeReview(
-        $planId,
-        (int)$review['id'],
-        $prepared,
-        $actorId
-    );
+    if ($patchId <= 0) {
+        $patches = array_values((array)($plan['review_patches'] ?? array()));
+        $patch = $patches === array() ? array() : $patches[array_key_last($patches)];
+        $patchId = (int)($patch['id'] ?? 0);
+    }
+    $state = $patchId > 0
+        ? $resolution->recoverHistoricalPatch(
+            $planId,
+            (int)$review['id'],
+            $patchId,
+            $actorId,
+            new BooksManualsChangeReviewerService($pdo, $plans)
+        )
+        : $resolution->initializeReview(
+            $planId,
+            (int)$review['id'],
+            $prepared,
+            $actorId
+        );
 }
 
 $freshPlan = $plans->loadPlan($planId);
@@ -135,6 +150,7 @@ echo json_encode(array(
     'schema' => 'ipca.manual-change-review-recovery-report.v1',
     'plan_id' => $planId,
     'mode' => $recover ? 'RECOVER_REVIEW_METADATA' : 'REPORT_ONLY',
+    'patch_id' => $patchId,
     'manual_content_mutated' => false,
     'architect_rerun_performed' => false,
     'accepted_baseline_before' => $before,

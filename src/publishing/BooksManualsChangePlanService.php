@@ -38,6 +38,7 @@ final class BooksManualsChangePlanService
         'review_answers' => 'ipca_manual_ai_architect_review_answers',
         'review_patches' => 'ipca_manual_ai_architect_review_patches',
         'review_cycles' => 'ipca_manual_ai_architect_review_cycles',
+        'review_check_metadata' => 'ipca_manual_ai_architect_review_check_metadata',
     );
 
     /** @var array<string,list<string>> */

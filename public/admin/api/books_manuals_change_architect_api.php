@@ -954,6 +954,13 @@ try {
                 'intval',
                 (array)($input['finding_ids'] ?? array())
             ))));
+            if ($requestedFindingIds === array()) {
+                $repairGroups = array_values((array)($state['repair_groups'] ?? array()));
+                $requestedFindingIds = array_values(array_map(
+                    'intval',
+                    (array)($repairGroups[0]['finding_ids'] ?? array())
+                ));
+            }
             $findings = array_values(array_filter(
                 (array)$state['findings'],
                 static function (array $finding) use ($requestedFindingIds): bool {
@@ -966,10 +973,9 @@ try {
                         array(
                             BooksManualsChangeReviewResolutionService::MECHANICAL_FIX,
                             BooksManualsChangeReviewResolutionService::TARGETED_AUTHOR_CORRECTION,
-                            BooksManualsChangeReviewResolutionService::HARD_INTEGRITY_BLOCKER,
                         ),
                         true
-                    ) && in_array((string)$finding['status'], array('patch_pending', 'blocked'), true);
+                    ) && strtoupper((string)($finding['resolution_status'] ?? '')) === 'UNRESOLVED';
                 }
             ));
             if ($findings === array()) {

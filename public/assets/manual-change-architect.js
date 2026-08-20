@@ -354,7 +354,13 @@
       if (generatePatch) {
         busy(generatePatch, true, 'Generating Targeted Correction…');
         try {
-          await request('generate_targeted_correction');
+          var findingIds = String(generatePatch.dataset.findingIds || '')
+            .split(',')
+            .map(function (value) { return Number(value || 0); })
+            .filter(function (value) { return value > 0; });
+          await request('generate_targeted_correction', {
+            finding_ids: findingIds
+          });
           window.location.reload();
         } catch (error) {
           toast(error.message, true);

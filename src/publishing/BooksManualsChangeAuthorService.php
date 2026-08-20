@@ -252,23 +252,68 @@ final class BooksManualsChangeAuthorService
         }
         $allDrafts = (array)($acceptedProposal['section_drafts'] ?? array());
         $scope = array();
+        $allowedNodes = array();
+        $failedCheckIds = array();
+        $repairChecks = array();
         foreach ($findings as $finding) {
+            $checkId = trim((string)($finding['check_id'] ?? ''));
+            if ($checkId !== '') {
+                $failedCheckIds[] = $checkId;
+            }
             foreach ((array)($finding['affected_sections_json'] ?? array()) as $section) {
                 $section = trim((string)$section);
                 if ($section !== '' && isset($allDrafts[$section])) {
                     $scope[$section] = true;
                 }
             }
+            $repairScope = array_values(array_filter(array_map(
+                static fn(mixed $value): string => trim((string)$value),
+                (array)($finding['allowed_repair_scope_json']
+                    ?? $finding['affected_nodes_json']
+                    ?? array())
+            )));
+            foreach ($repairScope as $number) {
+                foreach ($allDrafts as $section => $draft) {
+                    if (array_key_exists($number, (array)($draft['nodes'] ?? array()))) {
+                        $scope[(string)$section] = true;
+                        $allowedNodes[$number] = true;
+                    }
+                }
+            }
+            $repairChecks[] = array(
+                'check_id' => $checkId,
+                'required_invariant' => (string)($finding['required_invariant'] ?? $finding['why_matters'] ?? ''),
+                'observed_defect' => (string)($finding['observed_state'] ?? $finding['human_explanation'] ?? ''),
+                'human_explanation' => (string)($finding['human_explanation'] ?? ''),
+                'affected_sections' => array_values((array)($finding['affected_sections_json'] ?? array())),
+                'affected_nodes' => array_values((array)($finding['affected_nodes_json'] ?? array())),
+                'allowed_repair_scope' => $repairScope,
+                'canonical_evidence' => array_values((array)($finding['evidence_references_json'] ?? array())),
+                'known_limitations' => array_values((array)($finding['known_limitations_json'] ?? array())),
+            );
         }
         $scopeSections = array_keys($scope);
         if ($scopeSections === array()) {
             throw new RuntimeException('The review finding has no accepted amendment section for targeted correction.');
         }
+        if ($allowedNodes === array()) {
+            foreach ($scopeSections as $section) {
+                foreach (array_keys((array)($allDrafts[$section]['nodes'] ?? array())) as $number) {
+                    $allowedNodes[(string)$number] = true;
+                }
+            }
+        }
         $scopedDrafts = array_intersect_key($allDrafts, $scope);
         $unchangedFingerprints = array();
+        $frozenNodeFingerprints = array();
         foreach ($allDrafts as $section => $draft) {
             if (!isset($scope[$section])) {
                 $unchangedFingerprints[(string)$section] = hash('sha256', $this->json($draft));
+            }
+            foreach ((array)($draft['nodes'] ?? array()) as $number => $content) {
+                if (!isset($allowedNodes[(string)$number])) {
+                    $frozenNodeFingerprints[(string)$number] = hash('sha256', $this->json($content));
+                }
             }
         }
         require_once dirname(__DIR__) . '/openai.php';
@@ -305,18 +350,24 @@ final class BooksManualsChangeAuthorService
         );
         $prompt = implode("\n", array(
             'You are the Amendment Author operating in TARGETED PATCH MODE.',
-            'Correct only the supplied resolved Independent Review findings.',
+            'Correct only the supplied unresolved Independent Review checks.',
             'Do not reinterpret scope, create structure, add sections, or rewrite unaffected wording.',
-            'Return every node in each affected section, copying unaffected node wording exactly.',
+            'Return only nodes whose identifiers are explicitly listed in allowed_repair_scope.',
             'Preserve durable controlled-manual language and do not invent organizational policy or software capability.',
             'Do not describe screens, APIs, databases, hosting, JSON, or implementation details unless an explicit governed fact requires that detail in the manual.',
             'Known non-operational capabilities must remain explicitly non-operational.',
+            '---BEGIN FAILED CHECK IDS---',
+            $this->json(array_values(array_unique($failedCheckIds))),
+            '---END FAILED CHECK IDS---',
+            '---BEGIN STRUCTURED REPAIR CONTEXT---',
+            $this->json($repairChecks),
+            '---END STRUCTURED REPAIR CONTEXT---',
+            '---BEGIN ALLOWED REPAIR NODES---',
+            $this->json(array_keys($allowedNodes)),
+            '---END ALLOWED REPAIR NODES---',
             '---BEGIN ACCEPTED AFFECTED WORDING---',
             $this->json($scopedDrafts),
             '---END ACCEPTED AFFECTED WORDING---',
-            '---BEGIN REVIEW FINDINGS---',
-            $this->json($findings),
-            '---END REVIEW FINDINGS---',
             '---BEGIN GOVERNED HUMAN FACTS---',
             $this->json($governedFacts),
             '---END GOVERNED HUMAN FACTS---',
@@ -363,12 +414,17 @@ final class BooksManualsChangeAuthorService
                     if ($number === '' || $content === '' || !isset($acceptedNodeNumbers[$number])) {
                         throw new RuntimeException('Targeted Author attempted to add an unaccepted structure node.');
                     }
+                    if (!isset($allowedNodes[$number])) {
+                        throw new RuntimeException('Targeted Author attempted to modify a frozen unrelated node.');
+                    }
                     $nodes[$number] = $content;
                 }
                 if ($nodes === array()) {
                     throw new RuntimeException('Targeted correction returned no controlled wording.');
                 }
-                $candidate['section_drafts'][$section]['nodes'] = $nodes;
+                foreach ($nodes as $number => $content) {
+                    $candidate['section_drafts'][$section]['nodes'][$number] = $content;
+                }
                 $changedSections[$section] = array(
                     'reason' => trim((string)($patch['reason'] ?? '')),
                     'before' => $allDrafts[$section],
@@ -387,6 +443,18 @@ final class BooksManualsChangeAuthorService
                     throw new RuntimeException('Targeted correction modified unrelated accepted wording.');
                 }
             }
+            foreach ($frozenNodeFingerprints as $number => $fingerprint) {
+                $candidateContent = null;
+                foreach ((array)$candidate['section_drafts'] as $draft) {
+                    if (array_key_exists($number, (array)($draft['nodes'] ?? array()))) {
+                        $candidateContent = $draft['nodes'][$number];
+                        break;
+                    }
+                }
+                if (!hash_equals($fingerprint, hash('sha256', $this->json($candidateContent)))) {
+                    throw new RuntimeException('Targeted correction modified a frozen unrelated node.');
+                }
+            }
             $candidate['validation_evidence']['legacy_status'] = $this->legacyReferenceStatus(
                 $this->buildAuthorizedBrief($planId),
                 (array)$candidate['section_drafts']
@@ -402,7 +470,11 @@ final class BooksManualsChangeAuthorService
                 'scope_sections' => $scopeSections,
                 'changed_sections' => $changedSections,
                 'candidate_proposal' => $candidate,
+                'failed_check_ids' => array_values(array_unique($failedCheckIds)),
+                'repair_checks' => $repairChecks,
+                'allowed_repair_nodes' => array_keys($allowedNodes),
                 'unchanged_section_fingerprints' => $unchangedFingerprints,
+                'frozen_node_fingerprints' => $frozenNodeFingerprints,
                 'accepted_structure_nodes_unchanged' => true,
                 'lifecycle_unchanged' => true,
                 'production_applied' => false,

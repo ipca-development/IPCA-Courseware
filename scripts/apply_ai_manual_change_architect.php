@@ -53,6 +53,7 @@ $requiredTables = array(
     'ipca_manual_ai_architect_review_answers',
     'ipca_manual_ai_architect_review_patches',
     'ipca_manual_ai_architect_review_cycles',
+    'ipca_manual_ai_architect_review_check_metadata',
 );
 
 $tableCheck = $pdo->prepare(
