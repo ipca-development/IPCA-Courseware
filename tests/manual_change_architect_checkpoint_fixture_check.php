@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/publishing/BooksManualsChangeArchitectService.php';
+require_once __DIR__ . '/../src/publishing/BooksManualsChangePlanService.php';
 
 /** @param mixed $condition */
 function architect_fixture_assert($condition, string $message): void
@@ -42,6 +43,14 @@ $outOfScope = architect_fixture_numbers($report['out_of_scope']);
 foreach ($expected['out_of_scope_numbers'] as $number) {
     architect_fixture_assert(in_array($number, $outOfScope, true), "Expected out-of-scope section {$number} is missing.");
 }
+$complianceCandidateIds = array_map(
+    static fn(array $candidate): int => (int)($candidate['section_id'] ?? 0),
+    (array)($report['candidate_discovery'] ?? array())
+);
+architect_fixture_assert(
+    in_array(115, $complianceCandidateIds, true),
+    'Compliance Monitoring Sections 10/10.2 must remain discoverable candidates.'
+);
 
 $reviewSeparately = architect_fixture_numbers($report['review_separately']);
 architect_fixture_assert(
@@ -57,6 +66,17 @@ foreach ($expected['forbidden_amendment_numbers'] as $number) {
         "False-positive amendment generated for {$number}."
     );
 }
+architect_fixture_assert(
+    in_array('8.1', $amendmentNumbers, true),
+    'Section 8.1 must remain the correct SMS occurrence-lifecycle training amendment.'
+);
+architect_fixture_assert(
+    count(array_filter(
+        $amendments,
+        static fn(array $impact): bool => (int)($impact['section_id'] ?? 0) === 115
+    )) === 0,
+    'Parent/child Compliance Monitoring candidates were not consolidated out of amendment scope.'
+);
 $primary = array_values(array_filter(
     $amendments,
     static fn(array $impact): bool =>
@@ -156,6 +176,126 @@ architect_fixture_assert(
             ),
             $presentation['areas']
         ))
+);
+
+$ambiguousAreas = $presentation['areas'];
+$adjacentArea = $ambiguousAreas[array_key_last($ambiguousAreas)];
+$adjacentArea['impact_id'] = 999;
+$adjacentArea['section_id'] = 115;
+$adjacentArea['section_number'] = '10.2';
+$adjacentArea['section_title'] = 'Compliance Monitoring Training';
+$adjacentArea['is_primary_change'] = false;
+$adjacentArea['why_affected'] = (string)$ambiguousAreas[0]['why_affected'];
+$adjacentArea['must_preserve'] = array('Existing Compliance Monitoring competence requirements');
+$ambiguousAreas[] = $adjacentArea;
+$ambiguousGate = $service->validateImpactPresentation($ambiguousAreas);
+$duplicateBlocker = array_values(array_filter(
+    $ambiguousGate['failures'],
+    static fn(array $failure): bool =>
+        (string)$failure['code'] === 'duplicate_why'
+        && (string)$failure['section'] === '10.2'
+))[0] ?? null;
+architect_fixture_assert(
+    is_array($duplicateBlocker)
+        && in_array('HUMAN_DISPOSITION', $duplicateBlocker['resolution_paths'], true),
+    'A genuine ambiguous adjacent-section blocker was not classified as human-resolvable.'
+);
+$dispositionPayload = array(
+    'blocker_id' => (string)$duplicateBlocker['blocker_id'],
+    'disposition' => 'PRESERVE_UNCHANGED',
+    'rationale' => 'This section governs Compliance Monitoring competence and has no demonstrated SMS occurrence-lifecycle delta.',
+    'section_id' => 115,
+    'section_number' => '10.2',
+    'section_title' => 'Compliance Monitoring Training',
+);
+$resolvedProjection = $service->applyGovernedReviewResolutions(
+    $ambiguousAreas,
+    $ambiguousGate['failures'],
+    array(array(
+        'event_type' => 'REVIEW_BLOCKER_DISPOSITION_RECORDED',
+        'event_payload_json' => $dispositionPayload,
+    ))
+);
+architect_fixture_assert(
+    $service->validateImpactPresentation($resolvedProjection['areas'])['reviewable'] === true,
+    'The governed human disposition did not feed back into a successful quality-gate rerun.'
+);
+architect_fixture_assert(
+    count($resolvedProjection['human_dispositions']) === 1
+        && count($resolvedProjection['preserved_areas']) === 1,
+    'The human disposition was not retained in the governed Architect projection.'
+);
+
+$integrityArea = $presentation['areas'][0];
+$integrityArea['treatment'] = 'RESTRUCTURE';
+$integrityArea['proposed_structure_items'] = array();
+$integrityGate = $service->validateImpactPresentation(array($integrityArea));
+$integrityBlocker = array_values(array_filter(
+    $integrityGate['failures'],
+    static fn(array $failure): bool => (string)$failure['code'] === 'incomplete_structure'
+))[0] ?? null;
+architect_fixture_assert(
+    is_array($integrityBlocker)
+        && $integrityBlocker['integrity_blocker'] === true
+        && $integrityBlocker['resolution_paths'] === array('ARCHITECT_RESOLUTION'),
+    'Incomplete governed structure was not classified as non-overridable integrity.'
+);
+$governancePdo = new PDO('sqlite::memory:');
+$governancePdo->exec(
+    'CREATE TABLE ipca_manual_ai_architect_plans '
+    . '(id INTEGER PRIMARY KEY, owner_id INTEGER, status TEXT, stage TEXT, updated_by INTEGER, updated_at TEXT)'
+);
+$governancePdo->exec(
+    "INSERT INTO ipca_manual_ai_architect_plans (id,owner_id,status,stage) VALUES (1,7,'ready_for_review','scope')"
+);
+$governancePlanService = new BooksManualsChangePlanService($governancePdo);
+$integrityRejected = false;
+try {
+    $governancePlanService->recordReviewBlockerResolution(
+        1,
+        $integrityBlocker,
+        $integrityArea,
+        'REVIEW_EXCEPTION',
+        '',
+        'A qualified reviewer requests an exception.',
+        'Residual review uncertainty.',
+        '',
+        7
+    );
+} catch (RuntimeException $e) {
+    $integrityRejected = str_contains($e->getMessage(), 'cannot be resolved');
+}
+architect_fixture_assert(
+    $integrityRejected,
+    'A non-overridable integrity blocker accepted a human review exception.'
+);
+$governancePdo->exec(
+    'CREATE TABLE ipca_manual_ai_architect_decision_events ('
+    . 'id INTEGER PRIMARY KEY AUTOINCREMENT,event_uuid TEXT,plan_id INTEGER,aggregate_type TEXT,'
+    . 'aggregate_id INTEGER,event_type TEXT,decision TEXT,event_payload_json TEXT,'
+    . 'event_fingerprint TEXT,actor_id INTEGER,recorded_at TEXT)'
+);
+$persistedResolution = $governancePlanService->recordReviewBlockerResolution(
+    1,
+    $duplicateBlocker,
+    $adjacentArea,
+    'HUMAN_DISPOSITION',
+    'PRESERVE_UNCHANGED',
+    'This section governs Compliance Monitoring competence and has no demonstrated SMS occurrence-lifecycle delta.',
+    '',
+    '',
+    7
+);
+$persistedEvent = $governancePdo->query(
+    "SELECT event_type,event_payload_json FROM ipca_manual_ai_architect_decision_events WHERE id="
+    . (int)$persistedResolution['event_id']
+)->fetch(PDO::FETCH_ASSOC);
+$persistedPayload = json_decode((string)($persistedEvent['event_payload_json'] ?? ''), true);
+architect_fixture_assert(
+    ($persistedEvent['event_type'] ?? '') === 'REVIEW_BLOCKER_DISPOSITION_RECORDED'
+        && ($persistedPayload['actor_user_id'] ?? 0) === 7
+        && ($persistedPayload['resulting_architect_state']['classification'] ?? '') === 'MUST_PRESERVE',
+    'The governed human disposition was not persisted as an immutable audit event.'
 );
 foreach ($presentation['areas'] as $area) {
     foreach (array(

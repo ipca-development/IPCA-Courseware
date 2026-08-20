@@ -140,9 +140,11 @@ $restructureCount = count(array_filter(
     static fn(array $area): bool => strtoupper((string)($area['treatment'] ?? '')) === 'RESTRUCTURE'
 ));
 $areaAnchorByLabel = array();
+$presentationAreaBySection = array();
 foreach ($presentationAreas as $area) {
     $label = trim((string)($area['section_number'] ?? '') . ' ' . (string)($area['section_title'] ?? ''));
     $areaAnchorByLabel[$label] = 'mcw-impact-' . (int)($area['impact_id'] ?? 0);
+    $presentationAreaBySection[(string)($area['section_number'] ?? '')] = $area;
 }
 $amendments = array_values(array_filter(
     $impacts,
@@ -479,7 +481,53 @@ books_manuals_page_open(array(
           <details class="mcw-secondary-review"><summary>Reviewed — no change required (<?= count($preserved) ?>)</summary><div class="mcw-secondary-rows"><?php foreach ($preserved as $row): ?><article><strong><?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? 'Manual section'))) ?></strong><span class="mcw-mini-treatment">✓ Preserve</span><p><?= h((string)$row['rationale']) ?></p></article><?php endforeach; ?></div></details>
           <details class="mcw-secondary-review"><summary>Other legacy references found (<?= count($legacyReviewRows) ?>)</summary><div><p>These references belong to other workflows and remain available for separate governed review.</p><?php foreach ($legacyReviewRows as $hit): ?><article class="mcw-legacy-row"><strong><?= h($sectionLabels[(int)($hit['section_id'] ?? 0)] ?? 'Related manual section') ?></strong><span><?= h((string)$hit['legacy_identity']) ?></span><span class="mcw-mini-treatment">! Review separately</span><p><strong>Reason:</strong> <?= h((string)($hit['disposition_justification'] ?? 'This reference is outside the primary operational change.')) ?></p></article><?php endforeach; ?></div></details>
           <details class="mcw-secondary-review mcw-technical-analysis"><summary><span>Technical Analysis &amp; Coverage<small>Whole-manual review complete · <?= count((array)($impactPresentation['analysis_details']['target_components'] ?? array())) ?> target-state components · <?= count((array)($impactPresentation['analysis_details']['coverage'] ?? array())) ?> coverage decisions</small></span><span>View details</span></summary><div><p>The target-state model, complete coverage matrix, deterministic legacy scan, preservation boundaries, dependencies and canonical provenance remain retained in the Change Plan audit record.</p><?php foreach ($outOfScope as $row): ?><p><strong>Out of scope:</strong> <?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? ''))) ?></p><?php endforeach; ?><?php foreach ($reviewSeparately as $row): ?><p><strong>Review separately:</strong> <?= h(trim((string)($row['section_number'] ?? '') . ' ' . (string)($row['section_title'] ?? $row['subject_reference'] ?? ''))) ?></p><?php endforeach; ?></div></details>
-          <?php if (!$impactReviewable): ?><section class="mcw-quality-gate"><h3>Impact analysis needs refinement</h3><p>Acceptance is unavailable until the Architect resolves these review-quality checks.</p><ul><?php foreach ((array)($impactQualityGate['failures'] ?? array()) as $failure): ?><?php if (!is_array($failure)) { continue; } ?><li><strong><?= h((string)($failure['section'] ?? 'Overall')) ?></strong> — <?= h((string)($failure['message'] ?? 'Review contract incomplete.')) ?></li><?php endforeach; ?></ul></section><?php endif; ?>
+          <?php if (!$impactReviewable): ?>
+            <section class="mcw-quality-gate">
+              <h3>Impact analysis needs refinement</h3>
+              <p>Acceptance is unavailable until these governed review issues are resolved.</p>
+              <ul><?php foreach ((array)($impactQualityGate['failures'] ?? array()) as $failure): ?><?php if (!is_array($failure)) { continue; } ?><li><strong><?= h((string)($failure['section'] ?? 'Overall')) ?></strong> — <?= h((string)($failure['message'] ?? 'Review contract incomplete.')) ?></li><?php endforeach; ?></ul>
+              <button class="app-btn app-btn--secondary" type="button" data-mcw-open-review-resolution>Resolve Review Issues</button>
+            </section>
+            <section class="mcw-review-resolution" data-mcw-review-resolution hidden>
+              <header><div><h3>Resolve Review Issues</h3><p>Correct the Architect first where possible. Human decisions become immutable governed input and never bypass integrity blockers.</p></div><button type="button" data-mcw-close-review-resolution aria-label="Close">×</button></header>
+              <?php foreach ((array)($impactQualityGate['failures'] ?? array()) as $failure): ?>
+                <?php
+                  if (!is_array($failure)) { continue; }
+                  $blockerSection = (string)($failure['section'] ?? '');
+                  $blockerArea = $presentationAreaBySection[$blockerSection] ?? array();
+                  $blockerContext = array_values(array_filter(
+                      (array)($blockerArea['current_relevant_content'] ?? array()),
+                      'is_array'
+                  ))[0] ?? array();
+                  $contextParagraph = array_values(array_filter(
+                      (array)($blockerContext['paragraphs'] ?? array()),
+                      'is_string'
+                  ))[0] ?? '';
+                  $resolutionPaths = array_map('strval', (array)($failure['resolution_paths'] ?? array()));
+                ?>
+                <article class="mcw-review-blocker" data-mcw-review-blocker="<?= h((string)($failure['blocker_id'] ?? '')) ?>">
+                  <div class="mcw-review-blocker-heading"><div><strong><?= h($blockerSection !== '' ? $blockerSection : 'Overall analysis') ?></strong><span><?= h((string)($failure['blocker_type'] ?? 'Review quality')) ?></span></div><span><?= h(str_replace('_', ' ', (string)($failure['severity'] ?? ''))) ?></span></div>
+                  <p><?= h((string)($failure['message'] ?? 'Review contract incomplete.')) ?></p>
+                  <?php if ($contextParagraph !== ''): ?><blockquote><?= h(mb_strimwidth($contextParagraph, 0, 420, '…')) ?></blockquote><?php endif; ?>
+                  <div class="mcw-review-resolution-actions">
+                    <button class="app-btn app-btn--secondary" type="button" data-mcw-architect-resolve="<?= (int)($blockerArea['impact_id'] ?? 0) ?>">Let Architect Resolve / Re-run</button>
+                  </div>
+                  <?php if (in_array('HUMAN_DISPOSITION', $resolutionPaths, true)): ?>
+                    <div class="mcw-resolution-form">
+                      <label class="mcw-field"><span>Governed human disposition</span><select data-mcw-resolution-disposition><option value="AMEND">Amend</option><option value="PRESERVE_UNCHANGED">Preserve unchanged</option><option value="OUT_OF_SCOPE">Out of scope</option><option value="REVIEW_SEPARATELY">Review separately</option><option value="MERGE_WITH">Merge with another amendment area</option></select></label>
+                      <label class="mcw-field"><span>Merge target — only when merging</span><select data-mcw-resolution-merge-target><option value="">Select amendment area</option><?php foreach ($presentationAreas as $targetArea): ?><?php if ((string)($targetArea['section_number'] ?? '') === $blockerSection) { continue; } ?><option value="<?= h((string)$targetArea['section_number']) ?>"><?= h(trim((string)$targetArea['section_number'] . ' ' . (string)$targetArea['section_title'])) ?></option><?php endforeach; ?></select></label>
+                      <label class="mcw-field"><span>Required rationale</span><textarea rows="4" data-mcw-resolution-rationale placeholder="Explain why this governed disposition is correct for the canonical section."></textarea></label>
+                      <button class="app-btn app-btn--primary" type="button" data-mcw-save-disposition>Record Human Disposition</button>
+                    </div>
+                  <?php endif; ?>
+                  <?php if (in_array('REVIEW_EXCEPTION', $resolutionPaths, true) && !empty($failure['exception_eligible'])): ?>
+                    <details class="mcw-review-exception"><summary>Accept Review Exception</summary><div><p>Use only when the canonical impact decision is evidenced but residual review-quality uncertainty cannot reasonably be removed.</p><label class="mcw-field"><span>Exception rationale</span><textarea rows="4" data-mcw-exception-rationale></textarea></label><label class="mcw-field"><span>Residual risk / uncertainty</span><textarea rows="3" data-mcw-exception-risk></textarea></label><button class="app-btn app-btn--secondary" type="button" data-mcw-accept-review-exception>Accept Review Exception</button></div></details>
+                  <?php endif; ?>
+                  <?php if (!empty($failure['integrity_blocker'])): ?><p class="mcw-integrity-notice">This integrity blocker must be corrected. Human disposition and review exception are unavailable.</p><?php endif; ?>
+                </article>
+              <?php endforeach; ?>
+            </section>
+          <?php endif; ?>
           <section class="mcw-change-request-panel" data-mcw-impact-feedback hidden>
             <div><h3>What should the Architect reconsider?</h3><p>Describe the correction. The Architect will re-analyze the impact and prepare a revised recommendation.</p></div>
             <label class="mcw-field"><span>Affected area</span><select data-mcw-feedback-area><option value="">General / overall analysis</option><?php foreach ($presentationAreas as $area): ?><option value="<?= (int)$area['impact_id'] ?>"><?= h(trim((string)$area['section_number'] . ' ' . (string)$area['section_title'])) ?></option><?php endforeach; ?></select></label>

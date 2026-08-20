@@ -487,6 +487,10 @@ try {
                     . ($messages === array() ? '.' : ': ' . implode('; ', $messages))
                 );
             }
+            $approvedImpactIds = array_values(array_unique(array_filter(array_map(
+                static fn(mixed $area): int => is_array($area) ? (int)($area['impact_id'] ?? 0) : 0,
+                (array)($impactReport['impact_presentation']['areas'] ?? array())
+            ))));
             architect_api_json(200, array(
                 'ok' => true,
                 'result' => $plans->acceptImpactAnalysis(
@@ -508,7 +512,52 @@ try {
                                 $structures
                             ),
                         );
-                    }
+                    },
+                    $approvedImpactIds
+                ),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
+        case 'resolve_review_blocker':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $blockerId = trim((string)($input['blocker_id'] ?? ''));
+            $report = $architect->getCompleteCheckpointReport($planId);
+            $presentation = (array)($report['impact_presentation'] ?? array());
+            $blocker = null;
+            foreach ((array)($presentation['quality_gate']['failures'] ?? array()) as $candidate) {
+                if (is_array($candidate)
+                    && hash_equals((string)($candidate['blocker_id'] ?? ''), $blockerId)) {
+                    $blocker = $candidate;
+                    break;
+                }
+            }
+            if (!is_array($blocker)) {
+                throw new RuntimeException('This review blocker is no longer active. Refresh the analysis.');
+            }
+            $area = array();
+            foreach ((array)($presentation['areas'] ?? array()) as $candidate) {
+                if (is_array($candidate)
+                    && (string)($candidate['section_number'] ?? '') === (string)$blocker['section']) {
+                    $area = $candidate;
+                    break;
+                }
+            }
+            $result = $plans->recordReviewBlockerResolution(
+                $planId,
+                $blocker,
+                $area,
+                (string)($input['resolution_type'] ?? ''),
+                (string)($input['disposition'] ?? ''),
+                (string)($input['rationale'] ?? ''),
+                (string)($input['residual_risk'] ?? ''),
+                (string)($input['merge_target_section'] ?? ''),
+                $userId
+            );
+            $updatedReport = $architect->getCompleteCheckpointReport($planId);
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => $result + array(
+                    'quality_gate' => $updatedReport['impact_presentation']['quality_gate'] ?? array(),
                 ),
                 'csrf_token' => architect_api_csrf(),
             ));

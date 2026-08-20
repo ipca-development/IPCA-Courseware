@@ -46,6 +46,18 @@ final class BooksManualsChangeReviewerService
                 (string)($boundary['classification'] ?? '') === 'REVIEW_SEPARATELY'
                 && (string)($boundary['status'] ?? 'active') === 'active'
         ));
+        $acceptedReviewExceptions = array();
+        foreach ((array)($plan['events'] ?? array()) as $event) {
+            if ((string)($event['event_type'] ?? $event['decision'] ?? '') !== 'REVIEW_EXCEPTION_ACCEPTED') {
+                continue;
+            }
+            $payload = is_array($event['event_payload_json'] ?? null)
+                ? $event['event_payload_json']
+                : array();
+            if ($payload !== array()) {
+                $acceptedReviewExceptions[] = $payload;
+            }
+        }
         $status = $unexplainedHits === array() && $unresolvedBoundaries === array()
             ? self::READY
             : self::REQUIRES_REVIEW;
@@ -59,6 +71,8 @@ final class BooksManualsChangeReviewerService
             'ready_rule' => 'READY requires zero unexplained exact legacy hits and zero unresolved review boundaries.',
             'unexplained_exact_legacy_hits' => $unexplainedHits,
             'unresolved_review_boundaries' => $unresolvedBoundaries,
+            'accepted_review_exceptions' => $acceptedReviewExceptions,
+            'exception_reassessment_required' => $acceptedReviewExceptions !== array(),
         );
     }
 

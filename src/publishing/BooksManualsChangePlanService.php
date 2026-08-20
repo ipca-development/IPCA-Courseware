@@ -474,11 +474,116 @@ final class BooksManualsChangePlanService
         );
     }
 
+    /**
+     * Persist a governed human resolution for one active review blocker.
+     *
+     * @param array<string,mixed> $blocker
+     * @param array<string,mixed> $area
+     * @return array<string,mixed>
+     */
+    public function recordReviewBlockerResolution(
+        int $planId,
+        array $blocker,
+        array $area,
+        string $resolutionType,
+        string $disposition,
+        string $rationale,
+        string $residualRisk,
+        string $mergeTargetSection,
+        int $actorUserId
+    ): array {
+        $this->assertPlanOwner($planId, $actorUserId);
+        $resolutionType = strtoupper(trim($resolutionType));
+        $disposition = strtoupper(trim($disposition));
+        $rationale = trim($rationale);
+        $residualRisk = trim($residualRisk);
+        if (mb_strlen($rationale) < 20 || mb_strlen($rationale) > 10000) {
+            throw new InvalidArgumentException('A specific governed rationale of at least 20 characters is required.');
+        }
+        if (!empty($blocker['integrity_blocker'])
+            || (string)($blocker['severity'] ?? '') === 'NON_OVERRIDABLE_INTEGRITY') {
+            throw new RuntimeException('Controlled-content integrity blockers cannot be resolved by disposition or exception.');
+        }
+        if ($resolutionType === 'HUMAN_DISPOSITION') {
+            $allowed = array(
+                'AMEND', 'PRESERVE_UNCHANGED', 'OUT_OF_SCOPE',
+                'REVIEW_SEPARATELY', 'MERGE_WITH',
+            );
+            if (!in_array($disposition, $allowed, true)
+                || !in_array('HUMAN_DISPOSITION', (array)($blocker['resolution_paths'] ?? array()), true)) {
+                throw new InvalidArgumentException('This blocker does not permit the requested human disposition.');
+            }
+            if ($disposition === 'MERGE_WITH' && trim($mergeTargetSection) === '') {
+                throw new InvalidArgumentException('A target amendment area is required for a merge disposition.');
+            }
+            $eventType = 'REVIEW_BLOCKER_DISPOSITION_RECORDED';
+        } elseif ($resolutionType === 'REVIEW_EXCEPTION') {
+            if (empty($blocker['exception_eligible'])
+                || !in_array('REVIEW_EXCEPTION', (array)($blocker['resolution_paths'] ?? array()), true)) {
+                throw new RuntimeException('This blocker is not eligible for a review exception.');
+            }
+            if (mb_strlen($residualRisk) < 10 || mb_strlen($residualRisk) > 5000) {
+                throw new InvalidArgumentException('Describe the residual risk or uncertainty accepted by the reviewer.');
+            }
+            $eventType = 'REVIEW_EXCEPTION_ACCEPTED';
+            $disposition = 'ACCEPT_REVIEW_EXCEPTION';
+        } else {
+            throw new InvalidArgumentException('Unsupported blocker-resolution path.');
+        }
+        $payload = array(
+            'schema' => 'ipca.manual-change-review-resolution.v1',
+            'blocker_id' => (string)($blocker['blocker_id'] ?? ''),
+            'blocker' => $blocker,
+            'original_architect_conclusion' => array(
+                'why_affected' => (string)($area['why_affected'] ?? ''),
+                'proposed_amendment_summary' => (string)($area['proposed_amendment_summary'] ?? ''),
+                'must_preserve' => array_values((array)($area['must_preserve'] ?? array())),
+                'treatment' => (string)($area['treatment'] ?? ''),
+            ),
+            'resolution_type' => $resolutionType,
+            'disposition' => $disposition,
+            'rationale' => $rationale,
+            'residual_risk' => $residualRisk,
+            'actor_user_id' => $actorUserId,
+            'recorded_at' => gmdate(DATE_ATOM),
+            'section_id' => (int)($area['section_id'] ?? 0),
+            'section_number' => (string)($area['section_number'] ?? $blocker['section'] ?? ''),
+            'section_title' => (string)($area['section_title'] ?? ''),
+            'canonical_context' => $area['current_manual'] ?? $area['current_relevant_content'] ?? array(),
+            'evidence_refs' => array_values((array)($area['evidence_refs'] ?? array())),
+            'merge_target_section' => trim($mergeTargetSection),
+            'resulting_architect_state' => array(
+                'classification' => match ($disposition) {
+                    'PRESERVE_UNCHANGED' => 'MUST_PRESERVE',
+                    'OUT_OF_SCOPE' => 'OUT_OF_SCOPE',
+                    'REVIEW_SEPARATELY' => 'REVIEW_SEPARATELY',
+                    'MERGE_WITH' => 'MERGED',
+                    'AMEND' => 'MUST_CHANGE',
+                    default => 'REVIEW_EXCEPTION_ACCEPTED',
+                },
+                'quality_gate_must_rerun' => true,
+            ),
+        );
+        $eventId = $this->appendEvent($planId, $eventType, 10, $payload, $actorUserId);
+        $this->updatePlan($planId, array(
+            'status' => 'ready_for_review',
+            'stage' => 'scope',
+            'updated_by' => $actorUserId,
+        ));
+        return array(
+            'event_id' => $eventId,
+            'blocker_id' => $payload['blocker_id'],
+            'resolution_type' => $resolutionType,
+            'disposition' => $disposition,
+        );
+    }
+
     /** @return array{accepted_count:int,stage:string} */
     public function acceptImpactAnalysis(
         int $planId,
         int $actorUserId,
-        ?callable $afterApproval = null
+        ?callable $afterApproval = null,
+        ?array $approvedImpactIds = null
     ): array
     {
         $this->assertPlanOwner($planId, $actorUserId);
@@ -487,7 +592,16 @@ final class BooksManualsChangePlanService
             . " WHERE plan_id=? AND treatment IN ('AMEND','REPLACE','RESTRUCTURE','ADD','REMOVE_OBSOLETE')"
         );
         $stmt->execute(array($planId));
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $allRows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $approvedImpactIds = $approvedImpactIds === null
+            ? null
+            : array_values(array_unique(array_filter(array_map('intval', $approvedImpactIds))));
+        $rows = $approvedImpactIds === null
+            ? $allRows
+            : array_values(array_filter(
+                $allRows,
+                static fn(array $row): bool => in_array((int)$row['id'], $approvedImpactIds, true)
+            ));
         if ($rows === array()) {
             throw new RuntimeException('No governed amendment areas are available to accept.');
         }
@@ -498,18 +612,27 @@ final class BooksManualsChangePlanService
         }
         $this->pdo->beginTransaction();
         try {
-            $update = $this->pdo->prepare(
+            $this->pdo->prepare(
+                'UPDATE ' . self::TABLES['impacts']
+                . " SET status='dismissed',updated_at=CURRENT_TIMESTAMP(3)"
+                . " WHERE plan_id=? AND treatment IN ('AMEND','REPLACE','RESTRUCTURE','ADD','REMOVE_OBSOLETE')"
+            )->execute(array($planId));
+            $placeholders = implode(',', array_fill(0, count($rows), '?'));
+            $this->pdo->prepare(
                 'UPDATE ' . self::TABLES['impacts']
                 . " SET status='approved',updated_at=CURRENT_TIMESTAMP(3)"
-                . " WHERE plan_id=? AND treatment IN ('AMEND','REPLACE','RESTRUCTURE','ADD','REMOVE_OBSOLETE')"
-            );
-            $update->execute(array($planId));
+                . " WHERE plan_id=? AND id IN ({$placeholders})"
+            )->execute(array_merge(array($planId), array_map('intval', array_column($rows, 'id'))));
             $this->updatePlan($planId, array('stage' => 'structure', 'updated_by' => $actorUserId));
             $continuation = $afterApproval !== null
                 ? (array)$afterApproval($rows)
                 : array();
             $this->appendEvent($planId, 'IMPACT_ANALYSIS_ACCEPTED', 10, array(
                 'impact_ids' => array_map('intval', array_column($rows, 'id')),
+                'dismissed_impact_ids' => array_values(array_diff(
+                    array_map('intval', array_column($allRows, 'id')),
+                    array_map('intval', array_column($rows, 'id'))
+                )),
                 'continuation' => $continuation,
             ), $actorUserId);
             $this->pdo->commit();

@@ -129,6 +129,18 @@ architect_ui_assert(
         && str_contains($api, "empty(\$qualityGate['reviewable'])"),
     'The Step 2 quality gate must disable and reject acceptance of incomplete review output.'
 );
+architect_ui_assert(
+    str_contains($page, 'Resolve Review Issues')
+        && str_contains($page, 'Record Human Disposition')
+        && str_contains($page, 'Accept Review Exception')
+        && str_contains($page, 'integrity blocker must be corrected')
+        && str_contains($js, "request('resolve_review_blocker'")
+        && str_contains($api, "case 'resolve_review_blocker':")
+        && str_contains($api, '$approvedImpactIds')
+        && str_contains($plans, 'recordReviewBlockerResolution(')
+        && str_contains($architect, 'NON_OVERRIDABLE_INTEGRITY'),
+    'Governed blocker resolution and non-overridable integrity handling are incomplete.'
+);
 architect_ui_assert(str_contains($api, "case 'analyze_change':"), 'Wizard analysis API is missing.');
 architect_ui_assert(
     str_contains($api, 'architect_api_finish_response(202')

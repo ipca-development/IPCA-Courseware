@@ -146,6 +146,26 @@ return array(
                 'parent_title' => 'FSTD Compliance',
                 'text' => 'QTG test discrepancies are recorded in the FSTD report and reviewed by the FSTD Manager.',
             ),
+            array(
+                'id' => 115,
+                'number' => '10',
+                'title' => 'Compliance Monitoring System',
+                'parent_number' => '',
+                'parent_title' => 'Compliance Monitoring',
+                'text' => 'The Compliance Monitoring System independently verifies conformity with applicable requirements and the effectiveness of corrective action following compliance findings.',
+                'children' => array(
+                    array(
+                        'title' => '10.1 Compliance Monitoring Responsibilities',
+                        'paragraph_style' => 'subtitle_1',
+                        'text' => 'The Compliance Monitoring Manager plans audits, assigns qualified auditors and reports compliance findings to accountable management.',
+                    ),
+                    array(
+                        'title' => '10.2 Compliance Monitoring Training',
+                        'paragraph_style' => 'subtitle_1',
+                        'text' => 'Compliance Monitoring personnel receive initial and recurrent competence training in audit techniques, regulatory requirements, sampling, finding reporting and corrective-action verification.',
+                    ),
+                ),
+            ),
         ),
     ),
     'request' => implode("\n\n", array(
@@ -176,9 +196,9 @@ return array(
         'must_change_numbers' => array('3.3', '4.2', '5.6', '5.7', '8.1'),
         'primary_restructure_number' => '5.6',
         'must_preserve_numbers' => array('1.1', '2.1', '5.1'),
-        'out_of_scope_numbers' => array('7.1', '7.2', '9.2', '10.3'),
+        'out_of_scope_numbers' => array('7.1', '7.2', '9.2', '10.3', '10', '10.2'),
         'review_separately_numbers' => array('6.4'),
-        'forbidden_amendment_numbers' => array('7.1', '7.2', '9.2', '10.3'),
+        'forbidden_amendment_numbers' => array('7.1', '7.2', '9.2', '10.3', '10', '10.2'),
         'required_coverage_domains' => array(
             'responsibility',
             'reporting',

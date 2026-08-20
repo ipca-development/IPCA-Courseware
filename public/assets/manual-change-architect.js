@@ -173,6 +173,86 @@
         return;
       }
 
+      var openResolution = event.target.closest('[data-mcw-open-review-resolution]');
+      if (openResolution) {
+        var resolutionPanel = root.querySelector('[data-mcw-review-resolution]');
+        if (resolutionPanel) {
+          resolutionPanel.hidden = false;
+          resolutionPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        return;
+      }
+
+      var closeResolution = event.target.closest('[data-mcw-close-review-resolution]');
+      if (closeResolution) {
+        var openPanel = root.querySelector('[data-mcw-review-resolution]');
+        if (openPanel) openPanel.hidden = true;
+        return;
+      }
+
+      var architectResolve = event.target.closest('[data-mcw-architect-resolve]');
+      if (architectResolve) {
+        showFeedback(Number(architectResolve.dataset.mcwArchitectResolve || 0));
+        return;
+      }
+
+      var saveDisposition = event.target.closest('[data-mcw-save-disposition]');
+      if (saveDisposition) {
+        var dispositionBlocker = saveDisposition.closest('[data-mcw-review-blocker]');
+        var disposition = dispositionBlocker.querySelector('[data-mcw-resolution-disposition]');
+        var dispositionRationale = dispositionBlocker.querySelector('[data-mcw-resolution-rationale]');
+        var mergeTarget = dispositionBlocker.querySelector('[data-mcw-resolution-merge-target]');
+        var rationaleText = String((dispositionRationale || {}).value || '').trim();
+        if (rationaleText.length < 20) {
+          toast('Record a specific rationale of at least 20 characters.', true);
+          return;
+        }
+        busy(saveDisposition, true, 'Recording…');
+        try {
+          await request('resolve_review_blocker', {
+            blocker_id: String(dispositionBlocker.dataset.mcwReviewBlocker || ''),
+            resolution_type: 'HUMAN_DISPOSITION',
+            disposition: String((disposition || {}).value || ''),
+            rationale: rationaleText,
+            merge_target_section: String((mergeTarget || {}).value || '')
+          });
+          toast('Governed disposition recorded. Re-running the quality gate…');
+          window.setTimeout(function () { window.location.reload(); }, 350);
+        } catch (error) {
+          toast(error.message, true);
+          busy(saveDisposition, false);
+        }
+        return;
+      }
+
+      var acceptException = event.target.closest('[data-mcw-accept-review-exception]');
+      if (acceptException) {
+        var exceptionBlocker = acceptException.closest('[data-mcw-review-blocker]');
+        var exceptionRationale = exceptionBlocker.querySelector('[data-mcw-exception-rationale]');
+        var exceptionRisk = exceptionBlocker.querySelector('[data-mcw-exception-risk]');
+        var exceptionRationaleText = String((exceptionRationale || {}).value || '').trim();
+        var exceptionRiskText = String((exceptionRisk || {}).value || '').trim();
+        if (exceptionRationaleText.length < 20 || exceptionRiskText.length < 10) {
+          toast('Record both a specific rationale and the residual risk.', true);
+          return;
+        }
+        busy(acceptException, true, 'Recording Exception…');
+        try {
+          await request('resolve_review_blocker', {
+            blocker_id: String(exceptionBlocker.dataset.mcwReviewBlocker || ''),
+            resolution_type: 'REVIEW_EXCEPTION',
+            rationale: exceptionRationaleText,
+            residual_risk: exceptionRiskText
+          });
+          toast('Review exception recorded for independent reassessment.');
+          window.setTimeout(function () { window.location.reload(); }, 350);
+        } catch (error) {
+          toast(error.message, true);
+          busy(acceptException, false);
+        }
+        return;
+      }
+
       var cancelFeedback = event.target.closest('[data-mcw-cancel-impact-feedback]');
       if (cancelFeedback) {
         if (panel) panel.hidden = true;

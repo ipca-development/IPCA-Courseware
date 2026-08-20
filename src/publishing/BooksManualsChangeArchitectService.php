@@ -1,8 +1,12 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/BooksManualsChangePlanService.php';
-require_once dirname(__DIR__) . '/compliance/ComplianceAiRunLogger.php';
+if (!class_exists('BooksManualsChangePlanService', false)) {
+    require_once __DIR__ . '/BooksManualsChangePlanService.php';
+}
+if (!class_exists('ComplianceAiRunLogger', false)) {
+    require_once dirname(__DIR__) . '/compliance/ComplianceAiRunLogger.php';
+}
 
 /**
  * Read-only reasoning checkpoint for manual changes (stages 2-10).
@@ -557,18 +561,39 @@ final class BooksManualsChangeArchitectService
             $areas[$primaryIndex]['is_primary_change'] = true;
             $areas = $this->relatePresentationAreas($areas, $primaryIndex);
         }
+        $initialQualityGate = $this->validateImpactPresentation($areas);
+        $resolutionProjection = $this->applyGovernedReviewResolutions(
+            $areas,
+            (array)$initialQualityGate['failures'],
+            (array)($report['events'] ?? array())
+        );
+        $areas = $resolutionProjection['areas'];
         $qualityGate = $this->validateImpactPresentation($areas);
+        if ($resolutionProjection['accepted_exception_ids'] !== array()) {
+            $qualityGate['failures'] = array_values(array_filter(
+                (array)$qualityGate['failures'],
+                static fn(array $failure): bool => !in_array(
+                    (string)($failure['blocker_id'] ?? ''),
+                    $resolutionProjection['accepted_exception_ids'],
+                    true
+                )
+            ));
+            $qualityGate['reviewable'] = $qualityGate['failures'] === array();
+        }
+        $qualityGate['resolved_blockers'] = $resolutionProjection['resolved_blockers'];
+        $qualityGate['accepted_exceptions'] = $resolutionProjection['accepted_exceptions'];
         return array(
             'schema' => 'ipca.manual-change-impact-presentation.v2',
             'areas' => $areas,
             'quality_gate' => $qualityGate,
+            'human_dispositions' => $resolutionProjection['human_dispositions'],
             'legacy_only_impact_ids' => $legacyOnlyImpactIds,
             'legacy_only_section_ids' => array_values(array_unique(array_filter($legacyOnlySectionIds))),
-            'no_change_areas' => array_values(array_filter(
+            'no_change_areas' => array_merge(array_values(array_filter(
                 (array)($report['boundaries'] ?? array()),
                 static fn(mixed $row): bool => is_array($row)
                     && strtoupper((string)($row['classification'] ?? '')) === self::MUST_PRESERVE
-            )),
+            )), $resolutionProjection['preserved_areas']),
             'analysis_details' => array(
                 'target_components' => $report['target_components'] ?? array(),
                 'coverage' => $report['coverage'] ?? array(),
@@ -656,6 +681,7 @@ final class BooksManualsChangeArchitectService
             'change_intent' => $intent,
             'operational_target_state' => $target,
             'scope_interpretation' => $intent['scope_interpretation'],
+            'candidate_discovery' => array_values($semantic),
             'coverage_matrix' => $coverage,
             'legacy_references' => $legacyHits,
             'boundaries' => $boundaries,
@@ -1465,7 +1491,12 @@ final class BooksManualsChangeArchitectService
                 true
             );
             $hasCandidate = $coverageCells !== array();
-            $hasTargetDelta = $this->sectionHasTargetDelta($context, $intent, $target);
+            $hasTargetDelta = $this->sectionHasTargetDelta(
+                $context,
+                $intent,
+                $target,
+                $coverageCells
+            );
             $nonGoalMatch = $this->scoreTerms(
                 $this->normalize((string)$context['title'] . ' ' . (string)$context['complete_text']),
                 $nonGoals
@@ -1639,6 +1670,7 @@ final class BooksManualsChangeArchitectService
                 ),
             );
         }
+        $impacts = $this->consolidateParentChildImpacts($impacts);
         $primaryIndex = null;
         foreach ($impacts as $index => $impact) {
             if ((string)$impact['treatment'] === 'RESTRUCTURE') {
@@ -1701,6 +1733,107 @@ final class BooksManualsChangeArchitectService
     }
 
     /**
+     * Keep one amendment home when canonical parent/child contexts describe
+     * one governed physical section. Discovery evidence remains attached.
+     *
+     * @param list<array<string,mixed>> $impacts
+     * @return list<array<string,mixed>>
+     */
+    private function consolidateParentChildImpacts(array $impacts): array
+    {
+        $changeGroups = array();
+        $others = array();
+        foreach ($impacts as $impact) {
+            if ((string)($impact['classification'] ?? '') !== self::MUST_CHANGE) {
+                $others[] = $impact;
+                continue;
+            }
+            $changeGroups[(int)($impact['section_id'] ?? 0)][] = $impact;
+        }
+        $logicalGroups = array();
+        foreach ($changeGroups as $sectionId => $physicalGroup) {
+            $numbers = array_values(array_filter(array_map(
+                static fn(array $impact): string => trim((string)($impact['section_number'] ?? '')),
+                $physicalGroup
+            )));
+            foreach ($physicalGroup as $impact) {
+                $number = trim((string)($impact['section_number'] ?? ''));
+                $homeNumber = $number;
+                foreach ($numbers as $possibleParent) {
+                    if ($possibleParent !== $number
+                        && str_starts_with($number, $possibleParent . '.')
+                        && (
+                            $homeNumber === $number
+                            || substr_count($possibleParent, '.') > substr_count($homeNumber, '.')
+                        )) {
+                        $homeNumber = $possibleParent;
+                    }
+                }
+                $logicalGroups[$sectionId . '|' . $homeNumber][] = $impact;
+            }
+        }
+        $changeGroups = $logicalGroups;
+        $consolidated = array();
+        foreach ($changeGroups as $group) {
+            if (count($group) === 1) {
+                $consolidated[] = $group[0];
+                continue;
+            }
+            usort($group, static function (array $left, array $right): int {
+                if (($left['treatment'] ?? '') === 'RESTRUCTURE') {
+                    return -1;
+                }
+                if (($right['treatment'] ?? '') === 'RESTRUCTURE') {
+                    return 1;
+                }
+                $leftNumber = (string)($left['section_number'] ?? '');
+                $rightNumber = (string)($right['section_number'] ?? '');
+                $depth = substr_count($leftNumber, '.') <=> substr_count($rightNumber, '.');
+                return $depth !== 0 ? $depth : strlen($leftNumber) <=> strlen($rightNumber);
+            });
+            $home = array_shift($group);
+            $home['consolidated_contexts'] = array(array(
+                'context_key' => (string)($home['impact_key'] ?? ''),
+                'section_number' => (string)($home['section_number'] ?? ''),
+                'section_title' => (string)($home['section_title'] ?? ''),
+            ));
+            foreach ($group as $child) {
+                $home['target_component_keys'] = array_values(array_unique(array_merge(
+                    (array)($home['target_component_keys'] ?? array()),
+                    (array)($child['target_component_keys'] ?? array())
+                )));
+                $home['target_state_concepts'] = array_values(array_unique(array_merge(
+                    (array)($home['target_state_concepts'] ?? array()),
+                    (array)($child['target_state_concepts'] ?? array())
+                )));
+                $home['preserved_logic'] = array_values(array_unique(array_merge(
+                    (array)($home['preserved_logic'] ?? array()),
+                    (array)($child['preserved_logic'] ?? array())
+                )));
+                $home['canonical_evidence']['coverage'] = array_merge(
+                    (array)($home['canonical_evidence']['coverage'] ?? array()),
+                    (array)($child['canonical_evidence']['coverage'] ?? array())
+                );
+                $home['canonical_evidence']['legacy_hits'] = array_merge(
+                    (array)($home['canonical_evidence']['legacy_hits'] ?? array()),
+                    (array)($child['canonical_evidence']['legacy_hits'] ?? array())
+                );
+                $home['consolidated_contexts'][] = array(
+                    'context_key' => (string)($child['impact_key'] ?? ''),
+                    'section_number' => (string)($child['section_number'] ?? ''),
+                    'section_title' => (string)($child['section_title'] ?? ''),
+                );
+                if (($child['treatment'] ?? '') === 'RESTRUCTURE') {
+                    $home['treatment'] = 'RESTRUCTURE';
+                    $home['required_treatment'] = 'RESTRUCTURE';
+                }
+            }
+            $consolidated[] = $home;
+        }
+        return array_values(array_merge($consolidated, $others));
+    }
+
+    /**
      * @return array<string,mixed>
      */
     public function reasonMinimalityAndCompleteness(
@@ -1734,7 +1867,15 @@ final class BooksManualsChangeArchitectService
             static fn(array $boundary): bool => (string)$boundary['classification'] === self::REVIEW_SEPARATELY
         ));
         $counts = array_count_values(array_column($boundaries, 'classification'));
-        $allSectionsClassified = count($boundaries) === count((array)$hierarchy['sections']);
+        $loadedSectionIds = array_values(array_unique(array_map(
+            static fn(array $section): int => (int)$section['id'],
+            (array)$hierarchy['sections']
+        )));
+        $classifiedSectionIds = array_values(array_unique(array_map(
+            static fn(array $boundary): int => (int)$boundary['section_id'],
+            $boundaries
+        )));
+        $allSectionsClassified = array_diff($loadedSectionIds, $classifiedSectionIds) === array();
         $minimal = true;
         foreach ($boundaries as $boundary) {
             if ($boundary['classification'] === self::MUST_CHANGE
@@ -1774,7 +1915,8 @@ final class BooksManualsChangeArchitectService
                     . 'management-system domains, assigned an explicit boundary, and mapped against each target component.',
                 'sections_loaded' => count((array)$hierarchy['sections']),
                 'blocks_loaded' => count((array)$hierarchy['blocks']),
-                'sections_classified' => count($boundaries),
+                'sections_classified' => count($classifiedSectionIds),
+                'canonical_review_contexts_classified' => count($boundaries),
                 'target_components' => count((array)($target['components'] ?? array())),
                 'coverage_gaps' => count($gaps),
                 'unexplained_exact_legacy_hits' => count($unexplainedLegacy),
@@ -2850,7 +2992,180 @@ final class BooksManualsChangeArchitectService
                 $failures[] = array('code' => 'implementation_detail', 'section' => $section, 'message' => 'Remove implementation-level technical detail from the controlled-manual amendment.');
             }
         }
+        $failures = array_map(function (array $failure): array {
+            $code = (string)$failure['code'];
+            $metadata = match ($code) {
+                'duplicate_why' => array(
+                    'blocker_type' => 'POSSIBLE_DUPLICATE_AMENDMENT',
+                    'severity' => 'HUMAN_RESOLVABLE',
+                    'resolution_paths' => array('ARCHITECT_RESOLUTION', 'HUMAN_DISPOSITION', 'REVIEW_EXCEPTION'),
+                    'exception_eligible' => true,
+                    'integrity_blocker' => false,
+                ),
+                'missing_preservation' => array(
+                    'blocker_type' => 'AMBIGUOUS_PRESERVATION_BOUNDARY',
+                    'severity' => 'HUMAN_RESOLVABLE',
+                    'resolution_paths' => array('ARCHITECT_RESOLUTION', 'HUMAN_DISPOSITION'),
+                    'exception_eligible' => false,
+                    'integrity_blocker' => false,
+                ),
+                'missing_relationship' => array(
+                    'blocker_type' => 'UNCERTAIN_AMENDMENT_RELATIONSHIP',
+                    'severity' => 'HUMAN_RESOLVABLE',
+                    'resolution_paths' => array('ARCHITECT_RESOLUTION', 'HUMAN_DISPOSITION', 'REVIEW_EXCEPTION'),
+                    'exception_eligible' => true,
+                    'integrity_blocker' => false,
+                ),
+                'generic_why', 'vague_proposal' => array(
+                    'blocker_type' => 'PRESENTATION_REVIEWABILITY',
+                    'severity' => 'EXCEPTION_ELIGIBLE',
+                    'resolution_paths' => array('ARCHITECT_RESOLUTION', 'REVIEW_EXCEPTION'),
+                    'exception_eligible' => true,
+                    'integrity_blocker' => false,
+                ),
+                'incomplete_structure' => array(
+                    'blocker_type' => 'PERSISTED_STRUCTURE_MISMATCH',
+                    'severity' => 'NON_OVERRIDABLE_INTEGRITY',
+                    'resolution_paths' => array('ARCHITECT_RESOLUTION'),
+                    'exception_eligible' => false,
+                    'integrity_blocker' => true,
+                ),
+                'implementation_detail' => array(
+                    'blocker_type' => 'UNSUPPORTED_CONTROLLED_CONTENT',
+                    'severity' => 'NON_OVERRIDABLE_INTEGRITY',
+                    'resolution_paths' => array('ARCHITECT_RESOLUTION'),
+                    'exception_eligible' => false,
+                    'integrity_blocker' => true,
+                ),
+                default => array(
+                    'blocker_type' => 'REVIEW_QUALITY',
+                    'severity' => 'HUMAN_RESOLVABLE',
+                    'resolution_paths' => array('ARCHITECT_RESOLUTION'),
+                    'exception_eligible' => false,
+                    'integrity_blocker' => false,
+                ),
+            };
+            return $failure + $metadata + array(
+                'blocker_id' => substr(hash('sha256', implode('|', array(
+                    $code,
+                    (string)$failure['section'],
+                    (string)$failure['message'],
+                ))), 0, 24),
+            );
+        }, $failures);
         return array('reviewable' => $failures === array(), 'failures' => $failures);
+    }
+
+    /**
+     * Apply immutable human review events as governed Architect input.
+     *
+     * @param list<array<string,mixed>> $areas
+     * @param list<array<string,mixed>> $blockers
+     * @param list<array<string,mixed>> $events
+     * @return array<string,mixed>
+     */
+    public function applyGovernedReviewResolutions(
+        array $areas,
+        array $blockers,
+        array $events
+    ): array {
+        $blockerById = array();
+        foreach ($blockers as $blocker) {
+            $blockerById[(string)($blocker['blocker_id'] ?? '')] = $blocker;
+        }
+        $latestByBlocker = array();
+        foreach ($events as $event) {
+            if (!is_array($event)
+                || !in_array(
+                    (string)($event['event_type'] ?? $event['decision'] ?? ''),
+                    array('REVIEW_BLOCKER_DISPOSITION_RECORDED', 'REVIEW_EXCEPTION_ACCEPTED'),
+                    true
+                )) {
+                continue;
+            }
+            $payload = is_array($event['event_payload_json'] ?? null)
+                ? $event['event_payload_json']
+                : (is_array($event['payload_json'] ?? null) ? $event['payload_json'] : array());
+            $blockerId = (string)($payload['blocker_id'] ?? '');
+            if ($blockerId !== '' && isset($blockerById[$blockerId])) {
+                $latestByBlocker[$blockerId] = array(
+                    'event' => $event,
+                    'payload' => $payload,
+                    'blocker' => $blockerById[$blockerId],
+                );
+            }
+        }
+        $removeSections = array();
+        $acceptedExceptionIds = array();
+        $acceptedExceptions = array();
+        $resolvedBlockers = array();
+        $humanDispositions = array();
+        $preservedAreas = array();
+        foreach ($latestByBlocker as $blockerId => $resolution) {
+            $payload = $resolution['payload'];
+            $eventType = (string)(
+                $resolution['event']['event_type']
+                ?? $resolution['event']['decision']
+                ?? ''
+            );
+            if ($eventType === 'REVIEW_EXCEPTION_ACCEPTED') {
+                if (!empty($resolution['blocker']['exception_eligible'])
+                    && empty($resolution['blocker']['integrity_blocker'])) {
+                    $acceptedExceptionIds[] = $blockerId;
+                    $acceptedExceptions[] = $payload;
+                    $resolvedBlockers[] = $blockerId;
+                }
+                continue;
+            }
+            $disposition = strtoupper((string)($payload['disposition'] ?? ''));
+            $section = (string)($payload['section_number'] ?? $resolution['blocker']['section'] ?? '');
+            if ($disposition === 'AMEND') {
+                foreach ($areas as &$area) {
+                    if ((string)($area['section_number'] ?? '') === $section) {
+                        $area['why_affected'] = (string)($payload['rationale'] ?? $area['why_affected'] ?? '');
+                        $area['concise_rationale'] = $area['why_affected'];
+                        $area['governed_human_disposition'] = $payload;
+                        break;
+                    }
+                }
+                unset($area);
+                $resolvedBlockers[] = $blockerId;
+                $humanDispositions[] = $payload;
+                continue;
+            }
+            if (in_array(
+                $disposition,
+                array('PRESERVE_UNCHANGED', 'OUT_OF_SCOPE', 'REVIEW_SEPARATELY', 'MERGE_WITH'),
+                true
+            )) {
+                $removeSections[$section] = true;
+                $resolvedBlockers[] = $blockerId;
+                $humanDispositions[] = $payload;
+                if ($disposition === 'PRESERVE_UNCHANGED') {
+                    $preservedAreas[] = array(
+                        'section_number' => $section,
+                        'section_title' => (string)($payload['section_title'] ?? ''),
+                        'classification' => self::MUST_PRESERVE,
+                        'rationale' => (string)($payload['rationale'] ?? ''),
+                        'governed_human_disposition' => true,
+                    );
+                }
+            }
+        }
+        $areas = array_values(array_filter(
+            $areas,
+            static fn(array $area): bool => !isset(
+                $removeSections[(string)($area['section_number'] ?? '')]
+            )
+        ));
+        return array(
+            'areas' => $areas,
+            'accepted_exception_ids' => array_values(array_unique($acceptedExceptionIds)),
+            'accepted_exceptions' => $acceptedExceptions,
+            'resolved_blockers' => array_values(array_unique($resolvedBlockers)),
+            'human_dispositions' => $humanDispositions,
+            'preserved_areas' => $preservedAreas,
+        );
     }
 
     /**
@@ -3456,7 +3771,10 @@ final class BooksManualsChangeArchitectService
                 $childTitle = trim((string)($child['title'] ?? ''));
                 $childText = trim((string)($child['text'] ?? ''));
                 if ($childTitle !== '') {
-                    $appendFixtureBlock($childTitle, 'subtitle_2');
+                    $appendFixtureBlock(
+                        $childTitle,
+                        (string)($child['paragraph_style'] ?? 'subtitle_2')
+                    );
                 }
                 if ($childText !== '') {
                     $appendFixtureBlock($childText);
@@ -3718,10 +4036,40 @@ final class BooksManualsChangeArchitectService
             && !in_array($type, array('preservation'), true)) {
             return false;
         }
+        $roleSource = implode(' ', array_filter(array_map(
+            'strval',
+            array(
+                $component['name'] ?? '',
+                $component['title'] ?? '',
+                $component['desired_state'] ?? '',
+                $component['target_state'] ?? '',
+                $component['manual_level_expression'] ?? '',
+            )
+        )));
+        $roleName = trim((string)preg_replace(
+            '/\s+responsibilit(?:y|ies)\b.*$/iu',
+            '',
+            $roleSource
+        ));
+        $roleName = trim((string)preg_replace('/^role\s*[:\-–—]\s*/iu', '', $roleName));
+        $canonicalRoleTitle = trim((string)preg_replace(
+            '/^\d+(?:\.\d+)*\s+/u',
+            '',
+            (string)($context['title'] ?? '')
+        ));
         return match ($type) {
             'role' => (
-                trim((string)($component['name'] ?? '')) !== ''
-                && $this->containsTerm($title, (string)$component['name'])
+                (
+                    $roleName !== ''
+                    && (
+                        $this->containsTerm($functionalTitle, $roleName)
+                        || $this->containsTerm($text, $roleName)
+                    )
+                )
+                || (
+                    $canonicalRoleTitle !== ''
+                    && $this->containsTerm($this->normalize($roleSource), $canonicalRoleTitle)
+                )
             ),
             'record_evidence' => preg_match(
                 '/\b(?:control of (?:safety )?records?|safety records?|records? retention)\b/iu',
@@ -3774,7 +4122,12 @@ final class BooksManualsChangeArchitectService
      * @param array<string,mixed> $intent
      * @param array<string,mixed> $target
      */
-    private function sectionHasTargetDelta(array $context, array $intent, array $target): bool
+    private function sectionHasTargetDelta(
+        array $context,
+        array $intent,
+        array $target,
+        array $coverageCells
+    ): bool
     {
         $title = $this->normalize((string)($context['title'] ?? ''));
         $functionalTitle = $this->normalize(implode(' ', array_map(
@@ -3794,11 +4147,77 @@ final class BooksManualsChangeArchitectService
         if (preg_match('/\b(?:hazard identification|risk assessment|safety policy)\b/iu', $title) === 1) {
             return false;
         }
+        $componentsByKey = array();
+        foreach ((array)($target['components'] ?? array()) as $component) {
+            if (is_array($component)) {
+                $componentsByKey[(string)($component['component_key'] ?? '')] = $component;
+            }
+        }
+        $coveredComponents = array();
+        foreach ($coverageCells as $cell) {
+            if (!is_array($cell)
+                || !in_array(
+                    (string)($cell['coverage_status'] ?? ''),
+                    array('AMEND_EXISTING', 'REVIEW_REQUIRED'),
+                    true
+                )) {
+                continue;
+            }
+            $component = $componentsByKey[(string)($cell['component_key'] ?? '')] ?? null;
+            if (is_array($component)) {
+                $coveredComponents[] = $component;
+            }
+        }
+        if ($coveredComponents === array()) {
+            return false;
+        }
         $targetText = $this->normalize($this->json(array(
-            'components' => $target['components'] ?? array(),
+            'components' => $coveredComponents,
             'affected_roles' => $intent['affected_roles'] ?? array(),
             'affected_processes' => $intent['affected_processes'] ?? array(),
         )));
+        $complianceMonitoringContext = preg_match(
+            '/\bcompliance monitoring(?: system| assurance| training| program)?\b/iu',
+            $functionalTitle . ' ' . $text
+        ) === 1;
+        $smsOccurrenceContext = preg_match(
+            '/\b(?:sms|safety management system|occurrence|safety manager|reportability|ecca?irs|e-or|internal safety investigation|corrective action)\b/iu',
+            $functionalTitle . ' ' . $text
+        ) === 1;
+        $targetIsSmsOccurrence = preg_match(
+            '/\b(?:sms|occurrence|reportability|ecca?irs|investigation|corrective action|controlled closure)\b/iu',
+            $targetText
+        ) === 1;
+        if ($complianceMonitoringContext && $targetIsSmsOccurrence && !$smsOccurrenceContext) {
+            return false;
+        }
+        $functionalClassification = $this->classifySectionFunctions(array(
+            'section_title' => (string)($context['title'] ?? ''),
+            'current_manual' => $this->canonicalCurrentManual($context, array()),
+            'target_components' => $coveredComponents,
+            'coverage_decisions' => $coverageCells,
+            'preservation_boundaries' => array(),
+            'impact_dependencies' => array(),
+            'structure_nodes' => array(),
+        ));
+        $functions = array_merge(
+            array((string)($functionalClassification['primary_function'] ?? 'OTHER')),
+            array_map('strval', (array)($functionalClassification['secondary_functions'] ?? array()))
+        );
+        $coveredTypes = array_values(array_unique(array_map(
+            static fn(array $component): string => (string)($component['component_type'] ?? ''),
+            $coveredComponents
+        )));
+        if (in_array('RESPONSIBILITIES', $functions, true)
+            && array_intersect($coveredTypes, array('role', 'responsibility', 'human_decision', 'approval', 'lifecycle')) !== array()
+            && preg_match('/\b(?:duties|responsibilit\w*|focal point|accountab\w*|safety manager)\b/iu', $text) === 1) {
+            return true;
+        }
+        if (in_array('MONITORING_ASSURANCE', $functions, true)
+            && in_array('monitoring', $coveredTypes, true)
+            && preg_match('/\b(?:safety performance|monitor\w*|measurement|indicator\w*|effectiveness|review)\b/iu', $text) === 1) {
+            return true;
+        }
         $demonstratedFunctions = array(
             preg_match('/\b(?:responsible for|duties|focal point|administer\w*|approv\w*|authoriz\w*|assign\w*)\b/iu', $text) === 1
                 && preg_match('/\b(?:role|human decision|approval|safety manager|action owner)\b/iu', $targetText) === 1,
@@ -3806,7 +4225,7 @@ final class BooksManualsChangeArchitectService
                 && preg_match('/\b(?:record evidence|retained evidence|submission evidence|closure authorization)\w*\b/iu', $targetText) === 1,
             preg_match('/\b(?:submit\w*.{0,60}\boccurrence|reportability|authority deadline|ecca?irs|investigat\w*|corrective action|controlled closure)\b/iu', $text) === 1
                 && preg_match('/\b(?:occurrence|reportability|ecca?irs|investigation|corrective|closure)\w*\b/iu', $targetText) === 1,
-            preg_match('/\b(?:monitor\w*.{0,60}\b(?:trend|occurrence|action)|overdue action|performance indicator|review meeting|escalat)\w*\b/iu', $text) === 1
+            preg_match('/\b(?:safety performance|performance monitoring|performance measurement|monitor\w*.{0,60}\b(?:trend|occurrence|action)|overdue action|performance indicator|safety performance objective|safety performance indicator|sms maturity|review meeting|escalat)\w*\b/iu', $text) === 1
                 && preg_match('/\b(?:monitoring|reconciliation|overdue|performance|escalation)\w*\b/iu', $targetText) === 1,
             preg_match('/\b(?:training|trained|course|competence|induction|recurrent)\w*\b/iu', $text) === 1
                 && preg_match('/\b(?:training|competence|operational enablement)\w*\b/iu', $targetText) === 1,
