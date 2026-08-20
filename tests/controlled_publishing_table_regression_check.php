@@ -121,12 +121,20 @@ $mediaPayload['rows'] = array(array(
         . '<img src="https://evil.example/track.png" alt="Unsafe"></span>',
 ));
 $mediaPayload['row_colspans'] = array(array(1, 1));
+$mediaPayload['header_borders'] = array(
+    array(
+        'bottom' => array('style' => 'dashed', 'width' => 2, 'color' => '#123456'),
+    ),
+    array(),
+);
 $mediaPayload['cell_borders'] = array(array(
     array(
         'top' => array('style' => 'dashed', 'width' => 2, 'color' => '#123456'),
         'right' => array('style' => 'none', 'width' => 4, 'color' => '#ffffff'),
     ),
-    array(),
+    array(
+        'left' => array('style' => 'none', 'width' => 4, 'color' => '#ffffff'),
+    ),
 ));
 $mediaHtml = $renderer->renderBlock(
     array(
@@ -149,8 +157,10 @@ if (!str_contains($mediaHtml, 'class="cpb-table-cell-image"')
 if (str_contains($mediaHtml, 'evil.example') || str_contains($mediaHtml, 'onerror')) {
     $failures[] = 'Unsafe table-cell image markup was not rejected.';
 }
-if (!str_contains($mediaHtml, 'border-top:2px dashed #123456')
+if (!str_contains($mediaHtml, 'border-bottom:2px dashed #123456')
+    || str_contains($mediaHtml, 'border-top:2px dashed #123456')
     || !str_contains($mediaHtml, 'border-right:none')
+    || str_contains($mediaHtml, 'border-left:none')
     || !str_contains($mediaHtml, 'data-cell-borders=')) {
     $failures[] = 'Individual table-cell borders were not rendered.';
 }

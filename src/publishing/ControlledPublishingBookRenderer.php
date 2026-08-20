@@ -1868,7 +1868,11 @@ final class ControlledPublishingBookRenderer
                     $headerBold,
                     $headerItalic,
                     $headerUnderline,
-                    $headerBorders[$headerIndex] ?? array()
+                    $headerBorders[$headerIndex] ?? array(),
+                    array_merge(
+                        $colIndex > 0 ? array('left') : array(),
+                        $hasTitleRow ? array('top') : array()
+                    )
                 )
                     . ' data-col-index="' . $colIndex . '">';
                 $html .= '<span class="cpb-th-text">' . $this->renderTableCellInner((string)$header, $edit, $rows) . '</span>';
@@ -1934,7 +1938,13 @@ final class ControlledPublishingBookRenderer
                     $cellBold,
                     $cellItalic,
                     $cellUnderline,
-                    $cellBorders[$rowIndex][$cellPos] ?? array()
+                    $cellBorders[$rowIndex][$cellPos] ?? array(),
+                    array_merge(
+                        $cellIndex > 0 ? array('left') : array(),
+                        ($rowIndex > 0 || $hasHeaderRow || $hasTitleRow)
+                            ? array('top')
+                            : array()
+                    )
                 )
                     . $formulaAttr . '>'
                     . $this->renderTableCellInner($rawCell, $edit, $rows) . '</td>';
@@ -2327,7 +2337,8 @@ final class ControlledPublishingBookRenderer
         ?bool $fontBold = null,
         ?bool $fontItalic = null,
         ?bool $fontUnderline = null,
-        array $borders = array()
+        array $borders = array(),
+        array $suppressedBorderSides = array()
     ): string {
         $styles = array();
         $attrs = array();
@@ -2373,6 +2384,9 @@ final class ControlledPublishingBookRenderer
             foreach (array('top', 'right', 'bottom', 'left') as $side) {
                 $spec = $borders[$side] ?? null;
                 if (!is_array($spec)) {
+                    continue;
+                }
+                if (in_array($side, $suppressedBorderSides, true)) {
                     continue;
                 }
                 if ((string)($spec['style'] ?? '') === 'none') {

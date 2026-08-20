@@ -113,6 +113,8 @@ try {
     return {
       leftRight: window.extractCellBorders(left).right,
       rightLeft: window.extractCellBorders(right).left,
+      leftRightStyle: left.style.borderRightStyle,
+      rightLeftStyle: right.style.borderLeftStyle,
       figureWidth: figure.style.width,
       figureHeight: figure.style.getPropertyValue('--cpb-table-cell-image-height'),
       ratioLocked: figure.dataset.lockRatio,
@@ -127,6 +129,9 @@ try {
 
   if (result.leftRight?.style !== 'none' || result.rightLeft?.style !== 'none') {
     throw new Error('Adjacent cell boundary was not synchronized.');
+  }
+  if (result.leftRightStyle !== 'none' || result.rightLeftStyle !== '') {
+    throw new Error(`A synchronized shared boundary was rendered more than once: ${JSON.stringify(result)}`);
   }
   if (result.figureWidth !== '61%'
       || result.figureHeight !== '120px'

@@ -4405,6 +4405,7 @@
 
   function setCellBorderSide(cell, side, spec, synchronize) {
     if (!cell || !oppositeBorderSide(side)) return;
+    var neighbors = adjacentTableCells(cell, side);
     var borders = extractCellBorders(cell);
     borders[side] = {
       style: spec.style,
@@ -4412,7 +4413,10 @@
       color: spec.color,
     };
     cell.setAttribute('data-cell-borders', JSON.stringify(borders));
-    if (spec.style === 'none') {
+    var neighborOwnsBoundary = (side === 'left' || side === 'top') && neighbors.length > 0;
+    if (neighborOwnsBoundary) {
+      cell.style.removeProperty('border-' + side);
+    } else if (spec.style === 'none') {
       cell.style.setProperty('border-' + side, 'none');
     } else {
       cell.style.setProperty(
@@ -4421,7 +4425,7 @@
       );
     }
     if (synchronize !== false) {
-      adjacentTableCells(cell, side).forEach(function (neighbor) {
+      neighbors.forEach(function (neighbor) {
         setCellBorderSide(neighbor, oppositeBorderSide(side), spec, false);
       });
     }
