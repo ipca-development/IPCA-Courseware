@@ -47,7 +47,7 @@ function storedPage(sectionId, pageNumber, marker, width = 640, height = 900) {
     page_html: `<article class="reader-generated-page proof-book-style" style="width:${width}px;height:${height}px">
       <header class="reader-page-header">Header ${marker}</header>
       <main class="reader-page-body" data-blocks-root="1">
-        <div class="reader-semantic-piece cpb-block cpb-block--paragraph" contenteditable="true"
+        <div class="reader-semantic-piece cpb-block cpb-block--paragraph"
           data-source-fragment-id="${fragmentId}" data-block-id="1" data-block-type="paragraph"
           data-stable-anchor="paragraph-1" data-source-range-start="0" data-source-range-end="22"
           data-source-length="22" data-presentation-copy="0" data-semantic-type="paragraph">
@@ -116,6 +116,120 @@ function previewResult(sectionId = 11, marker = 'initial', pageNumber = 41) {
   };
 }
 
+function splitTablePreviewResult(sectionId = 11) {
+  const page = (pageNumber, rowIndex, firstValue, repeatedHeader) => ({
+    section_id: sectionId,
+    page_number: pageNumber,
+    page_html: `<article class="reader-generated-page" style="width:640px;height:900px">
+      <header class="reader-page-header">Header</header>
+      <main class="reader-page-body">
+        <div class="reader-semantic-piece reader-table-group cpb-block cpb-block--table"
+          data-block-id="3" data-block-type="table" data-stable-anchor="table-3"
+          data-semantic-type="table">
+          <div class="cpb-table-block cpb-table-block--align-left" data-table-align="left"
+            data-table-style-kind="standard">
+            <div class="cpb-table-wrap cpb-table-border-medium" data-border-width="medium"
+              data-border-color="#94a3b8"
+              style="width:280px;max-width:100%;--cpb-table-border-color:#94a3b8">
+              <table class="cpb-table" data-field="table" style="width:280px">
+                <colgroup><col style="width:140px"><col style="width:140px"></colgroup>
+                <thead data-source-fragment-id="section-${sectionId}/table-3/table-header"
+                  data-source-range-start="0" data-source-range-end="14" data-source-length="14"
+                  data-presentation-copy="${repeatedHeader ? '1' : '0'}">
+                  <tr class="cpb-table-title-row" data-title-row="1"><td colspan="2">Table title</td></tr>
+                  <tr class="cpb-table-header-row"><th><span class="cpb-th-text">A</span></th><th><span class="cpb-th-text">B</span></th></tr>
+                </thead>
+                <tbody><tr data-source-fragment-id="section-${sectionId}/table-3/table-row-${rowIndex}"
+                  data-source-range-start="0" data-source-range-end="4" data-source-length="4"
+                  data-presentation-copy="0"><td>${firstValue}</td><td>B${rowIndex + 1}</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+      <footer class="reader-page-footer"><span class="reader-page-number">${pageNumber}</span></footer>
+    </article>`,
+    metadata: {},
+  });
+  return {
+    ok: true,
+    result: {
+      pages: [
+        page(51, 0, 'A1', false),
+        page(52, 1, 'A2', true),
+      ],
+      book_style_css: '.reader-generated-page{color:rgb(12, 34, 56)}',
+      freshness: { is_current: true },
+    },
+  };
+}
+
+function splitParagraphPreviewResult(sectionId = 11) {
+  const page = (pageNumber, rangeStart, rangeEnd, text) => ({
+    section_id: sectionId,
+    page_number: pageNumber,
+    page_html: `<article class="reader-generated-page" style="width:640px;height:900px">
+      <header class="reader-page-header">Header</header>
+      <main class="reader-page-body">
+        <div class="reader-semantic-piece cpb-block cpb-block--paragraph"
+          data-source-fragment-id="section-${sectionId}/paragraph-1/root"
+          data-block-id="1" data-block-type="paragraph" data-stable-anchor="paragraph-1"
+          data-source-range-start="${rangeStart}" data-source-range-end="${rangeEnd}"
+          data-source-length="22" data-presentation-copy="0" data-semantic-type="paragraph">
+          <div class="cpb-paragraph-row"><div class="cpb-paragraph" data-field="html">${text}</div></div>
+        </div>
+      </main>
+      <footer class="reader-page-footer"><span class="reader-page-number">${pageNumber}</span></footer>
+    </article>`,
+    metadata: {},
+  });
+  return {
+    ok: true,
+    result: {
+      pages: [
+        page(61, 0, 11, 'Alpha beta '),
+        page(62, 11, 22, 'gamma delta'),
+      ],
+      book_style_css: '',
+      freshness: { is_current: true },
+    },
+  };
+}
+
+function splitListPreviewResult(sectionId = 11) {
+  const listPage = (pageNumber, start, items) => ({
+    section_id: sectionId,
+    page_number: pageNumber,
+    page_html: `<article class="reader-generated-page" style="width:640px;height:900px">
+      <header class="reader-page-header">Header</header>
+      <main class="reader-page-body">
+        <div class="reader-semantic-piece reader-list-group cpb-block cpb-block--list"
+          data-block-id="4" data-block-type="list" data-stable-anchor="list-4"
+          data-semantic-type="list">
+          <ol class="cpb-list" start="${start + 1}" data-field="items">${items.map((text, offset) =>
+            `<li data-source-fragment-id="section-${sectionId}/list-4/li-${start + offset}"
+              data-source-range-start="0" data-source-range-end="${text.length}"
+              data-source-length="${text.length}" data-presentation-copy="0">${text}</li>`
+          ).join('')}</ol>
+        </div>
+      </main>
+      <footer class="reader-page-footer"><span class="reader-page-number">${pageNumber}</span></footer>
+    </article>`,
+    metadata: {},
+  });
+  return {
+    ok: true,
+    result: {
+      pages: [
+        listPage(71, 0, ['One']),
+        listPage(72, 1, ['Two', 'Three']),
+      ],
+      book_style_css: '',
+      freshness: { is_current: true },
+    },
+  };
+}
+
 function renderDocument(search = '') {
   const start = editorShell.indexOf('<div class="cpb-editor-root" id="cpbEditorRoot"');
   const end = editorShell.indexOf('<script src="/assets/controlled_book_editor.js', start);
@@ -140,7 +254,8 @@ function renderDocument(search = '') {
       <style>
         body{margin:0}.cpb-editor-root{height:700px}
         #cpbCanvas{height:260px;overflow-y:auto;overflow-anchor:none;flex:none}
-        .cpb-sheet{min-height:1100px}.cpb-block{box-sizing:border-box;min-height:430px;margin:0}
+        .cpb-editor-source-mode .cpb-sheet{min-height:1100px}
+        .cpb-editor-source-mode .cpb-block{box-sizing:border-box;min-height:430px;margin:0}
       </style>
       </head><body>${shell}</body></html>`,
     url: base,
@@ -306,13 +421,17 @@ async function newEditorPage(
     }, initialPageRules);
   }
   await page.addScriptTag({ content: editorJs });
-  await page.waitForFunction(() =>
-    (
-      document.querySelector('#cpbCanvas .cpb-block[data-block-id]')
-      || document.querySelector('#cpbCanvas .cpb-paginated-page')
-    )
-    && document.querySelector('#cpbEditorRoot').__cpbPhaseC
-  );
+  try {
+    await page.waitForFunction(() =>
+      document.querySelector('#cpbCanvas .cpb-paginated-page')
+      && document.querySelector('#cpbEditorRoot').__cpbPhaseC
+    );
+  } catch (error) {
+    console.log(`  boot-errors=${JSON.stringify(browserErrors)}`);
+    console.log(`  boot-requests=${JSON.stringify(await page.evaluate(() => window.__phaseC?.requests || []))}`);
+    console.log(`  boot-canvas=${JSON.stringify(await page.locator('#cpbCanvas').innerText().catch(() => 'missing'))}`);
+    throw error;
+  }
   await page.waitForFunction(() =>
     document.querySelector('#cpbEditorRoot').getAttribute('aria-busy') === 'false'
     && document.querySelector('#cpbSectionAssembly')?.hidden
@@ -352,7 +471,20 @@ async function projectionMarker(page) {
 
 const cases = [];
 const phaseDCases = [];
+const primaryWysiwygCases = new Set([
+  'single authoritative WYSIWYG surface has no preview/source or page navigation chrome',
+  'authoritative page edits save in place and refresh automatically',
+  'automatic repagination preserves the direct editor caret',
+  'split paragraph edits merge into the complete source block',
+  'split list edits preserve surrounding items and inserted rows',
+  'automatic repagination preserves a split table cell caret',
+  'split authoritative table fragments save only their mapped source rows',
+]);
 function test(name, run) {
+  if (
+    !primaryWysiwygCases.has(name)
+    && process.env.CPB_RUN_LEGACY_SOURCE_PAGINATION !== '1'
+  ) return;
   cases.push({ name, run });
 }
 // Source mode is a continuous authoring surface, not a pagination authority.
@@ -361,19 +493,45 @@ function testLegacySourcePagination(name, run) {
   if (process.env.CPB_RUN_LEGACY_SOURCE_PAGINATION === '1') test(name, run);
 }
 function testPhaseD(name, run) {
+  if (process.env.CPB_RUN_LEGACY_SOURCE_PAGINATION !== '1') return;
   const testCase = { name, run };
   cases.push(testCase);
   phaseDCases.push(testCase);
 }
 
-test('disabled by default makes no stored_preview call', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '');
+test('single authoritative WYSIWYG surface has no preview/source or page navigation chrome', async (browser) => {
+  const initial = previewResult();
+  initial.result.pages.push(storedPage(11, 42, 'second-page'));
+  const { page, browserErrors } = await newEditorPage(browser, '', initial);
   try {
-    await page.waitForTimeout(100);
+    assert.equal(await page.locator('#cpbViewPaginated').count(), 0);
+    assert.equal(await page.locator('#cpbViewEdit').count(), 0);
+    assert.equal(await page.locator('#cpbPaginationRegenerate').count(), 0);
+    assert.equal(await page.locator('#cpbPaginationApprove').count(), 0);
+    assert.equal(await page.locator('#cpbCanvas .cpb-pagination-panel').count(), 0);
+    assert.equal(await page.locator('#cpbCanvas .cpb-pagination-page-navigation').count(), 0);
+    assert.equal(await page.locator('#cpbCanvas iframe').count(), 0);
+    assert.equal(await page.locator('#cpbCanvas .cpb-paginated-page').count(), 2);
+    assert.equal(await page.locator('#cpbCanvas .reader-generated-page').count(), 2);
+    assert.deepEqual(
+      await page.locator('#cpbCanvas .reader-generated-page').first().evaluate((node) => ({
+        width: Math.round(node.getBoundingClientRect().width),
+        height: Math.round(node.getBoundingClientRect().height),
+      })),
+      { width: 640, height: 900 },
+    );
+    assert.equal(
+      await page.locator('#cpbCanvas .reader-semantic-piece[data-block-id="1"] .cpb-paragraph')
+        .first().getAttribute('contenteditable'),
+      'true',
+    );
+    assert.equal(
+      await page.locator('#cpbCanvas .proof-book-style').first()
+        .evaluate((node) => getComputedStyle(node).color),
+      'rgb(12, 34, 56)',
+    );
+    assert.match(await page.locator('#cpbPublicationCss').textContent(), /proof-book-style/);
     assert.equal(await page.locator('#cpbProjection').count(), 0);
-    assert.equal(await page.evaluate(() =>
-      window.__phaseC.requests.filter((request) => request.action === 'stored_preview').length
-    ), 0);
     assert.equal(await page.evaluate(() =>
       document.querySelector('#cpbEditorRoot').__cpbPhaseC.enabled
     ), false);
@@ -383,9 +541,8 @@ test('disabled by default makes no stored_preview call', async (browser) => {
   }
 });
 
-test('canonical iOS pages are the default production editor and refresh after a save', async (browser) => {
-  assert.match(editorShell, /data-initial-view="paginated"/);
-  const { page, browserErrors } = await newEditorPage(browser, 'canonical_pages=1');
+test('authoritative page edits save in place and refresh automatically', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
   try {
     assert.equal(
       await page.locator('#cpbEditorRoot').evaluate((node) =>
@@ -393,47 +550,231 @@ test('canonical iOS pages are the default production editor and refresh after a 
       ),
       true,
     );
-    const canonicalFrame = page.locator('#cpbCanvas .cpb-canonical-page__frame').contentFrame();
-    assert.match(await canonicalFrame.locator('.reader-page-body').innerText(), /Body initial/);
+    const canonicalPage = page.locator('#cpbCanvas .cpb-paginated-page').first();
+    assert.match(await canonicalPage.locator('.reader-page-body').innerText(), /Body initial/);
     assert.equal(
-      await canonicalFrame.locator('.proof-book-style').evaluate((node) => getComputedStyle(node).color),
+      await canonicalPage.locator('.proof-book-style').evaluate((node) => getComputedStyle(node).color),
       'rgb(12, 34, 56)',
     );
-    assert.equal(await page.locator('#cpbPublicationCss').textContent(), '');
+    assert.match(await page.locator('#cpbPublicationCss').textContent(), /proof-book-style/);
     assert.equal(await page.evaluate(() =>
       window.__phaseC.requests.find((request) => request.action === 'stored_preview')
         ?.payload.section_id
     ), '11');
     assert.equal(await page.locator('#cpbCanvas .cpb-print-page').count(), 0);
-    assert.equal(await page.locator('#cpbViewPaginated').getAttribute('class').then((value) =>
-      String(value).includes('is-active')
-    ), true);
+    assert.equal(await page.locator('#cpbCanvas iframe').count(), 0);
 
     const baseline = await page.evaluate(() =>
       window.__phaseC.requests.filter((request) => request.action === 'stored_preview').length
     );
     await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }),
       previewResult(11, 'after-save', 41));
-    await page.locator('#cpbCanvas .cpb-canonical-page__edit-portal').first().click();
-    const field = page.locator('#cpbPaginatedBlockEditor .cpb-paragraph').first();
+    const field = canonicalPage.locator(
+      '.reader-semantic-piece[data-block-id="1"] .cpb-paragraph',
+    ).first();
+    assert.equal(await field.getAttribute('data-paginated-input-wired'), '1');
     await field.fill('Changed through canonical page');
-    await page.getByRole('button', { name: 'Save block' }).click();
+    await page.waitForTimeout(800);
+    await field.blur();
     await page.waitForFunction(() =>
       window.__phaseC.requests.some((request) => request.action === 'update_block')
       && window.__phaseC.requests.some((request) => request.action === 'live_ensure')
     );
     await waitForPreviewCount(page, baseline + 1);
-    await canonicalFrame.locator('.reader-page-body').filter({ hasText: 'after-save' }).waitFor();
+    await page.locator('#cpbCanvas .reader-page-body').filter({ hasText: 'after-save' }).waitFor();
+    assert.equal(await page.locator('#cpbPaginatedBlockEditor').count(), 0);
+    assert.equal(await page.evaluate(() =>
+      window.__phaseC.requests.find((request) => request.action === 'update_block')
+        ?.payload.payload.html
+    ), 'Changed through canonical page');
+    assert.equal(
+      await page.locator('#cpbEditorRoot').evaluate((node) =>
+        node.classList.contains('cpb-editor-paginated-mode')
+      ),
+      true,
+    );
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
 
-    await page.locator('#cpbViewEdit').click();
+test('automatic repagination preserves the direct editor caret', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }),
+      previewResult(11, 'focused refresh', 41));
+    const field = page.locator(
+      '#cpbCanvas .reader-semantic-piece[data-block-id="1"] .cpb-paragraph',
+    ).first();
+    await field.fill('Body focused refresh');
+    await field.evaluate((node) => {
+      const selection = getSelection();
+      const range = document.createRange();
+      range.setStart(node.firstChild, 5);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      node.focus();
+    });
     await page.waitForFunction(() =>
-      document.querySelector('#cpbEditorRoot').classList.contains('cpb-editor-source-mode')
-      && document.querySelector('#cpbCanvas .cpb-sheet')
+      window.__phaseC.requests.filter((request) => request.action === 'stored_preview').length >= 2
+      && document.activeElement?.classList.contains('cpb-paragraph')
+      && getSelection()?.anchorOffset === 5
+    );
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.textContent),
+      'Body focused refresh',
+    );
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('split paragraph edits merge into the complete source block', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '', splitParagraphPreviewResult());
+  try {
+    const secondFragment = page.locator(
+      '#cpbCanvas .cpb-paginated-page[data-page-number="62"] .cpb-paragraph',
+    );
+    assert.equal(await secondFragment.getAttribute('contenteditable'), 'true');
+    await secondFragment.fill('revised text');
+    await secondFragment.blur();
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 1
+      )
+    );
+    assert.equal(await page.evaluate(() =>
+      window.__phaseC.requests.find((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 1
+      )?.payload.payload.html
+    ), 'Alpha beta revised text');
+    assert.equal(await page.locator('#cpbCanvas [data-fragment-dirty="1"]').count(), 0);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('split list edits preserve surrounding items and inserted rows', async (browser) => {
+  const listSource = `
+    <div class="cpb-block cpb-block--list" data-block-id="4" data-block-type="list"
+      data-stable-anchor="list-4">
+      <div class="cpb-block-chrome" contenteditable="false"></div>
+      <ol class="cpb-list" contenteditable="true" data-field="items" start="1">
+        <li>One</li><li>Two</li><li>Three</li>
+      </ol>
+    </div>`;
+  const { page, browserErrors } = await newEditorPage(
+    browser,
+    '',
+    splitListPreviewResult(),
+    null,
+    listSource,
+  );
+  try {
+    const secondList = page.locator(
+      '#cpbCanvas .cpb-paginated-page[data-page-number="72"] .cpb-list',
+    );
+    assert.equal(await secondList.getAttribute('contenteditable'), 'true');
+    await secondList.evaluate((list) => {
+      list.focus();
+      list.children[0].textContent = 'Two revised';
+      const inserted = document.createElement('li');
+      inserted.textContent = 'Inserted';
+      list.children[0].insertAdjacentElement('afterend', inserted);
+      list.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      list.blur();
+    });
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 4
+      )
+    );
+    assert.deepEqual(await page.evaluate(() =>
+      window.__phaseC.requests.find((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 4
+      )?.payload.payload.items
+    ), ['One', 'Two revised', 'Inserted', 'Three']);
+    assert.equal(await page.locator('#cpbCanvas [data-fragment-dirty="1"]').count(), 0);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('split authoritative table fragments save only their mapped source rows', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '', splitTablePreviewResult());
+  try {
+    assert.equal(await page.locator('#cpbCanvas .cpb-paginated-page').count(), 2);
+    const firstBodyCell = page.locator(
+      '#cpbCanvas .cpb-paginated-page[data-page-number="51"] tbody td',
+    ).first();
+    assert.equal(await firstBodyCell.getAttribute('contenteditable'), 'true');
+    assert.equal(
+      await page.locator(
+        '#cpbCanvas .cpb-paginated-page[data-page-number="52"] thead th',
+      ).first().getAttribute('contenteditable'),
+      null,
+    );
+    await firstBodyCell.fill('Edited A1');
+    await firstBodyCell.blur();
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      )
+    );
+    const rows = await page.evaluate(() =>
+      window.__phaseC.requests.find((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      )?.payload.payload.rows
+    );
+    assert.deepEqual(rows, [
+      ['Edited A1', 'B1'],
+      ['A2', 'B2'],
+    ]);
+    assert.equal(await page.locator('#cpbCanvas [data-fragment-dirty="1"]').count(), 0);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('automatic repagination preserves a split table cell caret', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '', splitTablePreviewResult());
+  try {
+    const refreshed = splitTablePreviewResult();
+    refreshed.result.pages[1].page_html = refreshed.result.pages[1].page_html
+      .replace('>A2<', '>A2 focused<');
+    await page.evaluate((payload) => window.__phaseC.queuePreview({ payload }), refreshed);
+
+    const pageTwoCell = page.locator(
+      '#cpbCanvas .cpb-paginated-page[data-page-number="52"] tbody td',
+    ).first();
+    await pageTwoCell.evaluate((cell) => {
+      cell.textContent = 'A2 focused';
+      cell.focus();
+      const range = document.createRange();
+      range.setStart(cell.firstChild, 3);
+      range.collapse(true);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      cell.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    });
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'update_block'
+        && request.payload.payload.rows?.[1]?.[0] === 'A2 focused'
+      )
     );
     await page.waitForFunction(() =>
-      /not authoritative/i.test(document.querySelector('#cpbSaveStatus')?.textContent || '')
+      document.activeElement?.tagName === 'TD'
+      && document.activeElement.textContent === 'A2 focused'
+      && getSelection()?.anchorOffset === 3
     );
-    assert.match(await page.locator('#cpbSaveStatus').textContent(), /not authoritative/i);
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

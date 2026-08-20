@@ -118,7 +118,6 @@ compliance_page_open(array(
 <div class="cpb-editor-root" id="cpbEditorRoot"
      data-version-id="<?= (int)$versionId ?>"
      data-section-id="<?= (int)$sectionId ?>"
-     data-initial-view="paginated"
      data-csrf-token="<?= h($editorCsrfToken) ?>"
      data-annex-book="<?= $isAnnexBook ? '1' : '0' ?>">
   <div class="cpb-editor-shell">
@@ -348,20 +347,6 @@ compliance_page_open(array(
         <div class="cpb-toolbar-lep" id="cpbToolbarLep" hidden aria-hidden="true"></div>
         <div class="cpb-toolbar-part0" id="cpbToolbarPart0" hidden aria-hidden="true"></div>
         <div class="cpb-toolbar-shared" id="cpbToolbarShared">
-        <div class="cpb-toolbar-group cpb-toolbar-group--view" aria-label="Editor view">
-          <button type="button" class="cpb-tool-btn is-active" id="cpbViewPaginated"
-                  title="Exact pages used by the iOS reader">Page (iOS)</button>
-          <button type="button" class="cpb-tool-btn" id="cpbViewEdit"
-                  title="Continuous source editing view; not page-accurate">Source</button>
-        </div>
-        <div class="cpb-toolbar-group" id="cpbPaginationTools" hidden>
-          <button type="button" class="cpb-tool-btn" id="cpbPaginationRegenerate"
-                  title="Regenerate the authoritative page map">Regenerate pages</button>
-          <?php if (!$isAnnexBook): ?>
-          <button type="button" class="cpb-tool-btn" id="cpbPaginationApprove"
-                  title="Approve the current authoritative page map">Approve pages</button>
-          <?php endif; ?>
-        </div>
         <span class="cpb-pagination-status" id="cpbPaginationStatus" hidden></span>
         <div class="cpb-toolbar-group">
           <button type="button" class="cpb-tool-btn" id="cpbZoomOut" title="Zoom out">−</button>

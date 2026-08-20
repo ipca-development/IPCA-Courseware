@@ -15,6 +15,14 @@ foreach ($protected as $relative => $hash) {
 }
 
 $contracts = array(
+    'docs/architecture/authoritative-manual-pagination.md' => array(
+        'single-surface authoring',
+        'stored `page_html`',
+        '`data-source-fragment-id`',
+        'range-aware save',
+        'presentation copies remain read-only',
+        'automatically queue `live_ensure`',
+    ),
     'src/publishing/ControlledPublishingAuthoritativePaginationService.php' => array(
         'live-authoritative-flow-v2',
         'MANUAL_BREAK_REQUIRED',
@@ -66,14 +74,15 @@ $contracts = array(
         'state.authoritativeEditorPageStarts = []',
         'observeCanonicalPageState',
         "root.addEventListener('cpb:live-pagination-state', observeCanonicalPageState)",
-        "mode === 'paginated'",
+        "viewMode: 'paginated'",
+        'enforceAuthoritativeEditorSurface',
+        'var pages = sectionPages;',
+        "content.innerHTML = page.page_html || '';",
+        'wirePaginatedFields();',
+        'hasUnsavedCanonicalEdits',
     ),
     'public/admin/compliance/controlled_book_editor.php' => array(
-        'data-initial-view="paginated"',
-        'id="cpbViewPaginated"',
-        'Page (iOS)',
-        'id="cpbViewEdit"',
-        'id="cpbPaginationRegenerate"',
+        'id="cpbEditorRoot"',
     ),
     'src/publishing/ControlledPublishingPaginationService.php' => array(
         'htmlHasPaginableContent',
@@ -243,6 +252,50 @@ foreach ($contracts as $relative => $markers) {
         if (!str_contains($contents, $marker)) {
             $failures[] = "Missing marker '{$marker}' in {$relative}";
         }
+    }
+}
+
+$editorShell = (string)@file_get_contents(
+    $root . '/public/admin/compliance/controlled_book_editor.php'
+);
+foreach (array(
+    'id="cpbViewPaginated"',
+    'id="cpbViewEdit"',
+    'id="cpbPaginationRegenerate"',
+    'id="cpbPaginationApprove"',
+    'Page (iOS)',
+    'data-initial-view=',
+) as $forbiddenControl) {
+    if (str_contains($editorShell, $forbiddenControl)) {
+        $failures[] = "Editor still exposes preview/source workflow control: {$forbiddenControl}";
+    }
+}
+
+$editorJs = (string)@file_get_contents($root . '/public/assets/controlled_book_editor.js');
+foreach (array(
+    'canvasEl.appendChild(paginationBreakControl())',
+    'canvasEl.appendChild(paginationPageNavigation(',
+    'function paginationBreakControl(',
+    'function paginationPageNavigation(',
+    'appendCanonicalPageEditPortals',
+    'cpbPaginatedBlockEditor',
+    'function setViewMode(',
+) as $forbiddenChrome) {
+    if (str_contains($editorJs, $forbiddenChrome)) {
+        $failures[] = "Authoritative editor still renders non-document page chrome: {$forbiddenChrome}";
+    }
+}
+
+$architectureDoc = (string)@file_get_contents(
+    $root . '/docs/architecture/authoritative-manual-pagination.md'
+);
+foreach (array(
+    'projected iframe remains sandboxed, non-editable',
+    'edit the continuous source document',
+    'page furniture is explicitly labelled as an approximate editing layout',
+) as $obsoletePolicy) {
+    if (str_contains($architectureDoc, $obsoletePolicy)) {
+        $failures[] = "Architecture policy still describes the removed split editor: {$obsoletePolicy}";
     }
 }
 

@@ -10,9 +10,6 @@
   var csrfToken = root.getAttribute('data-csrf-token') || '';
   var documentType = root.getAttribute('data-document-type') || 'manual';
   var isAnnexBook = root.getAttribute('data-annex-book') === '1';
-  var initialViewMode = root.getAttribute('data-initial-view') === 'edit'
-    ? 'edit'
-    : 'paginated';
   var formSelectedBlockId = 0;
 
   var treeEl = document.getElementById('cpbSectionTree');
@@ -74,21 +71,13 @@
   var zoomLabelEl = document.getElementById('cpbZoomLabel');
   var indentBtn = document.getElementById('cpbIndent');
   var outdentBtn = document.getElementById('cpbOutdent');
-  var viewEditBtn = document.getElementById('cpbViewEdit');
-  var viewPaginatedBtn = document.getElementById('cpbViewPaginated');
-  var paginationToolsEl = document.getElementById('cpbPaginationTools');
-  var paginationRegenerateBtn = document.getElementById('cpbPaginationRegenerate');
-  var paginationApproveBtn = document.getElementById('cpbPaginationApprove');
   var pageBreakBtn = document.getElementById('cpbInsertPageBreak');
   var paginationStatusEl = document.getElementById('cpbPaginationStatus');
   var publicationCssEl = document.getElementById('cpbPublicationCss');
-  var liveProjectionEnabled = (
-    new URLSearchParams(window.location.search).get('live_projection') === '1'
-  ) && new URLSearchParams(window.location.search).get('continuous_editor') !== '1';
+  var liveProjectionEnabled = false;
   var liveProjectionEl = null;
   var liveProjectionPagesEl = null;
   var liveProjectionStatusEl = null;
-  var paginatedToolbarPlaceholder = null;
 
   var FONT_CLASSES = [
     'cpb-font-serif', 'cpb-font-sans', 'cpb-font-mono', 'cpb-font-arial',
@@ -208,17 +197,21 @@
     isAnnexCrossRefSection: false,
     crossRefAnnexSectionId: 0,
     tocSyncTimer: null,
-    viewMode: 'edit',
+    viewMode: 'paginated',
     paginatedResult: null,
     paginatedRequestSequence: 0,
     manualBreaks: [],
     paginationCandidates: [],
     paginationStale: false,
     canonicalRepairRequested: false,
-    paginationRegenerateTimer: null,
+    canonicalRefreshPending: false,
     pendingPaginatedAnchor: '',
+    pendingCreatedBlockId: 0,
+    surfaceBookmarks: null,
+    authoringChromeByBlockId: {},
+    authoringImageControlsByBlockId: {},
+    authoringEditableSpecialFields: {},
     lastPaginatedRange: null,
-    sectionPageIndex: 0,
     printLayoutTimer: null,
     printPageCount: 1,
     authoritativePageCount: 0,
@@ -572,6 +565,11 @@
 
   function applyPageHtmlFromResponse(pageHtml) {
     if (!pageHtml) return;
+    if (state.viewMode === 'paginated') {
+      captureAuthoringChrome(pageHtml);
+      markPaginationChanged();
+      return;
+    }
     blurCanvasEditing();
     var tmp = document.createElement('div');
     tmp.innerHTML = pageHtml;
@@ -1195,15 +1193,9 @@
 
   function openWizardChangeSection(sectionId) {
     return flushAllPendingSaves().then(function () {
-      if (state.viewMode === 'paginated') {
-        state.sectionId = sectionId;
-        state.sectionPageIndex = 0;
-        renderTree(state.sectionsTree, state.sectionId);
-        return loadPaginatedView().then(function () {
-          canvasEl.scrollTop = 0;
-        });
-      }
-      return loadSection(sectionId);
+      return loadSection(sectionId).then(function () {
+        canvasEl.scrollTop = 0;
+      });
     });
   }
 
@@ -2467,73 +2459,6 @@
     if (layer.childElementCount) frame.appendChild(layer);
   }
 
-  function appendCanonicalPageEditPortals(frame, page) {
-    if (!state.editable) return;
-    var metadata = page && page.metadata && typeof page.metadata === 'object'
-      ? page.metadata
-      : {};
-    var metrics = metadata.metrics && typeof metadata.metrics === 'object'
-      ? metadata.metrics
-      : {};
-    var contentFrame = metrics.content_frame && typeof metrics.content_frame === 'object'
-      ? metrics.content_frame
-      : null;
-    var measurements = Array.isArray(metrics.block_measurements)
-      ? metrics.block_measurements
-      : [];
-    if (!contentFrame || !measurements.length) return;
-    var bindings = projectionPieceBindings(page.page_html);
-    var coverage = Array.isArray(metadata.coverage) ? metadata.coverage : [];
-    var layer = document.createElement('div');
-    layer.className = 'cpb-live-projection__portals cpb-canonical-page__portals';
-    layer.setAttribute('aria-label', 'Editable authoritative page regions');
-    measurements.forEach(function (measurement) {
-      var fragmentId = String(measurement && measurement.source_fragment_id || '');
-      var binding = bindings[fragmentId];
-      var bounds = measurement && measurement.frame;
-      if (!binding || !binding.block_id || !bounds) return;
-      var covered = coverage.find(function (entry) {
-        return entry && String(entry.source_fragment_id || '') === fragmentId;
-      });
-      var sectionId = parseInt(
-        covered && covered.section_id || page.section_id || '0',
-        10
-      );
-      if (!sectionId) return;
-      var portal = document.createElement('button');
-      portal.type = 'button';
-      portal.className = 'cpb-live-projection__portal cpb-canonical-page__edit-portal';
-      portal.setAttribute('data-source-fragment-id', fragmentId);
-      portal.setAttribute('data-block-id', String(binding.block_id));
-      portal.setAttribute('data-stable-anchor', binding.stable_anchor);
-      portal.setAttribute('aria-label', 'Edit ' + (binding.block_type || 'content') + ' block');
-      portal.title = 'Edit source block';
-      portal.style.setProperty(
-        '--cpb-canonical-portal-left',
-        (Number(contentFrame.x || 0) + Number(bounds.x || 0)) + 'px'
-      );
-      portal.style.setProperty(
-        '--cpb-canonical-portal-top',
-        (Number(contentFrame.y || 0) + Number(bounds.y || 0)) + 'px'
-      );
-      portal.style.setProperty(
-        '--cpb-canonical-portal-width',
-        Math.max(0, Number(bounds.width || 0)) + 'px'
-      );
-      portal.style.setProperty(
-        '--cpb-canonical-portal-height',
-        Math.max(0, Number(bounds.height || 0)) + 'px'
-      );
-      portal.addEventListener('click', function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        openPaginatedBlockEditorById(binding.block_id, sectionId);
-      });
-      layer.appendChild(portal);
-    });
-    if (layer.childElementCount) frame.appendChild(layer);
-  }
-
   function renderLiveProjection(result, requestSequence, sectionId) {
     if (
       !state.liveProjection.enabled
@@ -2658,8 +2583,9 @@
     var detail = event && event.detail ? event.detail : {};
     var status = String(detail.status || '');
     if (status === 'current') {
-      setPaginationStatus('Authoritative pages updated.', false);
-      loadPaginatedView().catch(showError);
+      state.canonicalRefreshPending = true;
+      setPaginationStatus('Pages updated.', false);
+      loadPaginatedView(true).catch(showError);
       return;
     }
     if (status === 'pending' || status === 'generating' || status === 'stale') {
@@ -2674,35 +2600,54 @@
     }
   }
 
-  function updateViewModeControls() {
-    var paginated = state.viewMode === 'paginated';
-    root.classList.toggle('cpb-editor-paginated-mode', paginated);
-    root.classList.toggle('cpb-editor-source-mode', !paginated);
-    if (viewEditBtn) viewEditBtn.classList.toggle('is-active', !paginated);
-    if (viewPaginatedBtn) viewPaginatedBtn.classList.toggle('is-active', paginated);
-    if (paginationToolsEl) paginationToolsEl.hidden = !paginated;
-    if (paginationStatusEl) paginationStatusEl.hidden = !paginated;
-    if (addSubBtn) addSubBtn.style.display = paginated ? 'none' : addSubBtn.style.display;
+  function enforceAuthoritativeEditorSurface() {
+    root.classList.add('cpb-editor-paginated-mode');
+    root.classList.remove('cpb-editor-source-mode');
+    if (paginationStatusEl) paginationStatusEl.hidden = false;
+    if (addSubBtn) addSubBtn.style.display = 'none';
   }
 
   function paginatedEditableFields(blockEl) {
     var type = blockEl.getAttribute('data-block-type') || '';
     if (type === 'heading') return blockEl.querySelectorAll('.cpb-heading');
     if (type === 'paragraph') return blockEl.querySelectorAll('.cpb-paragraph');
+    if (type === 'list') {
+      return blockEl.querySelectorAll('.cpb-list,.cpb-list-continuation');
+    }
+    if (type === 'table') {
+      return Array.prototype.slice.call(blockEl.querySelectorAll('.cpb-table th,.cpb-table td'))
+        .filter(function (cell) {
+          var coverage = cell.closest('[data-presentation-copy]');
+          return !coverage || coverage.getAttribute('data-presentation-copy') !== '1';
+        });
+    }
     if (type === 'callout') return blockEl.querySelectorAll('.cpb-callout-title,.cpb-callout-text');
     if (type === 'image') return blockEl.querySelectorAll('figcaption');
     return [];
   }
 
+  function paginatedBlockPageCount(blockEl) {
+    var blockId = parseInt(blockEl && blockEl.getAttribute('data-block-id') || '0', 10);
+    if (!blockId || !state.paginatedResult || !Array.isArray(state.paginatedResult.pages)) return 0;
+    var needle = 'data-block-id="' + blockId + '"';
+    return state.paginatedResult.pages.reduce(function (count, page) {
+      return count + (String(page.page_html || '').indexOf(needle) >= 0 ? 1 : 0);
+    }, 0);
+  }
+
   function pieceIsWholeEditable(piece, blockEl) {
     if (!state.editable || !piece || !blockEl) return false;
     if (piece.getAttribute('data-presentation-copy') === '1') return false;
+    var blockType = blockEl.getAttribute('data-block-type') || '';
+    if (blockType === 'table' || blockType === 'list') {
+      return paginatedBlockPageCount(blockEl) <= 1;
+    }
     var sourceLength = parseInt(piece.getAttribute('data-source-length') || '0', 10);
     var rangeStart = parseInt(piece.getAttribute('data-source-range-start') || '0', 10);
     var rangeEnd = parseInt(piece.getAttribute('data-source-range-end') || '0', 10);
     if (sourceLength <= 0 || rangeStart !== 0 || rangeEnd < sourceLength) return false;
     return ['heading', 'paragraph', 'callout', 'image'].indexOf(
-      blockEl.getAttribute('data-block-type') || ''
+      blockType
     ) >= 0;
   }
 
@@ -2713,6 +2658,15 @@
     var rangeStart = parseInt(piece.getAttribute('data-source-range-start') || '0', 10);
     var rangeEnd = parseInt(piece.getAttribute('data-source-range-end') || '0', 10);
     return sourceLength > 0 && (rangeStart > 0 || rangeEnd < sourceLength);
+  }
+
+  function pieceIsFragmentedComposite(piece, blockEl) {
+    if (!state.editable || !piece || !blockEl) return false;
+    var blockType = blockEl.getAttribute('data-block-type') || '';
+    if (paginatedBlockPageCount(blockEl) <= 1) return false;
+    if (blockType === 'table') return true;
+    return blockType === 'list'
+      && !!blockEl.querySelector('.cpb-list > li[data-source-fragment-id]');
   }
 
   function textBoundary(rootEl, offset) {
@@ -2798,14 +2752,22 @@
     var piece = element && element.closest
       ? element.closest('[data-source-range-start][data-source-range-end]')
       : null;
+    var localOffset = textOffsetWithin(field, node, offset);
+    var rangeStart = piece
+      ? (parseInt(piece.getAttribute('data-source-range-start') || '0', 10) || 0)
+      : 0;
+    var blockType = block.getAttribute('data-block-type') || '';
     var location = {
       version_id: state.versionId,
       section_id: state.sectionId,
       block_id: parseInt(block.getAttribute('data-block-id') || '0', 10) || null,
       stable_anchor: block.getAttribute('data-stable-anchor') || '',
-      block_type: block.getAttribute('data-block-type') || '',
+      block_type: blockType,
       field: sourceFieldIdentity(field, block),
-      source_offset: textOffsetWithin(field, node, offset),
+      source_fragment_id: piece ? (piece.getAttribute('data-source-fragment-id') || '') : '',
+      source_offset: localOffset + (
+        piece && (blockType === 'paragraph' || blockType === 'list') ? rangeStart : 0
+      ),
     };
     if (piece) {
       location.source_range = {
@@ -2820,9 +2782,27 @@
     if (!location) return null;
     var block = null;
     if (location.stable_anchor) {
-      block = canvasEl.querySelector(
+      var anchored = Array.prototype.slice.call(canvasEl.querySelectorAll(
         '.cpb-block[data-stable-anchor="' + CSS.escape(location.stable_anchor) + '"]'
-      );
+      ));
+      block = anchored.find(function (candidate) {
+        if (location.source_fragment_id) {
+          var fragment = candidate.matches(
+            '[data-source-fragment-id="' + CSS.escape(location.source_fragment_id) + '"]'
+          ) ? candidate : candidate.querySelector(
+            '[data-source-fragment-id="' + CSS.escape(location.source_fragment_id) + '"]'
+          );
+          if (fragment && fragment.getAttribute('data-presentation-copy') !== '1') return true;
+          return false;
+        }
+        if (location.block_type !== 'paragraph' && location.block_type !== 'list') return true;
+        var piece = candidate.closest('[data-source-range-start][data-source-range-end]')
+          || candidate.querySelector('[data-source-range-start][data-source-range-end]');
+        if (!piece) return anchored.length === 1;
+        var start = parseInt(piece.getAttribute('data-source-range-start') || '0', 10) || 0;
+        var end = parseInt(piece.getAttribute('data-source-range-end') || '0', 10) || 0;
+        return location.source_offset >= start && location.source_offset <= end;
+      }) || anchored[0] || null;
     }
     if (!block && location.block_id) {
       block = canvasEl.querySelector(
@@ -2891,7 +2871,12 @@
         ),
       };
     }
-    var boundary = textBoundary(field, parseInt(location.source_offset || '0', 10));
+    var sourceOffset = parseInt(location.source_offset || '0', 10);
+    var piece = field.closest('[data-source-range-start][data-source-range-end]');
+    if (piece && (location.block_type === 'paragraph' || location.block_type === 'list')) {
+      sourceOffset -= parseInt(piece.getAttribute('data-source-range-start') || '0', 10) || 0;
+    }
+    var boundary = textBoundary(field, Math.max(0, sourceOffset));
     return { field: field, node: boundary.node, offset: boundary.offset };
   }
 
@@ -3032,6 +3017,7 @@
   function flushPaginatedParagraphFragment(blockEl, piece, field) {
     if (field.getAttribute('data-fragment-dirty') !== '1') return Promise.resolve();
     field.removeAttribute('data-fragment-dirty');
+    blockEl.removeAttribute('data-fragment-dirty');
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
     var page = piece.closest('.cpb-paginated-page');
     var sectionId = parseInt(page ? (page.getAttribute('data-section-id') || '0') : '0', 10);
@@ -3070,34 +3056,211 @@
     });
   }
 
+  function cleanPaginatedSourceClone(node) {
+    var clone = node.cloneNode(true);
+    [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*'))).forEach(function (element) {
+      [
+        'data-source-fragment-id',
+        'data-source-order',
+        'data-source-range-start',
+        'data-source-range-end',
+        'data-source-length',
+        'data-presentation-copy',
+        'data-semantic-type',
+        'data-input-wired',
+        'data-paginated-input-wired',
+        'contenteditable',
+      ].forEach(function (attribute) {
+        element.removeAttribute(attribute);
+      });
+    });
+    clone.querySelectorAll('.cpb-col-resize,[data-editor-only="1"]').forEach(function (element) {
+      element.remove();
+    });
+    return clone;
+  }
+
+  function copyPaginatedTableShell(canonicalBlock, sourceBlock) {
+    var canonicalTable = canonicalBlock.querySelector('.cpb-table');
+    var sourceTable = sourceBlock.querySelector('.cpb-table');
+    if (!canonicalTable || !sourceTable) return;
+    sourceTable.setAttribute('class', canonicalTable.getAttribute('class') || 'cpb-table');
+    sourceTable.setAttribute('style', canonicalTable.getAttribute('style') || '');
+    var canonicalCols = canonicalTable.querySelector('colgroup');
+    var sourceCols = sourceTable.querySelector('colgroup');
+    if (canonicalCols) {
+      var cleanCols = cleanPaginatedSourceClone(canonicalCols);
+      if (sourceCols) sourceCols.replaceWith(cleanCols);
+      else sourceTable.insertBefore(cleanCols, sourceTable.firstChild);
+    }
+    [
+      ['.cpb-table-wrap', ['class', 'style', 'data-border-width', 'data-border-color']],
+      ['.cpb-table-block', ['class', 'style', 'data-table-align', 'data-table-style-kind']],
+    ].forEach(function (entry) {
+      var canonical = canonicalBlock.querySelector(entry[0]);
+      var source = sourceBlock.querySelector(entry[0]);
+      if (!canonical || !source) return;
+      entry[1].forEach(function (attribute) {
+        if (canonical.hasAttribute(attribute)) {
+          source.setAttribute(attribute, canonical.getAttribute(attribute));
+        } else {
+          source.removeAttribute(attribute);
+        }
+      });
+    });
+  }
+
+  function mergePaginatedTableFragment(canonicalBlock, sourceBlock) {
+    var canonicalTable = canonicalBlock.querySelector('.cpb-table');
+    var sourceTable = sourceBlock.querySelector('.cpb-table');
+    if (!canonicalTable || !sourceTable) {
+      throw new Error('The table fragment cannot be mapped to its source table.');
+    }
+    copyPaginatedTableShell(canonicalBlock, sourceBlock);
+    var canonicalHead = canonicalTable.querySelector('thead[data-source-fragment-id]');
+    if (canonicalHead && canonicalHead.getAttribute('data-presentation-copy') !== '1') {
+      var sourceHead = sourceTable.querySelector('thead');
+      var cleanHead = cleanPaginatedSourceClone(canonicalHead);
+      if (sourceHead) sourceHead.replaceWith(cleanHead);
+      else sourceTable.insertBefore(cleanHead, sourceTable.querySelector('tbody'));
+    }
+    var sourceBody = sourceTable.querySelector('tbody[data-table-part="body"]')
+      || sourceTable.querySelector('tbody');
+    var sourceRows = sourceBody
+      ? Array.prototype.slice.call(sourceBody.querySelectorAll(':scope > tr'))
+      : [];
+    var groupOffsets = {};
+    canonicalTable.querySelectorAll('tbody > tr[data-source-fragment-id]').forEach(function (row) {
+      if (row.getAttribute('data-presentation-copy') === '1') return;
+      var fragmentId = row.getAttribute('data-source-fragment-id') || '';
+      var match = fragmentId.match(/\/table-row-(\d+)$/);
+      if (!match) return;
+      var start = parseInt(match[1], 10);
+      var offset = groupOffsets[fragmentId] || 0;
+      groupOffsets[fragmentId] = offset + 1;
+      var sourceRow = sourceRows[start + offset];
+      if (sourceRow) sourceRow.replaceWith(cleanPaginatedSourceClone(row));
+    });
+  }
+
+  function mergePaginatedListFragment(canonicalBlock, sourceBlock) {
+    var sourceItems = Array.prototype.slice.call(
+      sourceBlock.querySelectorAll('.cpb-list > li')
+    );
+    canonicalBlock.querySelectorAll('.cpb-list[data-paginated-source-item-indexes]').forEach(function (list) {
+      var expectedIndexes = (list.getAttribute('data-paginated-source-item-indexes') || '')
+        .split(',')
+        .map(function (value) { return parseInt(value, 10); })
+        .filter(function (value) { return Number.isFinite(value); });
+      if (!expectedIndexes.length) return;
+      var firstSourceItem = sourceItems[expectedIndexes[0]];
+      var lastSourceItem = sourceItems[expectedIndexes[expectedIndexes.length - 1]];
+      if (!firstSourceItem || !lastSourceItem || firstSourceItem.parentNode !== lastSourceItem.parentNode) {
+        throw new Error('The list fragment cannot be mapped to one source list.');
+      }
+      var parent = firstSourceItem.parentNode;
+      var insertionPoint = lastSourceItem.nextSibling;
+      expectedIndexes.slice().reverse().forEach(function (index) {
+        if (sourceItems[index] && sourceItems[index].parentNode === parent) sourceItems[index].remove();
+      });
+      Array.prototype.slice.call(list.children).filter(function (item) {
+        return item.matches('li');
+      }).forEach(function (item) {
+        parent.insertBefore(cleanPaginatedSourceClone(item), insertionPoint);
+      });
+    });
+  }
+
+  function flushPaginatedCompositeFragment(blockEl) {
+    if (!blockEl || blockEl.getAttribute('data-fragment-dirty') !== '1') {
+      return Promise.resolve();
+    }
+    blockEl.removeAttribute('data-fragment-dirty');
+    var dirtyFields = Array.prototype.slice.call(
+      blockEl.querySelectorAll('[data-fragment-dirty="1"]')
+    );
+    dirtyFields.forEach(function (field) {
+      field.removeAttribute('data-fragment-dirty');
+    });
+    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+    var blockType = blockEl.getAttribute('data-block-type') || '';
+    var sectionId = state.sectionId;
+    clearPendingForBlock(blockId);
+    if (!blockId || !sectionId || ['table', 'list'].indexOf(blockType) < 0) {
+      return Promise.reject(new Error('The page fragment cannot be mapped to its source block.'));
+    }
+    setStatus('Saving…', 'saving');
+    return apiGet(
+      apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
+    ).then(function (response) {
+      if (!response.ok) throw new Error(response.error || 'Source block load failed');
+      var holder = document.createElement('div');
+      holder.innerHTML = response.page_html || '';
+      var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
+      if (!sourceBlock) throw new Error('The complete source block could not be found.');
+      if (blockType === 'table') mergePaginatedTableFragment(blockEl, sourceBlock);
+      else mergePaginatedListFragment(blockEl, sourceBlock);
+      return apiPost('update_block', {
+        version_id: state.versionId,
+        block_id: blockId,
+        payload: extractPayload(sourceBlock, blockType),
+      });
+    }).then(function (response) {
+      if (!response.ok) throw new Error(response.error || 'Page edit save failed');
+      state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
+      setStatus('Saved', 'saved');
+      markPaginationChanged();
+    }).catch(function (error) {
+      blockEl.setAttribute('data-fragment-dirty', '1');
+      dirtyFields.forEach(function (field) {
+        field.setAttribute('data-fragment-dirty', '1');
+      });
+      showError(error);
+    });
+  }
+
   function markPaginationChanged() {
     state.paginationStale = true;
     state.authoritativeEditorPageStarts = [];
     state.authoritativeEditorGeometry = null;
     state.authoritativeEditorPageStartsVersionId = 0;
     state.authoritativeEditorPageStartsSectionId = 0;
-    if (state.viewMode === 'edit') {
-      scheduleUnifiedPrintLayout(450);
-    } else {
-      setPaginationStatus('Updating authoritative pages…', true);
-    }
-    clearTimeout(state.paginationRegenerateTimer);
-    state.paginationRegenerateTimer = null;
+    setPaginationStatus('Updating pages…', true);
   }
 
   function wirePaginatedFields() {
     canvasEl.querySelectorAll('.reader-semantic-piece').forEach(function (piece) {
       var blockEl = piece.matches('.cpb-block') ? piece : piece.querySelector('.cpb-block');
       if (!blockEl || piece.getAttribute('data-presentation-copy') === '1') return;
+      if ((blockEl.getAttribute('data-block-type') || '') === 'table') {
+        var canonicalBody = blockEl.querySelector('.cpb-table tbody[data-table-part="body"]')
+          || blockEl.querySelector('.cpb-table tbody');
+        if (canonicalBody) canonicalBody.setAttribute('data-table-part', 'body');
+      }
       if (blockEl.getAttribute('data-system-managed') === '1'
         || (blockEl.getAttribute('data-block-type') || '') === 'toc') {
         piece.classList.add('cpb-paginated-piece--automatic');
         return;
       }
       var splitParagraph = pieceIsSplitParagraph(piece, blockEl);
-      var editable = pieceIsWholeEditable(piece, blockEl) || splitParagraph;
+      var fragmentedComposite = pieceIsFragmentedComposite(piece, blockEl);
+      if (fragmentedComposite && (blockEl.getAttribute('data-block-type') || '') === 'list') {
+        blockEl.querySelectorAll('.cpb-list').forEach(function (list) {
+          var indexes = Array.prototype.slice.call(
+            list.querySelectorAll(':scope > li[data-source-fragment-id]')
+          ).map(function (item) {
+            var match = (item.getAttribute('data-source-fragment-id') || '').match(/\/li-(\d+)$/);
+            return match ? match[1] : '';
+          }).filter(Boolean);
+          if (indexes.length) {
+            list.setAttribute('data-paginated-source-item-indexes', indexes.join(','));
+          }
+        });
+      }
+      var editable = pieceIsWholeEditable(piece, blockEl) || splitParagraph || fragmentedComposite;
+      blockEl.toggleAttribute('data-paginated-fragmented', fragmentedComposite);
       piece.classList.toggle('cpb-paginated-piece--editable', editable);
-      piece.classList.toggle('cpb-paginated-piece--source-editor', !editable);
+      piece.classList.toggle('cpb-paginated-piece--read-only', !editable);
       if (editable) {
         Array.prototype.slice.call(paginatedEditableFields(blockEl)).forEach(function (field) {
           field.setAttribute('contenteditable', 'true');
@@ -3105,8 +3268,12 @@
           field.setAttribute('data-paginated-input-wired', '1');
           field.addEventListener('input', function () {
             state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
-            if (splitParagraph) {
+            if (splitParagraph || fragmentedComposite) {
               field.setAttribute('data-fragment-dirty', '1');
+              if (fragmentedComposite) {
+                blockEl.setAttribute('data-fragment-dirty', '1');
+                scheduleSave(blockEl);
+              }
               setStatus('Editing…', 'saving');
             } else {
               scheduleSave(blockEl);
@@ -3119,212 +3286,15 @@
             }
             if (splitParagraph) {
               flushPaginatedParagraphFragment(blockEl, piece, field);
+            } else if (fragmentedComposite) {
+              flushPaginatedCompositeFragment(blockEl);
             } else {
               flushPendingSave(blockEl);
             }
           });
         });
-      } else if (state.editable && blockEl.getAttribute('data-block-id')) {
-        var editButton = document.createElement('button');
-        editButton.type = 'button';
-        editButton.className = 'cpb-paginated-edit-block';
-        editButton.textContent = 'Edit block';
-        editButton.addEventListener('click', function (event) {
-          event.preventDefault();
-          event.stopPropagation();
-          openPaginatedBlockEditor(blockEl, piece);
-        });
-        piece.appendChild(editButton);
       }
     });
-  }
-
-  function closePaginatedBlockEditor() {
-    if (paginatedToolbarPlaceholder && paginatedToolbarPlaceholder.parentNode && toolbarMainEl) {
-      paginatedToolbarPlaceholder.parentNode.insertBefore(
-        toolbarMainEl,
-        paginatedToolbarPlaceholder
-      );
-      paginatedToolbarPlaceholder.remove();
-      paginatedToolbarPlaceholder = null;
-      updateToolbarMode();
-    }
-    var overlay = document.getElementById('cpbPaginatedBlockEditor');
-    if (overlay) overlay.remove();
-  }
-
-  function openPaginatedBlockEditor(blockEl, piece) {
-    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
-    var page = piece.closest('.cpb-paginated-page');
-    var sectionId = parseInt(page ? (page.getAttribute('data-section-id') || '0') : '0', 10);
-    return openPaginatedBlockEditorById(blockId, sectionId);
-  }
-
-  function openPaginatedBlockEditorById(blockId, sectionId) {
-    if (!blockId || !sectionId) {
-      setPaginationStatus('This generated element is read-only.', true);
-      return;
-    }
-    setPaginationStatus('Loading complete source block…', false);
-    apiGet(
-      apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
-    ).then(function (response) {
-      if (!response.ok) throw new Error(response.error || 'Block load failed');
-      var holder = document.createElement('div');
-      holder.innerHTML = response.page_html || '';
-      var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
-      if (!sourceBlock) throw new Error('The complete source block could not be found.');
-      closePaginatedBlockEditor();
-      var overlay = document.createElement('div');
-      overlay.id = 'cpbPaginatedBlockEditor';
-      overlay.className = 'cpb-paginated-block-overlay';
-      var dialog = document.createElement('div');
-      dialog.className = 'cpb-paginated-block-dialog';
-      var heading = document.createElement('div');
-      heading.className = 'cpb-paginated-block-dialog__head';
-      heading.innerHTML = '<strong>Edit complete source block</strong>';
-      var close = document.createElement('button');
-      close.type = 'button';
-      close.textContent = 'Close';
-      close.addEventListener('click', closePaginatedBlockEditor);
-      heading.appendChild(close);
-      var content = document.createElement('div');
-      content.className = 'cpb-paginated-block-dialog__content';
-      content.appendChild(sourceBlock);
-      if (toolbarMainEl && toolbarMainEl.parentNode) {
-        paginatedToolbarPlaceholder = document.createComment('paginated-toolbar-home');
-        toolbarMainEl.parentNode.insertBefore(paginatedToolbarPlaceholder, toolbarMainEl);
-        toolbarMainEl.hidden = false;
-      }
-      var actions = document.createElement('div');
-      actions.className = 'cpb-paginated-block-dialog__actions';
-      var save = document.createElement('button');
-      save.type = 'button';
-      save.textContent = 'Save block';
-      save.addEventListener('click', function () {
-        Promise.resolve(flushSave(sourceBlock)).then(function () {
-          markPaginationChanged();
-          closePaginatedBlockEditor();
-        });
-      });
-      actions.appendChild(save);
-      dialog.appendChild(heading);
-      if (toolbarMainEl && paginatedToolbarPlaceholder) dialog.appendChild(toolbarMainEl);
-      dialog.appendChild(content);
-      dialog.appendChild(actions);
-      overlay.appendChild(dialog);
-      canvasEl.appendChild(overlay);
-      wireCanvas();
-    }).catch(showError);
-  }
-
-  function markManualBreaksInPages() {
-    canvasEl.querySelectorAll('.cpb-manual-break-before').forEach(function (node) {
-      node.classList.remove('cpb-manual-break-before');
-    });
-    state.manualBreaks.forEach(function (row) {
-      var anchor = String(row.before_block_anchor || '');
-      if (!anchor) return;
-      canvasEl.querySelectorAll(
-        '.cpb-block[data-stable-anchor],.cpb-canonical-page__edit-portal[data-stable-anchor]'
-      ).forEach(function (target) {
-        if (target.getAttribute('data-stable-anchor') === anchor) {
-          target.classList.add('cpb-manual-break-before');
-        }
-      });
-    });
-  }
-
-  function paginationBreakControl() {
-    var panel = document.createElement('div');
-    panel.className = 'cpb-pagination-panel';
-    var title = document.createElement('strong');
-    title.textContent = selectedSectionUsesAutomaticPages()
-      ? 'Automatic generated pages'
-      : 'Manual page breaks';
-    panel.appendChild(title);
-    if (selectedSectionUsesAutomaticPages()) {
-      panel.appendChild(document.createTextNode(
-        ' · page flow is generated from the controlled outline and content length'
-      ));
-      return panel;
-    }
-    if (!state.editable) {
-      panel.appendChild(document.createTextNode(' · released revision'));
-      return panel;
-    }
-    var existing = {};
-    state.manualBreaks.forEach(function (row) {
-      existing[row.before_block_anchor] = true;
-    });
-    var select = document.createElement('select');
-    select.className = 'cpb-pagination-break-select';
-    state.paginationCandidates.forEach(function (row) {
-      if (parseInt(row.section_id || '0', 10) !== state.sectionId) return;
-      if (existing[row.stable_anchor]) return;
-      var option = document.createElement('option');
-      option.value = row.stable_anchor;
-      option.textContent = row.section_title + ' · ' + row.block_type;
-      select.appendChild(option);
-    });
-    var insert = document.createElement('button');
-    insert.type = 'button';
-    insert.textContent = 'Insert break';
-    insert.disabled = !select.options.length;
-    insert.addEventListener('click', function () {
-      mutateManualBreak({
-        action: 'insert',
-        book_version_id: state.versionId,
-        before_block_anchor: select.value,
-      });
-    });
-    panel.appendChild(select);
-    panel.appendChild(insert);
-    state.manualBreaks.forEach(function (row) {
-      if (parseInt(row.section_id || '0', 10) !== state.sectionId) return;
-      var item = document.createElement('span');
-      item.className = 'cpb-pagination-break-item';
-      item.textContent = 'Before ' + (row.section_title || row.before_block_anchor);
-      var moveSelect = document.createElement('select');
-      moveSelect.setAttribute('aria-label', 'Move page break');
-      state.paginationCandidates.forEach(function (candidate) {
-        if (parseInt(candidate.section_id || '0', 10) !== state.sectionId) return;
-        if (existing[candidate.stable_anchor] && candidate.stable_anchor !== row.before_block_anchor) {
-          return;
-        }
-        var moveOption = document.createElement('option');
-        moveOption.value = candidate.stable_anchor;
-        moveOption.textContent = candidate.section_title + ' · ' + candidate.block_type;
-        moveOption.selected = candidate.stable_anchor === row.before_block_anchor;
-        moveSelect.appendChild(moveOption);
-      });
-      var move = document.createElement('button');
-      move.type = 'button';
-      move.textContent = 'Move';
-      move.addEventListener('click', function () {
-        mutateManualBreak({
-          action: 'move',
-          book_version_id: state.versionId,
-          break_id: row.id,
-          before_block_anchor: moveSelect.value,
-        });
-      });
-      var remove = document.createElement('button');
-      remove.type = 'button';
-      remove.textContent = 'Remove';
-      remove.addEventListener('click', function () {
-        mutateManualBreak({
-          action: 'remove',
-          book_version_id: state.versionId,
-          break_id: row.id,
-        });
-      });
-      item.appendChild(moveSelect);
-      item.appendChild(move);
-      item.appendChild(remove);
-      panel.appendChild(item);
-    });
-    return panel;
   }
 
   function selectedSectionUsesAutomaticPages() {
@@ -3347,39 +3317,6 @@
         'distribution_list', 'abbreviations', 'definitions'].indexOf(key) >= 0;
   }
 
-  function paginationPageNavigation(sectionPages, allPageCount) {
-    var navigation = document.createElement('div');
-    navigation.className = 'cpb-pagination-page-navigation';
-    var previous = document.createElement('button');
-    previous.type = 'button';
-    previous.textContent = 'Previous page';
-    previous.disabled = state.sectionPageIndex <= 0;
-    previous.addEventListener('click', function () {
-      state.sectionPageIndex = Math.max(0, state.sectionPageIndex - 1);
-      renderPaginatedView(state.paginatedResult);
-      canvasEl.scrollTop = 0;
-    });
-    var current = document.createElement('strong');
-    var page = sectionPages[state.sectionPageIndex] || null;
-    current.textContent = page
-      ? 'Page ' + page.page_number + ' · ' + (state.sectionPageIndex + 1)
-        + ' of ' + sectionPages.length + ' in this section · ' + allPageCount + ' total'
-      : 'No page in this section';
-    var next = document.createElement('button');
-    next.type = 'button';
-    next.textContent = 'Next page';
-    next.disabled = state.sectionPageIndex >= sectionPages.length - 1;
-    next.addEventListener('click', function () {
-      state.sectionPageIndex = Math.min(sectionPages.length - 1, state.sectionPageIndex + 1);
-      renderPaginatedView(state.paginatedResult);
-      canvasEl.scrollTop = 0;
-    });
-    navigation.appendChild(previous);
-    navigation.appendChild(current);
-    navigation.appendChild(next);
-    return navigation;
-  }
-
   function storedPageContainsSection(page, sectionId) {
     if (parseInt(page.section_id || '0', 10) === sectionId) return true;
     var metadata = page.metadata && typeof page.metadata === 'object' ? page.metadata : {};
@@ -3392,6 +3329,7 @@
 
   function renderPaginatedView(result) {
     state.paginatedResult = result;
+    state.canonicalRefreshPending = false;
     state.paginationStale = !(result.freshness && result.freshness.is_current);
     if (result.artifact_compatible !== false) {
       state.canonicalRepairRequested = false;
@@ -3408,7 +3346,7 @@
       };
       scheduleLivePagination(repair);
     }
-    if (publicationCssEl) publicationCssEl.textContent = '';
+    if (publicationCssEl) publicationCssEl.textContent = result.book_style_css || '';
     if (pageBreakBtn) {
       pageBreakBtn.disabled = !state.editable || selectedSectionUsesAutomaticPages();
       pageBreakBtn.title = selectedSectionUsesAutomaticPages()
@@ -3420,29 +3358,16 @@
     var sectionPages = allPages.filter(function (page) {
       return storedPageContainsSection(page, state.sectionId);
     });
-    if (state.pendingPaginatedAnchor) {
-      var anchorNeedle = 'data-stable-anchor="' + state.pendingPaginatedAnchor + '"';
-      var retainedPageIndex = sectionPages.findIndex(function (page) {
-        return String(page.page_html || '').indexOf(anchorNeedle) >= 0;
-      });
-      if (retainedPageIndex >= 0) state.sectionPageIndex = retainedPageIndex;
-    }
-    state.sectionPageIndex = Math.max(
-      0,
-      Math.min(state.sectionPageIndex, Math.max(0, sectionPages.length - 1))
-    );
-    var pages = sectionPages.length ? [sectionPages[state.sectionPageIndex]] : [];
+    var pages = sectionPages;
     canvasEl.innerHTML = '';
-    canvasEl.appendChild(paginationBreakControl());
-    canvasEl.appendChild(paginationPageNavigation(sectionPages, totalPageCount));
     if (!pages.length) {
       var empty = document.createElement('div');
       empty.className = 'cpb-pagination-empty';
       empty.textContent = result.artifact_compatible === false
-        ? (result.compatibility_error || 'Stored pages are incompatible. Regenerate pages.')
+        ? (result.compatibility_error || 'The saved pages are being updated automatically.')
         : (allPages.length
-          ? 'This section has no generated pages yet. Click Regenerate.'
-          : 'No authoritative pages have been generated. Click Regenerate.');
+          ? 'This section has no page yet. Its pages are being updated automatically.'
+          : 'The authoritative pages are being generated automatically.');
       canvasEl.appendChild(empty);
     } else {
       var stack = document.createElement('div');
@@ -3461,29 +3386,38 @@
         frame.style.minWidth = geometry.width;
         frame.style.height = geometry.height;
         frame.style.minHeight = geometry.height;
-        var iframe = document.createElement('iframe');
-        iframe.className = 'cpb-live-projection__frame cpb-canonical-page__frame';
-        iframe.setAttribute('sandbox', '');
-        iframe.setAttribute('aria-hidden', 'true');
-        iframe.setAttribute('tabindex', '-1');
-        iframe.title = 'Authoritative iOS reader page ' + String(page.page_number || '');
-        iframe.style.width = geometry.width;
-        iframe.style.height = geometry.height;
-        iframe.srcdoc = projectionFrameDocument(page.page_html, result.book_style_css || '');
-        frame.appendChild(iframe);
-        appendCanonicalPageEditPortals(frame, page);
+        var content = document.createElement('div');
+        content.innerHTML = page.page_html || '';
+        while (content.firstChild) frame.appendChild(content.firstChild);
         stack.appendChild(frame);
       });
       canvasEl.appendChild(stack);
     }
-    markManualBreaksInPages();
+    applyAuthoringChromeToCanonicalPages();
+    applyAuthoringSpecialFieldsToCanonicalPages();
     wirePaginatedFields();
+    wireCanvas();
+    refreshCalloutTypographyFromBookStyles();
+    if (state.isTocSection) refreshTocTypographyFromBookStyles();
+    if (state.isLepSection) refreshLepTypographyFromBookStyles();
+    if (state.isPart0Section) refreshPart0TypographyFromBookStyles();
+    if (state.isAnnexRegisterSection || state.isAnnexCrossRefSection || state.isAnnexHighlightsSection) {
+      refreshAnnexAdminTypographyFromBookStyles();
+    }
+    if (state.pendingCreatedBlockId > 0) {
+      var created = canvasEl.querySelector(
+        '.cpb-block[data-block-id="' + state.pendingCreatedBlockId + '"]'
+      );
+      var createdField = created ? created.querySelector('[contenteditable="true"]') : null;
+      if (createdField) {
+        createdField.focus();
+        state.pendingCreatedBlockId = 0;
+      }
+    }
     applyCanvasZoom(state.canvasZoom, false);
     if (state.pendingPaginatedAnchor) {
       var retained = canvasEl.querySelector(
-        '.cpb-block[data-stable-anchor="' + state.pendingPaginatedAnchor + '"],'
-          + '.cpb-canonical-page__edit-portal[data-stable-anchor="'
-          + state.pendingPaginatedAnchor + '"]'
+        '.cpb-block[data-stable-anchor="' + state.pendingPaginatedAnchor + '"]'
       );
       if (retained) retained.scrollIntoView({ behavior: 'smooth', block: 'center' });
       state.pendingPaginatedAnchor = '';
@@ -3493,15 +3427,98 @@
       : 'not generated';
     setPaginationStatus(
       sectionPages.length + ' section pages of ' + totalPageCount + ' total · '
-        + state.manualBreaks.filter(function (row) {
-          return parseInt(row.section_id || '0', 10) === state.sectionId;
-        }).length + ' manual breaks · '
-        + (state.paginationStale ? 'Needs regeneration' : 'Current') + ' · ' + status,
+        + (state.paginationStale ? 'Updating' : 'Current') + ' · ' + status,
       state.paginationStale
     );
   }
 
-  function loadPaginatedView() {
+  function hasUnsavedCanonicalEdits() {
+    return Object.keys(state.pending).length > 0
+      || !!canvasEl.querySelector('[data-fragment-dirty="1"]');
+  }
+
+  function captureAuthoringChrome(pageHtml, merge) {
+    var holder = document.createElement('div');
+    holder.innerHTML = pageHtml || '';
+    var chromeByBlockId = merge ? Object.assign({}, state.authoringChromeByBlockId) : {};
+    var imageControlsByBlockId = merge
+      ? Object.assign({}, state.authoringImageControlsByBlockId)
+      : {};
+    var editableSpecialFields = merge
+      ? Object.assign({}, state.authoringEditableSpecialFields)
+      : {};
+    holder.querySelectorAll('.cpb-block[data-block-id]').forEach(function (blockEl) {
+      var blockId = blockEl.getAttribute('data-block-id') || '';
+      var chrome = blockEl.querySelector(':scope > .cpb-block-chrome');
+      if (blockId && chrome) chromeByBlockId[blockId] = chrome.outerHTML;
+      if (blockId && (blockEl.getAttribute('data-block-type') || '') === 'image') {
+        imageControlsByBlockId[blockId] = Array.prototype.slice.call(
+          blockEl.querySelectorAll('.cpb-image-rotate,.cpb-image-resize')
+        ).map(function (control) {
+          return control.outerHTML;
+        }).join('');
+      }
+    });
+    [
+      'data-cover-field',
+      'data-lep-field',
+      'data-lep-part-col',
+      'data-part0-field',
+      'data-part0-col',
+    ].forEach(function (attribute) {
+      holder.querySelectorAll('[' + attribute + '][contenteditable="true"]').forEach(function (field) {
+        editableSpecialFields[attribute + ':' + (field.getAttribute(attribute) || '')] = true;
+      });
+    });
+    state.authoringChromeByBlockId = chromeByBlockId;
+    state.authoringImageControlsByBlockId = imageControlsByBlockId;
+    state.authoringEditableSpecialFields = editableSpecialFields;
+  }
+
+  function applyAuthoringChromeToCanonicalPages() {
+    if (!state.editable) return;
+    var seen = {};
+    canvasEl.querySelectorAll('.cpb-block[data-block-id]').forEach(function (blockEl) {
+      var blockId = blockEl.getAttribute('data-block-id') || '';
+      if (!blockId || seen[blockId]) return;
+      var piece = blockEl.closest('[data-presentation-copy]');
+      if (piece && piece.getAttribute('data-presentation-copy') === '1') return;
+      seen[blockId] = true;
+      if (blockEl.querySelector(':scope > .cpb-block-chrome')) return;
+      var chromeHtml = state.authoringChromeByBlockId[blockId] || '';
+      if (chromeHtml) {
+        var holder = document.createElement('div');
+        holder.innerHTML = chromeHtml;
+        var chrome = holder.firstElementChild;
+        if (chrome) {
+          chrome.setAttribute('contenteditable', 'false');
+          blockEl.insertBefore(chrome, blockEl.firstChild);
+        }
+      }
+      var imageControls = state.authoringImageControlsByBlockId[blockId] || '';
+      var imageFrame = blockEl.querySelector('.cpb-image-frame') || blockEl.querySelector('.cpb-image');
+      if (imageControls && imageFrame && !imageFrame.querySelector('.cpb-image-resize')) {
+        imageFrame.insertAdjacentHTML('beforeend', imageControls);
+      }
+    });
+  }
+
+  function applyAuthoringSpecialFieldsToCanonicalPages() {
+    if (!state.editable) return;
+    Object.keys(state.authoringEditableSpecialFields).forEach(function (key) {
+      var separator = key.indexOf(':');
+      if (separator <= 0) return;
+      var attribute = key.slice(0, separator);
+      var value = key.slice(separator + 1);
+      canvasEl.querySelectorAll('[' + attribute + ']').forEach(function (field) {
+        if ((field.getAttribute(attribute) || '') !== value) return;
+        field.setAttribute('contenteditable', 'true');
+        field.setAttribute('spellcheck', 'true');
+      });
+    });
+  }
+
+  function loadPaginatedView(preserveEditorSurface) {
     setStatus('Loading pages…', 'saving');
     var requestedSectionId = state.sectionId || 0;
     var requestSequence = ++state.paginatedRequestSequence;
@@ -3517,46 +3534,23 @@
         requestSequence !== state.paginatedRequestSequence
         || requestedSectionId !== state.sectionId
       ) return false;
+      if (preserveEditorSurface && hasUnsavedCanonicalEdits()) {
+        state.canonicalRefreshPending = true;
+        setPaginationStatus('Pages ready · finishing the current edit first…', true);
+        return false;
+      }
+      if (preserveEditorSurface) captureEditorSurfaceBookmarks('canonical-refresh');
       state.manualBreaks = responses[1].breaks || [];
       state.paginationCandidates = responses[1].candidates || [];
+      var focusCreatedBlock = state.pendingCreatedBlockId > 0;
       renderPaginatedView(responses[0].result || {});
+      if (preserveEditorSurface && !focusCreatedBlock) {
+        restoreEditorSurfaceBookmarks('canonical-refresh');
+      } else if (focusCreatedBlock) {
+        state.surfaceBookmarks = null;
+      }
       setStatus(state.editable ? 'Ready' : 'Read-only (released)', state.editable ? 'saved' : '');
     }).catch(showError);
-  }
-
-  function setViewMode(mode) {
-    mode = mode === 'paginated' ? 'paginated' : 'edit';
-    if (mode === state.viewMode) return Promise.resolve();
-    return Promise.resolve(flushAllPendingSaves()).then(function () {
-      closePaginatedBlockEditor();
-      state.viewMode = mode;
-      updateViewModeControls();
-      if (mode === 'paginated') return loadPaginatedView();
-      if (publicationCssEl) publicationCssEl.textContent = '';
-      return loadSection(state.sectionId || initialSectionId || 0).then(function (result) {
-        setStatus('Source view · page positions are not authoritative', 'warn');
-        return result;
-      });
-    });
-  }
-
-  function regeneratePagination() {
-    clearTimeout(state.paginationRegenerateTimer);
-    state.paginationRegenerateTimer = null;
-    setPaginationStatus('Generating and validating authoritative pages…', false);
-    return paginationRequest('/admin/api/controlled_book_page_map_api.php', {
-      action: 'generate',
-      book_version_id: state.versionId,
-      book_key: (state.versionInfo.book_key || ''),
-    }).then(loadPaginatedView).catch(showError);
-  }
-
-  function approvePagination() {
-    setPaginationStatus('Approving pagination…', false);
-    return paginationRequest('/admin/api/controlled_book_page_map_api.php', {
-      action: 'approve',
-      book_version_id: state.versionId,
-    }).then(loadPaginatedView).catch(showError);
   }
 
   function mutateManualBreak(payload) {
@@ -4158,6 +4152,7 @@
       setSectionAssembly(true, 'Preparing page content…', 28);
       state.sectionId = res.section_id;
       state.editable = !!res.editable;
+      captureAuthoringChrome(res.page_html || '');
       state.sectionsTree = res.sections_tree || [];
       state.pageLayout = res.page_layout || {};
       state.pageHeader = res.page_header || defaultPageHeader();
@@ -4205,6 +4200,29 @@
       root.classList.toggle('cpb-editor-readonly', !state.editable);
       updateToolbarMode();
       renderTree(state.sectionsTree, state.sectionId);
+      if (state.viewMode === 'paginated') {
+        canvasEl.innerHTML = '<p class="cpb-pagination-empty">Loading authoritative pages…</p>';
+        updateAddSubsection(res.section);
+        updateOutlineButton();
+        enforceAuthoritativeEditorSurface();
+        setSectionAssembly(true, 'Loading authoritative pages…', 52);
+        return loadPaginatedView().then(function () {
+          if (loadSequence !== state.sectionLoadSequence) return false;
+          setSectionAssembly(true, 'Pages ready', 100);
+          return nextAnimationFrame().then(function () {
+            if (loadSequence !== state.sectionLoadSequence) return false;
+            setSectionAssembly(false, '', 100);
+            root.dispatchEvent(new CustomEvent('cpb:section-assembly-complete', {
+              detail: {
+                section_id: state.sectionId,
+                load_sequence: loadSequence,
+                complete: true,
+              },
+            }));
+            return true;
+          });
+        });
+      }
       canvasEl.innerHTML = res.page_html || '';
       wireCanvas();
       loadReviewThreadMarkers();
@@ -4751,16 +4769,9 @@
     link.title = node.title;
     if (node.is_navigable !== false && node.id) {
       link.addEventListener('click', function () {
-        if (state.viewMode === 'paginated') {
-          state.sectionId = node.id;
-          state.sectionPageIndex = 0;
-          renderTree(state.sectionsTree, state.sectionId);
-          loadPaginatedView().then(function () {
-            canvasEl.scrollTop = 0;
-          });
-          return;
-        }
-        loadSection(node.id, node.scroll_section_ref || null);
+        loadSection(node.id, node.scroll_section_ref || null).then(function () {
+          canvasEl.scrollTop = 0;
+        });
       });
       link.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -5813,6 +5824,7 @@
 
   function wireCanvas() {
     initCanvasEvents();
+    var authoritativeSurface = state.viewMode === 'paginated';
 
     canvasEl.querySelectorAll('.cpb-paragraph-row').forEach(function (row) {
       ensureParagraphStack(row);
@@ -5835,17 +5847,19 @@
           state.contentUndoLock = true;
           setTimeout(function () { state.contentUndoLock = false; }, 0);
         });
-        field.addEventListener('input', function () {
-          scheduleSave(blockEl);
-          scheduleUnifiedPrintLayout(300);
-        });
-        field.addEventListener('blur', function (event) {
-          if (isDeferredSaveControl(event.relatedTarget)) {
-            pausePendingSaveTimer();
-            return;
-          }
-          flushPendingSave(blockEl);
-        });
+        if (field.getAttribute('data-paginated-input-wired') !== '1') {
+          field.addEventListener('input', function () {
+            scheduleSave(blockEl);
+            scheduleUnifiedPrintLayout(300);
+          });
+          field.addEventListener('blur', function (event) {
+            if (isDeferredSaveControl(event.relatedTarget)) {
+              pausePendingSaveTimer();
+              return;
+            }
+            flushPendingSave(blockEl);
+          });
+        }
       });
     });
 
@@ -5870,7 +5884,11 @@
             if (!res.ok) throw new Error(res.error || 'Delete failed');
             clearPendingForBlock(blockId);
             clearStyleTargetForBlock(blockEl);
-            blockEl.remove();
+            canvasEl.querySelectorAll(
+              '.cpb-block[data-block-id="' + blockId + '"]'
+            ).forEach(function (instance) {
+              instance.remove();
+            });
             setStatus('Deleted', 'saved');
             markPaginationChanged();
             return recomputeSectionNumbers();
@@ -5884,6 +5902,11 @@
             section_id: state.sectionId,
           }).then(function (res) {
             if (!res.ok) throw new Error(res.error || 'Move failed');
+            if (state.viewMode === 'paginated') {
+              setStatus('Moved · updating pages…', 'saved');
+              markPaginationChanged();
+              return;
+            }
             var body = canvasEl.querySelector('[data-blocks-root]');
             applyNumberingState(res);
             if (body && res.page_body_html) {
@@ -5911,7 +5934,7 @@
       wireImageBlock(blockEl);
     });
 
-    wireLayout();
+    if (!authoritativeSurface) wireLayout();
 
     wireCoverPage();
 
@@ -5985,10 +6008,14 @@
     });
     state.inFlightSaves[key] = tracked;
     tracked.then(function () {
-      if (state.inFlightSaves[key] === tracked) delete state.inFlightSaves[key];
+      if (state.inFlightSaves[key] === tracked) {
+        delete state.inFlightSaves[key];
+      }
       delete state.saveFailures[key];
     }, function (error) {
-      if (state.inFlightSaves[key] === tracked) delete state.inFlightSaves[key];
+      if (state.inFlightSaves[key] === tracked) {
+        delete state.inFlightSaves[key];
+      }
       state.saveFailures[key] = error;
       showError(error);
     });
@@ -6009,17 +6036,26 @@
       }
     });
     state.pending = {};
-    canvasEl.querySelectorAll('[data-fragment-dirty="1"]').forEach(function (field) {
-      var blockEl = field.closest('.cpb-block');
-      var piece = field.closest('[data-source-range-start][data-source-range-end]');
-      if (
-        blockEl
-        && (blockEl.getAttribute('data-block-type') || '') === 'paragraph'
-        && piece
-      ) {
-        var result = flushPaginatedParagraphFragment(blockEl, piece, field);
-        if (result && typeof result.then === 'function') promises.push(result);
+    var dirtyBlocks = [];
+    canvasEl.querySelectorAll('[data-fragment-dirty="1"]').forEach(function (dirtyElement) {
+      var blockEl = dirtyElement.closest('.cpb-block');
+      if (blockEl && dirtyBlocks.indexOf(blockEl) < 0) dirtyBlocks.push(blockEl);
+    });
+    dirtyBlocks.forEach(function (blockEl) {
+      var blockType = blockEl.getAttribute('data-block-type') || '';
+      var result = null;
+      if (blockType === 'table' || blockType === 'list') {
+        result = flushPaginatedCompositeFragment(blockEl);
+      } else if (blockType === 'paragraph') {
+        var dirtyField = blockEl.querySelector('[data-fragment-dirty="1"]');
+        var piece = dirtyField
+          ? dirtyField.closest('[data-source-range-start][data-source-range-end]')
+          : null;
+        if (dirtyField && piece) {
+          result = flushPaginatedParagraphFragment(blockEl, piece, dirtyField);
+        }
       }
+      if (result && typeof result.then === 'function') promises.push(result);
     });
     Object.keys(state.inFlightSaves).forEach(function (key) {
       if (promises.indexOf(state.inFlightSaves[key]) < 0) {
@@ -6028,7 +6064,8 @@
     });
     return (promises.length ? Promise.all(promises) : Promise.resolve())
       .then(function () {
-        if (Object.keys(state.saveFailures).length) {
+        var failedKeys = Object.keys(state.saveFailures);
+        if (failedKeys.length) {
           throw new Error(
             'A manual edit did not save. Resolve the save error before opening or reverting Wizard changes.'
           );
@@ -6305,6 +6342,14 @@
     if (!state.editable || !blockEl || !isConnectedEl(blockEl)) return;
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
     var blockType = blockEl.getAttribute('data-block-type') || '';
+    if (
+      state.viewMode === 'paginated'
+      && blockEl.hasAttribute('data-paginated-fragmented')
+      && (blockType === 'table' || blockType === 'list')
+    ) {
+      blockEl.setAttribute('data-fragment-dirty', '1');
+      return flushPaginatedCompositeFragment(blockEl);
+    }
     clearPendingForBlock(blockId);
     if (Object.keys(state.pending).length === 0 && state.saveTimer) {
       clearTimeout(state.saveTimer);
@@ -6319,12 +6364,18 @@
       ).then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Save failed');
         applyNumberingState(res);
-        if (res.cross_ref_annex) applyCrossRefAnnexCatalog(res.cross_ref_annex);
+        if (res.cross_ref_annex) {
+          applyCrossRefAnnexCatalog(res.cross_ref_annex);
+        }
         syncBlockChangePresentation(blockEl, res.block_html || '');
         setStatus('Saved', 'saved');
         markPaginationChanged();
-        if (blockNeedsTocRefresh(blockEl)) scheduleTocSync();
-        if (refreshNumbering) return recomputeSectionNumbers().catch(showError);
+        if (blockNeedsTocRefresh(blockEl)) {
+          scheduleTocSync();
+        }
+        if (refreshNumbering) {
+          return recomputeSectionNumbers().catch(showError);
+        }
       }).catch(function (error) {
         if (isConnectedEl(blockEl)) state.pending[blockId] = blockEl;
         throw error;
@@ -7078,10 +7129,11 @@
         var count = res.result && res.result.entries_count !== undefined ? res.result.entries_count : 0;
         state.part0Page = res.part0_page || state.part0Page;
         if (res.page_html) {
-          canvasEl.innerHTML = res.page_html;
-          wireCanvas();
+          applyPageHtmlFromResponse(res.page_html);
           refreshPart0TypographyFromBookStyles();
           setStatus('Definitions imported (' + count + ' entries)', 'saved');
+        } else if (state.viewMode === 'paginated') {
+          markPaginationChanged();
         } else {
           return loadSection(state.sectionId);
         }
@@ -7226,10 +7278,11 @@
       var count = res.result && res.result.entries_count !== undefined ? res.result.entries_count : 0;
       state.part0Page = res.part0_page || state.part0Page;
       if (res.page_html) {
-        canvasEl.innerHTML = res.page_html;
-        wireCanvas();
+        applyPageHtmlFromResponse(res.page_html);
         refreshPart0TypographyFromBookStyles();
         setStatus('Definitions updated (' + count + ' entries)', 'saved');
+      } else if (state.viewMode === 'paginated') {
+        markPaginationChanged();
       } else {
         return loadSection(state.sectionId);
       }
@@ -7248,12 +7301,13 @@
       var reviewCount = res.result && res.result.needs_review_count !== undefined ? res.result.needs_review_count : 0;
       state.part0Page = res.part0_page || state.part0Page;
       if (res.page_html) {
-        canvasEl.innerHTML = res.page_html;
-        wireCanvas();
+        applyPageHtmlFromResponse(res.page_html);
         refreshPart0TypographyFromBookStyles();
         var msg = 'Abbreviations updated (' + count + ' entries)';
         if (reviewCount > 0) msg += ' — ' + reviewCount + ' need review';
         setStatus(msg, reviewCount > 0 ? 'warn' : 'saved');
+      } else if (state.viewMode === 'paginated') {
+        markPaginationChanged();
       } else {
         return loadSection(state.sectionId);
       }
@@ -7387,9 +7441,10 @@
       var count = res.result && res.result.parts_count !== undefined ? res.result.parts_count : 0;
       state.lepPage = res.lep_page || state.lepPage;
       if (res.page_html) {
-        canvasEl.innerHTML = res.page_html;
-        wireCanvas();
+        applyPageHtmlFromResponse(res.page_html);
         setStatus('Parts updated (' + count + ' rows)', 'saved');
+      } else if (state.viewMode === 'paginated') {
+        markPaginationChanged();
       } else {
         return loadSection(state.sectionId);
       }
@@ -7541,8 +7596,7 @@
       closeLepSignatureModal();
       state.lepPage = res.lep_page || state.lepPage;
       if (res.page_html) {
-        canvasEl.innerHTML = res.page_html;
-        wireCanvas();
+        applyPageHtmlFromResponse(res.page_html);
       }
       setStatus('Signature applied', 'saved');
     }).catch(showError);
@@ -8051,8 +8105,7 @@
         state.tocSettings = res.toc_settings || state.tocSettings;
         state.tocSettingsCatalog = res.toc_settings_catalog || state.tocSettingsCatalog;
         if (state.isTocSection && res.page_html) {
-          canvasEl.innerHTML = res.page_html;
-          wireCanvas();
+          applyPageHtmlFromResponse(res.page_html);
           updateTocToolbarCheckboxes();
           refreshTocTypographyFromBookStyles();
         }
@@ -8627,6 +8680,15 @@
         'cell-border-all', 'cell-border-outer', 'cell-border-inner', 'cell-border-none',
       ], true);
     }
+    if (blockEl.hasAttribute('data-paginated-fragmented')) {
+      setTableToolDisabled(blockEl, [
+        'toggle-title', 'delete-table', 'copy-table', 'paste-table',
+        'move-row-up', 'move-row-down', 'add-row', 'del-row',
+        'add-col', 'del-col',
+        'merge-cells-right', 'unmerge-cells',
+        'merge-cells-down', 'unmerge-cells-down',
+      ], true);
+    }
     syncTableStyleControls(blockEl);
   }
 
@@ -9010,7 +9072,9 @@
         titleTextColor = extractCellTextColor(titleCell);
         titleBorders = extractCellBorders(titleCell);
       }
-      tableSourceRows(table.querySelector('tbody[data-table-part="body"]')).forEach(function (tr) {
+      tableSourceRows(
+        table.querySelector('tbody[data-table-part="body"]') || table.querySelector('tbody')
+      ).forEach(function (tr) {
         var line = [];
         var bgLine = [];
         var alignLine = [];
@@ -10988,6 +11052,7 @@
         (res.block && res.block.id) || res.block_id || '0',
         10
       );
+      if (res.block_html) captureAuthoringChrome(res.block_html, true);
       function focusCreatedBlock() {
         if (createdBlockId <= 0) return;
         var created = canvasEl.querySelector(
@@ -11006,6 +11071,23 @@
         var selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
+      }
+      if (state.viewMode === 'paginated') {
+        state.pendingCreatedBlockId = createdBlockId;
+        focusCreatedBlock();
+        if (
+          document.activeElement
+          && document.activeElement.closest
+          && document.activeElement.closest(
+            '.cpb-block[data-block-id="' + createdBlockId + '"]'
+          )
+        ) {
+          state.pendingCreatedBlockId = 0;
+        }
+        setStatus('Added · updating pages…', 'saved');
+        markPaginationChanged();
+        applyNumberingState(res);
+        return res;
       }
       var anchor = liveInsertAfter || (focusedBlock && isConnectedEl(focusedBlock) ? focusedBlock : null);
       var body = canvasEl.querySelector('[data-blocks-root]');
@@ -11883,10 +11965,11 @@
         state.tocSettings = res.toc_settings || settings;
         state.tocSettingsCatalog = res.toc_settings_catalog || state.tocSettingsCatalog;
         if (res.page_html) {
-          canvasEl.innerHTML = res.page_html;
-          wireCanvas();
+          applyPageHtmlFromResponse(res.page_html);
           updateTocToolbarCheckboxes();
           setStatus('TOC updated (' + count + ' entries)', 'saved');
+        } else if (state.viewMode === 'paginated') {
+          markPaginationChanged();
         } else {
           var tocId = findTocSectionId(state.sectionsTree);
           if (tocId) return loadSection(tocId);
@@ -11991,9 +12074,10 @@
         var result = res.result || {};
         var count = result[opts.countKey] !== undefined ? result[opts.countKey] : 0;
         if (res.page_html) {
-          canvasEl.innerHTML = res.page_html;
-          wireCanvas();
+          applyPageHtmlFromResponse(res.page_html);
           refreshCalloutTypographyFromBookStyles();
+        } else if (state.viewMode === 'paginated') {
+          markPaginationChanged();
         } else if (scope === 'version') {
           return loadSection(state.sectionId);
         }
@@ -12018,8 +12102,7 @@
         if (!res.ok) throw new Error(res.error || 'Sync failed');
         var count = res.result && res.result.changes_count !== undefined ? res.result.changes_count : 0;
         if (res.page_html && state.part0SectionKey === 'highlights') {
-          canvasEl.innerHTML = res.page_html;
-          wireCanvas();
+          applyPageHtmlFromResponse(res.page_html);
           refreshPart0TypographyFromBookStyles();
           setStatus('Highlights updated (' + count + ' changes)', 'saved');
           return;
@@ -12046,6 +12129,16 @@
     apiUpload(fd)
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Upload failed');
+        if (res.block_html) captureAuthoringChrome(res.block_html, true);
+        if (state.viewMode === 'paginated') {
+          state.pendingCreatedBlockId = parseInt(
+            (res.block && res.block.id) || res.block_id || '0',
+            10
+          ) || 0;
+          setStatus('Image added · updating pages…', 'saved');
+          markPaginationChanged();
+          return;
+        }
         var body = canvasEl.querySelector('[data-blocks-root]');
         if (body && res.block_html) {
           body.insertAdjacentHTML('beforeend', res.block_html);
@@ -12831,22 +12924,6 @@
     });
   }
 
-  if (viewEditBtn) {
-    viewEditBtn.addEventListener('click', function () {
-      setViewMode('edit').catch(showError);
-    });
-  }
-  if (viewPaginatedBtn) {
-    viewPaginatedBtn.addEventListener('click', function () {
-      setViewMode('paginated').catch(showError);
-    });
-  }
-  if (paginationRegenerateBtn) {
-    paginationRegenerateBtn.addEventListener('click', regeneratePagination);
-  }
-  if (paginationApproveBtn) {
-    paginationApproveBtn.addEventListener('click', approvePagination);
-  }
   if (pageBreakBtn) {
     pageBreakBtn.addEventListener('mousedown', function (event) {
       capturePaginatedSelection();
@@ -12924,9 +13001,6 @@
   wireTableToolbar();
   loadCalloutPresets()
     .then(function () { return loadSection(initialSectionId || 0); })
-    .then(function () {
-      if (initialViewMode === 'paginated') return setViewMode('paginated');
-    })
     .then(function () {
       return loadWizardChanges().catch(function (error) {
         renderWizardChangesError(error.message);
