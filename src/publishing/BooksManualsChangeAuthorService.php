@@ -590,7 +590,11 @@ final class BooksManualsChangeAuthorService
                 $error->getMessage(),
                 $started
             );
-            if (count($attemptFeedback) < 2
+            $retryLimit = str_starts_with(
+                $error->getMessage(),
+                'Targeted correction returned no changed controlled wording.'
+            ) ? 1 : 2;
+            if (count($attemptFeedback) < $retryLimit
                 && preg_match(
                     '/^(?:Targeted Author attempted|Targeted correction returned|Targeted Author correction failed stable checks)/',
                     $error->getMessage()

@@ -950,6 +950,12 @@ try {
             if (!empty($state['review_divergence_detected'])) {
                 throw new RuntimeException('Review divergence was detected. Automatic correction has stopped for human inspection.');
             }
+            $state = $reviewResolution->reconcileAcceptedReviewScope(
+                $planId,
+                (int)($state['review_id'] ?? 0),
+                $userId,
+                $reviewer
+            );
             $requestedFindingIds = array_values(array_unique(array_filter(array_map(
                 'intval',
                 (array)($input['finding_ids'] ?? array())
@@ -979,7 +985,15 @@ try {
                 }
             ));
             if ($findings === array()) {
-                throw new RuntimeException('No targeted correction is currently authorized.');
+                architect_api_json(200, array(
+                    'ok' => true,
+                    'result' => array(
+                        'patch' => null,
+                        'review_state' => $state,
+                        'reconciled_without_patch' => true,
+                    ),
+                    'csrf_token' => architect_api_csrf(),
+                ));
             }
             $report = $plans->loadPlan($planId);
             $baseline = array_values(array_filter(

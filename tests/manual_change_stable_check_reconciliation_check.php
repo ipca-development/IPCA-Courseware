@@ -126,6 +126,21 @@ stableCheckAssert(
     'Reporter protection still depends on a preferred verb inflection.'
 );
 
+$trainingCorrection = $proposal;
+$trainingCorrection['section_drafts']['8.1']['nodes']['8.1'] .=
+    "\n\nPersonnel assigned as Action Owners for corrective or mitigating actions shall be trained "
+    . 'and competent in implementation, completion evidence and effectiveness review.';
+$trainingReview = $reviewer->verifyReadableAmendmentProposal($trainingCorrection);
+$trainingCheck = array_column(
+    (array)$trainingReview['review_checks'],
+    null,
+    'check_id'
+)['training.corrective-action-competence'] ?? array();
+stableCheckAssert(
+    (string)($trainingCheck['status'] ?? '') === 'PASS',
+    'The minimal corrective-action competence wording does not satisfy its stable check.'
+);
+
 $resolvePatchSection = new ReflectionMethod($author, 'resolveTargetedPatchSection');
 $resolvedSection = $resolvePatchSection->invoke(
     $author,

@@ -9,7 +9,7 @@ require_once __DIR__ . '/BooksManualsChangePlanService.php';
 final class BooksManualsChangeReviewerService
 {
     public const PROMPT_VERSION = 'manual-change-independent-reviewer-v1';
-    public const CHECK_VERSION = '2';
+    public const CHECK_VERSION = '3';
     public const READY = 'READY';
     public const REQUIRES_REVIEW = 'REQUIRES_REVIEW';
 
