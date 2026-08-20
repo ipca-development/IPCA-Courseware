@@ -307,8 +307,9 @@ if (str_contains($readerApi, 'cw_require_login();')) {
 }
 foreach (array(
     "mr_json(401, array('ok' => false, 'error' => 'Login required'))",
-    "loadReaderPageMap(\$ctx['version'], false)",
-    "loadReaderTocWithPages(\$ctx['version'], false)",
+    "loadReaderPageMap(\$ctx['version'], \$ctx['is_preview'])",
+    "loadReaderPage(\n                    \$ctx['version'],\n                    \$pageNumber,\n                    \$ctx['is_preview']",
+    "loadReaderTocWithPages(\n                    \$ctx['version'],\n                    \$ctx['is_preview']",
 ) as $readerApiMarker) {
     if (!str_contains($readerApi, $readerApiMarker)) {
         $failures[] = "Manual Reader API missing stored-map/auth marker: {$readerApiMarker}";

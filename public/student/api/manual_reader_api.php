@@ -269,7 +269,7 @@ try {
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             if (method_exists($reader, 'loadReaderPageMap')) {
-                mr_json(200, $reader->loadReaderPageMap($ctx['version'], false));
+                mr_json(200, $reader->loadReaderPageMap($ctx['version'], $ctx['is_preview']));
             }
             mr_json(200, $reader->loadFrozenPageMap($bookKey));
 
@@ -332,7 +332,7 @@ try {
                 $pages[] = $reader->loadReaderPage(
                     $ctx['version'],
                     $pageNumber,
-                    false
+                    $ctx['is_preview']
                 );
             }
             mr_json(200, array(
@@ -347,7 +347,11 @@ try {
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             $pageNumber = (int)($_GET['page_number'] ?? $_GET['page'] ?? 0);
             if (method_exists($reader, 'loadReaderPage')) {
-                mr_json(200, $reader->loadReaderPage($ctx['version'], $pageNumber, false));
+                mr_json(200, $reader->loadReaderPage(
+                    $ctx['version'],
+                    $pageNumber,
+                    $ctx['is_preview']
+                ));
             }
             mr_json(200, $reader->loadFrozenPage($bookKey, $pageNumber));
 
@@ -355,7 +359,10 @@ try {
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             if (method_exists($reader, 'loadReaderTocWithPages')) {
-                mr_json(200, $reader->loadReaderTocWithPages($ctx['version'], false));
+                mr_json(200, $reader->loadReaderTocWithPages(
+                    $ctx['version'],
+                    $ctx['is_preview']
+                ));
             }
             mr_json(200, $reader->loadTocWithPages($bookKey));
 
