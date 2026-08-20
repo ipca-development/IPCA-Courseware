@@ -300,7 +300,6 @@
       ['[data-mcw-accept-structure]', 'accept_structure', 'Accepting Structure…'],
       ['[data-mcw-accept-drafts]', 'accept_drafts', 'Accepting Amendments…'],
       ['[data-mcw-run-review]', 'run_independent_review', 'Accepting Independent Review…'],
-      ['[data-mcw-resolve-review]', 'resolve_independent_review', 'Preparing Governed Revision…'],
       ['[data-mcw-continue-apply]', 'continue_to_apply', 'Continuing…'],
       ['[data-mcw-apply]', 'apply_accepted_wizard_changes', 'Applying Accepted Changes…']
     ];
@@ -313,8 +312,6 @@
           var result = await request(entry[1]);
           if (result.redirect) {
             window.location.href = result.redirect;
-          } else if (entry[1] === 'resolve_independent_review') {
-            window.setTimeout(function () { window.location.reload(); }, 900);
           } else {
             window.location.reload();
           }
@@ -323,6 +320,126 @@
           busy(button, false);
         }
       });
+    });
+  }
+
+  function setupReviewResolution() {
+    root.addEventListener('click', async function (event) {
+      var answerButton = event.target.closest('[data-mcw-answer-review-question]');
+      if (answerButton) {
+        var question = answerButton.closest('[data-mcw-review-question]');
+        var selected = Array.prototype.slice.call(
+          question.querySelectorAll('input[name="mcw-review-choice"]:checked')
+        ).map(function (input) { return String(input.value || ''); });
+        if (!selected.length) {
+          toast('Select an answer before continuing.', true);
+          return;
+        }
+        busy(answerButton, true, 'Recording Decision…');
+        try {
+          await request('answer_review_question', {
+            question_id: Number(question.dataset.mcwReviewQuestion || 0),
+            selected_choice_ids: selected,
+            explanation: String((question.querySelector('[data-mcw-review-answer-explanation]') || {}).value || '')
+          });
+          window.location.reload();
+        } catch (error) {
+          toast(error.message, true);
+          busy(answerButton, false);
+        }
+        return;
+      }
+
+      var generatePatch = event.target.closest('[data-mcw-generate-targeted-patch]');
+      if (generatePatch) {
+        busy(generatePatch, true, 'Generating Targeted Correction…');
+        try {
+          await request('generate_targeted_correction');
+          window.location.reload();
+        } catch (error) {
+          toast(error.message, true);
+          busy(generatePatch, false);
+        }
+        return;
+      }
+
+      var acceptPatch = event.target.closest('[data-mcw-accept-targeted-patch]');
+      if (acceptPatch) {
+        var patch = acceptPatch.closest('[data-mcw-targeted-patch]');
+        busy(acceptPatch, true, 'Verifying Correction…');
+        try {
+          await request('accept_targeted_correction', {
+            patch_id: Number(patch.dataset.mcwTargetedPatch || 0)
+          });
+          window.location.reload();
+        } catch (error) {
+          toast(error.message, true);
+          busy(acceptPatch, false);
+        }
+        return;
+      }
+
+      var adjustPatch = event.target.closest('[data-mcw-request-patch-adjustment]');
+      if (adjustPatch) {
+        var adjustmentPatch = adjustPatch.closest('[data-mcw-targeted-patch]');
+        var reason = window.prompt('What should be adjusted in this targeted correction?') || '';
+        if (reason.trim().length < 10) {
+          if (reason) toast('Provide a specific adjustment request.', true);
+          return;
+        }
+        busy(adjustPatch, true, 'Recording Adjustment…');
+        try {
+          await request('request_targeted_correction_adjustment', {
+            patch_id: Number(adjustmentPatch.dataset.mcwTargetedPatch || 0),
+            reason: reason
+          });
+          window.location.reload();
+        } catch (error) {
+          toast(error.message, true);
+          busy(adjustPatch, false);
+        }
+        return;
+      }
+
+      var reopen = event.target.closest('[data-mcw-explicit-reopen]');
+      if (reopen) {
+        var rationale = window.prompt('Why must this accepted baseline be reopened?') || '';
+        if (rationale.trim().length < 20) {
+          if (rationale) toast('Provide a specific reopening rationale.', true);
+          return;
+        }
+        busy(reopen, true, 'Recording Explicit Reopen…');
+        try {
+          await request(String(reopen.dataset.mcwExplicitReopen || ''), {
+            rationale: rationale
+          });
+          window.location.reload();
+        } catch (error) {
+          toast(error.message, true);
+          busy(reopen, false);
+        }
+        return;
+      }
+
+      var followUp = event.target.closest('[data-mcw-scope-follow-up]');
+      if (followUp) {
+        var followUpReason = window.prompt('Why should this possible scope issue be handled separately?') || '';
+        if (followUpReason.trim().length < 20) {
+          if (followUpReason) toast('Provide a specific follow-up rationale.', true);
+          return;
+        }
+        busy(followUp, true, 'Recording Follow-up…');
+        try {
+          await request('record_scope_follow_up', {
+            finding_id: Number(followUp.dataset.mcwScopeFollowUp || 0),
+            rationale: followUpReason
+          });
+          window.location.reload();
+        } catch (error) {
+          toast(error.message, true);
+          busy(followUp, false);
+        }
+      }
     });
   }
 
@@ -542,6 +659,7 @@
   setupIntake();
   setupImpactDecisions();
   setupDraftDecisions();
+  setupReviewResolution();
   setupProgression();
   setupPendingAnalysis();
   setupPendingDrafting();

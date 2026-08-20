@@ -232,6 +232,188 @@ final class BooksManualsChangeAuthorService
     }
 
     /**
+     * Generate a minimal correction against an accepted draft baseline.
+     * Unaffected sections and lifecycle data are copied byte-for-byte.
+     *
+     * @param array<string,mixed> $acceptedProposal
+     * @param list<array<string,mixed>> $findings
+     * @param list<array<string,mixed>> $governedFacts
+     * @return array<string,mixed>
+     */
+    public function generateTargetedPatch(
+        int $planId,
+        int $actorUserId,
+        array $acceptedProposal,
+        array $findings,
+        array $governedFacts = array()
+    ): array {
+        if ((string)($acceptedProposal['wizard_status'] ?? '') !== 'accepted') {
+            throw new RuntimeException('Targeted correction requires accepted Step 4 wording.');
+        }
+        $allDrafts = (array)($acceptedProposal['section_drafts'] ?? array());
+        $scope = array();
+        foreach ($findings as $finding) {
+            foreach ((array)($finding['affected_sections_json'] ?? array()) as $section) {
+                $section = trim((string)$section);
+                if ($section !== '' && isset($allDrafts[$section])) {
+                    $scope[$section] = true;
+                }
+            }
+        }
+        $scopeSections = array_keys($scope);
+        if ($scopeSections === array()) {
+            throw new RuntimeException('The review finding has no accepted amendment section for targeted correction.');
+        }
+        $scopedDrafts = array_intersect_key($allDrafts, $scope);
+        $unchangedFingerprints = array();
+        foreach ($allDrafts as $section => $draft) {
+            if (!isset($scope[$section])) {
+                $unchangedFingerprints[(string)$section] = hash('sha256', $this->json($draft));
+            }
+        }
+        require_once dirname(__DIR__) . '/openai.php';
+        $schema = array(
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => array('section_patches'),
+            'properties' => array(
+                'section_patches' => array(
+                    'type' => 'array',
+                    'items' => array(
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'required' => array('section_number', 'reason', 'nodes'),
+                        'properties' => array(
+                            'section_number' => array('type' => 'string'),
+                            'reason' => array('type' => 'string'),
+                            'nodes' => array(
+                                'type' => 'array',
+                                'items' => array(
+                                    'type' => 'object',
+                                    'additionalProperties' => false,
+                                    'required' => array('number', 'content'),
+                                    'properties' => array(
+                                        'number' => array('type' => 'string'),
+                                        'content' => array('type' => 'string'),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        );
+        $prompt = implode("\n", array(
+            'You are the Amendment Author operating in TARGETED PATCH MODE.',
+            'Correct only the supplied resolved Independent Review findings.',
+            'Do not reinterpret scope, create structure, add sections, or rewrite unaffected wording.',
+            'Return every node in each affected section, copying unaffected node wording exactly.',
+            'Preserve durable controlled-manual language and do not invent organizational policy or software capability.',
+            'Do not describe screens, APIs, databases, hosting, JSON, or implementation details unless an explicit governed fact requires that detail in the manual.',
+            'Known non-operational capabilities must remain explicitly non-operational.',
+            '---BEGIN ACCEPTED AFFECTED WORDING---',
+            $this->json($scopedDrafts),
+            '---END ACCEPTED AFFECTED WORDING---',
+            '---BEGIN REVIEW FINDINGS---',
+            $this->json($findings),
+            '---END REVIEW FINDINGS---',
+            '---BEGIN GOVERNED HUMAN FACTS---',
+            $this->json($governedFacts),
+            '---END GOVERNED HUMAN FACTS---',
+        ));
+        $model = cw_openai_model();
+        $started = microtime(true);
+        try {
+            $response = cw_openai_responses(array(
+                'model' => $model,
+                'input' => array(array(
+                    'role' => 'user',
+                    'content' => array(array('type' => 'input_text', 'text' => $prompt)),
+                )),
+                'text' => array('format' => array(
+                    'type' => 'json_schema',
+                    'name' => 'manual_change_targeted_patch',
+                    'strict' => true,
+                    'schema' => $schema,
+                )),
+                'metadata' => array(
+                    'plan_id' => (string)$planId,
+                    'role' => 'AMENDMENT_AUTHOR_TARGETED_PATCH',
+                ),
+            ), 300);
+            $generated = cw_openai_extract_json_text($response);
+            $candidate = $acceptedProposal;
+            $changedSections = array();
+            $acceptedNodeNumbers = array_fill_keys(array_map(
+                'strval',
+                (array)($acceptedProposal['accepted_structure_nodes'] ?? array())
+            ), true);
+            foreach ((array)($generated['section_patches'] ?? array()) as $patch) {
+                if (!is_array($patch)) {
+                    continue;
+                }
+                $section = trim((string)($patch['section_number'] ?? ''));
+                if ($section === '' || !isset($scope[$section]) || !isset($candidate['section_drafts'][$section])) {
+                    throw new RuntimeException('Targeted Author attempted to modify content outside the authorized review scope.');
+                }
+                $nodes = array();
+                foreach ((array)($patch['nodes'] ?? array()) as $node) {
+                    $number = trim((string)($node['number'] ?? ''));
+                    $content = trim((string)($node['content'] ?? ''));
+                    if ($number === '' || $content === '' || !isset($acceptedNodeNumbers[$number])) {
+                        throw new RuntimeException('Targeted Author attempted to add an unaccepted structure node.');
+                    }
+                    $nodes[$number] = $content;
+                }
+                if ($nodes === array()) {
+                    throw new RuntimeException('Targeted correction returned no controlled wording.');
+                }
+                $candidate['section_drafts'][$section]['nodes'] = $nodes;
+                $changedSections[$section] = array(
+                    'reason' => trim((string)($patch['reason'] ?? '')),
+                    'before' => $allDrafts[$section],
+                    'after' => $candidate['section_drafts'][$section],
+                );
+            }
+            if (array_keys($changedSections) !== $scopeSections
+                && array_diff($scopeSections, array_keys($changedSections)) !== array()) {
+                throw new RuntimeException('Targeted correction did not address every affected section.');
+            }
+            foreach ($unchangedFingerprints as $section => $fingerprint) {
+                if (!hash_equals(
+                    $fingerprint,
+                    hash('sha256', $this->json($candidate['section_drafts'][$section]))
+                )) {
+                    throw new RuntimeException('Targeted correction modified unrelated accepted wording.');
+                }
+            }
+            $candidate['validation_evidence']['legacy_status'] = $this->legacyReferenceStatus(
+                $this->buildAuthorizedBrief($planId),
+                (array)$candidate['section_drafts']
+            );
+            if ($this->json($candidate['lifecycle'] ?? array())
+                !== $this->json($acceptedProposal['lifecycle'] ?? array())) {
+                throw new RuntimeException('Targeted correction changed the accepted lifecycle model.');
+            }
+            $this->logAi('OK', $planId, $actorUserId, $model, $prompt, $generated, null, $started);
+            return array(
+                'schema' => 'ipca.manual-change-targeted-patch.v1',
+                'mode' => 'TARGETED_PATCH',
+                'scope_sections' => $scopeSections,
+                'changed_sections' => $changedSections,
+                'candidate_proposal' => $candidate,
+                'unchanged_section_fingerprints' => $unchangedFingerprints,
+                'accepted_structure_nodes_unchanged' => true,
+                'lifecycle_unchanged' => true,
+                'production_applied' => false,
+            );
+        } catch (Throwable $error) {
+            $this->logAi('ERROR', $planId, $actorUserId, $model, $prompt, null, $error->getMessage(), $started);
+            throw $error;
+        }
+    }
+
+    /**
      * Assemble author-drafted wording without touching controlled publishing.
      *
      * @param array<string,mixed> $authorization
@@ -706,5 +888,10 @@ final class BooksManualsChangeAuthorService
             substr($hex, 16, 4),
             substr($hex, 20)
         );
+    }
+
+    private function json(mixed $value): string
+    {
+        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 }

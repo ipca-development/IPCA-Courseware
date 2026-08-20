@@ -60,22 +60,30 @@ architect_ui_assert(
 );
 architect_ui_assert(str_contains($page, 'data-mcw-accept-impacts'), 'Single impact-analysis continuation action is missing.');
 architect_ui_assert(
+    str_contains($page, "strtolower((string)(\$impact['status'] ?? '')) !== 'dismissed'")
+        && str_contains(
+            (string)$architect,
+            "strtolower((string)(\$impact['status'] ?? '')) !== 'dismissed'"
+        ),
+    'Dismissed candidate impacts must not return the Wizard to Impact Analysis after acceptance.'
+);
+architect_ui_assert(
     str_contains($page, "\$reviewPayload['prepared_result']")
-        && str_contains($page, 'What must be corrected')
-        && str_contains($page, 'Accept Independent Review &amp; Continue')
-        && str_contains($page, 'data-mcw-resolve-review')
-        && str_contains($page, 'Revise Proposed Amendments')
-        && str_contains($js, 'resolve_independent_review')
-        && str_contains($api, "\$report['structure_proposals'] = array()")
-        && str_contains($api, "\$architect->buildImpactPresentation(\$report)")
-        && str_contains($api, "'review_corrections' => \$reviewIssues")
+        && str_contains($page, 'Review Decisions')
+        && str_contains($page, 'Question <?= $questionPosition ?> of')
+        && str_contains($page, 'Current accepted wording')
+        && str_contains($page, 'Proposed targeted correction')
+        && str_contains($js, 'answer_review_question')
+        && str_contains($js, 'generate_targeted_correction')
+        && str_contains($api, 'cannot automatically reopen or regenerate accepted Steps 2–4')
+        && str_contains($api, "'outcome' => 'READY_TO_APPLY'")
         && str_contains((string)$structureService, 'reopenExistingProposal(')
         && str_contains((string)$structureService, 'reopened_existing_fingerprint'),
-    'Independent Review must unwrap the prepared result, present blockers, and expose governed correction.'
+    'Independent Review must preserve accepted baselines and expose governed convergent correction.'
 );
 architect_ui_assert(
     !str_contains($page, 'Run Independent Review')
-        && str_contains($page, 'Technical review record'),
+        && str_contains($page, 'Review Details'),
     'Step 5 must not present completed review preparation as a raw-JSON review action.'
 );
 foreach (array(

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsUi.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeArchitectService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeReviewResolutionService.php';
 
 /** @return array<mixed> */
 function mcw_array(mixed $value): array
@@ -91,6 +92,7 @@ $report = array();
 $manual = array();
 $versions = array();
 $loadError = '';
+$reviewResolutionState = array();
 try {
     if (!$plans->tablesPresent()) {
         throw new RuntimeException('The Manual Change Wizzard is not installed on this deployment.');
@@ -106,6 +108,10 @@ try {
     if ($planId > 0) {
         $report = (new BooksManualsChangeArchitectService($pdo, $plans))
             ->getCompleteCheckpointReport($planId);
+        if ((array)($report['reviews'] ?? array()) !== array()) {
+            $reviewResolutionState = (new BooksManualsChangeReviewResolutionService($pdo, $plans))
+                ->state($planId);
+        }
         $versionId = (int)($report['primary_manual_version_id'] ?? 0);
         $stmt = $pdo->prepare(
             'SELECT v.id,v.version_label,v.lifecycle_status,b.book_key,b.title
@@ -165,11 +171,13 @@ foreach ($presentationAreas as $area) {
 }
 $amendments = array_values(array_filter(
     $impacts,
-    static fn(array $impact): bool => in_array(
-        strtoupper((string)($impact['treatment'] ?? '')),
-        array('AMEND', 'REPLACE', 'RESTRUCTURE', 'ADD', 'REMOVE_OBSOLETE'),
-        true
-    )
+    static fn(array $impact): bool =>
+        strtolower((string)($impact['status'] ?? '')) !== 'dismissed'
+        && in_array(
+            strtoupper((string)($impact['treatment'] ?? '')),
+            array('AMEND', 'REPLACE', 'RESTRUCTURE', 'ADD', 'REMOVE_OBSOLETE'),
+            true
+        )
 ));
 usort($amendments, static fn(array $a, array $b): int =>
     strnatcasecmp((string)($a['section_number'] ?? ''), (string)($b['section_number'] ?? ''))
@@ -281,6 +289,20 @@ $reviewStatus = strtoupper((string)(
 ));
 $reviewApproved = (string)($review['status'] ?? '') === 'approved';
 $reviewIssues = array_values((array)($reviewDisplayPayload['issues'] ?? array()));
+$reviewResolutionReady = !empty($reviewResolutionState['ready_to_apply']);
+$reviewPendingQuestion = mcw_array($reviewResolutionState['pending_question'] ?? array());
+$reviewFindings = array_values(array_filter(
+    (array)($reviewResolutionState['findings'] ?? array()),
+    'is_array'
+));
+$reviewPatches = array_values(array_filter(
+    (array)($reviewResolutionState['patches'] ?? array()),
+    'is_array'
+));
+$reviewPendingPatch = array_values(array_filter(
+    $reviewPatches,
+    static fn(array $patch): bool => (string)($patch['status'] ?? '') === 'proposed'
+))[0] ?? array();
 $reviewNeedsStructureRevision = false;
 foreach ($reviewIssues as $reviewIssue) {
     if (preg_match(
@@ -293,6 +315,20 @@ foreach ($reviewIssues as $reviewIssue) {
 }
 $operations = array_values(array_filter((array)($report['operations'] ?? array()), 'is_array'));
 $operation = $operations === array() ? array() : $operations[array_key_last($operations)];
+$explicitReopenTarget = '';
+foreach (array_values((array)($report['events'] ?? array())) as $event) {
+    if (!is_array($event)) {
+        continue;
+    }
+    $eventType = (string)($event['event_type'] ?? '');
+    if ($eventType === 'INDEPENDENT_REVIEW_BASELINE_VOIDED_BY_HUMAN') {
+        $eventPayload = mcw_array($event['event_payload_json'] ?? array());
+        $explicitReopenTarget = (string)($eventPayload['target'] ?? '');
+    } elseif (($eventType === 'IMPACT_ANALYSIS_ACCEPTED' && $explicitReopenTarget === 'IMPACT_ANALYSIS')
+        || ($eventType === 'STRUCTURE_ACCEPTED' && $explicitReopenTarget === 'PROPOSED_STRUCTURE')) {
+        $explicitReopenTarget = '';
+    }
+}
 
 $analysisPending = $report !== array()
     && in_array((string)($report['status'] ?? ''), array('active', 'analyzing'), true);
@@ -301,8 +337,10 @@ $step2Complete = $amendments !== array() && !in_array(
     false,
     array_map(static fn(array $impact): bool => (string)($impact['status'] ?? '') === 'approved', $amendments),
     true
-);
+)
+    && $explicitReopenTarget !== 'IMPACT_ANALYSIS';
 $step3Complete = $structure !== array() && (string)($structure['status'] ?? '') === 'approved';
+$step3Complete = $step3Complete && $explicitReopenTarget !== 'PROPOSED_STRUCTURE';
 $step4Complete = $draft !== array()
     && $draftStatus === 'generated'
     && (string)($draftPayload['wizard_status'] ?? '') === 'accepted';
@@ -638,32 +676,79 @@ books_manuals_page_open(array(
         <details class="mcw-step mcw-step--complete"><summary><span class="mcw-check">✓</span><span><strong>5. Independent Review</strong><small>Ready for human approval</small></span><span>View</span></summary></details>
       <?php elseif ($activeStep === 5): ?>
         <section class="mcw-step mcw-step--active" data-mcw-step="5">
-          <header><span class="mcw-step-number">5</span><div><h2>Independent Review</h2><p>Reviewing the resulting manual for completeness, consistency and unsupported claims.</p></div></header>
-          <div class="mcw-review-result <?= $reviewReady ? 'is-ready' : 'is-review' ?>">
-            <h3><?= $reviewReady ? '✓ Ready for Human Approval' : 'Independent Review Found Issues' ?></h3>
-            <?php if (mcw_text($reviewPayload['summary'] ?? '') !== ''): ?>
-              <p><?= h((string)$reviewPayload['summary']) ?></p>
-            <?php endif; ?>
-            <?php $checks = mcw_array($reviewDisplayPayload['checks'] ?? $reviewDisplayPayload['final_quality_checks'] ?? array()); ?>
-            <?php if ($checks !== array()): ?><ul><?php foreach ($checks as $label => $result): ?><li><?= !empty($result) ? '✓' : '!' ?> <?= h(is_string($label) ? ucwords(str_replace('_', ' ', $label)) : (string)$result) ?></li><?php endforeach; ?></ul><?php endif; ?>
-            <?php if ($reviewIssues !== array()): ?>
-              <div class="mcw-review-issues">
-                <h4>What must be corrected</h4>
-                <ul><?php foreach ($reviewIssues as $issue): ?><li><?= h(mcw_review_issue_text($issue)) ?></li><?php endforeach; ?></ul>
-              </div>
-            <?php endif; ?>
-            <details><summary>Technical review record</summary><pre><?= h(json_encode($reviewDisplayPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre></details>
+          <header><span class="mcw-step-number">5</span><div><h2>Independent Review</h2><p>Resolve only material review findings. Accepted scope, structure and unaffected wording remain frozen.</p></div></header>
+          <?php $reviewCounts = mcw_array($reviewResolutionState['counts'] ?? array()); ?>
+          <?php $questionCount = (int)($reviewCounts['HUMAN_DECISION_REQUIRED'] ?? 0); ?>
+          <?php $answeredCount = count((array)($reviewResolutionState['answers'] ?? array())); ?>
+          <div class="mcw-review-summary">
+            <strong><?= $reviewResolutionReady ? 'Independent Review Complete' : 'Independent Review' ?></strong>
+            <span>✓ <?= count(array_filter(mcw_array($reviewDisplayPayload['checks'] ?? array()))) ?> checks passed</span>
+            <span>⚠ <?= max(0, $questionCount - $answeredCount) ?> decisions need your input</span>
+            <span>✕ <?= (int)($reviewResolutionState['hard_blockers'] ?? 0) ?> blocking defects</span>
           </div>
-          <?php if ($reviewReady): ?>
-            <?php if ($reviewApproved): ?>
-              <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-continue-apply>Continue to Apply</button>
-            <?php else: ?>
-              <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-run-review>Accept Independent Review &amp; Continue</button>
-            <?php endif; ?>
+
+          <?php if (!empty($reviewResolutionState['review_divergence_detected'])): ?>
+            <div class="mcw-review-result is-review"><h3>Review divergence detected</h3><p>Automatic correction has stopped because unresolved material findings increased across consecutive review cycles. Review Details contains the diagnostic state.</p></div>
+          <?php elseif ($reviewPendingQuestion !== array()): ?>
+            <?php
+              $pendingQuestions = array_values(array_filter(
+                  (array)($reviewResolutionState['questions'] ?? array()),
+                  static fn(array $question): bool => (string)($question['status'] ?? '') === 'pending'
+              ));
+              $questionPosition = 1;
+              foreach ($pendingQuestions as $index => $candidateQuestion) {
+                  if ((int)($candidateQuestion['id'] ?? 0) === (int)($reviewPendingQuestion['id'] ?? 0)) {
+                      $questionPosition = $index + 1;
+                      break;
+                  }
+              }
+              $questionChoices = mcw_array($reviewPendingQuestion['choices_json'] ?? array());
+              $questionSections = mcw_array($reviewPendingQuestion['affected_sections_json'] ?? array());
+            ?>
+            <section class="mcw-review-question" data-mcw-review-question="<?= (int)$reviewPendingQuestion['id'] ?>">
+              <span class="mcw-kicker">Question <?= $questionPosition ?> of <?= count($pendingQuestions) ?></span>
+              <h3><?= h((string)$reviewPendingQuestion['title']) ?></h3>
+              <p><?= h((string)$reviewPendingQuestion['prompt']) ?></p>
+              <div class="mcw-review-choices">
+                <?php foreach ($questionChoices as $choice): ?>
+                  <?php if (!is_array($choice)) continue; ?>
+                  <label><input type="<?= (string)$reviewPendingQuestion['question_type'] === 'MULTIPLE_CHOICE' ? 'checkbox' : 'radio' ?>" name="mcw-review-choice" value="<?= h((string)($choice['id'] ?? '')) ?>"> <span><?= h((string)($choice['label'] ?? '')) ?></span></label>
+                <?php endforeach; ?>
+              </div>
+              <details><summary>Why are we asking this?</summary><p><?= h((string)$reviewPendingQuestion['why_asking']) ?></p></details>
+              <p><strong>Affected sections</strong><br><?= h(implode(' · ', array_map('strval', $questionSections))) ?></p>
+              <label class="mcw-field"><span>Optional explanation</span><textarea rows="3" data-mcw-review-answer-explanation></textarea></label>
+              <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-answer-review-question>Continue</button>
+            </section>
+          <?php elseif ($reviewPendingPatch !== array()): ?>
+            <?php $patchPayload = mcw_array($reviewPendingPatch['proposed_payload_json'] ?? array()); ?>
+            <section class="mcw-targeted-patch" data-mcw-targeted-patch="<?= (int)$reviewPendingPatch['id'] ?>">
+              <span class="mcw-kicker">Targeted correction</span>
+              <?php foreach ((array)($patchPayload['changed_sections'] ?? array()) as $section => $change): ?>
+                <?php if (!is_array($change)) continue; ?>
+                <h3><?= h((string)$section) ?></h3>
+                <h4>Current accepted wording</h4>
+                <pre><?= h(implode("\n\n", array_map('strval', (array)($change['before']['nodes'] ?? array())))) ?></pre>
+                <h4>Proposed targeted correction</h4>
+                <pre><?= h(implode("\n\n", array_map('strval', (array)($change['after']['nodes'] ?? array())))) ?></pre>
+                <h4>Why this correction is required</h4><p><?= h((string)($change['reason'] ?? 'Resolve the identified Independent Review finding.')) ?></p>
+              <?php endforeach; ?>
+              <div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-request-patch-adjustment>Request Adjustment</button><button class="app-btn app-btn--primary" type="button" data-mcw-accept-targeted-patch>Accept Correction</button></div>
+            </section>
+          <?php elseif ($reviewResolutionReady): ?>
+            <div class="mcw-review-result is-ready"><h3>✓ No unresolved issues</h3><ul><li>✓ Accepted requirements represented</li><li>✓ Human decisions resolved</li><li>✓ Targeted corrections verified</li><li>✓ Known limitations correctly represented</li><li>✓ Accepted structure preserved</li><li>✓ Unaffected wording unchanged</li><li>✓ No integrity blockers</li></ul></div>
+            <button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-run-review>Continue to Apply</button>
           <?php else: ?>
-            <p class="mcw-apply-note">The Wizard cannot continue until these review issues are corrected. The quality gate has not been bypassed.</p>
-            <button class="app-btn app-btn--secondary mcw-primary-action" type="button" data-mcw-resolve-review><?= $reviewNeedsStructureRevision ? 'Revise Proposed Structure' : 'Revise Proposed Amendments' ?></button>
+            <?php $patchableFindings = array_values(array_filter($reviewFindings, static fn(array $finding): bool => in_array((string)($finding['status'] ?? ''), array('patch_pending', 'blocked'), true) && !in_array((string)($finding['finding_class'] ?? ''), array('POTENTIAL_SCOPE_DEFECT', 'HUMAN_DECISION_REQUIRED'), true))); ?>
+            <?php $scopeDefects = array_values(array_filter($reviewFindings, static fn(array $finding): bool => (string)($finding['finding_class'] ?? '') === 'POTENTIAL_SCOPE_DEFECT' && !in_array((string)($finding['status'] ?? ''), array('closed', 'verified'), true))); ?>
+            <div class="mcw-review-decisions"><h3>Review Decisions</h3><p><?= $answeredCount ?> decisions recorded · <?= count($patchableFindings) ?> targeted corrections required</p></div>
+            <?php if ($patchableFindings !== array() && $scopeDefects === array()): ?><button class="app-btn app-btn--primary mcw-primary-action" type="button" data-mcw-generate-targeted-patch>Generate Targeted Correction</button><?php elseif ($scopeDefects !== array()): ?><p class="mcw-apply-note">Resolve the potential scope issue before generating a wording correction.</p><?php endif; ?>
+            <?php foreach ($reviewFindings as $finding): ?>
+              <?php if (!in_array((string)($finding['finding_class'] ?? ''), array('HARD_INTEGRITY_BLOCKER', 'POTENTIAL_SCOPE_DEFECT'), true) || in_array((string)($finding['status'] ?? ''), array('closed', 'verified'), true)) continue; ?>
+              <div class="mcw-review-result is-review"><h3><?= h((string)$finding['title']) ?></h3><p><?= h((string)$finding['human_explanation']) ?></p><p>This cannot be dismissed through a questionnaire.</p><?php if ((string)$finding['finding_class'] === 'POTENTIAL_SCOPE_DEFECT'): ?><div class="mcw-step-actions"><button class="app-btn app-btn--secondary" type="button" data-mcw-scope-follow-up="<?= (int)$finding['id'] ?>">Record as Separate Follow-up</button><button class="app-btn app-btn--secondary" type="button" data-mcw-explicit-reopen="reopen_impact_analysis">Reopen Impact Analysis</button></div><?php endif; ?></div>
+            <?php endforeach; ?>
           <?php endif; ?>
+          <details class="mcw-review-details"><summary>Review Details</summary><pre><?= h(json_encode(array('review' => $reviewDisplayPayload, 'resolution' => $reviewResolutionState), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre></details>
         </section>
       <?php endif; ?>
     <?php endif; ?>

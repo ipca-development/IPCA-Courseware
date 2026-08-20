@@ -11,16 +11,20 @@ RuntimeSecrets::ensureCliEnvLoaded();
 require_once __DIR__ . '/../src/db.php';
 
 $pdo = cw_db();
-$sqlPath = __DIR__ . '/sql/2026_08_18_ai_manual_change_architect.sql';
-$sql = file_get_contents($sqlPath);
-if (!is_string($sql) || trim($sql) === '') {
-    throw new RuntimeException('Manual Change Architect migration SQL is missing.');
-}
-
-foreach (preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: array() as $statement) {
-    $statement = trim((string)preg_replace('/^\s*--.*$/m', '', $statement));
-    if ($statement !== '') {
-        $pdo->exec($statement);
+$sqlPaths = array(
+    __DIR__ . '/sql/2026_08_18_ai_manual_change_architect.sql',
+    __DIR__ . '/sql/2026_08_20_manual_change_review_convergence.sql',
+);
+foreach ($sqlPaths as $sqlPath) {
+    $sql = file_get_contents($sqlPath);
+    if (!is_string($sql) || trim($sql) === '') {
+        throw new RuntimeException('Manual Change Architect migration SQL is missing: ' . basename($sqlPath));
+    }
+    foreach (preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: array() as $statement) {
+        $statement = trim((string)preg_replace('/^\s*--.*$/m', '', $statement));
+        if ($statement !== '') {
+            $pdo->exec($statement);
+        }
     }
 }
 
@@ -43,6 +47,12 @@ $requiredTables = array(
     'ipca_manual_ai_architect_drafts',
     'ipca_manual_ai_architect_reviews',
     'ipca_manual_ai_architect_operations',
+    'ipca_manual_ai_architect_review_baselines',
+    'ipca_manual_ai_architect_review_findings',
+    'ipca_manual_ai_architect_review_questions',
+    'ipca_manual_ai_architect_review_answers',
+    'ipca_manual_ai_architect_review_patches',
+    'ipca_manual_ai_architect_review_cycles',
 );
 
 $tableCheck = $pdo->prepare(

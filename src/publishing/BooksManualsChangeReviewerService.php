@@ -448,6 +448,73 @@ final class BooksManualsChangeReviewerService
     }
 
     /**
+     * Verify a targeted correction without reopening accepted scope or
+     * structure. Whole-proposal deterministic checks may run, but only the
+     * authorized section scope may differ from the accepted baseline.
+     *
+     * @param array<string,mixed> $acceptedProposal
+     * @param array<string,mixed> $candidateProposal
+     * @param list<string> $scopeSections
+     * @return array<string,mixed>
+     */
+    public function verifyTargetedPatch(
+        array $acceptedProposal,
+        array $candidateProposal,
+        array $scopeSections
+    ): array {
+        $scope = array_fill_keys(array_map('strval', $scopeSections), true);
+        $before = (array)($acceptedProposal['section_drafts'] ?? array());
+        $after = (array)($candidateProposal['section_drafts'] ?? array());
+        $unchanged = array();
+        $scopeViolations = array();
+        foreach ($before as $section => $draft) {
+            if (isset($scope[(string)$section])) {
+                continue;
+            }
+            $beforeJson = $this->json($draft);
+            $afterJson = $this->json($after[$section] ?? null);
+            $matches = hash_equals(hash('sha256', $beforeJson), hash('sha256', $afterJson));
+            $unchanged[(string)$section] = $matches;
+            if (!$matches) {
+                $scopeViolations[] = (string)$section;
+            }
+        }
+        $structureBefore = array_map(
+            static fn(array $draft): array => array_keys((array)($draft['nodes'] ?? array())),
+            $before
+        );
+        $structureAfter = array_map(
+            static fn(array $draft): array => array_keys((array)($draft['nodes'] ?? array())),
+            $after
+        );
+        $structurePreserved = $structureBefore === $structureAfter;
+        $verification = $this->verifyReadableAmendmentProposal($candidateProposal);
+        $issues = array_values((array)($verification['issues'] ?? array()));
+        if ($scopeViolations !== array()) {
+            $issues[] = 'Targeted correction changed unrelated accepted wording.';
+        }
+        if (!$structurePreserved) {
+            $issues[] = 'Targeted correction changed the accepted structure.';
+        }
+        return array(
+            'schema' => 'ipca.manual-change-targeted-reverification.v1',
+            'status' => $issues === array() ? 'VERIFIED' : self::REQUIRES_REVIEW,
+            'scope_sections' => array_keys($scope),
+            'unaffected_sections_byte_unchanged' => !in_array(false, $unchanged, true),
+            'unaffected_section_results' => $unchanged,
+            'accepted_structure_preserved' => $structurePreserved,
+            'known_limitations_checked' =>
+                (array)($verification['unsupported_capability_claims'] ?? array()) === array(),
+            'preservation_boundaries_checked' =>
+                (array)($verification['readability']['preservation_checks'] ?? array()),
+            'issues' => array_values(array_unique($issues)),
+            'full_integrity_result' => $verification,
+            'architect_rerun_performed' => false,
+            'production_applied' => false,
+        );
+    }
+
+    /**
      * Independently review the in-memory result of minimal canonical operations.
      *
      * @param array<string,mixed> $package
@@ -622,5 +689,10 @@ final class BooksManualsChangeReviewerService
             'unsupported_claims' => array(),
             'production_applied' => false,
         );
+    }
+
+    private function json(mixed $value): string
+    {
+        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 }

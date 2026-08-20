@@ -281,7 +281,11 @@ final class BooksManualsChangeArchitectService
         foreach ($components as $component) {
             $componentMap[(string)($component['component_key'] ?? '')] = $component;
         }
-        $impacts = array_values(array_filter((array)($report['impacts'] ?? array()), 'is_array'));
+        $impacts = array_values(array_filter(
+            (array)($report['impacts'] ?? array()),
+            static fn(mixed $impact): bool => is_array($impact)
+                && strtolower((string)($impact['status'] ?? '')) !== 'dismissed'
+        ));
         $impactById = array();
         foreach ($impacts as $impact) {
             $impactById[(int)($impact['id'] ?? 0)] = $impact;

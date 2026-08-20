@@ -234,6 +234,24 @@ architect_fixture_assert(
         ))
 );
 
+$dismissedImpacts = $presentationImpacts;
+$dismissedSection = (string)($dismissedImpacts[array_key_last($dismissedImpacts)]['section_number'] ?? '');
+$dismissedImpacts[array_key_last($dismissedImpacts)]['status'] = 'dismissed';
+$postAcceptancePresentation = $service->buildImpactPresentation(array(
+    'impacts' => $dismissedImpacts,
+    'target_components' => $presentationComponents,
+    'change_intents' => array($report['change_intent']),
+    'boundaries' => $report['boundaries'],
+    'legacy_hits' => $report['legacy_references'],
+    'coverage' => $report['coverage_matrix'],
+    'impact_dependencies' => array(),
+    'structure_nodes' => array(),
+));
+architect_fixture_assert(
+    !in_array($dismissedSection, architect_fixture_numbers($postAcceptancePresentation['areas']), true),
+    'A dismissed candidate remained active after Impact Analysis acceptance.'
+);
+
 $ambiguousAreas = $presentation['areas'];
 $adjacentArea = $ambiguousAreas[array_key_last($ambiguousAreas)];
 $adjacentArea['impact_id'] = 999;

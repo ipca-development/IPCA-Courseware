@@ -9,6 +9,7 @@ require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeStructureServ
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeAuthorService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeReviewerService.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeApplyService.php';
+require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeReviewResolutionService.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -76,6 +77,7 @@ function architect_api_prepare_independent_review(
     BooksManualsChangePlanService $plans,
     BooksManualsChangeReviewerService $reviewer,
     BooksManualsChangeApplyService $apply,
+    BooksManualsChangeReviewResolutionService $reviewResolution,
     int $planId,
     int $actorUserId
 ): int {
@@ -119,7 +121,7 @@ function architect_api_prepare_independent_review(
                 && empty($operationPackage['lifecycle_transition_allowed']),
         ),
     ));
-    return $plans->save('reviews', $planId, array(
+    $reviewId = $plans->save('reviews', $planId, array(
         'review_uuid' => architect_api_uuid(),
         'draft_id' => (int)$draft['id'],
         'review_type' => 'independent_consistency',
@@ -134,6 +136,8 @@ function architect_api_prepare_independent_review(
         'requested_by' => $actorUserId,
         'requested_at' => gmdate('Y-m-d H:i:s.v'),
     ));
+    $reviewResolution->initializeReview($planId, $reviewId, $prepared, $actorUserId);
+    return $reviewId;
 }
 
 /** @param array<string,mixed> $input */
@@ -408,6 +412,7 @@ $structures = new BooksManualsChangeStructureService($pdo, $plans);
 $author = new BooksManualsChangeAuthorService($pdo, $plans);
 $reviewer = new BooksManualsChangeReviewerService($pdo, $plans);
 $apply = new BooksManualsChangeApplyService($pdo, $plans);
+$reviewResolution = new BooksManualsChangeReviewResolutionService($pdo, $plans);
 
 try {
     if (!$plans->tablesPresent()) {
@@ -753,163 +758,10 @@ try {
 
         case 'revise_structure_after_review': // Backward-compatible stale page action.
         case 'resolve_independent_review':
-            $planId = (int)($input['plan_id'] ?? 0);
-            $plan = $plans->getPlan($planId);
-            if ((int)($plan['owner_id'] ?? 0) !== $userId) {
-                throw new RuntimeException('Only the Change Plan owner can revise the proposed structure.');
-            }
-            $report = $plans->loadPlan($planId);
-            $reviewRows = array_values(array_filter((array)($report['reviews'] ?? array()), 'is_array'));
-            $latestReview = $reviewRows === array() ? array() : $reviewRows[array_key_last($reviewRows)];
-            $reviewPayload = is_array($latestReview['review_payload_json'] ?? null)
-                ? $latestReview['review_payload_json']
-                : array();
-            $preparedReview = is_array($reviewPayload['prepared_result'] ?? null)
-                ? $reviewPayload['prepared_result']
-                : $reviewPayload;
-            if (strtoupper((string)($preparedReview['status'] ?? '')) !== 'REQUIRES_REVIEW') {
-                throw new RuntimeException('Review correction is available only for unresolved Independent Review issues.');
-            }
-            $reviewIssues = array_values(array_filter(array_map(
-                static fn(mixed $issue): string => trim(is_string($issue) ? $issue : ''),
-                (array)($preparedReview['issues'] ?? array())
-            )));
-            $needsStructureRevision = false;
-            foreach ($reviewIssues as $issue) {
-                if (preg_match(
-                    '/(?:accepted consolidated hierarchy|missing accepted structure node|unexpected structure node)/iu',
-                    $issue
-                ) === 1) {
-                    $needsStructureRevision = true;
-                    break;
-                }
-            }
-            if (!$needsStructureRevision) {
-                $pdo->beginTransaction();
-                try {
-                    $pdo->prepare(
-                        "UPDATE ipca_manual_ai_architect_reviews
-                         SET status='superseded' WHERE id=? AND plan_id=? AND status='requested'"
-                    )->execute(array((int)($latestReview['id'] ?? 0), $planId));
-                    $abandonedPayload = json_encode(array(
-                        'schema' => 'ipca.manual-change-amendment-generation.v1',
-                        'generation_status' => 'superseded_by_independent_review',
-                        'superseded_at' => gmdate(DATE_ATOM),
-                        'review_issues' => $reviewIssues,
-                    ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-                    $pdo->prepare(
-                        "UPDATE ipca_manual_ai_architect_drafts
-                         SET status='abandoned',draft_payload_json=?,content_fingerprint=?
-                         WHERE plan_id=? AND status='generated'"
-                    )->execute(array(
-                        $abandonedPayload,
-                        hash('sha256', $abandonedPayload),
-                        $planId,
-                    ));
-                    $plans->updatePlan($planId, array(
-                        'stage' => 'drafting',
-                        'status' => 'active',
-                        'updated_by' => $userId,
-                    ));
-                    $plans->appendEvent($planId, 'AMENDMENT_REVISION_REQUESTED_BY_REVIEW', 12, array(
-                        'review_id' => (int)($latestReview['id'] ?? 0),
-                        'issues' => $reviewIssues,
-                        'structure_revision_required' => false,
-                    ), $userId);
-                    $pdo->commit();
-                } catch (Throwable $error) {
-                    if ($pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    throw $error;
-                }
-                architect_api_write_progress($planId, array(
-                    'percent' => 3,
-                    'stage_key' => 'drafting',
-                    'label' => 'Revising wording against Independent Review',
-                    'started_at' => gmdate(DATE_ATOM),
-                ));
-                architect_api_finish_response(202, array(
-                    'ok' => true,
-                    'result' => array(
-                        'stage' => 'drafting',
-                        'draft_status' => 'generating',
-                    ),
-                    'csrf_token' => architect_api_csrf(),
-                ));
-                ignore_user_abort(true);
-                @set_time_limit(360);
-                try {
-                    $author->generateAndPersist($planId, $userId, array(
-                        'review_corrections' => $reviewIssues,
-                        'progress_callback' => architect_api_progress_callback($planId),
-                    ));
-                } catch (Throwable $draftError) {
-                    error_log(
-                        'Independent Review amendment revision failed for plan '
-                        . $planId . ': ' . $draftError->getMessage()
-                    );
-                }
-                exit;
-            }
-            $pdo->beginTransaction();
-            try {
-                $governedDispositions = $plans->governAcceptedAnalysisDispositions(
-                    $planId,
-                    $userId
-                );
-                $pdo->prepare(
-                    "UPDATE ipca_manual_ai_architect_reviews
-                     SET status='superseded' WHERE plan_id=? AND status='requested'"
-                )->execute(array($planId));
-                $pdo->prepare(
-                    "UPDATE ipca_manual_ai_architect_drafts
-                     SET status='abandoned' WHERE plan_id=? AND status='generated'"
-                )->execute(array($planId));
-                $pdo->prepare(
-                    "UPDATE ipca_manual_ai_architect_structure_nodes n
-                     JOIN ipca_manual_ai_architect_structure_proposals p
-                       ON p.id=n.structure_proposal_id
-                     SET n.decision_status='superseded'
-                     WHERE p.plan_id=? AND p.status='approved'"
-                )->execute(array($planId));
-                $pdo->prepare(
-                    "UPDATE ipca_manual_ai_architect_structure_proposals
-                     SET status='superseded' WHERE plan_id=? AND status='approved'"
-                )->execute(array($planId));
-                $plans->updatePlan($planId, array(
-                    'stage' => 'structure',
-                    'status' => 'ready_for_review',
-                    'updated_by' => $userId,
-                ));
-                $plans->appendEvent($planId, 'STRUCTURE_REVISION_REQUESTED_BY_REVIEW', 12, array(
-                    'review_id' => (int)($latestReview['id'] ?? 0),
-                    'issues' => array_values((array)($preparedReview['issues'] ?? array())),
-                    'governed_dispositions' => $governedDispositions,
-                ), $userId);
-                $proposalId = architect_api_ensure_structure(
-                    $planId,
-                    $userId,
-                    $plans,
-                    $architect,
-                    $structures,
-                    true
-                );
-                $pdo->commit();
-            } catch (Throwable $error) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                throw $error;
-            }
-            architect_api_json(200, array(
-                'ok' => true,
-                'result' => array(
-                    'stage' => 'structure',
-                    'structure_proposal_id' => $proposalId,
-                ),
-                'csrf_token' => architect_api_csrf(),
-            ));
+            throw new RuntimeException(
+                'Independent Review cannot automatically reopen or regenerate accepted Steps 2–4. '
+                . 'Resolve the structured findings within Step 5.'
+            );
 
         case 'generate_drafts':
             $planId = (int)($input['plan_id'] ?? 0);
@@ -1055,6 +907,7 @@ try {
                 $plans,
                 $reviewer,
                 $apply,
+                $reviewResolution,
                 $planId,
                 $userId
             );
@@ -1068,9 +921,189 @@ try {
                 'csrf_token' => architect_api_csrf(),
             ));
 
+        case 'review_state':
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => $reviewResolution->state((int)($input['plan_id'] ?? 0)),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
+        case 'answer_review_question':
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => $reviewResolution->answerQuestion(
+                    (int)($input['plan_id'] ?? 0),
+                    (int)($input['question_id'] ?? 0),
+                    array_values((array)($input['selected_choice_ids'] ?? array())),
+                    (string)($input['explanation'] ?? ''),
+                    $userId
+                ),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
+        case 'generate_targeted_correction':
+            $planId = (int)($input['plan_id'] ?? 0);
+            $state = $reviewResolution->state($planId);
+            if (!empty($state['review_divergence_detected'])) {
+                throw new RuntimeException('Review divergence was detected. Automatic correction has stopped for human inspection.');
+            }
+            $requestedFindingIds = array_values(array_unique(array_filter(array_map(
+                'intval',
+                (array)($input['finding_ids'] ?? array())
+            ))));
+            $findings = array_values(array_filter(
+                (array)$state['findings'],
+                static function (array $finding) use ($requestedFindingIds): bool {
+                    if ($requestedFindingIds !== array()
+                        && !in_array((int)$finding['id'], $requestedFindingIds, true)) {
+                        return false;
+                    }
+                    return in_array(
+                        (string)$finding['finding_class'],
+                        array(
+                            BooksManualsChangeReviewResolutionService::MECHANICAL_FIX,
+                            BooksManualsChangeReviewResolutionService::TARGETED_AUTHOR_CORRECTION,
+                            BooksManualsChangeReviewResolutionService::HARD_INTEGRITY_BLOCKER,
+                        ),
+                        true
+                    ) && in_array((string)$finding['status'], array('patch_pending', 'blocked'), true);
+                }
+            ));
+            if ($findings === array()) {
+                throw new RuntimeException('No targeted correction is currently authorized.');
+            }
+            $report = $plans->loadPlan($planId);
+            $baseline = array_values(array_filter(
+                (array)($report['review_baselines'] ?? array()),
+                static fn(array $row): bool => (int)($row['id'] ?? 0) === (int)($state['baseline_id'] ?? 0)
+            ))[0] ?? array();
+            $drafts = array_values(array_filter(
+                (array)$report['drafts'],
+                static function (array $draft): bool {
+                    $payload = is_array($draft['draft_payload_json'] ?? null)
+                        ? $draft['draft_payload_json']
+                        : array();
+                    return (string)($draft['status'] ?? '') === 'generated'
+                        && (string)($payload['wizard_status'] ?? '') === 'accepted';
+                }
+            ));
+            $draft = $drafts === array() ? array() : $drafts[array_key_last($drafts)];
+            if ($baseline === array() || $draft === array()) {
+                throw new RuntimeException('The frozen accepted draft baseline is unavailable.');
+            }
+            $governedFacts = array_values(array_map(
+                static fn(array $answer): array => (array)($answer['governed_fact_json'] ?? array()),
+                (array)$state['answers']
+            ));
+            $patchResult = $author->generateTargetedPatch(
+                $planId,
+                $userId,
+                (array)$draft['draft_payload_json'],
+                $findings,
+                $governedFacts
+            );
+            $patch = $reviewResolution->persistTargetedPatch(
+                $planId,
+                (int)$baseline['id'],
+                (int)$draft['id'],
+                array_map(static fn(array $finding): int => (int)$finding['id'], $findings),
+                $patchResult,
+                $userId
+            );
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => array('patch' => $patch, 'review_state' => $reviewResolution->state($planId)),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
+        case 'accept_targeted_correction':
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => $reviewResolution->acceptTargetedPatch(
+                    (int)($input['plan_id'] ?? 0),
+                    (int)($input['patch_id'] ?? 0),
+                    $userId,
+                    $reviewer
+                ),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
+        case 'request_targeted_correction_adjustment':
+            $reviewResolution->requestPatchAdjustment(
+                (int)($input['plan_id'] ?? 0),
+                (int)($input['patch_id'] ?? 0),
+                (string)($input['reason'] ?? ''),
+                $userId
+            );
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => $reviewResolution->state((int)($input['plan_id'] ?? 0)),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
+        case 'reopen_impact_analysis':
+        case 'reopen_proposed_structure':
+            $reviewResolution->explicitlyReopenBaseline(
+                (int)($input['plan_id'] ?? 0),
+                $action === 'reopen_impact_analysis' ? 'IMPACT_ANALYSIS' : 'PROPOSED_STRUCTURE',
+                (string)($input['rationale'] ?? ''),
+                $userId
+            );
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => array(
+                    'stage' => $action === 'reopen_impact_analysis' ? 'scope' : 'structure',
+                    'explicit_human_reopen' => true,
+                ),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
+        case 'record_scope_follow_up':
+            architect_api_json(200, array(
+                'ok' => true,
+                'result' => $reviewResolution->recordScopeDefectAsFollowUp(
+                    (int)($input['plan_id'] ?? 0),
+                    (int)($input['finding_id'] ?? 0),
+                    (string)($input['rationale'] ?? ''),
+                    $userId
+                ),
+                'csrf_token' => architect_api_csrf(),
+            ));
+
         case 'run_independent_review':
             $planId = (int)($input['plan_id'] ?? 0);
-            $reviewResult = $plans->runIndependentReview($planId, $userId);
+            $state = $reviewResolution->state($planId);
+            if (empty($state['ready_to_apply'])) {
+                throw new RuntimeException('Independent Review still has unresolved decisions or defects.');
+            }
+            $reviewId = (int)$state['review_id'];
+            $operationPackage = $apply->buildPreflightPackage($planId);
+            $readyPayload = array(
+                'schema' => 'ipca.manual-change-convergent-independent-review.v1',
+                'status' => 'READY',
+                'outcome' => 'READY_TO_APPLY',
+                'review_state' => $state,
+                'operation_package' => $operationPackage,
+                'completed_at' => gmdate(DATE_ATOM),
+            );
+            $pdo->prepare(
+                "UPDATE ipca_manual_ai_architect_reviews
+                 SET status='approved',review_payload_json=?,reviewer_id=?,
+                     completed_at=CURRENT_TIMESTAMP(3)
+                 WHERE id=? AND plan_id=?"
+            )->execute(array(
+                json_encode($readyPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+                $userId,
+                $reviewId,
+                $planId,
+            ));
+            $plans->appendEvent($planId, 'INDEPENDENT_REVIEW_CONVERGED', 12, array(
+                'review_id' => $reviewId,
+                'outcome' => 'READY_TO_APPLY',
+                'unresolved_material_findings' => 0,
+                'automatic_backward_transition_performed' => false,
+            ), $userId);
+            $reviewResult = array('review_id' => $reviewId, 'status' => 'READY');
             $continueResult = $plans->continueToApply($planId, $userId);
             architect_api_json(200, array(
                 'ok' => true,
