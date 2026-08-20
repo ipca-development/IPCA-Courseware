@@ -83,7 +83,10 @@ function architect_api_prepare_independent_review(
 ): int {
     $stmt = $pdo->prepare(
         "SELECT * FROM ipca_manual_ai_architect_drafts
-         WHERE plan_id=? AND status='generated' ORDER BY id DESC LIMIT 1"
+         WHERE id=(
+             SELECT MAX(id) FROM ipca_manual_ai_architect_drafts
+             WHERE plan_id=? AND status='generated'
+         )"
     );
     $stmt->execute(array($planId));
     $draft = $stmt->fetch(PDO::FETCH_ASSOC);

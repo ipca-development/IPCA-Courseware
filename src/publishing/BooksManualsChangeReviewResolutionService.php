@@ -73,37 +73,40 @@ final class BooksManualsChangeReviewResolutionService
     {
         if ($reviewId === null || $reviewId <= 0) {
             $stmt = $this->pdo->prepare(
-                'SELECT id FROM ipca_manual_ai_architect_reviews WHERE plan_id=? ORDER BY id DESC LIMIT 1'
+                'SELECT MAX(id) FROM ipca_manual_ai_architect_reviews WHERE plan_id=?'
             );
             $stmt->execute(array($planId));
             $reviewId = (int)$stmt->fetchColumn();
         }
         $baseline = $this->row(
             'SELECT * FROM ipca_manual_ai_architect_review_baselines
-             WHERE plan_id=? AND review_id=? ORDER BY id DESC LIMIT 1',
+             WHERE id=(
+                 SELECT MAX(id) FROM ipca_manual_ai_architect_review_baselines
+                 WHERE plan_id=? AND review_id=?
+             )',
             array($planId, $reviewId)
         );
         $findings = $this->rows(
             'SELECT * FROM ipca_manual_ai_architect_review_findings
-             WHERE plan_id=? AND review_id=? ORDER BY id',
+             WHERE plan_id=? AND review_id=?',
             array($planId, $reviewId)
         );
         $questions = $this->rows(
             'SELECT q.* FROM ipca_manual_ai_architect_review_questions q
              JOIN ipca_manual_ai_architect_review_findings f ON f.id=q.finding_id
-             WHERE q.plan_id=? AND f.review_id=? ORDER BY q.id',
+             WHERE q.plan_id=? AND f.review_id=?',
             array($planId, $reviewId)
         );
         $answers = $this->rows(
             'SELECT a.* FROM ipca_manual_ai_architect_review_answers a
              JOIN ipca_manual_ai_architect_review_findings f ON f.id=a.finding_id
-             WHERE a.plan_id=? AND f.review_id=? ORDER BY a.id',
+             WHERE a.plan_id=? AND f.review_id=?',
             array($planId, $reviewId)
         );
         $patches = $this->rows(
             'SELECT p.* FROM ipca_manual_ai_architect_review_patches p
              JOIN ipca_manual_ai_architect_review_baselines b ON b.id=p.baseline_id
-             WHERE p.plan_id=? AND b.review_id=? ORDER BY p.id',
+             WHERE p.plan_id=? AND b.review_id=?',
             array($planId, $reviewId)
         );
         $counts = array_fill_keys(array(
@@ -141,7 +144,7 @@ final class BooksManualsChangeReviewResolutionService
         ));
         $cycles = $this->rows(
             'SELECT * FROM ipca_manual_ai_architect_review_cycles
-             WHERE plan_id=? AND review_id=? ORDER BY cycle_number',
+             WHERE plan_id=? AND review_id=?',
             array($planId, $reviewId)
         );
         $diverged = $cycles !== array()
@@ -1074,7 +1077,7 @@ final class BooksManualsChangeReviewResolutionService
         $state = $this->state($planId, $reviewId);
         $prior = $this->rows(
             'SELECT * FROM ipca_manual_ai_architect_review_cycles
-             WHERE plan_id=? AND review_id=? ORDER BY cycle_number',
+             WHERE plan_id=? AND review_id=?',
             array($planId, $reviewId)
         );
         $cycleNumber = count($prior) + 1;
@@ -1127,8 +1130,8 @@ final class BooksManualsChangeReviewResolutionService
     private function baselineIdForReview(int $reviewId): int
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id FROM ipca_manual_ai_architect_review_baselines
-             WHERE review_id=? ORDER BY id DESC LIMIT 1'
+            'SELECT MAX(id) FROM ipca_manual_ai_architect_review_baselines
+             WHERE review_id=?'
         );
         $stmt->execute(array($reviewId));
         return (int)$stmt->fetchColumn();
@@ -1148,10 +1151,18 @@ final class BooksManualsChangeReviewResolutionService
     {
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
-        return array_map(
+        $rows = array_map(
             fn(array $row): array => $this->decodeRow($row),
             $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array()
         );
+        if ($rows !== array() && array_key_exists('id', $rows[0])) {
+            usort(
+                $rows,
+                static fn(array $left, array $right): int =>
+                    (int)($left['id'] ?? 0) <=> (int)($right['id'] ?? 0)
+            );
+        }
+        return $rows;
     }
 
     /** @param array<string,mixed> $row @return array<string,mixed> */

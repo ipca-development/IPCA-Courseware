@@ -1001,10 +1001,16 @@ final class BooksManualsChangePlanService
         if ($foreignKey === null) {
             return array();
         }
-        return $this->rows(
-            'SELECT * FROM ' . $table . ' WHERE ' . $this->quoteIdentifier($foreignKey) . '=? ORDER BY id',
+        $rows = $this->rows(
+            'SELECT * FROM ' . $table . ' WHERE ' . $this->quoteIdentifier($foreignKey) . '=?',
             array($planId)
         );
+        usort(
+            $rows,
+            static fn(array $left, array $right): int =>
+                (int)($left['id'] ?? 0) <=> (int)($right['id'] ?? 0)
+        );
+        return $rows;
     }
 
     private function deletePlanRows(string $collection, int $planId): void

@@ -26,6 +26,12 @@ $reviewer = file_get_contents(
 $recovery = file_get_contents(
     $root . '/scripts/recover_manual_change_architect_review.php'
 ) ?: '';
+$planService = file_get_contents(
+    $root . '/src/publishing/BooksManualsChangePlanService.php'
+) ?: '';
+$resolutionService = file_get_contents(
+    $root . '/src/publishing/BooksManualsChangeReviewResolutionService.php'
+) ?: '';
 
 $service = (new ReflectionClass(BooksManualsChangeReviewResolutionService::class))
     ->newInstanceWithoutConstructor();
@@ -121,6 +127,18 @@ $checks = array(
         && str_contains($recovery, "'architect_rerun_performed' => false")
         && str_contains($recovery, "'accepted_baselines_preserved'")
         && str_contains($recovery, "'regressions_detected_before_mutation'"),
+    'large review JSON is never server-side filesorted' =>
+        str_contains($planService, "'SELECT * FROM ' . \$table . ' WHERE '")
+        && !str_contains(
+            $planService,
+            "'SELECT * FROM ' . \$table . ' WHERE ' . \$this->quoteIdentifier(\$foreignKey) . '=? ORDER BY id'"
+        )
+        && !preg_match(
+            '/review_findings[^;]+ORDER BY id/s',
+            $resolutionService
+        )
+        && str_contains($resolutionService, 'usort(')
+        && str_contains($resolutionService, 'SELECT MAX(id) FROM ipca_manual_ai_architect_review_baselines'),
 );
 
 $failures = array();
