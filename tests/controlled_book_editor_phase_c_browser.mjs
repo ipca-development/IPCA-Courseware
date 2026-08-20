@@ -491,11 +491,13 @@ const primaryWysiwygCases = new Set([
   'publication CSS stays inside pages and table geometry is immutable on render',
   'authoritative page edits save in place and refresh automatically',
   'layout-only block saves repaginate without regenerating revision highlights',
+  'deferred canonical refresh drains immediately after table save',
   'automatic repagination preserves the direct editor caret',
   'split paragraph edits merge into the complete source block',
   'split list edits preserve surrounding items and inserted rows',
   'automatic repagination preserves a split table cell caret',
   'split authoritative table fragments save only their mapped source rows',
+  'authoritative table resize saves deliberate pixel geometry only',
   'authoritative canvas remains hidden until all page assets and geometry settle',
   'manual page breaks remain visible inside the authoritative page',
 ]);
@@ -807,6 +809,35 @@ test('layout-only block saves repaginate without regenerating revision highlight
   }
 });
 
+test('deferred canonical refresh drains immediately after table save', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    const refreshed = previewResult(11, 'drained refresh', 41);
+    await page.evaluate((payload) => {
+      window.__phaseC.queuePreview({ payload });
+      window.__phaseC.queuePreview({ payload });
+    }, refreshed);
+    const field = page.locator(
+      '#cpbCanvas .reader-semantic-piece[data-block-id="1"] .cpb-paragraph',
+    ).first();
+    await field.fill('Pending authoritative refresh');
+    await page.locator('#cpbEditorRoot').evaluate((root) => {
+      root.dispatchEvent(new CustomEvent('cpb:live-pagination-state', {
+        detail: { status: 'current' },
+      }));
+    });
+    await field.blur();
+    await page.waitForFunction(() =>
+      document.querySelector('#cpbCanvas .reader-page-body')?.textContent
+        .includes('drained refresh')
+      && window.__phaseC.requests.filter((request) => request.action === 'live_ensure').length === 0,
+    null, { timeout: 1500 });
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
 test('automatic repagination preserves the direct editor caret', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
@@ -914,7 +945,12 @@ test('split list edits preserve surrounding items and inserted rows', async (bro
 });
 
 test('split authoritative table fragments save only their mapped source rows', async (browser) => {
-  const { page, browserErrors } = await newEditorPage(browser, '', splitTablePreviewResult());
+  const initial = splitTablePreviewResult();
+  initial.result.pages.forEach((stored) => {
+    stored.page_html = stored.page_html
+      .replaceAll('style="width:140px"', 'style="width:50%"');
+  });
+  const { page, browserErrors } = await newEditorPage(browser, '', initial);
   try {
     assert.equal(await page.locator('#cpbCanvas .cpb-paginated-page').count(), 2);
     const firstBodyCell = page.locator(
@@ -943,7 +979,52 @@ test('split authoritative table fragments save only their mapped source rows', a
       ['Edited A1', 'B1'],
       ['A2', 'B2'],
     ]);
+    assert.deepEqual(await page.evaluate(() =>
+      window.__phaseC.requests.find((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      )?.payload.payload.col_widths
+    ), [140, 140]);
     assert.equal(await page.locator('#cpbCanvas [data-fragment-dirty="1"]').count(), 0);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('authoritative table resize saves deliberate pixel geometry only', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '', splitTablePreviewResult());
+  try {
+    await page.evaluate((refreshed) => {
+      window.__phaseC.queueUpdate({ payload: { ok: true, content_change: false } });
+      window.__phaseC.queuePreview({ payload: refreshed });
+    }, splitTablePreviewResult());
+    const tableBlock = page.locator(
+      '#cpbCanvas .cpb-paginated-page[data-page-number="51"] .cpb-block--table',
+    );
+    const handle = tableBlock.locator('.cpb-col-resize').first();
+    await handle.dispatchEvent('mousedown', { clientX: 410, clientY: 240 });
+    await page.evaluate(() => {
+      document.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        clientX: 430,
+        clientY: 240,
+      }));
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: 430,
+        clientY: 240,
+      }));
+    });
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      )
+    );
+    assert.deepEqual(await page.evaluate(() =>
+      window.__phaseC.requests.find((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      )?.payload.payload.col_widths
+    ), [160, 120]);
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

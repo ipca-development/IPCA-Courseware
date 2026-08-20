@@ -209,6 +209,7 @@
     paginationStale: false,
     canonicalRepairRequested: false,
     canonicalRefreshPending: false,
+    canonicalRefreshInFlight: false,
     pendingPaginatedAnchor: '',
     pendingCreatedBlockId: 0,
     surfaceBookmarks: null,
@@ -2738,7 +2739,7 @@
     if (status === 'current') {
       state.canonicalRefreshPending = true;
       setPaginationStatus('Pages updated.', false);
-      loadPaginatedView(true).catch(showError);
+      drainCanonicalRefreshWhenReady();
       return;
     }
     if (status === 'pending' || status === 'generating' || status === 'stale') {
@@ -3233,22 +3234,24 @@
     return clone;
   }
 
-  function copyPaginatedTableShell(canonicalBlock, sourceBlock) {
+  function copyPaginatedTableShell(canonicalBlock, sourceBlock, includeGeometry) {
     var canonicalTable = canonicalBlock.querySelector('.cpb-table');
     var sourceTable = sourceBlock.querySelector('.cpb-table');
     if (!canonicalTable || !sourceTable) return;
     sourceTable.setAttribute('class', canonicalTable.getAttribute('class') || 'cpb-table');
-    sourceTable.setAttribute('style', canonicalTable.getAttribute('style') || '');
-    var canonicalCols = canonicalTable.querySelector('colgroup');
-    var sourceCols = sourceTable.querySelector('colgroup');
-    if (canonicalCols) {
-      var cleanCols = cleanPaginatedSourceClone(canonicalCols);
-      if (sourceCols) sourceCols.replaceWith(cleanCols);
-      else sourceTable.insertBefore(cleanCols, sourceTable.firstChild);
+    if (includeGeometry) {
+      sourceTable.setAttribute('style', canonicalTable.getAttribute('style') || '');
+      var canonicalCols = canonicalTable.querySelector('colgroup');
+      var sourceCols = sourceTable.querySelector('colgroup');
+      if (canonicalCols) {
+        var cleanCols = cleanPaginatedSourceClone(canonicalCols);
+        if (sourceCols) sourceCols.replaceWith(cleanCols);
+        else sourceTable.insertBefore(cleanCols, sourceTable.firstChild);
+      }
     }
     [
-      ['.cpb-table-wrap', ['class', 'style', 'data-border-width', 'data-border-color']],
-      ['.cpb-table-block', ['class', 'style', 'data-table-align', 'data-table-style-kind']],
+      ['.cpb-table-wrap', ['class', 'data-border-width', 'data-border-color']],
+      ['.cpb-table-block', ['class', 'data-table-align', 'data-table-style-kind']],
     ].forEach(function (entry) {
       var canonical = canonicalBlock.querySelector(entry[0]);
       var source = sourceBlock.querySelector(entry[0]);
@@ -3261,15 +3264,27 @@
         }
       });
     });
+    if (includeGeometry) {
+      ['.cpb-table-wrap', '.cpb-table-block'].forEach(function (selector) {
+        var canonical = canonicalBlock.querySelector(selector);
+        var source = sourceBlock.querySelector(selector);
+        if (!canonical || !source) return;
+        if (canonical.hasAttribute('style')) {
+          source.setAttribute('style', canonical.getAttribute('style'));
+        } else {
+          source.removeAttribute('style');
+        }
+      });
+    }
   }
 
-  function mergePaginatedTableFragment(canonicalBlock, sourceBlock) {
+  function mergePaginatedTableFragment(canonicalBlock, sourceBlock, includeGeometry) {
     var canonicalTable = canonicalBlock.querySelector('.cpb-table');
     var sourceTable = sourceBlock.querySelector('.cpb-table');
     if (!canonicalTable || !sourceTable) {
       throw new Error('The table fragment cannot be mapped to its source table.');
     }
-    copyPaginatedTableShell(canonicalBlock, sourceBlock);
+    copyPaginatedTableShell(canonicalBlock, sourceBlock, includeGeometry);
     var canonicalHead = canonicalTable.querySelector('thead[data-source-fragment-id]');
     if (canonicalHead && canonicalHead.getAttribute('data-presentation-copy') !== '1') {
       var sourceHead = sourceTable.querySelector('thead');
@@ -3331,6 +3346,7 @@
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
     var blockType = blockEl.getAttribute('data-block-type') || '';
     var sectionId = state.sectionId;
+    var geometryDirty = blockEl.getAttribute('data-table-geometry-dirty') === '1';
     if (!blockId || !sectionId || ['table', 'list'].indexOf(blockType) < 0) {
       return Promise.reject(new Error('The page fragment cannot be mapped to its source block.'));
     }
@@ -3352,7 +3368,9 @@
         holder.innerHTML = response.page_html || '';
         var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
         if (!sourceBlock) throw new Error('The complete source block could not be found.');
-        if (blockType === 'table') mergePaginatedTableFragment(blockEl, sourceBlock);
+        if (blockType === 'table') {
+          mergePaginatedTableFragment(blockEl, sourceBlock, geometryDirty);
+        }
         else mergePaginatedListFragment(blockEl, sourceBlock);
         return apiPost('update_block', {
           version_id: state.versionId,
@@ -3362,6 +3380,7 @@
       }).then(function (response) {
         if (!response.ok) throw new Error(response.error || 'Page edit save failed');
         state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
+        blockEl.removeAttribute('data-table-geometry-dirty');
         setStatus('Saved', 'saved');
         markPaginationChanged();
       }).catch(function (error) {
@@ -3746,7 +3765,7 @@
         requestSequence !== state.paginatedRequestSequence
         || requestedSectionId !== state.sectionId
       ) return false;
-      if (preserveEditorSurface && hasUnsavedCanonicalEdits()) {
+      if (preserveEditorSurface && hasPendingSaveWork()) {
         state.canonicalRefreshPending = true;
         setPaginationStatus('Pages ready · finishing the current edit first…', true);
         return false;
@@ -5939,6 +5958,7 @@
         if (!moved) {
           moved = true;
           pushUndo();
+          if (!part0Resize) blockEl.setAttribute('data-table-geometry-dirty', '1');
         }
         var desired = startW + ((ev.clientX - startX) / zoomScale);
         var w;
@@ -6238,6 +6258,7 @@
         delete state.inFlightSaves[key];
       }
       delete state.saveFailures[key];
+      window.setTimeout(drainCanonicalRefreshWhenReady, 0);
     }, function (error) {
       if (state.inFlightSaves[key] === tracked) {
         delete state.inFlightSaves[key];
@@ -6271,6 +6292,24 @@
     return connectedPending
       || Object.keys(state.inFlightSaves).length > 0
       || !!canvasEl.querySelector('[data-fragment-dirty="1"]');
+  }
+
+  function drainCanonicalRefreshWhenReady() {
+    if (
+      state.viewMode !== 'paginated'
+      || !state.canonicalRefreshPending
+      || state.canonicalRefreshInFlight
+      || hasPendingSaveWork()
+    ) return Promise.resolve(false);
+    state.canonicalRefreshPending = false;
+    state.canonicalRefreshInFlight = true;
+    setPaginationStatus('Loading updated authoritative pages…', true);
+    return Promise.resolve(loadPaginatedView(true)).finally(function () {
+      state.canonicalRefreshInFlight = false;
+      if (state.canonicalRefreshPending && !hasPendingSaveWork()) {
+        window.setTimeout(drainCanonicalRefreshWhenReady, 0);
+      }
+    });
   }
 
   function flushAllPendingSaves() {
@@ -9277,8 +9316,32 @@
     }
   }
 
+  function tableColumnWidthForPayload(col, table) {
+    var raw = String(col && col.style ? (col.style.width || '') : '').trim();
+    if (/^-?\d+(?:\.\d+)?px$/i.test(raw)) {
+      return Math.max(1, Math.round(parseFloat(raw) || 0));
+    }
+    var zoomScale = Math.max(0.1, state.canvasZoom / 100);
+    var rendered = col && col.getBoundingClientRect
+      ? col.getBoundingClientRect().width / zoomScale
+      : 0;
+    if (rendered > 0) return Math.max(1, Math.round(rendered));
+    if (/^-?\d+(?:\.\d+)?%$/.test(raw)) {
+      var tableWidth = String(table && table.style ? (table.style.width || '') : '');
+      if (/^-?\d+(?:\.\d+)?px$/i.test(tableWidth)) {
+        return Math.max(
+          1,
+          Math.round((parseFloat(tableWidth) || 0) * (parseFloat(raw) || 0) / 100)
+        );
+      }
+      return 140;
+    }
+    var parsed = parseFloat(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 140;
+  }
+
   function extractTablePayload(blockEl) {
-    normalizeTableTitleRow(blockEl);
+    if (!blockEl.closest('.cpb-paginated-page')) normalizeTableTitleRow(blockEl);
     var table = blockEl.querySelector('table');
     var wrap = tableWrap(blockEl);
     var titleCell = blockEl.querySelector('tr[data-title-row] td');
@@ -9371,8 +9434,7 @@
         }
       });
       table.querySelectorAll('colgroup col').forEach(function (col) {
-        var w = parseInt((col.style.width || '140').replace('px', ''), 10);
-        colWidths.push(isNaN(w) ? 140 : w);
+        colWidths.push(tableColumnWidthForPayload(col, table));
       });
     }
 
