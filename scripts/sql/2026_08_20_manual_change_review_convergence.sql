@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_baselines (
   created_by INT NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   UNIQUE KEY uk_imaa_review_baseline_uuid (baseline_uuid),
-  UNIQUE KEY uk_imaa_review_baseline_hash (plan_id, baseline_fingerprint),
+  UNIQUE KEY uk_imaa_review_baseline_hash (plan_id, review_id, baseline_fingerprint),
   KEY idx_imaa_review_baseline_plan (plan_id, created_at),
   CONSTRAINT fk_imaa_review_baseline_plan
     FOREIGN KEY (plan_id) REFERENCES ipca_manual_ai_architect_plans(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_baselines (
   CONSTRAINT fk_imaa_review_baseline_actor
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE ipca_manual_ai_architect_review_baselines
+  DROP INDEX uk_imaa_review_baseline_hash,
+  ADD UNIQUE KEY uk_imaa_review_baseline_hash (plan_id, review_id, baseline_fingerprint);
 
 CREATE TABLE IF NOT EXISTS ipca_manual_ai_architect_review_findings (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

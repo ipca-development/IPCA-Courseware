@@ -41,6 +41,25 @@ function cp_editor_json(int $code, array $payload): void
     exit;
 }
 
+function cp_editor_csrf(): string
+{
+    if (!isset($_SESSION['controlled_book_editor_csrf'])
+        || !is_string($_SESSION['controlled_book_editor_csrf'])
+        || strlen($_SESSION['controlled_book_editor_csrf']) < 32) {
+        $_SESSION['controlled_book_editor_csrf'] = bin2hex(random_bytes(32));
+    }
+    return (string)$_SESSION['controlled_book_editor_csrf'];
+}
+
+/** @param array<string,mixed> $input */
+function cp_editor_require_csrf(array $input): void
+{
+    $provided = (string)($input['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    if ($provided === '' || !hash_equals(cp_editor_csrf(), $provided)) {
+        cp_editor_json(403, array('ok' => false, 'error' => 'Invalid CSRF token.'));
+    }
+}
+
 /**
  * @param array<string,mixed> $version
  */
@@ -186,6 +205,10 @@ if ($action === '' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = (string)($json['action'] ?? '');
         $_POST = array_merge($_POST, $json);
     }
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && in_array($action, array('revert_wizard_change', 'undo_wizard_edit'), true)) {
+    cp_editor_require_csrf($_POST);
 }
 
 try {

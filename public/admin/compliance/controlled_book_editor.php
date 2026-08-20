@@ -12,6 +12,12 @@ require_once __DIR__ . '/../../../src/publishing/BooksManualsChangePlanService.p
 require_once __DIR__ . '/../../../src/publishing/BooksManualsChangeApplyService.php';
 
 $user = compliance_require_access($pdo);
+if (!isset($_SESSION['controlled_book_editor_csrf'])
+    || !is_string($_SESSION['controlled_book_editor_csrf'])
+    || strlen($_SESSION['controlled_book_editor_csrf']) < 32) {
+    $_SESSION['controlled_book_editor_csrf'] = bin2hex(random_bytes(32));
+}
+$editorCsrfToken = (string)$_SESSION['controlled_book_editor_csrf'];
 $foundation = new ControlledPublishingFoundationService($pdo);
 $sections = new ControlledPublishingSectionService($pdo);
 
@@ -113,6 +119,7 @@ compliance_page_open(array(
      data-version-id="<?= (int)$versionId ?>"
      data-section-id="<?= (int)$sectionId ?>"
      data-initial-view="paginated"
+     data-csrf-token="<?= h($editorCsrfToken) ?>"
      data-annex-book="<?= $isAnnexBook ? '1' : '0' ?>">
   <div class="cpb-editor-shell">
     <aside class="cpb-tree-panel">

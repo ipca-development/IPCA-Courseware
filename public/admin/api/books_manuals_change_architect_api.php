@@ -1017,124 +1017,13 @@ try {
             ));
 
         case 'generate_targeted_correction':
-            $planId = (int)($input['plan_id'] ?? 0);
-            $state = $reviewResolution->state($planId);
-            if (!empty($state['review_divergence_detected'])) {
-                throw new RuntimeException('Review divergence was detected. Automatic correction has stopped for human inspection.');
-            }
-            $state = $reviewResolution->reconcileAcceptedReviewScope(
-                $planId,
-                (int)($state['review_id'] ?? 0),
-                $userId,
-                $reviewer
-            );
-            $requestedFindingIds = array_values(array_unique(array_filter(array_map(
-                'intval',
-                (array)($input['finding_ids'] ?? array())
-            ))));
-            if ($requestedFindingIds === array()) {
-                $repairGroups = array_values((array)($state['repair_groups'] ?? array()));
-                $requestedFindingIds = array_values(array_map(
-                    'intval',
-                    (array)($repairGroups[0]['finding_ids'] ?? array())
-                ));
-            }
-            $findings = array_values(array_filter(
-                (array)$state['findings'],
-                static function (array $finding) use ($requestedFindingIds): bool {
-                    if ($requestedFindingIds !== array()
-                        && !in_array((int)$finding['id'], $requestedFindingIds, true)) {
-                        return false;
-                    }
-                    return in_array(
-                        (string)$finding['finding_class'],
-                        array(
-                            BooksManualsChangeReviewResolutionService::MECHANICAL_FIX,
-                            BooksManualsChangeReviewResolutionService::TARGETED_AUTHOR_CORRECTION,
-                        ),
-                        true
-                    ) && strtoupper((string)($finding['resolution_status'] ?? '')) === 'UNRESOLVED';
-                }
-            ));
-            if ($findings === array()) {
-                architect_api_json(200, array(
-                    'ok' => true,
-                    'result' => array(
-                        'patch' => null,
-                        'review_state' => $state,
-                        'reconciled_without_patch' => true,
-                    ),
-                    'csrf_token' => architect_api_csrf(),
-                ));
-            }
-            $report = $plans->loadPlan($planId);
-            $baseline = array_values(array_filter(
-                (array)($report['review_baselines'] ?? array()),
-                static fn(array $row): bool => (int)($row['id'] ?? 0) === (int)($state['baseline_id'] ?? 0)
-            ))[0] ?? array();
-            $drafts = array_values(array_filter(
-                (array)$report['drafts'],
-                static function (array $draft): bool {
-                    $payload = is_array($draft['draft_payload_json'] ?? null)
-                        ? $draft['draft_payload_json']
-                        : array();
-                    return (string)($draft['status'] ?? '') === 'generated'
-                        && (string)($payload['wizard_status'] ?? '') === 'accepted';
-                }
-            ));
-            $draft = $drafts === array() ? array() : $drafts[array_key_last($drafts)];
-            if ($baseline === array() || $draft === array()) {
-                throw new RuntimeException('The frozen accepted draft baseline is unavailable.');
-            }
-            $governedFacts = array_values(array_map(
-                static fn(array $answer): array => (array)($answer['governed_fact_json'] ?? array()),
-                (array)$state['answers']
-            ));
-            $patchResult = $author->generateTargetedPatch(
-                $planId,
-                $userId,
-                (array)$draft['draft_payload_json'],
-                $findings,
-                $governedFacts
-            );
-            $patch = $reviewResolution->persistTargetedPatch(
-                $planId,
-                (int)$baseline['id'],
-                (int)$draft['id'],
-                array_map(static fn(array $finding): int => (int)$finding['id'], $findings),
-                $patchResult,
-                $userId
-            );
-            architect_api_json(200, array(
-                'ok' => true,
-                'result' => array('patch' => $patch, 'review_state' => $reviewResolution->state($planId)),
-                'csrf_token' => architect_api_csrf(),
-            ));
-
         case 'accept_targeted_correction':
-            architect_api_json(200, array(
-                'ok' => true,
-                'result' => $reviewResolution->acceptTargetedPatch(
-                    (int)($input['plan_id'] ?? 0),
-                    (int)($input['patch_id'] ?? 0),
-                    $userId,
-                    $reviewer
-                ),
-                'csrf_token' => architect_api_csrf(),
-            ));
-
         case 'request_targeted_correction_adjustment':
-            $reviewResolution->requestPatchAdjustment(
-                (int)($input['plan_id'] ?? 0),
-                (int)($input['patch_id'] ?? 0),
-                (string)($input['reason'] ?? ''),
-                $userId
+            throw new RuntimeException(
+                'Interactive Author correction is disabled in Independent Review. '
+                . 'Answer the bounded clarification questions, then refine wording in the Editor. '
+                . 'Technical recovery artifacts require the governed CLI recovery workflow.'
             );
-            architect_api_json(200, array(
-                'ok' => true,
-                'result' => $reviewResolution->state((int)($input['plan_id'] ?? 0)),
-                'csrf_token' => architect_api_csrf(),
-            ));
 
         case 'reopen_impact_analysis':
         case 'reopen_proposed_structure':

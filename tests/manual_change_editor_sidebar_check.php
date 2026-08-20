@@ -150,6 +150,12 @@ $service = new BooksManualsChangeApplyService(
     $db,
     new BooksManualsChangePlanService($db)
 );
+$lockedSnapshots = new ReflectionMethod($service, 'snapshotsForSectionIds');
+$sqliteLockedSnapshot = $lockedSnapshots->invoke($service, array(11), true);
+wizardEditorAssert(
+    (string)($sqliteLockedSnapshot[11]['fingerprint'] ?? '') === $fingerprint,
+    'Locked section snapshot reads are not portable to the SQLite regression harness.'
+);
 $changes = $service->editorChanges(7);
 $item = (array)($changes['items'][0] ?? array());
 wizardEditorAssert(
@@ -253,9 +259,43 @@ wizardEditorAssert(
     'A later Wizard application erased or misclassified earlier section provenance.'
 );
 
+$db->prepare(
+    'INSERT INTO ipca_manual_ai_architect_operations
+     (id,plan_id,operation_type,status,operation_payload_json,result_json,completed_at)
+     VALUES (3,20,\'revert_wizard_change_item\',\'succeeded\',?,\'{}\',?)'
+)->execute(array(
+    json_encode(array(
+        'original_operation_id' => 2,
+        'book_version_id' => 7,
+        'section_id' => 11,
+    ), JSON_THROW_ON_ERROR),
+    '2026-08-20 12:35:00',
+));
+$updateToNewer->execute(array($manualRow['payload_json'], $manualRow['content_hash']));
+$afterLatestRevert = $service->editorChanges(7);
+$afterLatestRevertItems = (array)($afterLatestRevert['items'] ?? array());
+wizardEditorAssert(
+    count($afterLatestRevertItems) === 2
+        && (int)($afterLatestRevertItems[0]['operation_id'] ?? 0) === 2
+        && (string)($afterLatestRevertItems[0]['status'] ?? '') === 'REVERTED'
+        && (int)($afterLatestRevertItems[1]['operation_id'] ?? 0) === 1
+        && (string)($afterLatestRevertItems[1]['status'] ?? '') === 'MANUALLY_EDITED',
+    'Reverting the newest item incorrectly left the older Wizard application superseded.'
+);
+$db->exec("UPDATE ipca_publishing_book_versions SET lifecycle_status='released' WHERE id=7");
+$replayedRevert = $service->revertEditorChange(7, 2, 11, 25);
+wizardEditorAssert(
+    is_array($replayedRevert)
+        && array_key_exists('derived_refresh_warnings', $replayedRevert),
+    'A successful per-section revert was not replayable after the version lifecycle advanced.'
+);
+
 $editorJs = file_get_contents(dirname(__DIR__) . '/public/assets/controlled_book_editor.js') ?: '';
 $editorApi = file_get_contents(
     dirname(__DIR__) . '/public/admin/api/controlled_book_editor_api.php'
+) ?: '';
+$editorPage = file_get_contents(
+    dirname(__DIR__) . '/public/admin/compliance/controlled_book_editor.php'
 ) ?: '';
 $applyService = file_get_contents(
     dirname(__DIR__) . '/src/publishing/BooksManualsChangeApplyService.php'
@@ -270,7 +310,17 @@ wizardEditorAssert(
         && str_contains(
             $applyService,
             'This Wizard change was superseded by a later application to the same section.'
-        ),
+        )
+        && str_contains($applyService, '$lockedPreflightPackage = $this->buildPreflightPackage($planId, true);')
+        && strpos($applyService, 'A successful operation is the authoritative idempotent response.')
+            < strpos($applyService, '$draft = $this->latestRow(')
+        && strpos($applyService, '$existingStmt = $this->pdo->prepare(')
+            < strpos($applyService, '$newerApplications = $this->pdo->prepare(')
+        && str_contains($editorJs, 'function trackBlockSave(')
+        && str_contains($editorJs, 'return flushAllPendingSaves().then(function () {')
+        && str_contains($editorJs, 'requestPayload.csrf_token = csrfToken')
+        && str_contains($editorApi, 'cp_editor_require_csrf($_POST);')
+        && str_contains($editorPage, 'data-csrf-token="<?= h($editorCsrfToken) ?>"'),
     'A Wizard section can be reverted without owner, recency, and fingerprint safeguards.'
 );
 

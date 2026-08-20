@@ -404,6 +404,60 @@ foreach ($questions as $question) {
         'A review clarification is not a deterministic yes/no/other choice.'
     );
 }
+$db->exec(
+    "INSERT INTO ipca_manual_ai_architect_review_baselines
+     (id,review_id,draft_baseline_json) VALUES (2,10,'{}')"
+);
+for ($index = 1; $index <= 10; $index++) {
+    $persist->invoke(
+        $resolution,
+        20,
+        10,
+        2,
+        $baseCheck("overflow.{$index}", 'FAIL', "9.{$index}"),
+        array('status' => 'REQUIRES_REVIEW'),
+        1
+    );
+}
+$synchronize = new ReflectionMethod($resolution, 'synchronizeClarificationQuestions');
+$synchronize->invoke($resolution, 20, 10);
+$boundedQueue = $db->query(
+    "SELECT q.id,q.evidence_json
+     FROM ipca_manual_ai_architect_review_questions q
+     JOIN ipca_manual_ai_architect_review_findings f ON f.id=q.finding_id
+     WHERE f.review_id=10 AND q.status='pending' ORDER BY q.id"
+)->fetchAll(PDO::FETCH_ASSOC) ?: array();
+stableCheckAssert(
+    count($boundedQueue) === 8,
+    'The initial clarification queue exceeded its fixed eight-question bound.'
+);
+$firstBounded = $boundedQueue[0];
+$db->prepare(
+    "INSERT INTO ipca_manual_ai_architect_review_answers
+     (question_id,consequence,governed_fact_json)
+     VALUES (?,'NO_MANUAL_CHANGE_REQUIRED','{}')"
+)->execute(array((int)$firstBounded['id']));
+$db->prepare(
+    "UPDATE ipca_manual_ai_architect_review_questions SET status='answered' WHERE id=?"
+)->execute(array((int)$firstBounded['id']));
+$synchronize->invoke($resolution, 20, 10);
+$remainingQueueIds = array_map(
+    'intval',
+    $db->query(
+        "SELECT q.id
+         FROM ipca_manual_ai_architect_review_questions q
+         JOIN ipca_manual_ai_architect_review_findings f ON f.id=q.finding_id
+         WHERE f.review_id=10 AND q.status='pending' ORDER BY q.id"
+    )->fetchAll(PDO::FETCH_COLUMN) ?: array()
+);
+$expectedRemainingIds = array_map(
+    static fn(array $question): int => (int)$question['id'],
+    array_slice($boundedQueue, 1)
+);
+stableCheckAssert(
+    $remainingQueueIds === $expectedRemainingIds,
+    'Answering one bounded question regenerated the overflow queue or promoted hidden questions.'
+);
 $questionClasses = $db->query(
     "SELECT m.check_id,f.finding_class,f.status,f.blocking
      FROM ipca_manual_ai_architect_review_findings f
@@ -434,7 +488,11 @@ $reconcile->invoke(
     array('patch_id' => 2)
 );
 $afterRepeat = $db->query(
-    'SELECT check_id,resolution_status FROM ipca_manual_ai_architect_review_check_metadata ORDER BY check_id'
+    'SELECT m.check_id,m.resolution_status
+     FROM ipca_manual_ai_architect_review_check_metadata m
+     JOIN ipca_manual_ai_architect_review_findings f ON f.id=m.finding_id
+     WHERE f.review_id=9
+     ORDER BY m.check_id'
 )->fetchAll(PDO::FETCH_KEY_PAIR);
 stableCheckAssert(count($afterRepeat) === 5, 'Repeated repair created duplicate check identities.');
 stableCheckAssert($afterRepeat['check.a'] === 'VERIFIED', 'A later repair reopened an earlier verified check.');
@@ -561,19 +619,31 @@ $groups = $repairGroups->invoke($resolution, array(
         'allowed_repair_scope_json' => array('4.2'), 'check_id' => 'z',
         'human_explanation' => 'Z',
     ),
+    array(
+        'id' => 4, 'resolution_status' => 'UNRESOLVED', 'category' => 'GLOBAL',
+        'allowed_repair_scope_json' => array(), 'affected_nodes_json' => array(),
+        'affected_sections_json' => array(), 'check_id' => 'global',
+        'human_explanation' => 'Global accepted-package check.',
+    ),
 ));
 stableCheckAssert(
-    count($groups) === 2 && count((array)$groups[0]['check_ids']) === 2,
-    'Corrections were not grouped only by coherent repair scope.'
+    count($groups) === 3
+        && count((array)$groups[0]['check_ids']) === 2
+        && (array)($groups[2]['affected_nodes'] ?? array()) === array(
+            'Accepted amendment package',
+        ),
+    'Corrections were not grouped coherently or a scope-less check disappeared.'
 );
 
 $reviewPlanStatus = new ReflectionMethod($resolution, 'reviewPlanStatus');
 stableCheckAssert(
     $reviewPlanStatus->invoke($resolution, array(
-        'counts' => array('hard_blockers' => 0, 'questions_pending' => 2),
+        'hard_blockers' => 0,
+        'counts' => array('questions_pending' => 2),
     )) === 'ready_for_review'
         && $reviewPlanStatus->invoke($resolution, array(
-            'counts' => array('hard_blockers' => 1, 'questions_pending' => 0),
+            'hard_blockers' => 1,
+            'counts' => array('questions_pending' => 0),
         )) === 'blocked',
     'Ordinary clarification questions still place the Change Plan in a blocked state.'
 );

@@ -799,7 +799,7 @@ books_manuals_page_open(array(
                 <ul><?php foreach ($repairChecks as $repairCheck): ?><li><code><?= h((string)($repairCheck['check_id'] ?? '')) ?></code> — <?= h((string)($repairCheck['required_invariant'] ?? '')) ?></li><?php endforeach; ?></ul>
                 <h4>Unchanged content</h4>
                 <p><?= count((array)($patchPayload['frozen_node_fingerprints'] ?? array())) ?> unaffected accepted nodes are frozen by byte fingerprint.</p>
-                <div class="mcw-step-actions"><?php if (!$patchAwaitingVerification): ?><button class="app-btn app-btn--secondary" type="button" data-mcw-request-patch-adjustment>Request Adjustment</button><?php endif; ?><button class="app-btn app-btn--primary" type="button" data-mcw-accept-targeted-patch><?= $patchAwaitingVerification ? 'Retry Verification' : 'Accept Correction' ?></button></div>
+                <p class="app-muted">Recovery artifact only. Interactive Author correction is disabled; ordinary review points are resolved by the bounded questions above and may be refined directly in the Editor.</p>
               </section>
             <?php endforeach; ?>
           <?php elseif ($reviewResolutionReady): ?>

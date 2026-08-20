@@ -72,8 +72,12 @@ $checks = array(
     'migration is additive and defines all review artifacts' =>
         substr_count($migration, 'CREATE TABLE IF NOT EXISTS ') === 7
         && !preg_match('/\b(?:DROP|TRUNCATE)\s+TABLE\b|\bDELETE\s+FROM\b/i', $migration)
-        && substr_count($migration, 'ALTER TABLE ') === 1
+        && substr_count($migration, 'ALTER TABLE ') === 2
         && str_contains($migration, 'MODIFY COLUMN status VARCHAR(40)')
+        && str_contains(
+            $migration,
+            'UNIQUE KEY uk_imaa_review_baseline_hash (plan_id, review_id, baseline_fingerprint)'
+        )
         && str_contains($migration, 'ipca_manual_ai_architect_review_baselines')
         && str_contains($migration, 'ipca_manual_ai_architect_review_findings')
         && str_contains($migration, 'ipca_manual_ai_architect_review_questions')
@@ -160,9 +164,10 @@ $checks = array(
         && str_contains($scopeReconciliation, 'review_baselines_unchanged')
         && str_contains($scopeReconciliation, "'architect_rerun_performed' => false")
         && str_contains($scopeReconciliation, "'manual_content_mutated' => false"),
-    'targeted correction preflight reconciles the accepted candidate' =>
-        str_contains($api, '$reviewResolution->reconcileAcceptedReviewScope(')
-        && str_contains($api, "'reconciled_without_patch' => true"),
+    'ordinary review cannot restart an Author correction loop' =>
+        str_contains($api, 'Interactive Author correction is disabled in Independent Review.')
+        && !str_contains($api, '$author->generateTargetedPatch(')
+        && !str_contains($ui, 'data-mcw-accept-targeted-patch'),
     'READY_TO_APPLY is strict and only moves forward' =>
         str_contains($api, '$reviewResolution->approveForApply(')
         && str_contains($resolutionService, "'outcome' => 'READY_TO_APPLY'")

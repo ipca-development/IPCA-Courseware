@@ -307,6 +307,7 @@ final class BooksManualsChangePlanService
         string $justification,
         int $actorUserId
     ): array {
+        $this->assertPlanOwnerAtStage($planId, $actorUserId, 'scope');
         $allowed = array(
             'REMOVE_OR_REPLACE',
             'PRESERVE_WITH_JUSTIFICATION',
@@ -411,7 +412,7 @@ final class BooksManualsChangePlanService
      */
     public function governAcceptedAnalysisDispositions(int $planId, int $actorUserId): array
     {
-        $this->assertPlanOwner($planId, $actorUserId);
+        $this->assertPlanOwnerAtStage($planId, $actorUserId, 'scope');
         $hits = $this->rows(
             'SELECT h.* FROM ' . self::TABLES['legacy_hits'] . ' h'
             . ' LEFT JOIN ' . self::TABLES['legacy_hit_decisions'] . ' d'
@@ -486,10 +487,7 @@ final class BooksManualsChangePlanService
         if ($decision !== 'ACCEPT' && mb_strlen($note) < 5) {
             throw new InvalidArgumentException('Record a rationale for modification or rejection.');
         }
-        $plan = $this->getPlan($planId);
-        if ((int)($plan['owner_id'] ?? 0) !== $actorUserId) {
-            throw new RuntimeException('Only the Change Plan owner can decide amendment areas.');
-        }
+        $this->assertPlanOwnerAtStage($planId, $actorUserId, 'scope');
         $impact = $this->row(
             'SELECT * FROM ' . self::TABLES['impacts'] . ' WHERE id=? AND plan_id=? LIMIT 1',
             array($impactId, $planId)
@@ -559,7 +557,7 @@ final class BooksManualsChangePlanService
         string $mergeTargetSection,
         int $actorUserId
     ): array {
-        $this->assertPlanOwner($planId, $actorUserId);
+        $this->assertPlanOwnerAtStage($planId, $actorUserId, 'scope');
         $resolutionType = strtoupper(trim($resolutionType));
         $disposition = strtoupper(trim($disposition));
         $rationale = trim($rationale);
@@ -653,7 +651,7 @@ final class BooksManualsChangePlanService
         ?array $approvedImpactIds = null
     ): array
     {
-        $this->assertPlanOwner($planId, $actorUserId);
+        $this->assertPlanOwnerAtStage($planId, $actorUserId, 'scope');
         $stmt = $this->pdo->prepare(
             "SELECT id,status FROM " . self::TABLES['impacts']
             . " WHERE plan_id=? AND treatment IN ('AMEND','REPLACE','RESTRUCTURE','ADD','REMOVE_OBSOLETE')"
@@ -679,6 +677,20 @@ final class BooksManualsChangePlanService
         }
         $this->pdo->beginTransaction();
         try {
+            $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? ''
+                : ' FOR UPDATE';
+            $lockedPlan = $this->row(
+                'SELECT owner_id,stage FROM ' . self::TABLES['plans']
+                . ' WHERE id=?' . $lock,
+                array($planId)
+            );
+            if ((int)($lockedPlan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($lockedPlan['stage'] ?? '') !== 'scope') {
+                throw new RuntimeException(
+                    'Accepted Impact Analysis is frozen after Step 2 is completed.'
+                );
+            }
             $this->pdo->prepare(
                 'UPDATE ' . self::TABLES['impacts']
                 . " SET status='dismissed',updated_at=CURRENT_TIMESTAMP(3)"
@@ -723,18 +735,31 @@ final class BooksManualsChangePlanService
     /** @return array{proposal_id:int,node_count:int,stage:string} */
     public function acceptStructure(int $planId, int $actorUserId): array
     {
-        $this->assertPlanOwner($planId, $actorUserId);
-        $proposal = $this->row(
-            'SELECT * FROM ' . self::TABLES['structure_proposals']
-            . ' WHERE plan_id=? ORDER BY proposal_version DESC,id DESC LIMIT 1',
-            array($planId)
-        );
-        if ($proposal === null) {
-            throw new RuntimeException('The proposed manual structure is not ready yet.');
-        }
-        $proposalId = (int)$proposal['id'];
         $this->pdo->beginTransaction();
         try {
+            $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? ''
+                : ' FOR UPDATE';
+            $plan = $this->row(
+                'SELECT owner_id,stage FROM ' . self::TABLES['plans']
+                . ' WHERE id=?' . $lock,
+                array($planId)
+            );
+            if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($plan['stage'] ?? '') !== 'structure') {
+                throw new RuntimeException(
+                    'Accepted Proposed Structure is frozen after Step 3 is completed.'
+                );
+            }
+            $proposal = $this->row(
+                'SELECT * FROM ' . self::TABLES['structure_proposals']
+                . ' WHERE plan_id=? ORDER BY proposal_version DESC,id DESC LIMIT 1' . $lock,
+                array($planId)
+            );
+            if ($proposal === null) {
+                throw new RuntimeException('The proposed manual structure is not ready yet.');
+            }
+            $proposalId = (int)$proposal['id'];
             $this->pdo->prepare(
                 'UPDATE ' . self::TABLES['structure_proposals']
                 . " SET status='approved',updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND plan_id=?"
@@ -771,7 +796,6 @@ final class BooksManualsChangePlanService
         string $decision,
         int $actorUserId
     ): array {
-        $this->assertPlanOwner($planId, $actorUserId);
         $sectionNumber = trim($sectionNumber);
         $decision = strtolower(trim($decision));
         if ($sectionNumber === '' || !in_array(
@@ -781,40 +805,76 @@ final class BooksManualsChangePlanService
         )) {
             throw new InvalidArgumentException('Unsupported draft decision.');
         }
-        $draft = $this->row(
-            'SELECT * FROM ' . self::TABLES['drafts']
-            . ' WHERE plan_id=? ORDER BY draft_version DESC,id DESC LIMIT 1',
-            array($planId)
-        );
-        if ($draft === null || (string)($draft['status'] ?? '') !== 'generated') {
-            throw new RuntimeException('The draft amendment package is not open for section decisions.');
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
         }
-        $payload = $this->decodeJson($draft['draft_payload_json'] ?? null);
-        $sections = (array)($payload['section_drafts'] ?? $payload['sections'] ?? array());
-        if (!array_key_exists($sectionNumber, $sections)) {
-            throw new RuntimeException('That amendment section is not part of the governed draft.');
+        $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? ''
+            : ' FOR UPDATE';
+        try {
+            $plan = $this->row(
+                'SELECT owner_id,stage FROM ' . self::TABLES['plans']
+                . ' WHERE id=?' . $lock,
+                array($planId)
+            );
+            if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($plan['stage'] ?? '') !== 'drafting') {
+                throw new RuntimeException(
+                    'Draft decisions are frozen after Step 4 is accepted.'
+                );
+            }
+            $draft = $this->row(
+                'SELECT * FROM ' . self::TABLES['drafts']
+                . ' WHERE plan_id=? ORDER BY draft_version DESC,id DESC LIMIT 1' . $lock,
+                array($planId)
+            );
+            if ($draft === null || (string)($draft['status'] ?? '') !== 'generated') {
+                throw new RuntimeException(
+                    'The draft amendment package is not open for section decisions.'
+                );
+            }
+            $payload = $this->decodeJson($draft['draft_payload_json'] ?? null);
+            if ((string)($payload['wizard_status'] ?? '') === 'accepted') {
+                throw new RuntimeException('Accepted Step 4 wording is frozen during review.');
+            }
+            $sections = (array)($payload['section_drafts'] ?? $payload['sections'] ?? array());
+            if (!array_key_exists($sectionNumber, $sections)) {
+                throw new RuntimeException('That amendment section is not part of the governed draft.');
+            }
+            $payload['decisions'] = is_array($payload['decisions'] ?? null)
+                ? $payload['decisions']
+                : array();
+            $payload['decisions'][$sectionNumber] = array(
+                'decision' => $decision,
+                'actor_id' => $actorUserId,
+                'decided_at' => gmdate('c'),
+            );
+            $draftId = (int)$draft['id'];
+            $payloadJson = $this->json($payload);
+            $this->pdo->prepare(
+                'UPDATE ' . self::TABLES['drafts']
+                . ' SET draft_payload_json=?,content_fingerprint=? WHERE id=? AND plan_id=?'
+            )->execute(array(
+                $payloadJson,
+                hash('sha256', $payloadJson),
+                $draftId,
+                $planId,
+            ));
+            $this->appendEvent($planId, 'DRAFT_SECTION_DECIDED', 12, array(
+                'draft_id' => $draftId,
+                'section_number' => $sectionNumber,
+                'decision' => $decision,
+            ), $actorUserId);
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (Throwable $error) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
         }
-        $payload['decisions'] = is_array($payload['decisions'] ?? null) ? $payload['decisions'] : array();
-        $payload['decisions'][$sectionNumber] = array(
-            'decision' => $decision,
-            'actor_id' => $actorUserId,
-            'decided_at' => gmdate('c'),
-        );
-        $draftId = (int)$draft['id'];
-        $this->pdo->prepare(
-            'UPDATE ' . self::TABLES['drafts']
-            . ' SET draft_payload_json=?,content_fingerprint=? WHERE id=? AND plan_id=?'
-        )->execute(array(
-            $this->json($payload),
-            hash('sha256', $this->json($payload)),
-            $draftId,
-            $planId,
-        ));
-        $this->appendEvent($planId, 'DRAFT_SECTION_DECIDED', 12, array(
-            'draft_id' => $draftId,
-            'section_number' => $sectionNumber,
-            'decision' => $decision,
-        ), $actorUserId);
         return array(
             'draft_id' => $draftId,
             'section_number' => $sectionNumber,
@@ -825,36 +885,81 @@ final class BooksManualsChangePlanService
     /** @return array{draft_id:int,stage:string} */
     public function acceptDrafts(int $planId, int $actorUserId): array
     {
-        $this->assertPlanOwner($planId, $actorUserId);
-        $draft = $this->row(
-            'SELECT * FROM ' . self::TABLES['drafts']
-            . ' WHERE plan_id=? ORDER BY draft_version DESC,id DESC LIMIT 1',
-            array($planId)
-        );
-        if ($draft === null || (string)($draft['status'] ?? '') !== 'generated') {
-            throw new RuntimeException('The proposed manual amendments are not ready for acceptance.');
-        }
-        $payload = $this->decodeJson($draft['draft_payload_json'] ?? null);
-        $sections = (array)($payload['section_drafts'] ?? $payload['sections'] ?? array());
-        $decisions = (array)($payload['decisions'] ?? array());
-        foreach (array_keys($sections) as $sectionNumber) {
-            if ((string)($decisions[$sectionNumber]['decision'] ?? '') !== 'accepted') {
-                throw new RuntimeException('Every required amendment must be accepted before continuing.');
-            }
-        }
-        $draftId = (int)$draft['id'];
-        $payload['wizard_status'] = 'accepted';
         $ownsTransaction = !$this->pdo->inTransaction();
         if ($ownsTransaction) {
             $this->pdo->beginTransaction();
         }
+        $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? ''
+            : ' FOR UPDATE';
         try {
+            $plan = $this->row(
+                'SELECT owner_id,stage FROM ' . self::TABLES['plans']
+                . ' WHERE id=?' . $lock,
+                array($planId)
+            );
+            if ((int)($plan['owner_id'] ?? 0) !== $actorUserId) {
+                throw new RuntimeException(
+                    'Only the Change Plan owner can accept amendment wording.'
+                );
+            }
+            $draft = $this->row(
+                'SELECT * FROM ' . self::TABLES['drafts']
+                . ' WHERE plan_id=? ORDER BY draft_version DESC,id DESC LIMIT 1' . $lock,
+                array($planId)
+            );
+            if ($draft === null || (string)($draft['status'] ?? '') !== 'generated') {
+                throw new RuntimeException(
+                    'The proposed manual amendments are not ready for acceptance.'
+                );
+            }
+            $payload = $this->decodeJson($draft['draft_payload_json'] ?? null);
+            $draftId = (int)$draft['id'];
+            $sections = (array)($payload['section_drafts'] ?? $payload['sections'] ?? array());
+            $decisions = (array)($payload['decisions'] ?? array());
+            if ((string)($plan['stage'] ?? '') === 'review'
+                && (string)($payload['wizard_status'] ?? '') === 'accepted') {
+                foreach (array_keys($sections) as $sectionNumber) {
+                    if ((string)($decisions[$sectionNumber]['decision'] ?? '') !== 'accepted') {
+                        throw new RuntimeException(
+                            'Accepted Step 4 decisions no longer match the frozen review state.'
+                        );
+                    }
+                }
+                $acceptedJson = $this->json($payload);
+                if (!hash_equals(
+                    (string)($draft['content_fingerprint'] ?? ''),
+                    hash('sha256', $acceptedJson)
+                )) {
+                    throw new RuntimeException(
+                        'Accepted Step 4 wording no longer matches its recorded fingerprint.'
+                    );
+                }
+                if ($ownsTransaction) {
+                    $this->pdo->commit();
+                }
+                return array('draft_id' => $draftId, 'stage' => 'review');
+            }
+            if ((string)($plan['stage'] ?? '') !== 'drafting') {
+                throw new RuntimeException(
+                    'The Change Plan is no longer awaiting amendment acceptance.'
+                );
+            }
+            foreach (array_keys($sections) as $sectionNumber) {
+                if ((string)($decisions[$sectionNumber]['decision'] ?? '') !== 'accepted') {
+                    throw new RuntimeException(
+                        'Every required amendment must be accepted before continuing.'
+                    );
+                }
+            }
+            $payload['wizard_status'] = 'accepted';
+            $payloadJson = $this->json($payload);
             $this->pdo->prepare(
                 'UPDATE ' . self::TABLES['drafts']
                 . ' SET draft_payload_json=?,content_fingerprint=? WHERE id=? AND plan_id=?'
             )->execute(array(
-                $this->json($payload),
-                hash('sha256', $this->json($payload)),
+                $payloadJson,
+                hash('sha256', $payloadJson),
                 $draftId,
                 $planId,
             ));
@@ -977,6 +1082,21 @@ final class BooksManualsChangePlanService
         $plan = $this->getPlan($planId);
         if ($actorUserId <= 0 || (int)($plan['owner_id'] ?? 0) !== $actorUserId) {
             throw new RuntimeException('Only the Change Plan owner can continue this wizard.');
+        }
+        return $plan;
+    }
+
+    /** @return array<string,mixed> */
+    private function assertPlanOwnerAtStage(
+        int $planId,
+        int $actorUserId,
+        string $requiredStage
+    ): array {
+        $plan = $this->assertPlanOwner($planId, $actorUserId);
+        if ((string)($plan['stage'] ?? '') !== $requiredStage) {
+            throw new RuntimeException(
+                'This accepted Wizard checkpoint is frozen at the current stage.'
+            );
         }
         return $plan;
     }

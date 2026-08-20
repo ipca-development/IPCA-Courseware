@@ -225,11 +225,14 @@ final class BooksManualsChangeReviewResolutionService
             (array)($state['questions'] ?? array()),
             static fn(array $question): bool => (string)($question['status'] ?? '') === 'pending'
         ));
+        $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? ''
+            : ' FOR UPDATE';
         $this->pdo->beginTransaction();
         try {
             $lockedPlan = $this->row(
                 'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
-                 WHERE id=? LIMIT 1 FOR UPDATE',
+                 WHERE id=? LIMIT 1' . $lock,
                 array($planId)
             );
             if ((int)($lockedPlan['owner_id'] ?? 0) !== $actorUserId
@@ -289,11 +292,14 @@ final class BooksManualsChangeReviewResolutionService
         int $actorUserId,
         BooksManualsChangeApplyService $apply
     ): array {
+        $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? ''
+            : ' FOR UPDATE';
         $this->pdo->beginTransaction();
         try {
             $plan = $this->row(
                 'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
-                 WHERE id=? LIMIT 1 FOR UPDATE',
+                 WHERE id=? LIMIT 1' . $lock,
                 array($planId)
             );
             if ((int)($plan['owner_id'] ?? 0) !== $actorUserId) {
@@ -303,7 +309,7 @@ final class BooksManualsChangeReviewResolutionService
             }
             $review = $this->row(
                 'SELECT * FROM ipca_manual_ai_architect_reviews
-                 WHERE plan_id=? ORDER BY id DESC LIMIT 1 FOR UPDATE',
+                 WHERE plan_id=? ORDER BY id DESC LIMIT 1' . $lock,
                 array($planId)
             );
             $reviewId = (int)($review['id'] ?? 0);
@@ -328,6 +334,7 @@ final class BooksManualsChangeReviewResolutionService
                     'Independent Review is no longer awaiting approval.'
                 );
             }
+            $this->assertFrozenDraftCurrent($planId, $reviewId);
             $this->synchronizeClarificationQuestions($planId, $reviewId);
             $state = $this->state($planId, $reviewId);
             if (empty($state['ready_to_apply'])) {
@@ -348,7 +355,7 @@ final class BooksManualsChangeReviewResolutionService
             $update = $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_architect_reviews
                  SET status='approved',review_payload_json=?,reviewer_id=?,
-                     completed_at=CURRENT_TIMESTAMP(3)
+                     completed_at=CURRENT_TIMESTAMP
                  WHERE id=? AND plan_id=?"
             );
             $update->execute(array(
@@ -558,9 +565,12 @@ final class BooksManualsChangeReviewResolutionService
         }
         $this->pdo->beginTransaction();
         try {
+            $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? ''
+                : ' FOR UPDATE';
             $lockedPlan = $this->row(
                 'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
-                 WHERE id=? LIMIT 1 FOR UPDATE',
+                 WHERE id=? LIMIT 1' . $lock,
                 array($planId)
             );
             if ((int)($lockedPlan['owner_id'] ?? 0) !== $actorUserId
@@ -569,28 +579,66 @@ final class BooksManualsChangeReviewResolutionService
                     'The Change Plan changed before this review answer was recorded.'
                 );
             }
+            $latestReview = $this->row(
+                'SELECT id FROM ipca_manual_ai_architect_reviews
+                 WHERE plan_id=? ORDER BY id DESC LIMIT 1' . $lock,
+                array($planId)
+            );
+            $reviewId = (int)($latestReview['id'] ?? 0);
+            if ($reviewId <= 0) {
+                throw new RuntimeException('Independent Review is unavailable.');
+            }
+            $this->synchronizeClarificationQuestions($planId, $reviewId);
             $question = $this->row(
                 'SELECT q.*,f.review_id,f.finding_class,f.status finding_status
                  FROM ipca_manual_ai_architect_review_questions q
                  JOIN ipca_manual_ai_architect_review_findings f ON f.id=q.finding_id
-                 WHERE q.id=? AND q.plan_id=? LIMIT 1 FOR UPDATE',
-                array($questionId, $planId)
+                 WHERE q.id=? AND q.plan_id=? AND f.review_id=? LIMIT 1' . $lock,
+                array($questionId, $planId, $reviewId)
             );
             if ($question === null) {
-                throw new RuntimeException('Review question not found.');
+                throw new RuntimeException(
+                    'This question does not belong to the current Independent Review.'
+                );
             }
             $existing = $this->row(
                 'SELECT * FROM ipca_manual_ai_architect_review_answers
-                 WHERE question_id=? LIMIT 1 FOR UPDATE',
+                 WHERE question_id=? LIMIT 1' . $lock,
                 array($questionId)
             );
             if ($existing !== null) {
-                $reviewId = (int)$question['review_id'];
                 $this->pdo->commit();
                 return $this->state($planId, $reviewId);
             }
             if ((string)($question['status'] ?? '') !== 'pending') {
                 throw new RuntimeException('This review question is no longer pending.');
+            }
+            $firstPending = $this->row(
+                "SELECT q.id
+                 FROM ipca_manual_ai_architect_review_questions q
+                 JOIN ipca_manual_ai_architect_review_findings f ON f.id=q.finding_id
+                 WHERE q.plan_id=? AND f.review_id=? AND q.status='pending'
+                 ORDER BY q.id LIMIT 1" . $lock,
+                array($planId, $reviewId)
+            );
+            if ((int)($firstPending['id'] ?? 0) !== $questionId) {
+                throw new RuntimeException(
+                    'Answer the currently displayed review question before later questions.'
+                );
+            }
+            $questionEvidence = (array)($question['evidence_json'] ?? array());
+            $choices = (array)($question['choices_json'] ?? array());
+            if ((string)($questionEvidence['schema'] ?? '')
+                    !== 'ipca.manual-change-review-clarification-evidence.v2'
+                || (string)($question['question_type'] ?? '') !== 'SINGLE_CHOICE'
+                || array_column($choices, 'id') !== array(
+                    'yes-editor-review-note',
+                    'no-current-wording-sufficient',
+                    'other',
+                )) {
+                throw new RuntimeException(
+                    'This stale review question was replaced by the bounded clarification queue.'
+                );
             }
         $choices = is_array($question['choices_json'] ?? null)
             ? $question['choices_json']
@@ -652,9 +700,6 @@ final class BooksManualsChangeReviewResolutionService
         ), true)) {
             throw new RuntimeException('The selected answer has an invalid manual consequence.');
         }
-        $questionEvidence = is_array($question['evidence_json'] ?? null)
-            ? $question['evidence_json']
-            : $this->decode((string)($question['evidence_json'] ?? ''));
         $findingIds = array_values(array_unique(array_filter(array_map(
             'intval',
             (array)($questionEvidence['finding_ids'] ?? array((int)$question['finding_id']))
@@ -725,7 +770,7 @@ final class BooksManualsChangeReviewResolutionService
                  SET finding_class=?,outcome=?,status=?,blocking=?,
                      title=?,resolution_json=?,
                      resolved_at=CASE WHEN ?=\'review_acknowledged\'
-                                      THEN CURRENT_TIMESTAMP(3) ELSE NULL END
+                                      THEN CURRENT_TIMESTAMP ELSE NULL END
                  WHERE plan_id=? AND id IN (' . $placeholders . ')'
             )->execute(array_merge(array(
                 $consequence === 'STRUCTURAL_CONSEQUENCE'
@@ -745,7 +790,7 @@ final class BooksManualsChangeReviewResolutionService
             ), $findingIds));
             $this->pdo->prepare(
                 'UPDATE ipca_manual_ai_architect_review_check_metadata
-                 SET resolution_status=?,last_verified_at=CURRENT_TIMESTAMP(3),
+                 SET resolution_status=?,last_verified_at=CURRENT_TIMESTAMP,
                      verified_at=NULL
                  WHERE plan_id=? AND finding_id IN (' . $placeholders . ')'
             )->execute(array_merge(array($resolutionStatus, $planId), $findingIds));
@@ -1010,7 +1055,7 @@ final class BooksManualsChangeReviewResolutionService
                 $acceptStmt = $this->pdo->prepare(
                     "UPDATE ipca_manual_ai_architect_review_patches
                      SET status='HUMAN_ACCEPTED_PENDING_VERIFICATION',accepted_by=?,
-                         accepted_at=CURRENT_TIMESTAMP(3)
+                         accepted_at=CURRENT_TIMESTAMP
                      WHERE id=? AND plan_id=? AND UPPER(status)='PROPOSED'"
                 );
                 $acceptStmt->execute(array($actorUserId, $patchId, $planId));
@@ -1896,54 +1941,98 @@ final class BooksManualsChangeReviewResolutionService
         if (mb_strlen(trim($rationale)) < 20) {
             throw new InvalidArgumentException('Explain why the accepted baseline must be reopened.');
         }
-        $plan = $this->plans->getPlan($planId);
-        if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
-            || (string)($plan['stage'] ?? '') !== 'review') {
-            throw new RuntimeException('Only the Change Plan owner may explicitly reopen an accepted baseline from review.');
-        }
-        $state = $this->state($planId);
-        $eligible = array_values(array_filter(
-            (array)$state['findings'],
-            static function (array $finding) use ($target): bool {
-                if (in_array((string)$finding['status'], array('closed', 'verified'), true)) {
-                    return false;
-                }
-                if ($target === 'IMPACT_ANALYSIS') {
-                    return (string)$finding['finding_class'] === self::POTENTIAL_SCOPE_DEFECT
-                        || (
-                            (string)($finding['category'] ?? '') === 'SCOPE'
-                            && (string)($finding['resolution_status'] ?? '') === 'BLOCKED'
-                        );
-                }
-                if ((string)($finding['category'] ?? '') === 'STRUCTURE'
-                    && (string)($finding['resolution_status'] ?? '') === 'BLOCKED') {
-                    return true;
-                }
-                $resolution = is_array($finding['resolution_json'] ?? null)
-                    ? $finding['resolution_json']
-                    : array();
-                return (string)($resolution['consequence'] ?? '') === 'STRUCTURAL_CONSEQUENCE';
+        $this->pdo->beginTransaction();
+        try {
+            $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? ''
+                : ' FOR UPDATE';
+            $plan = $this->row(
+                'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
+                 WHERE id=? LIMIT 1' . $lock,
+                array($planId)
+            );
+            if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($plan['stage'] ?? '') !== 'review') {
+                throw new RuntimeException(
+                    'Only the Change Plan owner may explicitly reopen an accepted baseline from review.'
+                );
             }
-        ));
-        if ($eligible === array()) {
-            throw new RuntimeException('No demonstrated review finding authorizes reopening this accepted baseline.');
+            $review = $this->row(
+                'SELECT id FROM ipca_manual_ai_architect_reviews
+                 WHERE plan_id=? ORDER BY id DESC LIMIT 1' . $lock,
+                array($planId)
+            );
+            $reviewId = (int)($review['id'] ?? 0);
+            if ($reviewId <= 0) {
+                throw new RuntimeException('Independent Review is unavailable.');
+            }
+            $this->rows(
+                'SELECT id FROM ipca_manual_ai_architect_review_findings
+                 WHERE plan_id=? AND review_id=?' . $lock,
+                array($planId, $reviewId)
+            );
+            $state = $this->state($planId, $reviewId);
+            $eligible = array_values(array_filter(
+                (array)$state['findings'],
+                static function (array $finding) use ($target): bool {
+                    if (in_array((string)$finding['status'], array('closed', 'verified'), true)) {
+                        return false;
+                    }
+                    if ($target === 'IMPACT_ANALYSIS') {
+                        return (string)$finding['finding_class'] === self::POTENTIAL_SCOPE_DEFECT
+                            || (
+                                (string)($finding['category'] ?? '') === 'SCOPE'
+                                && (string)($finding['resolution_status'] ?? '') === 'BLOCKED'
+                            );
+                    }
+                    if ((string)($finding['category'] ?? '') === 'STRUCTURE'
+                        && (string)($finding['resolution_status'] ?? '') === 'BLOCKED') {
+                        return true;
+                    }
+                    $resolution = is_array($finding['resolution_json'] ?? null)
+                        ? $finding['resolution_json']
+                        : array();
+                    return (string)($resolution['consequence'] ?? '')
+                        === 'STRUCTURAL_CONSEQUENCE';
+                }
+            ));
+            if ($eligible === array()) {
+                throw new RuntimeException(
+                    'No demonstrated review finding authorizes reopening this accepted baseline.'
+                );
+            }
+            $baselineIds = array_values(array_unique(array_map(
+                static fn(array $finding): int => (int)$finding['baseline_id'],
+                $eligible
+            )));
+            $this->plans->appendEvent(
+                $planId,
+                'INDEPENDENT_REVIEW_BASELINE_VOIDED_BY_HUMAN',
+                12,
+                array(
+                    'target' => $target,
+                    'rationale' => trim($rationale),
+                    'finding_ids' => array_map(
+                        static fn(array $finding): int => (int)$finding['id'],
+                        $eligible
+                    ),
+                    'baseline_ids' => $baselineIds,
+                    'automatic' => false,
+                ),
+                $actorUserId
+            );
+            $this->plans->updatePlan($planId, array(
+                'stage' => $target === 'IMPACT_ANALYSIS' ? 'scope' : 'structure',
+                'status' => 'ready_for_review',
+                'updated_by' => $actorUserId,
+            ));
+            $this->pdo->commit();
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
         }
-        $baselineIds = array_values(array_unique(array_map(
-            static fn(array $finding): int => (int)$finding['baseline_id'],
-            $eligible
-        )));
-        $this->plans->appendEvent($planId, 'INDEPENDENT_REVIEW_BASELINE_VOIDED_BY_HUMAN', 12, array(
-            'target' => $target,
-            'rationale' => trim($rationale),
-            'finding_ids' => array_map(static fn(array $finding): int => (int)$finding['id'], $eligible),
-            'baseline_ids' => $baselineIds,
-            'automatic' => false,
-        ), $actorUserId);
-        $this->plans->updatePlan($planId, array(
-            'stage' => $target === 'IMPACT_ANALYSIS' ? 'scope' : 'structure',
-            'status' => 'ready_for_review',
-            'updated_by' => $actorUserId,
-        ));
     }
 
     public function recordScopeDefectAsFollowUp(
@@ -1955,49 +2044,152 @@ final class BooksManualsChangeReviewResolutionService
         if (mb_strlen(trim($rationale)) < 20) {
             throw new InvalidArgumentException('Explain why this possible scope issue belongs in a separate follow-up.');
         }
-        $plan = $this->plans->getPlan($planId);
-        if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
-            || (string)($plan['stage'] ?? '') !== 'review') {
-            throw new RuntimeException('Scope follow-up decisions belong to Independent Review.');
+        $this->pdo->beginTransaction();
+        try {
+            $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? ''
+                : ' FOR UPDATE';
+            $plan = $this->row(
+                'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
+                 WHERE id=? LIMIT 1' . $lock,
+                array($planId)
+            );
+            if ((int)($plan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($plan['stage'] ?? '') !== 'review') {
+                throw new RuntimeException(
+                    'Scope follow-up decisions belong to Independent Review.'
+                );
+            }
+            $finding = $this->row(
+                'SELECT f.*,m.id metadata_id,m.resolution_status
+                 FROM ipca_manual_ai_architect_review_findings f
+                 LEFT JOIN ipca_manual_ai_architect_review_check_metadata m
+                   ON m.finding_id=f.id
+                 WHERE f.id=? AND f.plan_id=? LIMIT 1' . $lock,
+                array($findingId, $planId)
+            );
+            if ($finding === null
+                || (string)$finding['finding_class'] !== self::POTENTIAL_SCOPE_DEFECT
+                || in_array((string)$finding['status'], array('closed', 'verified'), true)) {
+                throw new RuntimeException(
+                    'This finding is not an unresolved potential scope defect.'
+                );
+            }
+            $resolution = array(
+                'disposition' => 'SEPARATE_FOLLOW_UP',
+                'rationale' => trim($rationale),
+                'actor_id' => $actorUserId,
+                'recorded_at' => gmdate(DATE_ATOM),
+                'accepted_baseline_changed' => false,
+            );
+            $this->pdo->prepare(
+                "UPDATE ipca_manual_ai_architect_review_findings
+                 SET status='closed',blocking=0,resolution_json=?,
+                     resolved_at=CURRENT_TIMESTAMP
+                 WHERE id=? AND plan_id=?"
+            )->execute(array($this->json($resolution), $findingId, $planId));
+            if ((int)($finding['metadata_id'] ?? 0) > 0) {
+                $this->pdo->prepare(
+                    "UPDATE ipca_manual_ai_architect_review_check_metadata
+                     SET resolution_status='ACKNOWLEDGED',verified_at=NULL,
+                         last_verified_at=CURRENT_TIMESTAMP
+                     WHERE id=? AND plan_id=?"
+                )->execute(array((int)$finding['metadata_id'], $planId));
+            }
+            $this->plans->appendEvent(
+                $planId,
+                'INDEPENDENT_REVIEW_SCOPE_DEFECT_DEFERRED',
+                12,
+                array(
+                    'finding_id' => $findingId,
+                    'finding_fingerprint' => $finding['finding_fingerprint'],
+                    'rationale' => trim($rationale),
+                    'accepted_baseline_changed' => false,
+                    'stage_preserved' => 'review',
+                ),
+                $actorUserId
+            );
+            $state = $this->state($planId, (int)$finding['review_id']);
+            $this->plans->updatePlan($planId, array(
+                'stage' => 'review',
+                'status' => $this->reviewPlanStatus($state),
+                'updated_by' => $actorUserId,
+            ));
+            $this->pdo->commit();
+            return $this->state($planId, (int)$finding['review_id']);
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
         }
-        $finding = $this->row(
-            'SELECT * FROM ipca_manual_ai_architect_review_findings
-             WHERE id=? AND plan_id=? LIMIT 1',
-            array($findingId, $planId)
-        );
-        if ($finding === null
-            || (string)$finding['finding_class'] !== self::POTENTIAL_SCOPE_DEFECT
-            || in_array((string)$finding['status'], array('closed', 'verified'), true)) {
-            throw new RuntimeException('This finding is not an unresolved potential scope defect.');
-        }
-        $resolution = array(
-            'disposition' => 'SEPARATE_FOLLOW_UP',
-            'rationale' => trim($rationale),
-            'actor_id' => $actorUserId,
-            'recorded_at' => gmdate(DATE_ATOM),
-            'accepted_baseline_changed' => false,
-        );
-        $this->pdo->prepare(
-            "UPDATE ipca_manual_ai_architect_review_findings
-             SET status='closed',blocking=0,resolution_json=?,resolved_at=CURRENT_TIMESTAMP(3)
-             WHERE id=? AND plan_id=?"
-        )->execute(array($this->json($resolution), $findingId, $planId));
-        $this->plans->appendEvent($planId, 'INDEPENDENT_REVIEW_SCOPE_DEFECT_DEFERRED', 12, array(
-            'finding_id' => $findingId,
-            'finding_fingerprint' => $finding['finding_fingerprint'],
-            'rationale' => trim($rationale),
-            'accepted_baseline_changed' => false,
-            'stage_preserved' => 'review',
-        ), $actorUserId);
-        return $this->state($planId, (int)$finding['review_id']);
     }
 
     /** @param array<string,mixed> $state */
     private function reviewPlanStatus(array $state): string
     {
-        return (int)($state['counts']['hard_blockers'] ?? 0) > 0
+        return (int)($state['hard_blockers'] ?? 0) > 0
             ? 'blocked'
             : 'ready_for_review';
+    }
+
+    private function assertFrozenDraftCurrent(int $planId, int $reviewId): void
+    {
+        $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? ''
+            : ' FOR UPDATE';
+        $baseline = $this->row(
+            'SELECT * FROM ipca_manual_ai_architect_review_baselines
+             WHERE plan_id=? AND review_id=? ORDER BY id DESC LIMIT 1' . $lock,
+            array($planId, $reviewId)
+        );
+        $frozenDraft = (array)($baseline['draft_baseline_json'] ?? array());
+        $draftId = (int)($frozenDraft['id'] ?? 0);
+        if ($draftId <= 0) {
+            throw new RuntimeException('The frozen accepted Step 4 draft is unavailable.');
+        }
+        $currentDraft = $this->row(
+            'SELECT * FROM ipca_manual_ai_architect_drafts
+             WHERE id=? AND plan_id=? LIMIT 1' . $lock,
+            array($draftId, $planId)
+        );
+        $latestDraft = $this->row(
+            "SELECT id FROM ipca_manual_ai_architect_drafts
+             WHERE plan_id=? AND status='generated'
+             ORDER BY draft_version DESC,id DESC LIMIT 1" . $lock,
+            array($planId)
+        );
+        if ($currentDraft === null || (int)($latestDraft['id'] ?? 0) !== $draftId) {
+            throw new RuntimeException(
+                'Accepted Step 4 wording changed after Independent Review was frozen.'
+            );
+        }
+        $payload = (array)($currentDraft['draft_payload_json'] ?? array());
+        $payloadFingerprint = hash('sha256', $this->json($payload));
+        $frozenFingerprint = (string)($frozenDraft['content_fingerprint'] ?? '');
+        $currentFingerprint = (string)($currentDraft['content_fingerprint'] ?? '');
+        if ($frozenFingerprint === ''
+            || $currentFingerprint === ''
+            || !hash_equals($frozenFingerprint, $currentFingerprint)
+            || !hash_equals($currentFingerprint, $payloadFingerprint)
+            || (string)($frozenDraft['source_fingerprint'] ?? '')
+                !== (string)($currentDraft['source_fingerprint'] ?? '')) {
+            throw new RuntimeException(
+                'Accepted Step 4 wording no longer matches the frozen Independent Review baseline.'
+            );
+        }
+        if ((string)($payload['wizard_status'] ?? '') !== 'accepted') {
+            throw new RuntimeException('Accepted Step 4 wording is no longer marked accepted.');
+        }
+        $sections = (array)($payload['section_drafts'] ?? $payload['sections'] ?? array());
+        $decisions = (array)($payload['decisions'] ?? array());
+        foreach (array_keys($sections) as $sectionNumber) {
+            if ((string)($decisions[$sectionNumber]['decision'] ?? '') !== 'accepted') {
+                throw new RuntimeException(
+                    'Every frozen Step 4 amendment must remain individually accepted.'
+                );
+            }
+        }
     }
 
     /** @return array<string,mixed> */
@@ -2068,8 +2260,8 @@ final class BooksManualsChangeReviewResolutionService
         $fingerprint = hash('sha256', $this->json($snapshot));
         $existing = $this->row(
             'SELECT * FROM ipca_manual_ai_architect_review_baselines
-             WHERE plan_id=? AND baseline_fingerprint=? LIMIT 1',
-            array($planId, $fingerprint)
+             WHERE plan_id=? AND review_id=? AND baseline_fingerprint=? LIMIT 1',
+            array($planId, $reviewId, $fingerprint)
         );
         if ($existing !== null) {
             return $existing;
@@ -2408,9 +2600,13 @@ final class BooksManualsChangeReviewResolutionService
                 ))));
             }
             sort($scope, SORT_NATURAL);
-            $key = implode('|', $scope);
-            if ($key === '') {
-                continue;
+            if ($scope === array()) {
+                $scope = array('Accepted amendment package');
+                $key = '__global__|' . strtoupper(
+                    (string)($finding['category'] ?? 'CONTENT')
+                );
+            } else {
+                $key = implode('|', $scope);
             }
             $groups[$key] ??= array(
                 'group_id' => hash('sha256', $key),
@@ -2551,7 +2747,7 @@ final class BooksManualsChangeReviewResolutionService
                  SET finding_class=?,outcome=\'HUMAN_CLARIFICATION_RECORDED\',
                      status=\'review_acknowledged\',blocking=0,
                      title=\'Review guidance recorded\',
-                     resolved_at=COALESCE(resolved_at,CURRENT_TIMESTAMP(3))
+                     resolved_at=COALESCE(resolved_at,CURRENT_TIMESTAMP)
                  WHERE plan_id=? AND id IN (' . $placeholders . ')'
             )->execute(array_merge(
                 array(self::HUMAN_DECISION_REQUIRED, $planId),
@@ -2579,9 +2775,54 @@ final class BooksManualsChangeReviewResolutionService
              ORDER BY f.id',
             array($planId, $reviewId, self::HARD_INTEGRITY_BLOCKER)
         );
-        $groups = $this->repairGroups($findings);
+        $findingById = array();
+        foreach ($findings as $finding) {
+            $findingById[(int)$finding['id']] = $finding;
+        }
+        $pendingQueue = $this->rows(
+            'SELECT q.id,q.question_fingerprint,q.evidence_json
+             FROM ipca_manual_ai_architect_review_questions q
+             JOIN ipca_manual_ai_architect_review_findings f ON f.id=q.finding_id
+             WHERE q.plan_id=? AND f.review_id=? AND q.status=\'pending\'',
+            array($planId, $reviewId)
+        );
+        $candidateFingerprints = array();
+        $coveredFindingIds = array();
+        $queueVersionsValid = $pendingQueue !== array();
+        foreach ($pendingQueue as $pendingQuestion) {
+            $evidence = (array)($pendingQuestion['evidence_json'] ?? array());
+            if ((string)($evidence['schema'] ?? '')
+                !== 'ipca.manual-change-review-clarification-evidence.v2') {
+                $queueVersionsValid = false;
+                break;
+            }
+            $candidateFingerprints[(string)$pendingQuestion['question_fingerprint']] = true;
+            $questionVersions = (array)($evidence['check_versions'] ?? array());
+            foreach ((array)($evidence['finding_ids'] ?? array()) as $rawFindingId) {
+                $findingId = (int)$rawFindingId;
+                $currentFinding = $findingById[$findingId] ?? null;
+                $checkId = (string)($currentFinding['check_id'] ?? '');
+                if ($currentFinding === null
+                    || $checkId === ''
+                    || !isset($questionVersions[$checkId])
+                    || (string)$questionVersions[$checkId]
+                        !== (string)($currentFinding['check_version'] ?? '')) {
+                    $queueVersionsValid = false;
+                    break 2;
+                }
+                $coveredFindingIds[$findingId] = true;
+            }
+        }
+        $currentFindingIds = array_keys($findingById);
+        $coveredIds = array_keys($coveredFindingIds);
+        sort($currentFindingIds, SORT_NUMERIC);
+        sort($coveredIds, SORT_NUMERIC);
+        $reuseFrozenQueue = $queueVersionsValid
+            && $coveredIds === $currentFindingIds;
+        $activeFingerprints = $reuseFrozenQueue ? $candidateFingerprints : array();
+        $groups = $reuseFrozenQueue ? array() : $this->repairGroups($findings);
         $maxQuestions = 8;
-        if (count($groups) > $maxQuestions) {
+        if (!$reuseFrozenQueue && count($groups) > $maxQuestions) {
             $visibleGroups = array_slice($groups, 0, $maxQuestions - 1);
             $overflowGroups = array_slice($groups, $maxQuestions - 1);
             $overflowGroupIds = array_values(array_map(
@@ -2625,10 +2866,6 @@ final class BooksManualsChangeReviewResolutionService
             );
             $groups = $visibleGroups;
         }
-        $findingById = array();
-        foreach ($findings as $finding) {
-            $findingById[(int)$finding['id']] = $finding;
-        }
         if ($findingById !== array()) {
             $findingIds = array_keys($findingById);
             $placeholders = implode(',', array_fill(0, count($findingIds), '?'));
@@ -2643,7 +2880,6 @@ final class BooksManualsChangeReviewResolutionService
                 $findingIds
             ));
         }
-        $activeFingerprints = array();
         foreach ($groups as $group) {
             $findingIds = array_values(array_unique(array_filter(array_map(
                 'intval',
@@ -2795,7 +3031,7 @@ final class BooksManualsChangeReviewResolutionService
                  WHERE review_id=?
              ) AND status='HUMAN_ACCEPTED_PENDING_VERIFICATION'"
         )->execute(array($planId, $reviewId));
-        if ($groups !== array()) {
+        if ($reuseFrozenQueue || $groups !== array()) {
             $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_architect_review_patches
                  SET status='SUPERSEDED'

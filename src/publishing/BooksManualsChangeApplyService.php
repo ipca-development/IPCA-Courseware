@@ -41,6 +41,63 @@ final class BooksManualsChangeApplyService
         if ($versionId <= 0) {
             throw new RuntimeException('The Change Plan does not identify its original manual version.');
         }
+        $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? ''
+            : ' FOR UPDATE';
+
+        // A successful operation is the authoritative idempotent response.
+        // Check it before rebuilding mutable preflight state, because a real
+        // application necessarily changes the original section fingerprints.
+        $this->pdo->beginTransaction();
+        try {
+            $lockedPlan = $this->latestRow(
+                'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
+                 WHERE id=?' . $lock,
+                array($planId)
+            );
+            if ((int)($lockedPlan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($lockedPlan['stage'] ?? '') !== 'operations') {
+                throw new RuntimeException(
+                    'The Change Plan changed before the Wizard replay was checked.'
+                );
+            }
+            $versionLock = $this->latestRow(
+                'SELECT id FROM ipca_publishing_book_versions WHERE id=?' . $lock,
+                array($versionId)
+            );
+            if ((int)($versionLock['id'] ?? 0) !== $versionId) {
+                throw new RuntimeException('The Wizard application manual version is unavailable.');
+            }
+            $succeeded = $this->latestRow(
+                "SELECT * FROM ipca_manual_ai_architect_operations
+                 WHERE plan_id=? AND operation_type='apply_accepted_wizard_changes'
+                   AND status='succeeded'
+                 ORDER BY id DESC LIMIT 1" . $lock,
+                array($planId),
+                false
+            );
+            if ($succeeded !== null) {
+                $result = $this->decode($succeeded['result_json'] ?? null);
+                if ((int)($result['book_version_id'] ?? 0) !== $versionId) {
+                    throw new RuntimeException(
+                        'The completed Wizard application has invalid version provenance.'
+                    );
+                }
+                $this->pdo->commit();
+                $result['derived_refresh_warnings'] = $this->refreshPostCommitArtifacts(
+                    $versionId,
+                    $actorUserId,
+                    'manual_change_architect_apply_replay'
+                );
+                return $result;
+            }
+            $this->pdo->commit();
+        } catch (Throwable $replayError) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $replayError;
+        }
 
         $draft = $this->latestRow(
             'SELECT * FROM ipca_manual_ai_architect_drafts
@@ -119,7 +176,7 @@ final class BooksManualsChangeApplyService
         try {
             $lockedPlan = $this->latestRow(
                 'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
-                 WHERE id=? FOR UPDATE',
+                 WHERE id=?' . $lock,
                 array($planId)
             );
             if ((int)($lockedPlan['owner_id'] ?? 0) !== $actorUserId
@@ -134,7 +191,7 @@ final class BooksManualsChangeApplyService
             $operationsStmt = $this->pdo->prepare(
                 "SELECT * FROM ipca_manual_ai_architect_operations
                  WHERE plan_id=? AND operation_type='apply_accepted_wizard_changes'
-                 ORDER BY id DESC FOR UPDATE"
+                 ORDER BY id DESC" . $lock
             );
             $operationsStmt->execute(array($planId));
             $priorOperations = $operationsStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
@@ -143,6 +200,11 @@ final class BooksManualsChangeApplyService
                 if ($priorStatus === 'succeeded') {
                     $result = $this->decode($priorOperation['result_json'] ?? null);
                     $this->pdo->commit();
+                    $result['derived_refresh_warnings'] = $this->refreshPostCommitArtifacts(
+                        $versionId,
+                        $actorUserId,
+                        'manual_change_architect_apply_replay'
+                    );
                     return $result;
                 }
                 if ($priorStatus !== 'running') {
@@ -159,7 +221,7 @@ final class BooksManualsChangeApplyService
                     "UPDATE ipca_manual_ai_architect_operations
                      SET status='failed',
                          error_message='Stale Wizard application claim recovered safely.',
-                         completed_at=CURRENT_TIMESTAMP(3)
+                         completed_at=CURRENT_TIMESTAMP
                      WHERE id=? AND status='running'"
                 )->execute(array((int)$priorOperation['id']));
                 $this->plans->appendEvent(
@@ -201,10 +263,21 @@ final class BooksManualsChangeApplyService
 
         try {
             $this->pdo->beginTransaction();
+            $mutationPlan = $this->latestRow(
+                'SELECT owner_id,stage FROM ipca_manual_ai_architect_plans
+                 WHERE id=?' . $lock,
+                array($planId)
+            );
+            if ((int)($mutationPlan['owner_id'] ?? 0) !== $actorUserId
+                || (string)($mutationPlan['stage'] ?? '') !== 'operations') {
+                throw new RuntimeException(
+                    'The Change Plan changed before the Wizard content mutation.'
+                );
+            }
             $version = $this->lockEditableVersion($versionId);
             $claimedOperation = $this->latestRow(
                 "SELECT id,status,request_fingerprint
-                 FROM ipca_manual_ai_architect_operations WHERE id=? FOR UPDATE",
+                 FROM ipca_manual_ai_architect_operations WHERE id=?" . $lock,
                 array($operationId)
             );
             if ((string)($claimedOperation['status'] ?? '') !== 'running'
@@ -214,6 +287,15 @@ final class BooksManualsChangeApplyService
                 )) {
                 throw new RuntimeException(
                     'The Wizard application claim expired before content mutation.'
+                );
+            }
+            $lockedPreflightPackage = $this->buildPreflightPackage($planId, true);
+            if (!hash_equals(
+                (string)($reviewedPackage['package_fingerprint'] ?? ''),
+                (string)($lockedPreflightPackage['package_fingerprint'] ?? '')
+            )) {
+                throw new RuntimeException(
+                    'The independently reviewed operation package changed before mutation.'
                 );
             }
             $before = $this->snapshotsForTargets($targets, true);
@@ -272,7 +354,7 @@ final class BooksManualsChangeApplyService
             $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_architect_operations
                  SET status='succeeded',result_json=?,result_fingerprint=?,
-                     completed_at=CURRENT_TIMESTAMP(3)
+                     completed_at=CURRENT_TIMESTAMP
                  WHERE id=? AND plan_id=? AND status='running'"
             )->execute(array($this->json($result), $resultFingerprint, $operationId, $planId));
             $this->plans->appendEvent($planId, 'WIZARD_CHANGES_APPLIED_IN_PLACE', 13, array(
@@ -306,7 +388,7 @@ final class BooksManualsChangeApplyService
             }
             $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_architect_operations
-                 SET status='failed',error_message=?,completed_at=CURRENT_TIMESTAMP(3)
+                 SET status='failed',error_message=?,completed_at=CURRENT_TIMESTAMP
                  WHERE id=? AND status='running'"
             )->execute(array($e->getMessage(), $operationId));
             throw $e;
@@ -355,6 +437,14 @@ final class BooksManualsChangeApplyService
             (array)($proposal['section_drafts'] ?? array()),
             'is_array'
         ));
+        $decisionRows = (array)($proposal['decisions'] ?? array());
+        foreach ((array)($proposal['section_drafts'] ?? array()) as $sectionNumber => $_section) {
+            if ((string)($decisionRows[$sectionNumber]['decision'] ?? '') !== 'accepted') {
+                throw new RuntimeException(
+                    'Every independently reviewed amendment must remain individually accepted.'
+                );
+            }
+        }
         $targets = $this->buildTargets($planId, $versionId, $sectionDrafts);
         $snapshots = $this->snapshotsForTargets($targets, $forUpdate);
         $this->assertTargetsUnchanged($targets, $snapshots);
@@ -557,9 +647,7 @@ final class BooksManualsChangeApplyService
                 $note['operation_id'] = (int)$operation['id'];
                 $note['plan_id'] = (int)$operation['plan_id'];
                 $note['plan_title'] = (string)($operation['plan_title'] ?? 'Manual Change Wizard');
-                $guidanceKey = (array)($note['check_ids'] ?? array()) !== array()
-                    ? 'checks:' . implode('|', array_map('strval', (array)$note['check_ids']))
-                    : 'answer:' . (int)($note['answer_id'] ?? 0);
+                $guidanceKey = 'answer:' . (int)($note['answer_id'] ?? 0);
                 if (!isset($guidance[$guidanceKey])) {
                     $guidance[$guidanceKey] = $note;
                 }
@@ -601,7 +689,9 @@ final class BooksManualsChangeApplyService
                     'original_preview' => $differencePreviews['before'],
                     'applied_preview' => $differencePreviews['after'],
                 );
-                $newerSectionSeen[$sectionId] = true;
+                if (!$reverted) {
+                    $newerSectionSeen[$sectionId] = true;
+                }
             }
         }
         $latest = (array)$applications[0];
@@ -656,9 +746,7 @@ final class BooksManualsChangeApplyService
                 (array)($fact['check_ids'] ?? array())
             )));
             sort($checkIds, SORT_STRING);
-            $guidanceKey = $checkIds === array()
-                ? 'finding:' . (int)($answer['finding_id'] ?? 0)
-                : 'checks:' . implode('|', $checkIds);
+            $guidanceKey = 'answer:' . (int)($answer['id'] ?? 0);
             $guidance[$guidanceKey] = array(
                 'answer_id' => (int)($answer['id'] ?? 0),
                 'question_id' => (int)($answer['question_id'] ?? 0),
@@ -674,9 +762,10 @@ final class BooksManualsChangeApplyService
                 'check_ids' => $checkIds,
                 'affected_sections' => array_values(array_map('strval', (array)$sections)),
                 'consequence' => $consequence,
-                'show_in_editor' => $consequence !== 'NO_MANUAL_CHANGE_REQUIRED',
+                'show_in_editor' => true,
                 'advisory' => true,
                 'editor_action_required' => false,
+                'manual_change_indicated' => $consequence !== 'NO_MANUAL_CHANGE_REQUIRED',
             );
         }
         return array_values($guidance);
@@ -698,8 +787,11 @@ final class BooksManualsChangeApplyService
         }
         $this->pdo->beginTransaction();
         try {
+            $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? ''
+                : ' FOR UPDATE';
             $planOwner = $this->latestRow(
-                'SELECT owner_id FROM ipca_manual_ai_architect_plans WHERE id=? FOR UPDATE',
+                'SELECT owner_id FROM ipca_manual_ai_architect_plans WHERE id=?' . $lock,
                 array((int)$operationReference['plan_id'])
             );
             if ((int)($planOwner['owner_id'] ?? 0) !== $actorUserId) {
@@ -710,8 +802,7 @@ final class BooksManualsChangeApplyService
             $this->lockEditableVersion($versionId);
             $operation = $this->latestRow(
                 "SELECT * FROM ipca_manual_ai_architect_operations
-                 WHERE id=? AND operation_type='apply_accepted_wizard_changes'
-                 FOR UPDATE",
+                 WHERE id=? AND operation_type='apply_accepted_wizard_changes'" . $lock,
                 array($operationId)
             );
             if ((int)$operation['plan_id'] !== (int)$operationReference['plan_id']
@@ -844,8 +935,11 @@ final class BooksManualsChangeApplyService
         }
         $this->pdo->beginTransaction();
         try {
+            $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? ''
+                : ' FOR UPDATE';
             $planOwner = $this->latestRow(
-                'SELECT owner_id FROM ipca_manual_ai_architect_plans WHERE id=? FOR UPDATE',
+                'SELECT owner_id FROM ipca_manual_ai_architect_plans WHERE id=?' . $lock,
                 array((int)$operationReference['plan_id'])
             );
             if ((int)($planOwner['owner_id'] ?? 0) !== $actorUserId) {
@@ -853,22 +947,60 @@ final class BooksManualsChangeApplyService
                     'Only the Change Plan owner can revert its Wizard changes.'
                 );
             }
-            $this->lockEditableVersion($versionId);
+            $lockedVersion = $this->latestRow(
+                'SELECT * FROM ipca_publishing_book_versions WHERE id=?' . $lock,
+                array($versionId)
+            );
             $operation = $this->latestRow(
                 "SELECT * FROM ipca_manual_ai_architect_operations
-                 WHERE id=? AND operation_type='apply_accepted_wizard_changes'
-                 FOR UPDATE",
+                 WHERE id=? AND operation_type='apply_accepted_wizard_changes'"
+                    . $lock,
                 array($operationId)
             );
-            if ((int)$operation['plan_id'] !== (int)$operationReference['plan_id']
-                || (string)($operation['status'] ?? '') !== 'succeeded') {
+            if ((int)$operation['plan_id'] !== (int)$operationReference['plan_id']) {
                 throw new RuntimeException(
-                    'This Wizard change has already been undone or is unavailable.'
+                    'This Wizard change has invalid plan provenance.'
                 );
             }
             $result = $this->decode($operation['result_json'] ?? null);
             if ((int)($result['book_version_id'] ?? 0) !== $versionId) {
                 throw new RuntimeException('This Wizard change changed before revert.');
+            }
+            $existingStmt = $this->pdo->prepare(
+                "SELECT id,operation_payload_json,result_json
+                 FROM ipca_manual_ai_architect_operations
+                 WHERE plan_id=? AND operation_type='revert_wizard_change_item'
+                   AND status='succeeded' ORDER BY id" . $lock
+            );
+            $existingStmt->execute(array((int)$operation['plan_id']));
+            foreach ($existingStmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $existingRow) {
+                $existingPayload = $this->decode($existingRow['operation_payload_json'] ?? null);
+                if ((int)($existingPayload['original_operation_id'] ?? 0) === $operationId
+                    && (int)($existingPayload['section_id'] ?? 0) === $sectionId) {
+                    $existingResult = $this->decode($existingRow['result_json'] ?? null);
+                    $this->pdo->commit();
+                    $existingResult['derived_refresh_warnings'] =
+                        $this->refreshPostCommitArtifacts(
+                            $versionId,
+                            $actorUserId,
+                            'manual_change_architect_revert_item_replay'
+                        );
+                    return $existingResult;
+                }
+            }
+            if ((string)($operation['status'] ?? '') !== 'succeeded') {
+                throw new RuntimeException(
+                    'This Wizard change has already been undone or is unavailable.'
+                );
+            }
+            if (!in_array(
+                (string)($lockedVersion['lifecycle_status'] ?? ''),
+                array('draft', 'in_review'),
+                true
+            )) {
+                throw new RuntimeException(
+                    'Wizard changes may only be reverted in Draft or Draft Review manuals.'
+                );
             }
             $before = (array)($result['before_sections'] ?? array());
             $after = (array)($result['after_sections'] ?? array());
@@ -879,7 +1011,7 @@ final class BooksManualsChangeApplyService
                 "SELECT id,result_json
                  FROM ipca_manual_ai_architect_operations
                  WHERE id>? AND operation_type='apply_accepted_wizard_changes'
-                   AND status='succeeded' ORDER BY id FOR UPDATE"
+                   AND status='succeeded' ORDER BY id" . $lock
             );
             $newerApplications->execute(array($operationId));
             foreach ($newerApplications->fetchAll(PDO::FETCH_ASSOC) ?: array() as $newer) {
@@ -889,22 +1021,6 @@ final class BooksManualsChangeApplyService
                     throw new RuntimeException(
                         'This Wizard change was superseded by a later application to the same section.'
                     );
-                }
-            }
-
-            $existingStmt = $this->pdo->prepare(
-                "SELECT operation_payload_json,result_json
-                 FROM ipca_manual_ai_architect_operations
-                 WHERE plan_id=? AND operation_type='revert_wizard_change_item'
-                   AND status='succeeded' ORDER BY id"
-            );
-            $existingStmt->execute(array((int)$operation['plan_id']));
-            foreach ($existingStmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $existingRow) {
-                $existingPayload = $this->decode($existingRow['operation_payload_json'] ?? null);
-                if ((int)($existingPayload['original_operation_id'] ?? 0) === $operationId
-                    && (int)($existingPayload['section_id'] ?? 0) === $sectionId) {
-                    $this->pdo->commit();
-                    return $this->decode($existingRow['result_json'] ?? null);
                 }
             }
 
@@ -1015,7 +1131,7 @@ final class BooksManualsChangeApplyService
             $this->pdo->prepare(
                 "UPDATE ipca_manual_ai_architect_operations
                  SET status='succeeded',result_json=?,result_fingerprint=?,
-                     completed_at=CURRENT_TIMESTAMP(3)
+                     completed_at=CURRENT_TIMESTAMP
                  WHERE id=? AND status='running'"
             )->execute(array(
                 $this->json($revertResult),
@@ -1173,11 +1289,15 @@ final class BooksManualsChangeApplyService
     private function snapshotsForSectionIds(array $sectionIds, bool $forUpdate = false): array
     {
         $snapshots = array();
+        $lock = $forUpdate
+            && (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite'
+                ? ' FOR UPDATE'
+                : '';
         foreach ($sectionIds as $sectionId) {
             $stmt = $this->pdo->prepare(
                 'SELECT * FROM ipca_publishing_book_blocks
                  WHERE section_id=? ORDER BY sort_order,id'
-                    . ($forUpdate ? ' FOR UPDATE' : '')
+                    . $lock
             );
             $stmt->execute(array($sectionId));
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
@@ -1704,8 +1824,11 @@ final class BooksManualsChangeApplyService
      */
     private function lockEditableVersion(int $versionId): array
     {
+        $lock = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            ? ''
+            : ' FOR UPDATE';
         $version = $this->latestRow(
-            'SELECT * FROM ipca_publishing_book_versions WHERE id=? FOR UPDATE',
+            'SELECT * FROM ipca_publishing_book_versions WHERE id=?' . $lock,
             array($versionId)
         );
         if (!in_array((string)($version['lifecycle_status'] ?? ''), array('draft', 'in_review'), true)) {

@@ -7,6 +7,7 @@
   var versionId = parseInt(root.getAttribute('data-version-id') || '0', 10);
   var initialSectionId = parseInt(root.getAttribute('data-section-id') || '0', 10);
   var apiBase = root.getAttribute('data-api-base') || '/admin/api/controlled_book_editor_api.php';
+  var csrfToken = root.getAttribute('data-csrf-token') || '';
   var documentType = root.getAttribute('data-document-type') || 'manual';
   var isAnnexBook = root.getAttribute('data-annex-book') === '1';
   var initialViewMode = root.getAttribute('data-initial-view') === 'edit'
@@ -143,6 +144,8 @@
     saveTimer: null,
     saving: false,
     pending: {},
+    inFlightSaves: {},
+    saveFailures: {},
     expanded: {},
     outlineOpen: false,
     pageLayout: {},
@@ -951,11 +954,15 @@
   }
 
   function apiPost(action, payload) {
+    var requestPayload = Object.assign({ action: action }, payload || {});
+    if (action === 'revert_wizard_change' || action === 'undo_wizard_edit') {
+      requestPayload.csrf_token = csrfToken;
+    }
     return fetch(apiBase, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.assign({ action: action }, payload || {})),
+      body: JSON.stringify(requestPayload),
     }).then(function (r) {
       return parseApiResponse(r).then(function (result) {
         recordCommittedSourceMutation(action, payload || {}, result || {});
@@ -974,9 +981,11 @@
       )) return;
       undoWizardEditBtn.disabled = true;
       undoWizardEditBtn.textContent = 'Restoring…';
-      apiPost('undo_wizard_edit', {
-        version_id: versionId,
-        operation_id: operationId,
+      flushAllPendingSaves().then(function () {
+        return apiPost('undo_wizard_edit', {
+          version_id: versionId,
+          operation_id: operationId,
+        });
       }).then(function (response) {
         if (!response || response.ok !== true) {
           throw new Error(
@@ -1021,6 +1030,16 @@
     if (status === 'SUPERSEDED') return 'Superseded by later Wizard change';
     if (status === 'MANUALLY_EDITED') return 'Edited after Wizard';
     return 'Applied';
+  }
+
+  function reviewConsequenceLabel(consequence) {
+    if (consequence === 'NO_MANUAL_CHANGE_REQUIRED') {
+      return 'Current accepted wording confirmed sufficient';
+    }
+    if (consequence === 'STRUCTURAL_CONSEQUENCE') {
+      return 'Accepted baseline must be explicitly reopened';
+    }
+    return 'Editor review note';
   }
 
   function renderWizardChanges(changes) {
@@ -1075,13 +1094,25 @@
       html += '<h3 class="cpb-wizard-changes__heading">Independent Review guidance</h3>';
       guidance.forEach(function (note) {
         var labels = Array.isArray(note.selected_labels) ? note.selected_labels.join(' · ') : '';
+        var affected = Array.isArray(note.affected_sections)
+          ? note.affected_sections.join(' · ')
+          : '';
         html += '<article class="cpb-wizard-guidance"><strong>'
           + escapeHtml(String(note.title || 'Review note')) + '</strong>'
           + (note.prompt ? '<p>' + escapeHtml(String(note.prompt)) + '</p>' : '')
           + (labels ? '<p><b>Owner answer:</b> ' + escapeHtml(labels) + '</p>' : '')
+          + (affected ? '<p><b>Affected sections:</b> ' + escapeHtml(affected) + '</p>' : '')
+          + (note.governed_fact ? '<p><b>Governed fact:</b> '
+            + escapeHtml(String(note.governed_fact)) + '</p>' : '')
           + (note.instruction ? '<p><b>Instruction:</b> '
             + escapeHtml(String(note.instruction)) + '</p>' : '')
-          + '<small>Advisory review note — edit the manual directly if refinement is needed.</small>'
+          + '<p><b>Outcome:</b> '
+          + escapeHtml(reviewConsequenceLabel(String(note.consequence || '')))
+          + '</p><small>'
+          + (note.manual_change_indicated === false
+            ? 'Recorded review clarification — no manual edit is required.'
+            : 'Advisory review note — edit the manual directly if refinement is needed.')
+          + '</small>'
           + '</article>';
       });
     }
@@ -1112,12 +1143,14 @@
   }
 
   function submitWizardChangeRevert(item, force, fingerprint) {
-    return apiPost('revert_wizard_change', {
-      version_id: versionId,
-      operation_id: Number(item.operation_id || 0),
-      section_id: Number(item.section_id || 0),
-      force: force ? 1 : 0,
-      expected_current_fingerprint: fingerprint || '',
+    return flushAllPendingSaves().then(function () {
+      return apiPost('revert_wizard_change', {
+        version_id: versionId,
+        operation_id: Number(item.operation_id || 0),
+        section_id: Number(item.section_id || 0),
+        force: force ? 1 : 0,
+        expected_current_fingerprint: fingerprint || '',
+      });
     }).then(function (response) {
       if (response.requires_confirmation) {
         if (!window.confirm(
@@ -1161,15 +1194,17 @@
   }
 
   function openWizardChangeSection(sectionId) {
-    if (state.viewMode === 'paginated') {
-      state.sectionId = sectionId;
-      state.sectionPageIndex = 0;
-      renderTree(state.sectionsTree, state.sectionId);
-      return loadPaginatedView().then(function () {
-        canvasEl.scrollTop = 0;
-      });
-    }
-    return loadSection(sectionId);
+    return flushAllPendingSaves().then(function () {
+      if (state.viewMode === 'paginated') {
+        state.sectionId = sectionId;
+        state.sectionPageIndex = 0;
+        renderTree(state.sectionsTree, state.sectionId);
+        return loadPaginatedView().then(function () {
+          canvasEl.scrollTop = 0;
+        });
+      }
+      return loadSection(sectionId);
+    });
   }
 
   if (sidebarTabsEl) {
@@ -3003,32 +3038,35 @@
     var rangeStart = parseInt(piece.getAttribute('data-source-range-start') || '0', 10);
     var rangeEnd = parseInt(piece.getAttribute('data-source-range-end') || '0', 10);
     if (!blockId || !sectionId || rangeEnd <= rangeStart) {
+      field.setAttribute('data-fragment-dirty', '1');
       return Promise.reject(new Error('The paragraph fragment cannot be mapped to its source block.'));
     }
     setStatus('Saving paragraph…', 'saving');
-    return apiGet(
-      apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
-    ).then(function (response) {
-      if (!response.ok) throw new Error(response.error || 'Source paragraph load failed');
-      var holder = document.createElement('div');
-      holder.innerHTML = response.page_html || '';
-      var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
-      var sourceField = sourceBlock ? sourceBlock.querySelector('.cpb-paragraph') : null;
-      if (!sourceBlock || !sourceField) throw new Error('The complete source paragraph was not found.');
-      replaceTextRangeHtml(sourceField, rangeStart, rangeEnd, field.innerHTML);
-      return apiPost('update_block', {
-        version_id: state.versionId,
-        block_id: blockId,
-        payload: extractPayload(sourceBlock, 'paragraph'),
+    return trackBlockSave(blockId, function () {
+      return apiGet(
+        apiBase + '?action=load&version_id=' + state.versionId + '&section_id=' + sectionId
+      ).then(function (response) {
+        if (!response.ok) throw new Error(response.error || 'Source paragraph load failed');
+        var holder = document.createElement('div');
+        holder.innerHTML = response.page_html || '';
+        var sourceBlock = holder.querySelector('[data-block-id="' + blockId + '"]');
+        var sourceField = sourceBlock ? sourceBlock.querySelector('.cpb-paragraph') : null;
+        if (!sourceBlock || !sourceField) throw new Error('The complete source paragraph was not found.');
+        replaceTextRangeHtml(sourceField, rangeStart, rangeEnd, field.innerHTML);
+        return apiPost('update_block', {
+          version_id: state.versionId,
+          block_id: blockId,
+          payload: extractPayload(sourceBlock, 'paragraph'),
+        });
+      }).then(function (response) {
+        if (!response.ok) throw new Error(response.error || 'Paragraph save failed');
+        state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
+        setStatus('Saved', 'saved');
+        markPaginationChanged();
+      }).catch(function (error) {
+        field.setAttribute('data-fragment-dirty', '1');
+        throw error;
       });
-    }).then(function (response) {
-      if (!response.ok) throw new Error(response.error || 'Paragraph save failed');
-      state.pendingPaginatedAnchor = blockEl.getAttribute('data-stable-anchor') || '';
-      setStatus('Saved', 'saved');
-      markPaginationChanged();
-    }).catch(function (error) {
-      field.setAttribute('data-fragment-dirty', '1');
-      showError(error);
     });
   }
 
@@ -5936,8 +5974,30 @@
     });
   }
 
+  function trackBlockSave(blockId, saveWork) {
+    var key = String(blockId);
+    var previous = state.inFlightSaves[key] || Promise.resolve();
+    var tracked = previous.catch(function () {
+      return null;
+    }).then(function () {
+      delete state.saveFailures[key];
+      return saveWork();
+    });
+    state.inFlightSaves[key] = tracked;
+    tracked.then(function () {
+      if (state.inFlightSaves[key] === tracked) delete state.inFlightSaves[key];
+      delete state.saveFailures[key];
+    }, function (error) {
+      if (state.inFlightSaves[key] === tracked) delete state.inFlightSaves[key];
+      state.saveFailures[key] = error;
+      showError(error);
+    });
+    return tracked;
+  }
+
   function flushAllPendingSaves() {
     clearTimeout(state.saveTimer);
+    state.saveTimer = null;
     var promises = [];
     Object.keys(state.pending).forEach(function (id) {
       var pendingEl = state.pending[id];
@@ -5949,7 +6009,31 @@
       }
     });
     state.pending = {};
-    return promises.length ? Promise.all(promises) : Promise.resolve();
+    canvasEl.querySelectorAll('[data-fragment-dirty="1"]').forEach(function (field) {
+      var blockEl = field.closest('.cpb-block');
+      var piece = field.closest('[data-source-range-start][data-source-range-end]');
+      if (
+        blockEl
+        && (blockEl.getAttribute('data-block-type') || '') === 'paragraph'
+        && piece
+      ) {
+        var result = flushPaginatedParagraphFragment(blockEl, piece, field);
+        if (result && typeof result.then === 'function') promises.push(result);
+      }
+    });
+    Object.keys(state.inFlightSaves).forEach(function (key) {
+      if (promises.indexOf(state.inFlightSaves[key]) < 0) {
+        promises.push(state.inFlightSaves[key]);
+      }
+    });
+    return (promises.length ? Promise.all(promises) : Promise.resolve())
+      .then(function () {
+        if (Object.keys(state.saveFailures).length) {
+          throw new Error(
+            'A manual edit did not save. Resolve the save error before opening or reverting Wizard changes.'
+          );
+        }
+      });
   }
 
   function formatCrossRefDisplay(documentKey, refKey) {
@@ -6228,22 +6312,24 @@
     }
     var payload = extractPayload(blockEl, blockType);
     setStatus('Saving…', 'saving');
-    return apiPost('update_block', { version_id: state.versionId, block_id: blockId, payload: payload }).then(function (res) {
-      if (!res.ok) throw new Error(res.error || 'Save failed');
-      applyNumberingState(res);
-      if (res.cross_ref_annex) {
-        applyCrossRefAnnexCatalog(res.cross_ref_annex);
-      }
-      syncBlockChangePresentation(blockEl, res.block_html || '');
-      setStatus('Saved', 'saved');
-      markPaginationChanged();
-      if (blockNeedsTocRefresh(blockEl)) {
-        scheduleTocSync();
-      }
-      if (refreshNumbering) {
-        return recomputeSectionNumbers().catch(showError);
-      }
-    }).catch(showError);
+    return trackBlockSave(blockId, function () {
+      return apiPost(
+        'update_block',
+        { version_id: state.versionId, block_id: blockId, payload: payload }
+      ).then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'Save failed');
+        applyNumberingState(res);
+        if (res.cross_ref_annex) applyCrossRefAnnexCatalog(res.cross_ref_annex);
+        syncBlockChangePresentation(blockEl, res.block_html || '');
+        setStatus('Saved', 'saved');
+        markPaginationChanged();
+        if (blockNeedsTocRefresh(blockEl)) scheduleTocSync();
+        if (refreshNumbering) return recomputeSectionNumbers().catch(showError);
+      }).catch(function (error) {
+        if (isConnectedEl(blockEl)) state.pending[blockId] = blockEl;
+        throw error;
+      });
+    });
   }
 
   function defaultBookStyles() {
