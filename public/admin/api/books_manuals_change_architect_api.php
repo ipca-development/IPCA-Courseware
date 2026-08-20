@@ -715,6 +715,10 @@ try {
             }
             $pdo->beginTransaction();
             try {
+                $governedDispositions = $plans->governAcceptedAnalysisDispositions(
+                    $planId,
+                    $userId
+                );
                 $pdo->prepare(
                     "UPDATE ipca_manual_ai_architect_reviews
                      SET status='superseded' WHERE plan_id=? AND status='requested'"
@@ -742,6 +746,7 @@ try {
                 $plans->appendEvent($planId, 'STRUCTURE_REVISION_REQUESTED_BY_REVIEW', 12, array(
                     'review_id' => (int)($latestReview['id'] ?? 0),
                     'issues' => array_values((array)($preparedReview['issues'] ?? array())),
+                    'governed_dispositions' => $governedDispositions,
                 ), $userId);
                 $proposalId = architect_api_ensure_structure(
                     $planId,

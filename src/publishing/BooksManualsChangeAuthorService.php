@@ -134,6 +134,7 @@ final class BooksManualsChangeAuthorService
                 array(
                     'generated_at' => gmdate(DATE_ATOM),
                     'model' => $generated['_model'] ?? null,
+                    'legacy_status' => $this->legacyReferenceStatus($brief, $sectionDrafts),
                     'authorization_fingerprint' => hash(
                         'sha256',
                         json_encode($brief, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
@@ -409,6 +410,15 @@ final class BooksManualsChangeAuthorService
             'The lifecycle array must use exactly these states and this order:',
             'INITIAL_REPORT, TRIAGE, REPORTABILITY_DECISION, AUTHORITY_DEADLINE_CONTROL, ECCAIRS_PREPARATION_APPROVAL, TRANSMISSION, INVESTIGATION, ACTIONS, RESIDUAL_RISK_ACCEPTANCE, EFFECTIVENESS_REVIEW, MONITORING_ESCALATION, AUTHORITY_FOLLOW_UP, CONTROLLED_CLOSURE.',
             'Known limitation: do not claim automated intermediate or final ECCAIRS amendments are operational unless the authorization explicitly proves that capability.',
+            'Where occurrence and ECCAIRS controls are authorized, preserve every supported legal reference, reporting category, and deadline from the canonical source, including exact qualifying conditions.',
+            'When supported by the canonical source, retain the exact references “Regulation (EU) No 376/2014”, “Implementing Regulation (EU) 2015/1018”, and “BCAA Circular MAS-01”, together with “not later than 72 hours”, “within 30 days”, and “not later than three months”.',
+            'Separate initial notification, preliminary 30-day reporting, other authority-conditioned intermediate updates, and final reporting timing. Never apply the 30-day rule universally.',
+            'State explicitly that “Submission of the initial occurrence does not complete the reporting process”. Preserve findings, conclusions, causal and contributing factors, corrective or mitigating actions, implementation information and effectiveness information, and direct ECCAIRS follow-up.',
+            'For initial ECCAIRS notification, govern information required for the applicable reporting stage; explain unavailable or unknown information without delaying the applicable reporting deadline; require Safety Manager review and approval before transmission.',
+            'For follow-up, state that required intermediate and final information is entered directly into ECCAIRS using the applicable authority reporting interface. Separate preliminary 30-day results from additional intermediate information and authority-conditioned Article 13 follow-up.',
+            'Keep occurrence-level deadline/action monitoring in the occurrence procedure and aggregate/systemic assurance in safety-performance monitoring.',
+            'Do not include static ECCAIRS field schemas. For unavailable information, use stage-based completeness and qualified deadline wording.',
+            'Ensure Safety Manager authority, controlled records, corrective-action competence, residual-risk acceptance, and closure gates are mutually consistent across supporting sections.',
             '---BEGIN AUTHORIZED BRIEF---',
             json_encode($brief, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             '---END AUTHORIZED BRIEF---',
@@ -492,6 +502,62 @@ final class BooksManualsChangeAuthorService
             $drafts[$sectionNumber] = $row;
         }
         return $drafts;
+    }
+
+    /**
+     * @param array<string,mixed> $brief
+     * @param array<string,array<string,mixed>> $sectionDrafts
+     * @return array<string,mixed>
+     */
+    private function legacyReferenceStatus(array $brief, array $sectionDrafts): array
+    {
+        $draftText = '';
+        foreach ($sectionDrafts as $draft) {
+            $draftText .= "\n" . implode("\n", array_map(
+                'strval',
+                (array)($draft['nodes'] ?? array())
+            ));
+        }
+        $acceptedSectionIds = array_fill_keys(array_map(
+            static fn(array $impact): int => (int)($impact['section_id'] ?? 0),
+            (array)($brief['approved_impacts'] ?? array())
+        ), true);
+        $remaining = array();
+        $outside = array();
+        foreach ((array)($brief['legacy_references'] ?? array()) as $reference) {
+            if (!is_array($reference)) {
+                continue;
+            }
+            $disposition = strtoupper((string)($reference['disposition'] ?? ''));
+            $section = (string)($reference['section_number'] ?? '');
+            $sectionId = (int)($reference['section_id'] ?? 0);
+            $text = trim((string)($reference['exact_text'] ?? ''));
+            if ($disposition === 'REVIEW_SEPARATELY' || !isset($acceptedSectionIds[$sectionId])) {
+                $outside[] = array(
+                    'legacy_hit_id' => (int)($reference['id'] ?? 0),
+                    'section_number' => $section,
+                    'disposition' => $disposition,
+                );
+                continue;
+            }
+            if ($disposition === 'REMOVE_OR_REPLACE'
+                && $text !== ''
+                && mb_stripos($draftText, $text) !== false) {
+                $remaining[] = array(
+                    'legacy_hit_id' => (int)($reference['id'] ?? 0),
+                    'section_number' => $section,
+                    'exact_text' => $text,
+                );
+            }
+        }
+        return array(
+            'remaining_within_accepted_scope' => count($remaining),
+            'remaining_items' => $remaining,
+            'outside_scope' => array(
+                'count' => count($outside),
+                'items' => $outside,
+            ),
+        );
     }
 
     /** @param array<string,mixed> $proposal @return array{valid:bool,failures:list<string>} */

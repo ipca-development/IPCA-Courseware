@@ -397,6 +397,66 @@ final class BooksManualsChangePlanService
     }
 
     /**
+     * Convert the Architect's visible legacy/boundary recommendations into
+     * governed decisions when the owner accepts the complete impact analysis.
+     *
+     * @return array{legacy_decisions:int,resolved_review_boundaries:int}
+     */
+    public function governAcceptedAnalysisDispositions(int $planId, int $actorUserId): array
+    {
+        $this->assertPlanOwner($planId, $actorUserId);
+        $hits = $this->rows(
+            'SELECT h.* FROM ' . self::TABLES['legacy_hits'] . ' h'
+            . ' LEFT JOIN ' . self::TABLES['legacy_hit_decisions'] . ' d'
+            . ' ON d.legacy_hit_id=h.id'
+            . ' WHERE h.plan_id=? AND d.id IS NULL ORDER BY h.id',
+            array($planId)
+        );
+        $accepted = 0;
+        foreach ($hits as $hit) {
+            $disposition = strtoupper(trim((string)($hit['disposition'] ?? '')));
+            if (!in_array($disposition, array(
+                'REMOVE_OR_REPLACE',
+                'PRESERVE_WITH_JUSTIFICATION',
+                'REVIEW_SEPARATELY',
+            ), true)) {
+                continue;
+            }
+            $justification = trim((string)($hit['disposition_justification'] ?? ''));
+            if ($justification === '') {
+                continue;
+            }
+            $this->recordLegacyHitDecision(
+                $planId,
+                (int)$hit['id'],
+                $disposition,
+                $justification . ' Accepted with the complete Impact Analysis.',
+                $actorUserId
+            );
+            $accepted++;
+        }
+        $boundaryStmt = $this->pdo->prepare(
+            'UPDATE ' . self::TABLES['boundaries']
+            . " SET status='resolved',updated_at=CURRENT_TIMESTAMP(3)"
+            . " WHERE plan_id=? AND classification='REVIEW_SEPARATELY'"
+            . " AND status='active' AND rationale IS NOT NULL AND TRIM(rationale)<>''"
+        );
+        $boundaryStmt->execute(array($planId));
+        $resolved = $boundaryStmt->rowCount();
+        if ($accepted > 0 || $resolved > 0) {
+            $this->appendEvent($planId, 'ANALYSIS_DISPOSITIONS_GOVERNED', 10, array(
+                'legacy_decisions' => $accepted,
+                'resolved_review_boundaries' => $resolved,
+                'authority' => 'human_acceptance_of_complete_impact_analysis',
+            ), $actorUserId);
+        }
+        return array(
+            'legacy_decisions' => $accepted,
+            'resolved_review_boundaries' => $resolved,
+        );
+    }
+
+    /**
      * Record the human decision governing one consolidated amendment area.
      *
      * @return array<string,mixed>
@@ -623,6 +683,10 @@ final class BooksManualsChangePlanService
                 . " SET status='approved',updated_at=CURRENT_TIMESTAMP(3)"
                 . " WHERE plan_id=? AND id IN ({$placeholders})"
             )->execute(array_merge(array($planId), array_map('intval', array_column($rows, 'id'))));
+            $governedDispositions = $this->governAcceptedAnalysisDispositions(
+                $planId,
+                $actorUserId
+            );
             $this->updatePlan($planId, array('stage' => 'structure', 'updated_by' => $actorUserId));
             $continuation = $afterApproval !== null
                 ? (array)$afterApproval($rows)
@@ -633,6 +697,7 @@ final class BooksManualsChangePlanService
                     array_map('intval', array_column($allRows, 'id')),
                     array_map('intval', array_column($rows, 'id'))
                 )),
+                'governed_dispositions' => $governedDispositions,
                 'continuation' => $continuation,
             ), $actorUserId);
             $this->pdo->commit();

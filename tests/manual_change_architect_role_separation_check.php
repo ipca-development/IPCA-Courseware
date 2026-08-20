@@ -62,6 +62,17 @@ $checks = array(
         str_contains($planService, 'recordLegacyHitDecision')
         && str_contains($planService, "'create_related_plan' => false")
         && str_contains($planService, "'PRESERVE_WITH_JUSTIFICATION'"),
+    'Accepted analysis governs visible legacy and review-separately dispositions' =>
+        str_contains($planService, 'governAcceptedAnalysisDispositions')
+        && str_contains($planService, 'human_acceptance_of_complete_impact_analysis')
+        && str_contains($planService, "'governed_dispositions'"),
+    'Author carries legacy accounting and review constraints into the draft' =>
+        str_contains($author, 'legacyReferenceStatus')
+        && str_contains($author, 'remaining_within_accepted_scope')
+        && str_contains(
+            $author,
+            'Submission of the initial occurrence does not complete the reporting process'
+        ),
 );
 
 foreach ($checks as $label => $passed) {

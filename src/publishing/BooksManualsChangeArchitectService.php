@@ -3264,11 +3264,14 @@ final class BooksManualsChangeArchitectService
             );
             $rows = array();
             $completeLifecycle = preg_match('/\b(?:occurrence|initial report)\b/iu', $componentText) === 1
-                && preg_match('/\breportability\b/iu', $componentText) === 1
-                && preg_match('/\becca?irs\b/iu', $componentText) === 1
+                && preg_match('/\b(?:reportability|reportable|reporting assessment)\b/iu', $componentText) === 1
+                && preg_match(
+                    '/\b(?:ecca?irs|external reporting|authority (?:notification|submission|reporting))\b/iu',
+                    $componentText
+                ) === 1
                 && preg_match('/\binvestigat\w*\b/iu', $componentText) === 1
-                && preg_match('/\b(?:corrective(?: or mitigating)?|mitigating) actions?\b/iu', $componentText) === 1
-                && preg_match('/\beffectiveness\b/iu', $componentText) === 1
+                && preg_match('/\b(?:(?:corrective|mitigating) actions?|action tracking)\b/iu', $componentText) === 1
+                && preg_match('/\b(?:effectiveness|follow-up|follow up)\b/iu', $componentText) === 1
                 && preg_match('/\bclos(?:e|ed|ure)\b/iu', $componentText) === 1;
             foreach ($definitions as $definition) {
                 $sourceSupportsPreservation = in_array(
