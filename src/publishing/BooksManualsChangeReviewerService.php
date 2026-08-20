@@ -9,7 +9,7 @@ require_once __DIR__ . '/BooksManualsChangePlanService.php';
 final class BooksManualsChangeReviewerService
 {
     public const PROMPT_VERSION = 'manual-change-independent-reviewer-v1';
-    public const CHECK_VERSION = '3';
+    public const CHECK_VERSION = '4';
     public const READY = 'READY';
     public const REQUIRES_REVIEW = 'REQUIRES_REVIEW';
 
@@ -839,8 +839,8 @@ final class BooksManualsChangeReviewerService
             'training.corrective-action-competence' => array(
                 'TRAINING', 'MATERIAL', (string)($nodes['8.1'] ?? ''), array('8.1'), array('8.1'),
                 array('/corrective\s+(?:or|and)\s+mitigating\s+action/iu', '/Action Owners?/iu', '/implementation|completion\s+evidence/iu', '/effectiveness/iu'),
-                'Training covers action ownership, implementation evidence and effectiveness control.',
-                'Section 8.1 does not include corrective-action competence.'
+                'Personnel assigned corrective or mitigating actions, including Action Owners, are trained and competent in implementation, completion evidence and effectiveness control.',
+                'Section 8.1 does not explicitly connect corrective or mitigating Action Owners to implementation, completion-evidence and effectiveness competence.'
             ),
             'reporting.missing-information-deadline' => array(
                 'ECCAIRS_INITIAL', 'MATERIAL', $text56, array('5.6'), array('5.6.3', '5.6.4'),
