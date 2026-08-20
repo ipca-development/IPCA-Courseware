@@ -10,7 +10,7 @@ $protected = array(
     'src/document/StructuredDocumentPayload.php'
         => '9b5412d9966d0e7ce162ae652cbd8515b4f8864689852f2807e5f404f356a8ed',
     'src/publishing/ControlledPublishingBookRenderer.php'
-        => 'b90d68a286497bbceec66e44253ed8dfeb76c15a7ca59865a280c9fa713d28ec',
+        => 'dce29a9d7c01e6e3036b59053279b4dd1a063cc42fed2358998fefb596423cab',
 );
 
 foreach ($protected as $relative => $expectedHash) {

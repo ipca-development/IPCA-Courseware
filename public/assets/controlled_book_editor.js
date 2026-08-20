@@ -3610,7 +3610,6 @@
       wireCanvas();
       loadReviewThreadMarkers();
       applyLayoutToDom(state.pageLayout);
-      refreshContentTableTypographyFromBookStyles();
       refreshCalloutTypographyFromBookStyles();
       if (state.isTocSection) {
         refreshTocTypographyFromBookStyles();
@@ -4440,10 +4439,10 @@
     };
     cell.setAttribute('data-cell-borders', JSON.stringify(borders));
     var neighborOwnsBoundary = (side === 'left' || side === 'top') && neighbors.length > 0;
-    if (neighborOwnsBoundary) {
+    if (spec.style === 'none') {
+      cell.style.setProperty('border-' + side, 'none', 'important');
+    } else if (neighborOwnsBoundary) {
       cell.style.removeProperty('border-' + side);
-    } else if (spec.style === 'none') {
-      cell.style.setProperty('border-' + side, 'none');
     } else {
       cell.style.setProperty(
         'border-' + side,

@@ -121,8 +121,17 @@ final class ControlledPublishingHtmlSanitizer
                 $keepAttrs = array();
                 if ($tag === 'span') {
                     $style = (string)$child->getAttribute('style');
+                    $spanStyles = array();
                     if (preg_match('/color\s*:\s*(#[0-9a-fA-F]{3,8})/', $style, $m) === 1) {
-                        $keepAttrs['style'] = 'color:' . strtolower($m[1]);
+                        $spanStyles[] = 'color:' . strtolower($m[1]);
+                    }
+                    if ($allowTableImages
+                        && preg_match('/font-size\s*:\s*([0-9]+(?:\.[0-9]+)?)pt/i', $style, $m) === 1) {
+                        $fontSize = max(6.0, min(72.0, (float)$m[1]));
+                        $spanStyles[] = 'font-size:' . rtrim(
+                            rtrim(number_format($fontSize, 2, '.', ''), '0'),
+                            '.'
+                        ) . 'pt';
                     }
                     if ($allowTableImages
                         && $child->getAttribute('class') === 'cpb-table-cell-image') {
@@ -144,11 +153,11 @@ final class ControlledPublishingHtmlSanitizer
                             true
                         ) ? $align : 'center';
                         if ($height > 0) {
-                            $heightStyle = '--cpb-table-cell-image-height:' . $height . 'px';
-                            $keepAttrs['style'] = isset($keepAttrs['style'])
-                                ? $keepAttrs['style'] . ';' . $heightStyle
-                                : $heightStyle;
+                            $spanStyles[] = '--cpb-table-cell-image-height:' . $height . 'px';
                         }
+                    }
+                    if ($spanStyles !== array()) {
+                        $keepAttrs['style'] = implode(';', $spanStyles);
                     }
                 }
                 if (in_array($tag, array('span', 'p', 'div'), true)

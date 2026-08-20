@@ -114,13 +114,15 @@ if (!str_contains($verticalEditHtml, 'cpb-table-block--align-left')
 
 $mediaPayload = table_payload(2);
 $mediaPayload['rows'] = array(array(
-    'Text <span class="cpb-table-cell-image" data-width-pct="42" data-height-px="96" data-lock-ratio="0" data-align="right">'
+    'Text <span style="font-size:8pt;color:#123456">Small</span>'
+        . '<span class="cpb-table-cell-image" data-width-pct="42" data-height-px="96" data-lock-ratio="0" data-align="right">'
         . '<img src="https://ipca-test.nyc3.digitaloceanspaces.com/publishing/test/cell.png" alt="Diagram" onerror="alert(1)">'
         . '</span>',
     '<span class="cpb-table-cell-image" data-width-pct="50" data-align="center">'
         . '<img src="https://evil.example/track.png" alt="Unsafe"></span>',
 ));
 $mediaPayload['row_colspans'] = array(array(1, 1));
+$mediaPayload['cell_font_size'] = array(array(8, 8));
 $mediaPayload['header_borders'] = array(
     array(
         'bottom' => array('style' => 'dashed', 'width' => 2, 'color' => '#123456'),
@@ -150,6 +152,9 @@ if (!str_contains($mediaHtml, 'class="cpb-table-cell-image"')
     || !str_contains($mediaHtml, 'data-height-px="96"')
     || !str_contains($mediaHtml, 'data-lock-ratio="0"')
     || !str_contains($mediaHtml, '--cpb-table-cell-image-height:96px')
+    || !str_contains($mediaHtml, 'font-size:8pt')
+    || !str_contains($mediaHtml, 'font-size:8pt !important')
+    || !str_contains($mediaHtml, 'data-font-size="8"')
     || !str_contains($mediaHtml, 'data-align="right"')
     || !str_contains($mediaHtml, 'alt="Diagram"')) {
     $failures[] = 'Governed table-cell image markup was not preserved.';
@@ -159,8 +164,8 @@ if (str_contains($mediaHtml, 'evil.example') || str_contains($mediaHtml, 'onerro
 }
 if (!str_contains($mediaHtml, 'border-bottom:2px dashed #123456')
     || str_contains($mediaHtml, 'border-top:2px dashed #123456')
-    || !str_contains($mediaHtml, 'border-right:none')
-    || str_contains($mediaHtml, 'border-left:none')
+    || !str_contains($mediaHtml, 'border-right:none !important')
+    || !str_contains($mediaHtml, 'border-left:none !important')
     || !str_contains($mediaHtml, 'data-cell-borders=')) {
     $failures[] = 'Individual table-cell borders were not rendered.';
 }
@@ -198,6 +203,16 @@ $requiredMarkers = array(
     'cell_borders: cellBorders',
     'domRange: range.cloneRange()',
 );
+$loadRenderStart = strpos($editorSource, "canvasEl.innerHTML = res.page_html || '';");
+$loadRenderEnd = strpos($editorSource, 'refreshCalloutTypographyFromBookStyles();', $loadRenderStart ?: 0);
+if ($loadRenderStart === false
+    || $loadRenderEnd === false
+    || str_contains(
+        substr($editorSource, $loadRenderStart, $loadRenderEnd - $loadRenderStart),
+        'refreshContentTableTypographyFromBookStyles();'
+    )) {
+    $failures[] = 'Section reload still overwrites persisted table-cell typography.';
+}
 foreach ($requiredMarkers as $marker) {
     if (!str_contains($editorSource, $marker)) {
         $failures[] = "Editor is missing required regression marker: {$marker}";

@@ -1331,6 +1331,13 @@
     return root.outerHTML;
   }
 
+  function tableFragmentGroupKey(fragmentValue) {
+    const blockId = Number(fragmentValue && fragmentValue.blockId || 0);
+    if (blockId > 0) return `block:${blockId}`;
+    return String(fragmentValue && fragmentValue.id || "")
+      .replace(/\/table-(?:header|row-\d+)$/, "");
+  }
+
   function pagePiecesMarkup(values) {
     const output = [];
     let index = 0;
@@ -1386,9 +1393,11 @@
         continue;
       }
       const group = [];
+      const tableGroupKey = tableFragmentGroupKey(value.fragment);
       while (
         index < values.length
         && ["tableHeader", "tableRow"].includes(values[index].fragment.type)
+        && tableFragmentGroupKey(values[index].fragment) === tableGroupKey
       ) {
         group.push(values[index]);
         index++;

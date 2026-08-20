@@ -2386,11 +2386,11 @@ final class ControlledPublishingBookRenderer
                 if (!is_array($spec)) {
                     continue;
                 }
-                if (in_array($side, $suppressedBorderSides, true)) {
+                if ((string)($spec['style'] ?? '') === 'none') {
+                    $styles[] = 'border-' . $side . ':none !important';
                     continue;
                 }
-                if ((string)($spec['style'] ?? '') === 'none') {
-                    $styles[] = 'border-' . $side . ':none';
+                if (in_array($side, $suppressedBorderSides, true)) {
                     continue;
                 }
                 $styles[] = 'border-' . $side . ':'
