@@ -426,6 +426,7 @@ final class BooksManualsChangeAuthorService
         ));
         $model = cw_openai_model();
         $started = microtime(true);
+        $generated = null;
         try {
             $response = cw_openai_responses(array(
                 'model' => $model,
@@ -455,7 +456,12 @@ final class BooksManualsChangeAuthorService
                 if (!is_array($patch)) {
                     continue;
                 }
-                $section = trim((string)($patch['section_number'] ?? ''));
+                $section = $this->resolveTargetedPatchSection(
+                    trim((string)($patch['section_number'] ?? '')),
+                    (array)($patch['nodes'] ?? array()),
+                    $allDrafts,
+                    $scope
+                );
                 if ($section === '' || !isset($scope[$section]) || !isset($candidate['section_drafts'][$section])) {
                     throw new RuntimeException('Targeted Author attempted to modify content outside the authorized review scope.');
                 }
@@ -570,7 +576,16 @@ final class BooksManualsChangeAuthorService
                 'production_applied' => false,
             );
         } catch (Throwable $error) {
-            $this->logAi('ERROR', $planId, $actorUserId, $model, $prompt, null, $error->getMessage(), $started);
+            $this->logAi(
+                'ERROR',
+                $planId,
+                $actorUserId,
+                $model,
+                $prompt,
+                is_array($generated) ? $generated : null,
+                $error->getMessage(),
+                $started
+            );
             throw $error;
         }
     }
@@ -995,6 +1010,50 @@ final class BooksManualsChangeAuthorService
             }
         }
         return $candidate;
+    }
+
+    /**
+     * Resolve a model-supplied section label through its returned node IDs.
+     * The node-to-section mapping from the accepted draft is authoritative.
+     *
+     * @param list<array<string,mixed>> $patchNodes
+     * @param array<string,array<string,mixed>> $allDrafts
+     * @param array<string,bool> $scope
+     */
+    private function resolveTargetedPatchSection(
+        string $declaredSection,
+        array $patchNodes,
+        array $allDrafts,
+        array $scope
+    ): string {
+        $resolved = array();
+        foreach ($patchNodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            $number = trim((string)($node['number'] ?? ''));
+            if ($number === '') {
+                continue;
+            }
+            foreach ($allDrafts as $section => $draft) {
+                if (array_key_exists($number, (array)($draft['nodes'] ?? array()))) {
+                    $resolved[(string)$section] = true;
+                    break;
+                }
+            }
+        }
+        if (count($resolved) === 1) {
+            $canonical = (string)array_key_first($resolved);
+            if (isset($scope[$canonical])) {
+                return $canonical;
+            }
+        }
+        if ($resolved === array() && isset($scope[$declaredSection])) {
+            return $declaredSection;
+        }
+        throw new RuntimeException(
+            'Targeted Author attempted to modify content outside the authorized review scope.'
+        );
     }
 
     /** @param array<string,mixed> $proposal @return array{valid:bool,failures:list<string>} */

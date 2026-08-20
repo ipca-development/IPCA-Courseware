@@ -60,6 +60,19 @@ stableCheckAssert(
     'Semantic initial-submission control still depends on exact fixture prose.'
 );
 
+$resolvePatchSection = new ReflectionMethod($author, 'resolveTargetedPatchSection');
+$resolvedSection = $resolvePatchSection->invoke(
+    $author,
+    '5.6.4',
+    array(array('number' => '5.6.4', 'content' => 'Targeted correction')),
+    (array)$proposal['section_drafts'],
+    array('5.6' => true)
+);
+stableCheckAssert(
+    $resolvedSection === '5.6',
+    'A node-scoped Author response did not resolve to its accepted parent section.'
+);
+
 $db = new PDO('sqlite::memory:');
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->exec(
