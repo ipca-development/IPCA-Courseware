@@ -141,6 +141,64 @@ stableCheckAssert(
     'The minimal corrective-action competence wording does not satisfy its stable check.'
 );
 
+$scopedIds = $reviewer->scopedCheckIds(
+    array(
+        array(
+            'check_id' => 'target-node',
+            'affected_sections' => array('5.6'),
+            'affected_nodes' => array('5.6.7'),
+        ),
+        array(
+            'check_id' => 'frozen-node',
+            'affected_sections' => array('8.1'),
+            'affected_nodes' => array('8.1'),
+        ),
+        array(
+            'check_id' => 'section-level',
+            'affected_sections' => array('5.6'),
+            'affected_nodes' => array(),
+        ),
+        array(
+            'check_id' => 'global-metadata',
+            'affected_sections' => array(),
+            'affected_nodes' => array(),
+        ),
+    ),
+    array('5.6'),
+    array('5.6.7'),
+    array('explicit-target')
+);
+stableCheckAssert(
+    in_array('target-node', $scopedIds, true)
+        && in_array('section-level', $scopedIds, true)
+        && in_array('global-metadata', $scopedIds, true)
+        && in_array('explicit-target', $scopedIds, true)
+        && !in_array('frozen-node', $scopedIds, true),
+    'Scoped reverification did not isolate checks affected by the changed node.'
+);
+
+$targetedParent = $proposal;
+$targetedParent['section_drafts']['8.1']['nodes']['8.1'] = 'Training';
+$targetedCandidate = $targetedParent;
+$targetedCandidate['section_drafts']['5.6']['nodes']['5.6.7'] = str_replace(
+    'Submission of the initial occurrence does not complete the reporting process where subsequent intermediate or final information is required.',
+    'Submitting the initial occurrence alone cannot constitute completion when intermediate or final authority follow-up remains required.',
+    (string)$targetedCandidate['section_drafts']['5.6']['nodes']['5.6.7']
+);
+$targetedVerification = $reviewer->verifyTargetedPatch(
+    $targetedParent,
+    $targetedCandidate,
+    array('5.6'),
+    array('5.6.7'),
+    array('eccairs.follow-up.initial-not-completion')
+);
+$reverifiedIds = (array)($targetedVerification['reverified_check_ids'] ?? array());
+stableCheckAssert(
+    in_array('eccairs.follow-up.initial-not-completion', $reverifiedIds, true)
+        && !in_array('training.corrective-action-competence', $reverifiedIds, true),
+    'Targeted reverification reopened a check whose node remained byte-frozen.'
+);
+
 $resolvePatchSection = new ReflectionMethod($author, 'resolveTargetedPatchSection');
 $resolvedSection = $resolvePatchSection->invoke(
     $author,

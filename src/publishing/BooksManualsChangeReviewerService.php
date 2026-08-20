@@ -1084,6 +1084,54 @@ final class BooksManualsChangeReviewerService
         return true;
     }
 
+    /**
+     * Select checks that can be affected by a node-scoped correction.
+     *
+     * @param list<array<string,mixed>> $checks
+     * @param list<string> $scopeSections
+     * @param list<string> $scopeNodes
+     * @param list<string> $alwaysInclude
+     * @return list<string>
+     */
+    public function scopedCheckIds(
+        array $checks,
+        array $scopeSections,
+        array $scopeNodes,
+        array $alwaysInclude = array()
+    ): array {
+        $sectionSet = array_fill_keys(array_map('strval', $scopeSections), true);
+        $nodeSet = array_fill_keys(array_map('strval', $scopeNodes), true);
+        $selected = array_fill_keys(array_map('strval', $alwaysInclude), true);
+        foreach ($checks as $check) {
+            $checkId = (string)($check['check_id'] ?? '');
+            if ($checkId === '') {
+                continue;
+            }
+            $affectedNodes = array_values(array_map(
+                'strval',
+                (array)($check['affected_nodes'] ?? array())
+            ));
+            $affectedSections = array_values(array_map(
+                'strval',
+                (array)($check['affected_sections'] ?? array())
+            ));
+            $nodeIntersection = array_values(array_filter(
+                $affectedNodes,
+                static fn(string $node): bool => isset($nodeSet[$node])
+            ));
+            $sectionIntersection = array_values(array_filter(
+                $affectedSections,
+                static fn(string $section): bool => isset($sectionSet[$section])
+            ));
+            if ($nodeIntersection !== array()
+                || ($affectedNodes === array() && $sectionIntersection !== array())
+                || ($affectedNodes === array() && $affectedSections === array())) {
+                $selected[$checkId] = true;
+            }
+        }
+        return array_keys($selected);
+    }
+
     private function checkSlug(string $value): string
     {
         $slug = strtolower(trim($value));
@@ -1149,15 +1197,52 @@ final class BooksManualsChangeReviewerService
             $after
         );
         $structurePreserved = $structureBefore === $structureAfter;
+        $changedNodes = array();
+        $changedSections = array();
+        foreach (array_keys($allowedNodes) as $number) {
+            foreach ($before as $section => $draft) {
+                if (!array_key_exists($number, (array)($draft['nodes'] ?? array()))) {
+                    continue;
+                }
+                if ($this->json($draft['nodes'][$number] ?? null)
+                    !== $this->json($after[$section]['nodes'][$number] ?? null)) {
+                    $changedNodes[] = $number;
+                    $changedSections[] = (string)$section;
+                }
+                break;
+            }
+        }
+        $changedNodes = array_values(array_unique($changedNodes));
+        $changedSections = array_values(array_unique($changedSections));
         $verification = $this->verifyReadableAmendmentProposal($candidateProposal);
-        $issues = array_values((array)($verification['issues'] ?? array()));
+        $parentVerification = $this->verifyReadableAmendmentProposal($acceptedProposal);
+        $reviewChecks = array_values((array)($verification['review_checks'] ?? array()));
+        $reverifiedCheckIds = $this->scopedCheckIds(
+            array_values((array)($parentVerification['review_checks'] ?? array())),
+            $changedSections,
+            $changedNodes,
+            array_values(array_unique(array_map('strval', $targetCheckIds)))
+        );
+        $reverifiedSet = array_fill_keys($reverifiedCheckIds, true);
+        $reconciliationChecks = array_values(array_filter(
+            $reviewChecks,
+            static fn(array $check): bool =>
+                isset($reverifiedSet[(string)($check['check_id'] ?? '')])
+        ));
+        $issues = array_values(array_map(
+            static fn(array $check): string => (string)($check['human_explanation'] ?? ''),
+            array_filter(
+                $reconciliationChecks,
+                static fn(array $check): bool =>
+                    (string)($check['status'] ?? '') === 'FAIL'
+            )
+        ));
         if ($scopeViolations !== array()) {
             $issues[] = 'Targeted correction changed unrelated accepted wording.';
         }
         if (!$structurePreserved) {
             $issues[] = 'Targeted correction changed the accepted structure.';
         }
-        $reviewChecks = array_values((array)($verification['review_checks'] ?? array()));
         $checkMap = array_column($reviewChecks, null, 'check_id');
         $targetedResults = array();
         foreach (array_values(array_unique(array_map('strval', $targetCheckIds))) as $checkId) {
@@ -1217,6 +1302,8 @@ final class BooksManualsChangeReviewerService
         );
         $reviewChecks[] = $preservationCheck;
         $reviewChecks[] = $structureCheck;
+        $reconciliationChecks[] = $preservationCheck;
+        $reconciliationChecks[] = $structureCheck;
         return array(
             'schema' => 'ipca.manual-change-targeted-reverification.v1',
             'status' => $issues === array() ? 'VERIFIED' : self::REQUIRES_REVIEW,
@@ -1224,6 +1311,14 @@ final class BooksManualsChangeReviewerService
             'scope_nodes' => array_keys($allowedNodes),
             'targeted_check_ids' => array_keys($targetedResults),
             'targeted_check_results' => $targetedResults,
+            'reverified_check_ids' => array_values(array_unique(array_merge(
+                $reverifiedCheckIds,
+                array(
+                    'integrity.targeted-patch.frozen-nodes',
+                    'integrity.targeted-patch.structure-preserved',
+                )
+            ))),
+            'reconciliation_checks' => $reconciliationChecks,
             'review_checks' => $reviewChecks,
             'unaffected_sections_byte_unchanged' => !in_array(false, $unchanged, true),
             'unaffected_section_results' => $unchanged,

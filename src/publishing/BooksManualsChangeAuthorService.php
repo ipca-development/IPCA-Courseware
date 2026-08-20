@@ -984,11 +984,31 @@ final class BooksManualsChangeAuthorService
         require_once __DIR__ . '/BooksManualsChangeReviewerService.php';
         $reviewer = new BooksManualsChangeReviewerService($this->pdo, $this->plans);
         $baselineVerification = $reviewer->verifyReadableAmendmentProposal($acceptedProposal);
+        $scopeSections = array_values(array_unique(array_map(
+            'strval',
+            array_keys($changedSections)
+        )));
+        $scopeNodes = array();
+        foreach ($changedSections as $change) {
+            $scopeNodes = array_merge(
+                $scopeNodes,
+                array_map('strval', (array)($change['changed_nodes'] ?? array()))
+            );
+        }
+        $scopeNodes = array_values(array_unique($scopeNodes));
+        $reverifiedCheckIds = array_fill_keys($reviewer->scopedCheckIds(
+            array_values((array)($baselineVerification['review_checks'] ?? array())),
+            $scopeSections,
+            $scopeNodes,
+            $targetCheckIds
+        ), true);
         $baselinePasses = array_fill_keys(array_values(array_map(
             static fn(array $check): string => (string)$check['check_id'],
             array_filter(
                 (array)($baselineVerification['review_checks'] ?? array()),
-                static fn(array $check): bool => (string)($check['status'] ?? '') === 'PASS'
+                static fn(array $check): bool =>
+                    (string)($check['status'] ?? '') === 'PASS'
+                    && isset($reverifiedCheckIds[(string)($check['check_id'] ?? '')])
             )
         )), true);
         $passes = static function (

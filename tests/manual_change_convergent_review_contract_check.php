@@ -121,9 +121,12 @@ $checks = array(
         && str_contains($author, "'production_applied' => false"),
     'Reviewer performs targeted reverification and scope checks' =>
         str_contains($reviewer, 'verifyTargetedPatch')
+        && str_contains($reviewer, 'scopedCheckIds')
         && str_contains($reviewer, 'Targeted correction changed unrelated accepted wording')
+        && str_contains($reviewer, "'reconciliation_checks' =>")
         && str_contains($reviewer, "'review_checks' => \$reviewChecks")
         && str_contains($reviewer, 'frozen_nodes_byte_unchanged')
+        && str_contains($resolutionService, "\$verification['reconciliation_checks']")
         && str_contains($reviewer, "'architect_rerun_performed' => false"),
     'stable checks and patch verification states are persisted separately' =>
         str_contains($migration, 'check_id VARCHAR(191) NOT NULL')

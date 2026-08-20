@@ -829,7 +829,11 @@ final class BooksManualsChangeReviewResolutionService
                 $planId,
                 $reviewId,
                 (int)$newBaseline['id'],
-                (array)($verification['review_checks'] ?? array()),
+                (array)(
+                    $verification['reconciliation_checks']
+                    ?? $verification['review_checks']
+                    ?? array()
+                ),
                 $actorUserId,
                 array(
                     'patch_id' => $patchId,
