@@ -114,7 +114,7 @@ if (!str_contains($verticalEditHtml, 'cpb-table-block--align-left')
 
 $mediaPayload = table_payload(2);
 $mediaPayload['rows'] = array(array(
-    'Text <span class="cpb-table-cell-image" data-width-pct="42" data-align="right">'
+    'Text <span class="cpb-table-cell-image" data-width-pct="42" data-height-px="96" data-lock-ratio="0" data-align="right">'
         . '<img src="https://ipca-test.nyc3.digitaloceanspaces.com/publishing/test/cell.png" alt="Diagram" onerror="alert(1)">'
         . '</span>',
     '<span class="cpb-table-cell-image" data-width-pct="50" data-align="center">'
@@ -139,6 +139,9 @@ $mediaHtml = $renderer->renderBlock(
 );
 if (!str_contains($mediaHtml, 'class="cpb-table-cell-image"')
     || !str_contains($mediaHtml, 'data-width-pct="42"')
+    || !str_contains($mediaHtml, 'data-height-px="96"')
+    || !str_contains($mediaHtml, 'data-lock-ratio="0"')
+    || !str_contains($mediaHtml, '--cpb-table-cell-image-height:96px')
     || !str_contains($mediaHtml, 'data-align="right"')
     || !str_contains($mediaHtml, 'alt="Diagram"')) {
     $failures[] = 'Governed table-cell image markup was not preserved.';

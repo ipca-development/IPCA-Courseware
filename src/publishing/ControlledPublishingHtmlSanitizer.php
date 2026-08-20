@@ -129,13 +129,26 @@ final class ControlledPublishingHtmlSanitizer
                         $keepAttrs['class'] = 'cpb-table-cell-image';
                         $rawWidth = (int)$child->getAttribute('data-width-pct');
                         $width = $rawWidth > 0 ? max(15, min(100, $rawWidth)) : 50;
+                        $height = max(0, min(
+                            1600,
+                            (int)$child->getAttribute('data-height-px')
+                        ));
                         $align = strtolower(trim((string)$child->getAttribute('data-align')));
                         $keepAttrs['data-width-pct'] = (string)$width;
+                        $keepAttrs['data-height-px'] = (string)$height;
+                        $keepAttrs['data-lock-ratio'] =
+                            $child->getAttribute('data-lock-ratio') === '0' ? '0' : '1';
                         $keepAttrs['data-align'] = in_array(
                             $align,
                             array('left', 'center', 'right'),
                             true
                         ) ? $align : 'center';
+                        if ($height > 0) {
+                            $heightStyle = '--cpb-table-cell-image-height:' . $height . 'px';
+                            $keepAttrs['style'] = isset($keepAttrs['style'])
+                                ? $keepAttrs['style'] . ';' . $heightStyle
+                                : $heightStyle;
+                        }
                     }
                 }
                 if (in_array($tag, array('span', 'p', 'div'), true)

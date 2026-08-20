@@ -215,9 +215,7 @@ compliance_page_open(array(
             <button type="button" class="cpb-tool-btn" data-table-action="copy-table" title="Copy entire table" disabled>Copy table</button>
             <button type="button" class="cpb-tool-btn" data-table-action="paste-table" title="Paste copied table below the selected table" disabled>Paste table</button>
         </div>
-        </div>
-        <div class="cpb-toolbar-row cpb-toolbar-row--table">
-          <div class="cpb-toolbar-group" aria-label="Rows and columns">
+        <div class="cpb-toolbar-group" aria-label="Rows and columns">
             <button type="button" class="cpb-tool-btn" data-table-action="move-row-up" title="Move selected row up" disabled>↑ Row</button>
             <button type="button" class="cpb-tool-btn" data-table-action="move-row-down" title="Move selected row down" disabled>↓ Row</button>
             <button type="button" class="cpb-tool-btn" data-table-action="add-row" title="Add row at bottom" disabled>+ Row</button>
@@ -234,6 +232,8 @@ compliance_page_open(array(
             <button type="button" class="cpb-tool-btn" data-table-action="formula-avg" title="Insert AVG formula" disabled>AVG</button>
             <button type="button" class="cpb-tool-btn" data-table-action="formula-custom" title="Insert custom formula" disabled>fx</button>
           </div>
+        </div>
+        <div class="cpb-toolbar-row cpb-toolbar-row--table">
           <div class="cpb-toolbar-group" aria-label="Cells">
             <button type="button" class="cpb-tool-btn" data-table-action="merge-cells-right" title="Merge selected cell horizontally" disabled>Merge H</button>
             <button type="button" class="cpb-tool-btn" data-table-action="unmerge-cells" title="Unmerge selected cell horizontally" disabled>Unmerge H</button>
@@ -247,6 +247,11 @@ compliance_page_open(array(
           <div class="cpb-toolbar-group" aria-label="Cell image">
             <span class="cpb-toolbar-table-label">Cell image</span>
             <button type="button" class="cpb-tool-btn" data-table-action="cell-image-insert" title="Insert or replace an image in the selected cell" disabled>Insert</button>
+            <label class="cpb-table-image-size">W <input type="number" id="cpbCellImageWidth" min="15" max="100" step="1" value="50" title="Image width as percentage of cell" disabled>%</label>
+            <label class="cpb-table-image-size">H <input type="number" id="cpbCellImageHeight" min="1" max="1600" step="1" placeholder="Auto" title="Image height in pixels" disabled>px</label>
+            <label class="cpb-table-image-lock" title="Keep the image width and height ratio">
+              <input type="checkbox" id="cpbCellImageLockRatio" checked disabled> Lock ratio
+            </label>
             <button type="button" class="cpb-tool-btn" data-table-action="cell-image-left" title="Align cell image left" disabled>Left</button>
             <button type="button" class="cpb-tool-btn" data-table-action="cell-image-center" title="Align cell image center" disabled>Center</button>
             <button type="button" class="cpb-tool-btn" data-table-action="cell-image-right" title="Align cell image right" disabled>Right</button>

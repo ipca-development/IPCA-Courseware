@@ -36,6 +36,9 @@
   var treeHeadTitleEl = document.getElementById('cpbTreeHeadTitle');
   var imageInput = document.getElementById('cpbImageInput');
   var tableCellImageInput = document.getElementById('cpbTableCellImageInput');
+  var cellImageWidthInput = document.getElementById('cpbCellImageWidth');
+  var cellImageHeightInput = document.getElementById('cpbCellImageHeight');
+  var cellImageLockRatioInput = document.getElementById('cpbCellImageLockRatio');
   var cellBorderStyleSelect = document.getElementById('cpbCellBorderStyle');
   var cellBorderWidthSelect = document.getElementById('cpbCellBorderWidth');
   var cellBorderColorInput = document.getElementById('cpbCellBorderColor');
@@ -4456,6 +4459,68 @@
     return cell ? cell.querySelector('.cpb-table-cell-image') : null;
   }
 
+  function tableCellImageRatio(figure) {
+    var image = figure ? figure.querySelector('img') : null;
+    if (!image) return 1;
+    if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+      return image.naturalWidth / image.naturalHeight;
+    }
+    var rect = image.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 1;
+  }
+
+  function syncTableCellImageSizeControls(figure) {
+    var active = !!figure;
+    [cellImageWidthInput, cellImageHeightInput, cellImageLockRatioInput].forEach(function (control) {
+      if (control) control.disabled = !active;
+    });
+    if (!figure) return;
+    var width = Math.max(15, Math.min(100, parseInt(
+      figure.getAttribute('data-width-pct') || '50',
+      10
+    ) || 50));
+    var height = Math.max(0, Math.min(1600, parseInt(
+      figure.getAttribute('data-height-px') || '0',
+      10
+    ) || 0));
+    if (cellImageWidthInput) cellImageWidthInput.value = String(width);
+    if (cellImageHeightInput) cellImageHeightInput.value = height > 0 ? String(height) : '';
+    if (cellImageLockRatioInput) {
+      cellImageLockRatioInput.checked = figure.getAttribute('data-lock-ratio') !== '0';
+    }
+  }
+
+  function updateTableCellImageSize(changedDimension) {
+    var blockEl = state.activeTableToolsBlock;
+    var cell = blockEl ? resolveSelectedTableCell(blockEl) : null;
+    var figure = tableCellImage(cell);
+    if (!blockEl || !figure) return;
+    pushUndo();
+    var width = Math.max(15, Math.min(100, parseInt(
+      cellImageWidthInput ? cellImageWidthInput.value : '50',
+      10
+    ) || 50));
+    var height = Math.max(0, Math.min(1600, parseInt(
+      cellImageHeightInput ? cellImageHeightInput.value : '0',
+      10
+    ) || 0));
+    var locked = cellImageLockRatioInput ? cellImageLockRatioInput.checked : true;
+    var ratio = Math.max(0.01, tableCellImageRatio(figure));
+    var cellWidth = Math.max(1, cell.clientWidth);
+    if (locked && changedDimension === 'width') {
+      height = Math.max(1, Math.min(1600, Math.round((cellWidth * width / 100) / ratio)));
+    } else if (locked && changedDimension === 'height' && height > 0) {
+      width = Math.max(15, Math.min(100, Math.round(((height * ratio) / cellWidth) * 100)));
+    }
+    figure.setAttribute('data-width-pct', String(width));
+    figure.setAttribute('data-height-px', String(height));
+    figure.setAttribute('data-lock-ratio', locked ? '1' : '0');
+    wireTableCellImages(blockEl);
+    syncTableCellImageSizeControls(figure);
+    scheduleSave(blockEl);
+    flushSave(blockEl);
+  }
+
   function setTableCellImageAlignment(blockEl, align) {
     var cell = resolveSelectedTableCell(blockEl);
     var figure = tableCellImage(cell);
@@ -4512,6 +4577,8 @@
       var figure = existing || document.createElement('span');
       figure.className = 'cpb-table-cell-image';
       figure.setAttribute('data-width-pct', existing ? (existing.getAttribute('data-width-pct') || '50') : '50');
+      figure.setAttribute('data-height-px', existing ? (existing.getAttribute('data-height-px') || '0') : '0');
+      figure.setAttribute('data-lock-ratio', existing ? (existing.getAttribute('data-lock-ratio') || '1') : '1');
       figure.setAttribute('data-align', existing ? (existing.getAttribute('data-align') || 'center') : 'center');
       figure.innerHTML = '';
       var image = document.createElement('img');
@@ -4531,9 +4598,17 @@
     if (!blockEl) return;
     blockEl.querySelectorAll('.cpb-table-cell-image').forEach(function (figure) {
       var pct = Math.max(15, Math.min(100, parseInt(figure.getAttribute('data-width-pct') || '50', 10) || 50));
+      var height = Math.max(0, Math.min(1600, parseInt(figure.getAttribute('data-height-px') || '0', 10) || 0));
       figure.setAttribute('data-width-pct', String(pct));
+      figure.setAttribute('data-height-px', String(height));
+      figure.setAttribute('data-lock-ratio', figure.getAttribute('data-lock-ratio') === '0' ? '0' : '1');
       figure.setAttribute('contenteditable', 'false');
       figure.style.width = pct + '%';
+      if (height > 0) {
+        figure.style.setProperty('--cpb-table-cell-image-height', height + 'px');
+      } else {
+        figure.style.removeProperty('--cpb-table-cell-image-height');
+      }
       var handle = figure.querySelector('.cpb-table-cell-image-resize');
       if (!handle) {
         handle = document.createElement('button');
@@ -4556,10 +4631,18 @@
         var startX = event.clientX;
         var startWidth = parseInt(figure.getAttribute('data-width-pct') || '50', 10) || 50;
         var cellWidth = Math.max(1, cell.getBoundingClientRect().width);
+        var locked = figure.getAttribute('data-lock-ratio') !== '0';
+        var ratio = Math.max(0.01, tableCellImageRatio(figure));
         function move(moveEvent) {
           var next = Math.max(15, Math.min(100, Math.round(startWidth + ((moveEvent.clientX - startX) / cellWidth) * 100)));
           figure.setAttribute('data-width-pct', String(next));
           figure.style.width = next + '%';
+          if (locked) {
+            var nextHeight = Math.max(1, Math.min(1600, Math.round((cellWidth * next / 100) / ratio)));
+            figure.setAttribute('data-height-px', String(nextHeight));
+            figure.style.setProperty('--cpb-table-cell-image-height', nextHeight + 'px');
+          }
+          syncTableCellImageSizeControls(figure);
         }
         function up() {
           document.removeEventListener('pointermove', move);
@@ -7744,6 +7827,7 @@
     [cellBorderStyleSelect, cellBorderWidthSelect, cellBorderColorInput].forEach(function (control) {
       if (control) control.disabled = !active;
     });
+    if (!active) syncTableCellImageSizeControls(null);
     if (!active) return;
     var structured = blockEl.getAttribute('data-structured-table-editor') === '1';
     var selected = state.selectedTableCells.filter(function (cell) {
@@ -7819,6 +7903,7 @@
     var selectedImage = selectedCell ? tableCellImage(selectedCell) : null;
     var imageInsertButton = tableToolbarEl.querySelector('[data-table-action="cell-image-insert"]');
     if (imageInsertButton) imageInsertButton.textContent = selectedImage ? 'Replace' : 'Insert';
+    syncTableCellImageSizeControls(structured ? null : selectedImage);
     setTableToolDisabled(
       blockEl,
       ['cell-image-left', 'cell-image-center', 'cell-image-right', 'cell-image-remove'],
@@ -11929,6 +12014,24 @@
         uploadTableCellImageFile(tableCellImageInput.files[0]);
       }
       tableCellImageInput.value = '';
+    });
+  }
+
+  if (cellImageWidthInput) {
+    cellImageWidthInput.addEventListener('change', function () {
+      updateTableCellImageSize('width');
+    });
+  }
+
+  if (cellImageHeightInput) {
+    cellImageHeightInput.addEventListener('change', function () {
+      updateTableCellImageSize('height');
+    });
+  }
+
+  if (cellImageLockRatioInput) {
+    cellImageLockRatioInput.addEventListener('change', function () {
+      updateTableCellImageSize('lock');
     });
   }
 
