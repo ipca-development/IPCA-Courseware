@@ -60,6 +60,23 @@ stableCheckAssert(
     'Semantic initial-submission control still depends on exact fixture prose.'
 );
 
+$evidenceFirst = $proposal;
+$evidenceFirst['section_drafts']['5.6']['nodes']['5.6.4'] =
+    'Initial ECCAIRS notification uses the information required for the applicable reporting stage. '
+    . 'Unavailable or unknown information shall not delay the reporting deadline. '
+    . 'The Safety Manager shall review and approve the notification before transmission. '
+    . 'Evidence of preparation, approval, submission and authority acceptance shall be retained.';
+$evidenceFirstReview = $reviewer->verifyReadableAmendmentProposal($evidenceFirst);
+$evidenceFirstCheck = array_column(
+    (array)$evidenceFirstReview['review_checks'],
+    null,
+    'check_id'
+)['eccairs.initial.governance-complete'] ?? array();
+stableCheckAssert(
+    (string)($evidenceFirstCheck['status'] ?? '') === 'PASS',
+    'Retained-evidence governance still depends on word order rather than the semantic control.'
+);
+
 $resolvePatchSection = new ReflectionMethod($author, 'resolveTargetedPatchSection');
 $resolvedSection = $resolvePatchSection->invoke(
     $author,

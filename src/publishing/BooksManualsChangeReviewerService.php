@@ -742,7 +742,7 @@ final class BooksManualsChangeReviewerService
             ),
             'eccairs.initial.governance-complete' => array(
                 'ECCAIRS_INITIAL', 'MATERIAL', $initial, array('5.6.4'), array('5.6.4'),
-                array('/Safety Manager/iu', '/(?:information required|required information)/iu', '/(?:unknown|unavailable)/iu', '/review.{0,60}approv|approv.{0,60}transmission/isu', '/retain.{0,240}(?:submission|authority|evidence)/isu'),
+                array('/Safety Manager/iu', '/(?:information required|required information)/iu', '/(?:unknown|unavailable)/iu', '/review.{0,60}approv|approv.{0,60}transmission/isu', '/(?:retain.{0,240}(?:submission|authority|evidence)|(?:submission|authority|evidence).{0,240}retain)/isu'),
                 'Initial ECCAIRS preparation covers required information, unavailable information, Safety Manager approval and retained evidence.',
                 'Initial ECCAIRS governance requirements are incomplete.'
             ),
