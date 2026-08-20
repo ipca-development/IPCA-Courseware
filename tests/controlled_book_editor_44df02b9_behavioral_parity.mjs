@@ -426,7 +426,12 @@ async function exerciseRow(page, row) {
         selectAll('[data-block-id="2"] .cpb-paragraph'); click('[data-align="center"]');
         q('#cpbFontSelect').value = 'sans'; q('#cpbFontSelect').dispatchEvent(new Event('change', { bubbles: true }));
         q('#cpbFontSizeSelect').value = '14'; q('#cpbFontSizeSelect').dispatchEvent(new Event('change', { bubbles: true }));
-        q('#cpbTextColor').value = '#112233'; q('#cpbTextColor').dispatchEvent(new Event('input', { bubbles: true })); await wait();
+        q('#cpbTextColor').value = '#112233'; q('#cpbTextColor').dispatchEvent(new Event('input', { bubbles: true }));
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          const currentHtml = q('[data-block-id="2"] .cpb-paragraph').innerHTML;
+          if (payload(2)?.html === currentHtml) break;
+          await wait(25);
+        }
         return observe({ html: q('[data-block-id="2"] .cpb-paragraph').innerHTML, attrs: { align: q('[data-block-id="2"] .cpb-paragraph').dataset.textAlign, font: q('[data-block-id="2"] .cpb-paragraph').dataset.fontFamily, size: q('[data-block-id="2"] .cpb-paragraph').dataset.fontSize, color: q('[data-block-id="2"] .cpb-paragraph').dataset.textColor }, saved: payload(2) });
       }
       case 'history.undo': {

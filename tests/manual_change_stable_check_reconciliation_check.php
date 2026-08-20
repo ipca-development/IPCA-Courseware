@@ -267,8 +267,10 @@ $db->exec(
 $db->exec(
     'CREATE TABLE ipca_manual_ai_architect_review_baselines (
         id INTEGER PRIMARY KEY,
+        plan_id INTEGER,
         review_id INTEGER NOT NULL,
-        draft_baseline_json TEXT NOT NULL
+        draft_baseline_json TEXT NOT NULL,
+        structure_baseline_json TEXT NOT NULL DEFAULT \'{}\'
     )'
 );
 $db->exec(
@@ -296,6 +298,12 @@ $db->exec(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         plan_id INTEGER NOT NULL,
         baseline_id INTEGER NOT NULL,
+        parent_draft_id INTEGER,
+        resulting_draft_id INTEGER,
+        patch_fingerprint TEXT,
+        scope_json TEXT,
+        verification_json TEXT,
+        proposed_payload_json TEXT,
         status TEXT NOT NULL
     )'
 );
@@ -321,36 +329,121 @@ $assertPreparedPackage = new ReflectionMethod(
     'assertPreparedOperationPackageCurrent'
 );
 $preparedFingerprint = str_repeat('a', 64);
+$unchangedTransition = $assertPreparedPackage->invoke(
+    $resolution,
+    20,
+    9,
+    1,
+    array('prepared_result' => array(
+        'operation_package' => array('package_fingerprint' => $preparedFingerprint),
+    )),
+    array('package_fingerprint' => $preparedFingerprint)
+);
 stableCheckAssert(
-    $assertPreparedPackage->invoke(
-        $resolution,
-        array('prepared_result' => array(
-            'operation_package' => array('package_fingerprint' => $preparedFingerprint),
-        )),
-        array('package_fingerprint' => $preparedFingerprint)
-    ) === $preparedFingerprint,
+    (string)($unchangedTransition['prepared_package_fingerprint'] ?? '')
+        === $preparedFingerprint
+        && empty($unchangedTransition['governed_candidate_transition']),
     'An unchanged prepared operation package was not accepted.'
 );
 $packageDriftBlocked = false;
 try {
     $assertPreparedPackage->invoke(
         $resolution,
+        20,
+        9,
+        1,
         array('prepared_result' => array(
-            'operation_package' => array('package_fingerprint' => $preparedFingerprint),
+            'operation_package' => array(
+                'package_fingerprint' => $preparedFingerprint,
+                'plan_id' => 20,
+            ),
         )),
-        array('package_fingerprint' => str_repeat('b', 64))
+        array(
+            'package_fingerprint' => str_repeat('b', 64),
+            'plan_id' => 21,
+        )
     );
 } catch (ReflectionException $error) {
     throw $error;
 } catch (Throwable $error) {
     $packageDriftBlocked = str_contains(
         $error->getMessage(),
-        'changed after Independent Review was prepared'
+        'source-bound operation package changed'
     );
 }
 stableCheckAssert(
     $packageDriftBlocked,
     'Approval did not block operation-package drift after Independent Review preparation.'
+);
+$preparedPackage = array(
+    'package_fingerprint' => str_repeat('c', 64),
+    'plan_id' => 30,
+    'book_version_id' => 9,
+    'lifecycle_status' => 'in_review',
+    'draft_id' => 13,
+    'draft_fingerprint' => 'draft-13',
+    'target_contexts' => array(array('section_number' => '5.6', 'context_hash' => 'source')),
+    'pre_apply_section_fingerprints' => array('7' => 'section'),
+    'replacements' => array(
+        '5.6' => array('replacement_fingerprint' => 'old-5.6'),
+        '8.1' => array('replacement_fingerprint' => 'old-8.1'),
+    ),
+);
+$currentPackage = $preparedPackage;
+$currentPackage['package_fingerprint'] = str_repeat('d', 64);
+$currentPackage['draft_id'] = 15;
+$currentPackage['draft_fingerprint'] = 'draft-15';
+$currentPackage['replacements']['5.6']['replacement_fingerprint'] = 'new-5.6';
+$currentPackage['replacements']['8.1']['replacement_fingerprint'] = 'new-8.1';
+$structure = json_encode(
+    array('nodes' => array('5.6', '8.1')),
+    JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+);
+$db->prepare(
+    'INSERT INTO ipca_manual_ai_architect_review_baselines
+     (id,plan_id,review_id,draft_baseline_json,structure_baseline_json)
+     VALUES (3,30,11,?,?),(4,30,11,?,?)'
+)->execute(array(
+    json_encode(array('id' => 13), JSON_THROW_ON_ERROR),
+    $structure,
+    json_encode(array('id' => 15), JSON_THROW_ON_ERROR),
+    $structure,
+));
+$db->prepare(
+    'INSERT INTO ipca_manual_ai_architect_review_patches
+     (id,plan_id,baseline_id,parent_draft_id,resulting_draft_id,patch_fingerprint,
+      scope_json,verification_json,proposed_payload_json,status)
+     VALUES (1,30,3,13,14,?,?,?,\'{}\',\'VERIFICATION_FAILED\'),
+            (2,30,3,14,15,?,?,?,?,\'VERIFIED\')'
+)->execute(array(
+    'patch-1',
+    json_encode(array('sections' => array('5.6', '8.1')), JSON_THROW_ON_ERROR),
+    '{}',
+    'patch-2',
+    json_encode(array('sections' => array('5.6')), JSON_THROW_ON_ERROR),
+    json_encode(array(
+        'patch_verification_status' => 'VERIFIED',
+        'repair_type' => 'HISTORICAL_SCOPE_REPAIR',
+        'parent_baseline_id' => 3,
+        'result_baseline_id' => 4,
+    ), JSON_THROW_ON_ERROR),
+    json_encode(array('source_patch_id' => 1), JSON_THROW_ON_ERROR),
+));
+$governedTransition = $assertPreparedPackage->invoke(
+    $resolution,
+    30,
+    11,
+    4,
+    array('prepared_result' => array('operation_package' => $preparedPackage)),
+    $currentPackage
+);
+stableCheckAssert(
+    !empty($governedTransition['governed_candidate_transition'])
+        && (array)$governedTransition['verified_patch_ids'] === array(2, 1)
+        && (array)$governedTransition['changed_replacement_sections']
+            === array('5.6', '8.1')
+        && (int)$governedTransition['result_baseline_id'] === 4,
+    'A verified, source-frozen review candidate transition was not accepted and audited.'
 );
 $persist = new ReflectionMethod($resolution, 'persistReviewCheck');
 $reconcile = new ReflectionMethod($resolution, 'reconcileVerificationChecks');

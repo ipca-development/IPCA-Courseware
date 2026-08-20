@@ -343,7 +343,10 @@ final class BooksManualsChangeReviewResolutionService
                 );
             }
             $operationPackage = $apply->buildPreflightPackage($planId, true);
-            $preparedPackageFingerprint = $this->assertPreparedOperationPackageCurrent(
+            $packageTransition = $this->assertPreparedOperationPackageCurrent(
+                $planId,
+                $reviewId,
+                (int)($state['baseline_id'] ?? 0),
                 $existingPayload,
                 $operationPackage
             );
@@ -354,6 +357,7 @@ final class BooksManualsChangeReviewResolutionService
                 'review_mode' => 'HUMAN_CLARIFICATION_WITH_EDITOR_GUIDANCE',
                 'review_state' => $state,
                 'operation_package' => $operationPackage,
+                'operation_package_transition' => $packageTransition,
                 'completed_at' => gmdate(DATE_ATOM),
             ));
             $update = $this->pdo->prepare(
@@ -386,7 +390,7 @@ final class BooksManualsChangeReviewResolutionService
                     'clarifications_recorded' => count((array)($state['answers'] ?? array())),
                     'technical_integrity_blockers' => 0,
                     'author_correction_loop_performed' => false,
-                    'prepared_operation_package_fingerprint' => $preparedPackageFingerprint,
+                    'operation_package_transition' => $packageTransition,
                 ),
                 $actorUserId
             );
@@ -2137,25 +2141,262 @@ final class BooksManualsChangeReviewResolutionService
             : 'ready_for_review';
     }
 
-    /** @param array<string,mixed> $reviewPayload @param array<string,mixed> $currentPackage */
+    /**
+     * @param array<string,mixed> $reviewPayload
+     * @param array<string,mixed> $currentPackage
+     * @return array<string,mixed>
+     */
     private function assertPreparedOperationPackageCurrent(
+        int $planId,
+        int $reviewId,
+        int $latestBaselineId,
         array $reviewPayload,
         array $currentPackage
-    ): string {
+    ): array {
         $preparedResult = (array)($reviewPayload['prepared_result'] ?? array());
         $preparedPackage = (array)($preparedResult['operation_package'] ?? array());
         $preparedFingerprint = (string)($preparedPackage['package_fingerprint'] ?? '');
-        if ($preparedFingerprint === ''
-            || !hash_equals(
-                $preparedFingerprint,
-                (string)($currentPackage['package_fingerprint'] ?? '')
-            )) {
+        $currentFingerprint = (string)($currentPackage['package_fingerprint'] ?? '');
+        if ($preparedFingerprint === '' || $currentFingerprint === '') {
             throw new RuntimeException(
-                'The operation package changed after Independent Review was prepared. '
-                . 'Prepare a new Independent Review before approval.'
+                'Independent Review does not contain a complete operation-package fingerprint.'
             );
         }
-        return $preparedFingerprint;
+        $sourceBoundaryFingerprint =
+            $this->operationPackageSourceBoundaryFingerprint($currentPackage);
+        if (hash_equals($preparedFingerprint, $currentFingerprint)) {
+            return array(
+                'governed_candidate_transition' => false,
+                'prepared_package_fingerprint' => $preparedFingerprint,
+                'approved_package_fingerprint' => $currentFingerprint,
+                'prepared_draft_id' => (int)($preparedPackage['draft_id'] ?? 0),
+                'approved_draft_id' => (int)($currentPackage['draft_id'] ?? 0),
+                'source_boundary_fingerprint' => $sourceBoundaryFingerprint,
+                'verified_patch_ids' => array(),
+                'changed_replacement_sections' => array(),
+            );
+        }
+        if (!hash_equals(
+            $this->operationPackageSourceBoundaryFingerprint($preparedPackage),
+            $sourceBoundaryFingerprint
+        )) {
+            throw new RuntimeException(
+                'The source-bound operation package changed after Independent Review was prepared.'
+            );
+        }
+        $preparedDraftId = (int)($preparedPackage['draft_id'] ?? 0);
+        $currentDraftId = (int)($currentPackage['draft_id'] ?? 0);
+        if ($preparedDraftId <= 0 || $currentDraftId <= 0 || $preparedDraftId === $currentDraftId) {
+            throw new RuntimeException(
+                'The operation package fingerprint changed without a governed draft transition.'
+            );
+        }
+        $baselines = $this->rows(
+            'SELECT * FROM ipca_manual_ai_architect_review_baselines
+             WHERE plan_id=? AND review_id=?',
+            array($planId, $reviewId)
+        );
+        $preparedBaseline = null;
+        $latestBaseline = null;
+        foreach ($baselines as $baseline) {
+            $baselineDraft = (array)($baseline['draft_baseline_json'] ?? array());
+            if ((int)($baselineDraft['id'] ?? 0) === $preparedDraftId) {
+                $preparedBaseline = $baseline;
+            }
+            if ((int)($baseline['id'] ?? 0) === $latestBaselineId
+                && (int)($baselineDraft['id'] ?? 0) === $currentDraftId) {
+                $latestBaseline = $baseline;
+            }
+        }
+        if ($preparedBaseline === null || $latestBaseline === null
+            || !hash_equals(
+                $this->plans->draftPayloadFingerprint(
+                    (array)($preparedBaseline['structure_baseline_json'] ?? array())
+                ),
+                $this->plans->draftPayloadFingerprint(
+                    (array)($latestBaseline['structure_baseline_json'] ?? array())
+                )
+            )) {
+            throw new RuntimeException(
+                'The accepted structure changed during the governed review candidate transition.'
+            );
+        }
+        $patches = $this->rows(
+            'SELECT p.* FROM ipca_manual_ai_architect_review_patches p
+             JOIN ipca_manual_ai_architect_review_baselines b ON b.id=p.baseline_id
+             WHERE p.plan_id=? AND b.review_id=?',
+            array($planId, $reviewId)
+        );
+        $lineage = $this->verifiedPackageTransitionLineage(
+            $patches,
+            $preparedDraftId,
+            $currentDraftId,
+            $latestBaselineId
+        );
+        $allowedSections = array();
+        foreach ($lineage as $patch) {
+            foreach ((array)($patch['scope_json']['sections'] ?? array()) as $section) {
+                $allowedSections[(string)$section] = true;
+            }
+        }
+        $preparedReplacements = (array)($preparedPackage['replacements'] ?? array());
+        $currentReplacements = (array)($currentPackage['replacements'] ?? array());
+        $preparedSections = array_keys($preparedReplacements);
+        $currentSections = array_keys($currentReplacements);
+        sort($preparedSections, SORT_NATURAL);
+        sort($currentSections, SORT_NATURAL);
+        if ($preparedSections !== $currentSections) {
+            throw new RuntimeException(
+                'The governed review candidate changed the accepted replacement section set.'
+            );
+        }
+        $changedSections = array();
+        foreach ($preparedSections as $section) {
+            if (!hash_equals(
+                $this->plans->draftPayloadFingerprint($preparedReplacements[$section]),
+                $this->plans->draftPayloadFingerprint($currentReplacements[$section])
+            )) {
+                if (!isset($allowedSections[$section])) {
+                    throw new RuntimeException(
+                        "Replacement {$section} changed outside the verified review patch scope."
+                    );
+                }
+                $changedSections[] = $section;
+            }
+        }
+        $terminalPatch = $lineage[0];
+        $terminalVerification = (array)($terminalPatch['verification_json'] ?? array());
+        return array(
+            'governed_candidate_transition' => true,
+            'prepared_package_fingerprint' => $preparedFingerprint,
+            'approved_package_fingerprint' => $currentFingerprint,
+            'prepared_draft_id' => $preparedDraftId,
+            'approved_draft_id' => $currentDraftId,
+            'source_boundary_fingerprint' => $sourceBoundaryFingerprint,
+            'accepted_structure_fingerprint' => $this->plans->draftPayloadFingerprint(
+                (array)$latestBaseline['structure_baseline_json']
+            ),
+            'verified_patch_ids' => array_map(
+                static fn(array $patch): int => (int)$patch['id'],
+                $lineage
+            ),
+            'patch_fingerprints' => array_map(
+                static fn(array $patch): string => (string)$patch['patch_fingerprint'],
+                $lineage
+            ),
+            'terminal_patch_id' => (int)$terminalPatch['id'],
+            'parent_baseline_id' => (int)($terminalVerification['parent_baseline_id'] ?? 0),
+            'result_baseline_id' => (int)($terminalVerification['result_baseline_id'] ?? 0),
+            'allowed_replacement_sections' => array_keys($allowedSections),
+            'changed_replacement_sections' => $changedSections,
+        );
+    }
+
+    /** @param array<string,mixed> $package */
+    private function operationPackageSourceBoundaryFingerprint(array $package): string
+    {
+        unset(
+            $package['draft_id'],
+            $package['draft_fingerprint'],
+            $package['replacements'],
+            $package['package_fingerprint']
+        );
+        return $this->plans->draftPayloadFingerprint($package);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $patches
+     * @return list<array<string,mixed>>
+     */
+    private function verifiedPackageTransitionLineage(
+        array $patches,
+        int $preparedDraftId,
+        int $currentDraftId,
+        int $latestBaselineId
+    ): array {
+        $byId = array();
+        $byResultDraft = array();
+        foreach ($patches as $patch) {
+            $patchId = (int)($patch['id'] ?? 0);
+            $resultingDraftId = (int)($patch['resulting_draft_id'] ?? 0);
+            if ($patchId > 0) {
+                $byId[$patchId] = $patch;
+            }
+            if ($resultingDraftId > 0) {
+                $byResultDraft[$resultingDraftId][] = $patch;
+            }
+        }
+        $terminalPatch = null;
+        foreach (array_reverse($byResultDraft[$currentDraftId] ?? array()) as $candidate) {
+            $verification = (array)($candidate['verification_json'] ?? array());
+            if (strtoupper((string)($candidate['status'] ?? '')) === 'VERIFIED'
+                && strtoupper((string)($verification['patch_verification_status'] ?? ''))
+                    === 'VERIFIED'
+                && (int)($verification['result_baseline_id'] ?? 0) === $latestBaselineId) {
+                $terminalPatch = $candidate;
+                break;
+            }
+        }
+        if ($terminalPatch === null) {
+            throw new RuntimeException(
+                'The current review candidate is not bound to a verified result baseline.'
+            );
+        }
+        $lineage = array();
+        $cursor = $terminalPatch;
+        $visited = array();
+        while (true) {
+            $cursorId = (int)$cursor['id'];
+            if (isset($visited[$cursorId])) {
+                throw new RuntimeException('The governed review patch lineage contains a cycle.');
+            }
+            $visited[$cursorId] = true;
+            $lineage[] = $cursor;
+            $parentDraftId = (int)($cursor['parent_draft_id'] ?? 0);
+            if ($parentDraftId === $preparedDraftId) {
+                break;
+            }
+            $verification = (array)($cursor['verification_json'] ?? array());
+            $proposedPayload = (array)($cursor['proposed_payload_json'] ?? array());
+            $sourcePatchId = (int)(
+                $verification['source_patch_id']
+                ?? $proposedPayload['source_patch_id']
+                ?? $proposedPayload['historical_scope_repair']['source_patch_id']
+                ?? 0
+            );
+            $parentPatch = $sourcePatchId > 0 ? ($byId[$sourcePatchId] ?? null) : null;
+            if ($parentPatch === null) {
+                foreach (array_reverse($byResultDraft[$parentDraftId] ?? array()) as $candidate) {
+                    if (strtoupper((string)($candidate['status'] ?? '')) === 'VERIFIED') {
+                        $parentPatch = $candidate;
+                        break;
+                    }
+                }
+            }
+            if ($parentPatch === null
+                || (int)($parentPatch['resulting_draft_id'] ?? 0) !== $parentDraftId) {
+                throw new RuntimeException(
+                    'The governed review patch lineage does not reach the prepared draft.'
+                );
+            }
+            $parentStatus = strtoupper((string)($parentPatch['status'] ?? ''));
+            if ($parentStatus !== 'VERIFIED'
+                && !(
+                    strtoupper((string)($verification['repair_type'] ?? ''))
+                        === 'HISTORICAL_SCOPE_REPAIR'
+                    && $sourcePatchId === (int)$parentPatch['id']
+                    && $parentStatus === 'VERIFICATION_FAILED'
+                )) {
+                throw new RuntimeException(
+                    'An unverified patch appears in the governed candidate lineage.'
+                );
+            }
+            $cursor = $parentPatch;
+            if (count($lineage) > count($patches)) {
+                throw new RuntimeException('The governed review patch lineage is invalid.');
+            }
+        }
+        return $lineage;
     }
 
     private function assertFrozenDraftCurrent(int $planId, int $reviewId): void
