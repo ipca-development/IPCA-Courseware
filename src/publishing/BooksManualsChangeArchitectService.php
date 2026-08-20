@@ -344,10 +344,42 @@ final class BooksManualsChangeArchitectService
                     'complete_text' => $this->json($currentManual),
                     'path' => array(),
                 );
+                $allComponentRows = array_values(array_map(
+                    static fn(array $component): array => array(
+                        'component_type' => (string)($component['component_type'] ?? ''),
+                        'title' => (string)($component['title'] ?? $component['name'] ?? ''),
+                        'summary' => (string)(
+                            $component['manual_level_expression']
+                            ?? $component['target_state']
+                            ?? $component['desired_state']
+                            ?? ''
+                        ),
+                    ),
+                    array_values(array_filter($componentMap, 'is_array'))
+                ));
+                $preliminaryFunctions = $this->classifySectionFunctions(array(
+                    'section_title' => (string)($impact['section_title'] ?? ''),
+                    'current_manual' => $currentManual,
+                    'target_components' => $allComponentRows,
+                    'coverage_decisions' => $evidence['coverage'] ?? array(),
+                    'preservation_boundaries' => $impact['preserved_logic_json']
+                        ?? $impact['preserved_logic']
+                        ?? array(),
+                    'impact_dependencies' => $impact['dependencies_json']
+                        ?? $impact['dependencies']
+                        ?? array(),
+                    'structure_nodes' => array(),
+                ));
                 foreach ($componentMap as $componentKey => $component) {
                     if ($componentKey !== ''
                         && is_array($component)
-                        && $this->componentSectionRelevant($component, $relevanceContext)) {
+                        && (
+                            $this->componentSectionRelevant($component, $relevanceContext)
+                            || $this->componentSupportsSectionFunctions(
+                                $component,
+                                $preliminaryFunctions
+                            )
+                        )) {
                         $componentKeys[] = $componentKey;
                     }
                 }
@@ -427,18 +459,34 @@ final class BooksManualsChangeArchitectService
                     );
                 }
             }
+            $sectionBoundaries = array_values(array_filter(
+                (array)($report['boundaries'] ?? array()),
+                static fn(mixed $boundary): bool => is_array($boundary)
+                    && (int)($boundary['section_id'] ?? 0) === (int)($impact['section_id'] ?? 0)
+            ));
+            $functionalClassification = $this->classifySectionFunctions(array(
+                'section_title' => $sectionTitle,
+                'current_manual' => $currentManual,
+                'target_components' => $componentRows,
+                'coverage_decisions' => $evidence['coverage'] ?? array(),
+                'preservation_boundaries' => array_merge($sectionBoundaries, $preserved),
+                'impact_dependencies' => array_merge($related, $relations),
+                'structure_nodes' => $proposedHierarchy,
+            ));
             $amendmentRows = $this->manualAmendmentRows(
                 $componentRows,
                 $sectionNumber,
                 $sectionTitle,
                 $treatment,
-                $currentManual
+                $currentManual,
+                $functionalClassification
             );
             $narrative = $this->sectionReviewNarrative(
                 $sectionTitle,
                 $treatment,
                 $componentRows,
-                $currentManual
+                $currentManual,
+                $functionalClassification
             );
             if ($treatment !== 'RESTRUCTURE') {
                 $preserved = array_values(array_filter(
@@ -449,7 +497,11 @@ final class BooksManualsChangeArchitectService
             }
             $preserved = array_values(array_unique(array_merge(
                 $preserved,
-                $this->canonicalPreservationDecisions($sectionTitle, $currentManual)
+                $this->canonicalPreservationDecisions(
+                    $sectionTitle,
+                    $currentManual,
+                    $functionalClassification
+                )
             )));
             $legacyConcepts = $this->legacyConcepts($evidence);
             $areas[] = array(
@@ -459,6 +511,9 @@ final class BooksManualsChangeArchitectService
                 'section_title' => $sectionTitle,
                 'treatment' => $treatment,
                 'is_primary_change' => false,
+                'primary_function' => $functionalClassification['primary_function'],
+                'secondary_functions' => $functionalClassification['secondary_functions'],
+                'functional_classification' => $functionalClassification,
                 'why_affected' => $narrative['why_affected'],
                 'current_relevant_content' => array_values((array)(
                     $currentManual['preview_subsections']
@@ -2178,6 +2233,70 @@ final class BooksManualsChangeArchitectService
     }
 
     /**
+     * @param array<string,mixed> $component
+     * @param array<string,mixed> $classification
+     */
+    private function componentSupportsSectionFunctions(
+        array $component,
+        array $classification
+    ): bool {
+        $functions = array_merge(
+            array((string)($classification['primary_function'] ?? 'OTHER')),
+            array_map('strval', (array)($classification['secondary_functions'] ?? array()))
+        );
+        if ($functions === array('OTHER')) {
+            return false;
+        }
+        $type = $this->normalize((string)($component['component_type'] ?? ''));
+        $text = $this->normalize(
+            (string)($component['name'] ?? $component['title'] ?? '') . ' '
+            . (string)(
+                $component['desired_state']
+                ?? $component['target_state']
+                ?? $component['manual_level_expression']
+                ?? ''
+            )
+        );
+        return (
+            in_array('RESPONSIBILITIES', $functions, true)
+            && (
+                in_array($type, array('role', 'human decision', 'approval'), true)
+                || preg_match('/\b(?:safety manager|action owner|reportability decision|approv\w*|authoriz\w*)\b/iu', $text) === 1
+            )
+        ) || (
+            in_array('QUALIFICATION', $functions, true)
+            && preg_match('/\b(?:qualification|competence|role enablement)\w*\b/iu', $text) === 1
+        ) || (
+            in_array('COMPETENCE_TRAINING', $functions, true)
+            && (
+                $type === 'training'
+                || preg_match('/\b(?:training|competence|operational enablement)\w*\b/iu', $text) === 1
+            )
+        ) || (
+            in_array('RECORDS_CONTROL', $functions, true)
+            && (
+                in_array($type, array('record', 'record evidence'), true)
+                || preg_match('/\b(?:record|retained evidence|submission evidence|acknowledgement)\w*\b/iu', $text) === 1
+            )
+        ) || (
+            in_array('MONITORING_ASSURANCE', $functions, true)
+            && (
+                $type === 'monitoring'
+                || preg_match('/\b(?:monitoring|reconciliation|overdue|performance|escalation)\w*\b/iu', $text) === 1
+            )
+        ) || (
+            in_array('OCCURRENCE_LIFECYCLE', $functions, true)
+            && (
+                in_array($type, array(
+                    'lifecycle', 'human decision', 'automatic action', 'deadline',
+                    'control', 'approval', 'closure', 'limitation',
+                ), true)
+                || preg_match('/\b(?:occurrence|reportability|ecca?irs|investigation|corrective|closure)\w*\b/iu', $text) === 1
+            )
+        );
+    }
+
+    /**
      * @param list<string> $componentKeys
      * @param list<string> $concepts
      * @param array<string,array<string,mixed>> $componentMap
@@ -2249,6 +2368,7 @@ final class BooksManualsChangeArchitectService
             };
             $rows[] = array(
                 'component_key' => $key,
+                'component_type' => (string)($component['component_type'] ?? ''),
                 'title' => (string)($component['title'] ?? ucwords(str_replace(array('.', '_'), ' ', $key))),
                 'treatment' => $treatment,
                 'summary' => $this->presentationText(
@@ -2290,6 +2410,185 @@ final class BooksManualsChangeArchitectService
     }
 
     /**
+     * Determine a section's governed functions from corroborating canonical
+     * and target-state signals. A title match can contribute context but can
+     * never establish a function without non-title evidence.
+     *
+     * @param array<string,mixed> $context
+     * @return array{primary_function:string,secondary_functions:list<string>,evidence:array<string,list<string>>}
+     */
+    public function classifySectionFunctions(array $context): array
+    {
+        $current = is_array($context['current_manual'] ?? null)
+            ? $context['current_manual']
+            : array();
+        $subsections = array_values(array_filter(
+            (array)($current['subsections'] ?? array()),
+            'is_array'
+        ));
+        $title = $this->normalize((string)($context['section_title'] ?? $current['section_title'] ?? ''));
+        $hierarchy = $this->normalize(implode(' ', array_map(
+            static fn(mixed $node): string => is_array($node)
+                ? (string)($node['title'] ?? '')
+                : (string)$node,
+            (array)($current['hierarchy_path'] ?? $context['hierarchy_path'] ?? array())
+        )));
+        $subsectionTitles = $this->normalize(implode(' ', array_map(
+            static fn(array $row): string => (string)($row['title'] ?? ''),
+            $subsections
+        )));
+        $canonicalContent = $this->normalize(implode(' ', array_map(
+            static fn(array $row): string => implode(' ', array_map(
+                'strval',
+                (array)($row['paragraphs'] ?? array())
+            )),
+            $subsections
+        )));
+        $components = array_values(array_filter(
+            (array)($context['target_components'] ?? array()),
+            'is_array'
+        ));
+        $target = $this->normalize(implode(' ', array_map(
+            static fn(array $row): string =>
+                (string)($row['component_type'] ?? '') . ' '
+                . (string)($row['title'] ?? '') . ' '
+                . (string)($row['summary'] ?? ''),
+            $components
+        )));
+        $coverage = $this->normalize($this->json($context['coverage_decisions'] ?? array()));
+        $preservation = $this->normalize($this->json($context['preservation_boundaries'] ?? array()));
+        $dependencies = $this->normalize($this->json($context['impact_dependencies'] ?? array()));
+        $structure = $this->normalize($this->json($context['structure_nodes'] ?? array()));
+        $sources = array(
+            'title' => $title,
+            'hierarchy' => $hierarchy,
+            'subsections' => $subsectionTitles,
+            'canonical_content' => $canonicalContent,
+            'target_state' => $target . ' ' . $coverage,
+            'preservation' => $preservation,
+            'dependencies' => $dependencies,
+            'structure' => $structure,
+        );
+        $definitions = array(
+            'RESPONSIBILITIES' => array(
+                'title' => '/\b(?:responsibilit|duties|accountab|manager|postholder)\w*\b/iu',
+                'hierarchy' => '/\b(?:organization|responsibilit|accountab|management personnel)\w*\b/iu',
+                'subsections' => '/\b(?:duties and responsibilities|responsibilit|accountab|authority)\w*\b/iu',
+                'canonical_content' => '/\b(?:responsible for|duties|focal point|accountable|approv\w*|authoriz\w*|assign\w*)\b/iu',
+                'target_state' => '/\b(?:role|human decision|approval|decision authority|safety manager|action owner)\b/iu',
+                'preservation' => '/\b(?:responsibilit|accountab|duties)\w*\b/iu',
+                'dependencies' => '/\b(?:assigns|decision|oversight|responsibilit)\w*\b/iu',
+                'structure' => '/\b(?:responsibilit|authority|accountab)\w*\b/iu',
+            ),
+            'QUALIFICATION' => array(
+                'title' => '/\b(?:qualification|eligibility)\w*\b/iu',
+                'hierarchy' => '/\b(?:personnel|qualification|organization)\w*\b/iu',
+                'subsections' => '/\b(?:requirements|qualification|experience|eligibility)\w*\b/iu',
+                'canonical_content' => '/\b(?:experience|qualification|licen[cs]e|knowledge|managerial skills|language)\w*\b/iu',
+                'target_state' => '/\b(?:qualification|competence|role enablement)\w*\b/iu',
+                'preservation' => '/\b(?:qualification|experience|eligibility)\w*\b/iu',
+                'dependencies' => '/\b(?:qualification|competence)\w*\b/iu',
+                'structure' => '/\b(?:qualification|eligibility)\w*\b/iu',
+            ),
+            'COMPETENCE_TRAINING' => array(
+                'title' => '/\b(?:training|competence)\w*\b/iu',
+                'hierarchy' => '/\b(?:training|promotion|competence|personnel)\w*\b/iu',
+                'subsections' => '/\b(?:training|competence|initial|recurrent|course)\w*\b/iu',
+                'canonical_content' => '/\b(?:training|trained|course|competence|induction|recurrent)\w*\b/iu',
+                'target_state' => '/\b(?:training|competence|operational enablement)\w*\b/iu',
+                'preservation' => '/\b(?:training|competence|course)\w*\b/iu',
+                'dependencies' => '/\b(?:training|competence|perform)\w*\b/iu',
+                'structure' => '/\b(?:training|competence)\w*\b/iu',
+            ),
+            'RECORDS_CONTROL' => array(
+                'title' => '/\b(?:record|document control|evidence|retention)\w*\b/iu',
+                'hierarchy' => '/\b(?:record|document control|information management)\w*\b/iu',
+                'subsections' => '/\b(?:record|retention|storage|access|evidence)\w*\b/iu',
+                'canonical_content' => '/\b(?:record|retain|retention|stored|storage|access|evidence|acknowledgement)\w*\b/iu',
+                'target_state' => '/\b(?:record evidence|retained evidence|submission evidence|closure authorization)\w*\b/iu',
+                'preservation' => '/\b(?:record|retention|storage|access)\w*\b/iu',
+                'dependencies' => '/\b(?:retains|evidence|record)\w*\b/iu',
+                'structure' => '/\b(?:record|evidence|retention)\w*\b/iu',
+            ),
+            'OCCURRENCE_LIFECYCLE' => array(
+                'title' => '/\b(?:occurrence|reporting|investigation|closure)\w*\b/iu',
+                'hierarchy' => '/\b(?:safety risk management|occurrence|reporting)\w*\b/iu',
+                'subsections' => '/\b(?:occurrence|reporting|reportability|ecca?irs|investigation|corrective|closure)\w*\b/iu',
+                'canonical_content' => '/\b(?:occurrence|reportability|ecca?irs|investigat\w*|corrective action|authority deadline|clos(?:e|ed|ure))\b/iu',
+                'target_state' => '/\b(?:occurrence lifecycle|reportability|ecca?irs|investigation|corrective|closure)\w*\b/iu',
+                'preservation' => '/\b(?:reporting|investigation|reporter protection)\w*\b/iu',
+                'dependencies' => '/\b(?:primary procedure|lifecycle|occurrence)\w*\b/iu',
+                'structure' => '/\b(?:occurrence|reportability|ecca?irs|investigation|closure)\w*\b/iu',
+            ),
+            'MONITORING_ASSURANCE' => array(
+                'title' => '/\b(?:performance|monitor|assurance|compliance)\w*\b/iu',
+                'hierarchy' => '/\b(?:assurance|performance|compliance)\w*\b/iu',
+                'subsections' => '/\b(?:monitor|performance|indicator|review|trend|escalation)\w*\b/iu',
+                'canonical_content' => '/\b(?:monitor|trend|overdue|performance|indicator|review meeting|escalat)\w*\b/iu',
+                'target_state' => '/\b(?:monitoring|reconciliation|overdue|performance|escalation)\w*\b/iu',
+                'preservation' => '/\b(?:monitoring|performance|review|indicator)\w*\b/iu',
+                'dependencies' => '/\b(?:monitoring input|status|timeliness|outcomes)\w*\b/iu',
+                'structure' => '/\b(?:monitoring|escalation|reconciliation)\w*\b/iu',
+            ),
+        );
+        $weights = array(
+            'title' => 1,
+            'hierarchy' => 1,
+            'subsections' => 4,
+            'canonical_content' => 4,
+            'target_state' => 2,
+            'preservation' => 1,
+            'dependencies' => 1,
+            'structure' => 1,
+        );
+        $scores = array();
+        $evidence = array();
+        $nonTitleEvidence = array();
+        foreach ($definitions as $function => $patterns) {
+            $scores[$function] = 0;
+            $evidence[$function] = array();
+            $nonTitleEvidence[$function] = 0;
+            foreach ($patterns as $source => $pattern) {
+                if (($sources[$source] ?? '') === '' || preg_match($pattern, $sources[$source]) !== 1) {
+                    continue;
+                }
+                $scores[$function] += $weights[$source];
+                $evidence[$function][] = $source;
+                if ($source !== 'title') {
+                    $nonTitleEvidence[$function] += $weights[$source];
+                }
+            }
+        }
+        $qualificationCorroborated =
+            preg_match('/\b(?:qualification|experience|eligibility)\w*\b/iu', $title . ' ' . $subsectionTitles . ' ' . $structure) === 1
+            || (
+                preg_match('/\brequirements?\b/iu', $subsectionTitles) === 1
+                && preg_match('/\b(?:experience|qualification|licen[cs]e|knowledge|managerial skills|language)\w*\b/iu', $canonicalContent) === 1
+                && preg_match('/\b(?:manager|postholder|personnel|organization|accountable person)\w*\b/iu', $title . ' ' . $hierarchy) === 1
+            );
+        arsort($scores);
+        $qualified = array_values(array_filter(
+            array_keys($scores),
+            static function (string $function) use (
+                $scores,
+                $nonTitleEvidence,
+                $qualificationCorroborated
+            ): bool {
+                if ($scores[$function] < 5 || $nonTitleEvidence[$function] < 4) {
+                    return false;
+                }
+                return $function !== 'QUALIFICATION' || $qualificationCorroborated;
+            }
+        ));
+        $primary = $qualified[0] ?? 'OTHER';
+        return array(
+            'primary_function' => $primary,
+            'secondary_functions' => array_values(array_slice($qualified, 1)),
+            'evidence' => array_intersect_key($evidence, array_fill_keys($qualified, true)),
+        );
+    }
+
+    /**
      * @param list<array<string,mixed>> $components
      * @param array<string,mixed> $currentManual
      * @return array{why_affected:string,proposed_amendment_summary:string}
@@ -2298,7 +2597,8 @@ final class BooksManualsChangeArchitectService
         string $sectionTitle,
         string $treatment,
         array $components,
-        array $currentManual
+        array $currentManual,
+        array $classification
     ): array {
         $title = $this->normalize($sectionTitle);
         $source = $this->normalize($this->json($currentManual));
@@ -2308,32 +2608,44 @@ final class BooksManualsChangeArchitectService
             $components
         )));
         $context = $title . ' ' . $source . ' ' . $target;
+        $functions = array_merge(
+            array((string)($classification['primary_function'] ?? 'OTHER')),
+            array_map('strval', (array)($classification['secondary_functions'] ?? array()))
+        );
+        $primaryFunction = (string)($classification['primary_function'] ?? 'OTHER');
         if ($treatment === 'RESTRUCTURE'
+            && $primaryFunction === 'OCCURRENCE_LIFECYCLE'
             && preg_match('/\b(?:occurrence|safety report|investigation)\b/iu', $context) === 1) {
             return array(
                 'why_affected' => 'The current reporting and investigation procedure does not represent the complete governed occurrence lifecycle required by the accepted change: reportability decisions, ECCAIRS submissions and follow-up, action control, effectiveness review, monitoring, escalation and authorized closure are not controlled as one end-to-end process.',
                 'proposed_amendment_summary' => 'Restructure the section as the primary occurrence-management procedure. Replace obsolete intake and reporting references, assign each lifecycle decision and record, integrate valid investigation logic, govern corrective and mitigating actions, add intermediate/final ECCAIRS follow-up, and make closure conditional on evidence, effectiveness and applicable authority follow-up.',
             );
         }
-        if (preg_match('/\bresponsibilit\w*\b/iu', $title) === 1) {
+        if ($primaryFunction === 'RESPONSIBILITIES') {
+            $alsoCompetence = in_array('QUALIFICATION', $functions, true)
+                || in_array('COMPETENCE_TRAINING', $functions, true);
             return array(
-                'why_affected' => 'The updated occurrence lifecycle assigns accountable decisions that the current responsibility section does not state explicitly, including reportability, ECCAIRS submission approval and follow-up, action oversight, effectiveness review, escalation and closure authorization.',
-                'proposed_amendment_summary' => 'Extend the accountable role’s duties to cover the occurrence lifecycle decisions and oversight introduced in the primary procedure, including reportability, authority communication, investigation and action governance, escalation and controlled closure. Retain unrelated valid SMS accountabilities.',
+                'why_affected' => 'The canonical section governs the Safety Manager’s duties'
+                    . ($alsoCompetence ? ', qualifications and training' : '')
+                    . ', but it does not state the accountable decisions introduced by the updated occurrence lifecycle: reportability, ECCAIRS submission approval and follow-up, action oversight, effectiveness review, escalation and closure authorization.',
+                'proposed_amendment_summary' => 'Amend only the Safety Manager responsibility and affected competence elements needed by the occurrence lifecycle. Add reportability, authority communication, investigation and action governance, effectiveness, escalation and closure duties'
+                    . ($alsoCompetence ? ', together with role-specific competence for those duties' : '')
+                    . '. Preserve the existing qualification requirements, valid SMS duties and unaffected training requirements.',
             );
         }
-        if (preg_match('/\brecord\w*\b/iu', $title) === 1) {
+        if ($primaryFunction === 'RECORDS_CONTROL') {
             return array(
                 'why_affected' => 'The occurrence lifecycle creates controlled evidence that is not explicitly represented in the current record-control section, including reportability decisions, authority submissions and acknowledgements, investigation evidence, action evidence, effectiveness results, residual-risk acceptance and closure authorization.',
                 'proposed_amendment_summary' => 'Extend the controlled SMS record set to include occurrence intake, reportability decisions, ECCAIRS submissions and acknowledgements, investigation records, corrective and mitigating action evidence, effectiveness reviews, residual-risk decisions and closure authorization. Keep the existing valid access and retention controls.',
             );
         }
-        if (preg_match('/\b(?:performance|monitor|assurance|compliance)\w*\b/iu', $title) === 1) {
+        if ($primaryFunction === 'MONITORING_ASSURANCE') {
             return array(
                 'why_affected' => 'The current monitoring framework does not yet use occurrence-lifecycle status and outcomes as explicit performance inputs, so overdue reports or actions, ECCAIRS follow-up, effectiveness results and closure performance could remain outside routine safety oversight.',
                 'proposed_amendment_summary' => 'Add occurrence-management inputs to safety-performance monitoring: reporting timeliness, reportability and authority follow-up status, overdue investigations and actions, effectiveness outcomes, escalation and closure performance. Preserve the existing occurrence-trend, overdue-action and safety-review practices.',
             );
         }
-        if (preg_match('/\b(?:training|competence)\w*\b/iu', $title) === 1) {
+        if ($primaryFunction === 'COMPETENCE_TRAINING') {
             return array(
                 'why_affected' => 'The updated lifecycle introduces role-specific decisions and evidence duties for reporters, Safety Managers and Action Owners that are not covered by a general SMS-training statement alone.',
                 'proposed_amendment_summary' => 'Define role-appropriate initial and recurrent competence for occurrence reporting, reportability and ECCAIRS handling, investigation, action ownership, effectiveness review, escalation and closure. Retain the existing valid SMS induction and practical-training principles.',
@@ -2358,55 +2670,84 @@ final class BooksManualsChangeArchitectService
      * @param array<string,mixed> $currentManual
      * @return list<string>
      */
-    private function canonicalPreservationDecisions(string $sectionTitle, array $currentManual): array
+    private function canonicalPreservationDecisions(
+        string $sectionTitle,
+        array $currentManual,
+        array $classification
+    ): array
     {
-        $title = $this->normalize($sectionTitle);
         $source = $this->normalize($this->json($currentManual));
-        $candidates = match (true) {
-            preg_match('/\bresponsibilit\w*\b/iu', $title) === 1 => array(
-                array('/\bqualif\w*\b/iu', 'Existing qualification requirements'),
+        $primaryFunction = (string)($classification['primary_function'] ?? 'OTHER');
+        $functions = array($primaryFunction);
+        if ($primaryFunction === 'RESPONSIBILITIES') {
+            $functions = array_merge(
+                $functions,
+                array_values(array_intersect(
+                    array_map('strval', (array)($classification['secondary_functions'] ?? array())),
+                    array('QUALIFICATION', 'COMPETENCE_TRAINING')
+                ))
+            );
+        }
+        $candidates = array();
+        if (in_array('RESPONSIBILITIES', $functions, true)) {
+            $candidates = array_merge($candidates, array(
+                array('/\b(?:development|administration|maintenance).{0,80}\b(?:sms|safety management system)|\b(?:sms|safety management system).{0,80}\b(?:development|administration|maintenance)/iu', 'Existing valid SMS development, administration and maintenance duties'),
                 array('/\bsafety management system|\bsms\b/iu', 'Existing overall SMS accountability'),
                 array('/\b(?:hazard|risk management|risk assessment)\b/iu', 'Existing hazard and risk-management responsibilities'),
                 array('/\breview\w*.{0,40}\boccurrence|\boccurrence.{0,40}\breview/iu', 'Existing occurrence-review responsibility'),
                 array('/\bassign\w*.{0,30}\baction/iu', 'Existing action-assignment responsibility'),
                 array('/\baccountable manager\b/iu', 'Existing escalation to the Accountable Manager'),
-            ),
-            preg_match('/\brecord\w*\b/iu', $title) === 1 => array(
+            ));
+        }
+        if (in_array('QUALIFICATION', $functions, true)) {
+            $candidates = array_merge($candidates, array(
+                array('/\b(?:experience|qualification|licen[cs]e|knowledge|managerial skills|language)\w*\b/iu', 'Existing qualification, experience, knowledge and skill requirements'),
+            ));
+        }
+        if (in_array('RECORDS_CONTROL', $functions, true)) {
+            $candidates = array_merge($candidates, array(
                 array('/\bdefinition.{0,40}\brecord|\brecord.{0,40}\bdefinition/iu', 'Existing definition and scope of controlled records'),
                 array('/\bretention|retain\w*.{0,30}\byear/iu', 'Existing record-retention requirements'),
                 array('/\baccess.{0,30}\brestrict|\brestrict\w*.{0,30}\baccess/iu', 'Existing record-access restrictions'),
                 array('/\b(?:electronic|cloud|digital)\b/iu', 'Existing electronic and cloud-storage allowance'),
-            ),
-            preg_match('/\b(?:performance|monitor|assurance|compliance)\w*\b/iu', $title) === 1 => array(
+            ));
+        }
+        if (in_array('MONITORING_ASSURANCE', $functions, true)) {
+            $candidates = array_merge($candidates, array(
                 array('/\b(?:spo|spi|safety performance (?:objective|indicator))\b/iu', 'Existing safety-performance objective and indicator framework'),
                 array('/\b(?:maturity|continuous improvement)\b/iu', 'Existing SMS maturity and continuous-improvement model'),
                 array('/\b(?:review|monitor)\w*.{0,60}\bsafety performance|\bsafety performance.{0,60}\b(?:review|monitor)/iu', 'Existing safety-performance review principles'),
                 array('/\boccurrence trend/iu', 'Existing occurrence-trend monitoring'),
                 array('/\boverdue.{0,30}\b(?:action|corrective)/iu', 'Existing overdue-action monitoring'),
                 array('/\bsafety review meeting/iu', 'Existing safety-review meeting'),
-            ),
-            preg_match('/\b(?:training|competence)\w*\b/iu', $title) === 1 => array(
+            ));
+        }
+        if (in_array('COMPETENCE_TRAINING', $functions, true)) {
+            $candidates = array_merge($candidates, array(
                 array('/\b(?:role|function|personnel|safety manager).{0,60}\b(?:training|competence|induction)|\b(?:training|competence|induction).{0,60}\b(?:role|function|personnel|safety manager)/iu', 'Existing role-appropriate SMS training principles'),
                 array('/\bsms induction/iu', 'Existing SMS induction'),
                 array('/\bpractical training/iu', 'Existing practical training for the Safety Manager'),
+                array('/\bsafety manager training|\binitial.{0,30}\brecurrent|\brecurrent.{0,30}\binitial/iu', 'Existing Safety Manager initial and recurrent training requirements'),
+                array('/\breceived a course|\bcourse.{0,40}\bsafety manager/iu', 'Existing Safety Manager course requirements'),
                 array('/\b(?:maintain|recurrent|continued).{0,40}\bcompetenc|\bcompetenc.{0,40}\b(?:maintain|recurrent|continued)/iu', 'Existing competence-maintenance requirements'),
                 array('/\btraining record|\brecord.{0,30}\btraining/iu', 'Existing training-record requirements'),
-            ),
-            preg_match('/\b(?:occurrence|safety report|investigation)\b/iu', $title . ' ' . $source) === 1 => array(
+            ));
+        }
+        if (in_array('OCCURRENCE_LIFECYCLE', $functions, true)) {
+            $candidates = array_merge($candidates, array(
                 array('/\bmandatory\b.{0,50}\bvoluntary|\bvoluntary\b.{0,50}\bmandatory/iu', 'Mandatory and voluntary reporting principles'),
                 array('/\b(?:just culture|reporter protection|confidential)\b/iu', 'Reporter protection and just-culture principles'),
                 array('/\b(?:72.hour|seventy.two.hour|deadline)\b/iu', 'Applicable initial authority-reporting deadlines'),
                 array('/\binvestigat\w*\b/iu', 'Valid internal safety-investigation principles'),
-            ),
-            default => array(),
-        };
+            ));
+        }
         $preserved = array();
         foreach ($candidates as [$pattern, $decision]) {
             if (preg_match($pattern, $source) === 1) {
                 $preserved[] = $decision;
             }
         }
-        return $preserved;
+        return array_values(array_unique($preserved));
     }
 
     /** @param array<string,mixed> $currentManual */
@@ -2441,15 +2782,15 @@ final class BooksManualsChangeArchitectService
             if ($index === $primaryIndex) {
                 continue;
             }
-            $title = $this->normalize((string)$area['section_title']);
+            $primaryFunction = (string)($area['primary_function'] ?? 'OTHER');
             $relationship = match (true) {
-                preg_match('/\bresponsibilit\w*\b/iu', $title) === 1 =>
+                $primaryFunction === 'RESPONSIBILITIES' =>
                     'Assigns the accountable lifecycle decisions and oversight described in the primary procedure.',
-                preg_match('/\brecord\w*\b/iu', $title) === 1 =>
+                $primaryFunction === 'RECORDS_CONTROL' =>
                     'Retains the controlled evidence generated by the primary occurrence lifecycle.',
-                preg_match('/\b(?:performance|monitor|assurance|compliance)\w*\b/iu', $title) === 1 =>
+                $primaryFunction === 'MONITORING_ASSURANCE' =>
                     'Uses lifecycle status, timeliness and outcomes as safety-performance monitoring inputs.',
-                preg_match('/\b(?:training|competence)\w*\b/iu', $title) === 1 =>
+                $primaryFunction === 'COMPETENCE_TRAINING' =>
                     'Establishes competence for the roles that perform and govern the primary lifecycle.',
                 default => 'Supports a defined control required by the primary amended procedure.',
             };
@@ -2525,7 +2866,8 @@ final class BooksManualsChangeArchitectService
         string $sectionNumber,
         string $sectionTitle,
         string $treatment,
-        array $currentManual
+        array $currentManual,
+        array $classification
     ): array {
         $componentText = $this->normalize(implode(' ', array_map(
             static fn(array $row): string =>
@@ -2533,7 +2875,13 @@ final class BooksManualsChangeArchitectService
             $components
         )));
         $sourceText = $this->normalize($this->json($currentManual));
+        $functions = array_merge(
+            array((string)($classification['primary_function'] ?? 'OTHER')),
+            array_map('strval', (array)($classification['secondary_functions'] ?? array()))
+        );
+        $primaryFunction = (string)($classification['primary_function'] ?? 'OTHER');
         if ($treatment === 'RESTRUCTURE'
+            && $primaryFunction === 'OCCURRENCE_LIFECYCLE'
             && preg_match('/\b(?:occurrence|safety report|investigation)\b/iu', $sectionTitle . ' ' . $sourceText) === 1) {
             $definitions = array(
                 array(
@@ -2624,15 +2972,14 @@ final class BooksManualsChangeArchitectService
             }
         }
 
-        $normalizedTitle = $this->normalize($sectionTitle);
         $summary = match (true) {
-            preg_match('/\bresponsibilit\w*\b/iu', $normalizedTitle) === 1 =>
-                'Add reportability, authority-submission, action-oversight, effectiveness, escalation and closure decision responsibilities for the updated occurrence lifecycle.',
-            preg_match('/\brecord\w*\b/iu', $normalizedTitle) === 1 =>
+            $primaryFunction === 'RESPONSIBILITIES' =>
+                'Add reportability, authority-submission, action-oversight, effectiveness, escalation and closure decision responsibilities, plus only the competence needed to perform those duties.',
+            $primaryFunction === 'RECORDS_CONTROL' =>
                 'Add reportability decisions, ECCAIRS submissions and acknowledgements, investigation/action evidence, effectiveness results, residual-risk decisions and closure authorization to the controlled record set.',
-            preg_match('/\b(?:performance|monitor|assurance|compliance)\w*\b/iu', $normalizedTitle) === 1 =>
+            $primaryFunction === 'MONITORING_ASSURANCE' =>
                 'Monitor occurrence timeliness, authority follow-up, overdue investigations and actions, effectiveness outcomes, escalation and closure performance.',
-            preg_match('/\b(?:training|competence)\w*\b/iu', $normalizedTitle) === 1 =>
+            $primaryFunction === 'COMPETENCE_TRAINING' =>
                 'Define initial and recurrent competence for reporters, Safety Managers and Action Owners before they perform their occurrence-lifecycle duties.',
             default =>
                 'Amend this existing manual section only for the demonstrated operational delta and preserve unrelated valid content.',
@@ -2909,6 +3256,13 @@ final class BooksManualsChangeArchitectService
         return array(
             'section_number' => (string)($context['section_number'] ?? ''),
             'section_title' => (string)($context['title'] ?? ''),
+            'hierarchy_path' => array_values(array_map(
+                static fn(array $node): array => array(
+                    'title' => (string)($node['title'] ?? ''),
+                    'section_key' => (string)($node['section_key'] ?? ''),
+                ),
+                array_values(array_filter((array)($context['path'] ?? array()), 'is_array'))
+            )),
             'source_label' => 'Canonical manual content',
             'subsections' => $subsections,
             'preview_subsections' => array_values(array_intersect_key(
@@ -3070,17 +3424,44 @@ final class BooksManualsChangeArchitectService
             $sectionId = (int)($fixtureSection['id'] ?? ($index + 1));
             $number = trim((string)($fixtureSection['number'] ?? ($index + 1)));
             $text = trim((string)($fixtureSection['text'] ?? ''));
-            $block = array(
-                'id' => $sectionId * 1000 + 1,
-                'book_version_id' => 1,
-                'section_id' => $sectionId,
-                'block_type' => 'paragraph',
-                'stable_anchor' => 'fixture-' . $sectionId,
-                'content_hash' => hash('sha256', $text),
-                'payload_json' => array('text' => $text),
-                '_text' => $text,
-                '_normalized' => $this->normalize($text),
-            );
+            $sectionBlocks = array();
+            $appendFixtureBlock = function (
+                string $blockText,
+                string $style = 'body'
+            ) use (&$sectionBlocks, $sectionId): void {
+                $ordinal = count($sectionBlocks) + 1;
+                $block = array(
+                    'id' => $sectionId * 1000 + $ordinal,
+                    'book_version_id' => 1,
+                    'section_id' => $sectionId,
+                    'block_type' => 'paragraph',
+                    'paragraph_style' => $style,
+                    'stable_anchor' => 'fixture-' . $sectionId . '-' . $ordinal,
+                    'content_hash' => hash('sha256', $blockText),
+                    'payload_json' => array('text' => $blockText),
+                    'text' => $blockText,
+                    '_text' => $blockText,
+                    '_normalized' => $this->normalize($blockText),
+                    '_paragraph_style' => $style,
+                );
+                $sectionBlocks[] = $block;
+            };
+            if ($text !== '') {
+                $appendFixtureBlock($text);
+            }
+            foreach ((array)($fixtureSection['children'] ?? array()) as $child) {
+                if (!is_array($child)) {
+                    continue;
+                }
+                $childTitle = trim((string)($child['title'] ?? ''));
+                $childText = trim((string)($child['text'] ?? ''));
+                if ($childTitle !== '') {
+                    $appendFixtureBlock($childTitle, 'subtitle_2');
+                }
+                if ($childText !== '') {
+                    $appendFixtureBlock($childText);
+                }
+            }
             $section = array(
                 'id' => $sectionId,
                 'book_version_id' => 1,
@@ -3106,10 +3487,10 @@ final class BooksManualsChangeArchitectService
                         'title' => $number . ' ' . (string)($fixtureSection['title'] ?? ''),
                     ),
                 ),
-                '_blocks' => array($block),
+                '_blocks' => $sectionBlocks,
             );
             $sections[] = $section;
-            $blocks[] = $block;
+            $blocks = array_merge($blocks, $sectionBlocks);
         }
         return array(
             'version' => array(
@@ -3413,22 +3794,24 @@ final class BooksManualsChangeArchitectService
         if (preg_match('/\b(?:hazard identification|risk assessment|safety policy)\b/iu', $title) === 1) {
             return false;
         }
-        if (preg_match(
-            '/\b(?:safety manager|control of (?:safety )?records|occurrence reporting|internal safety investigation|safety performance monitoring)\b/iu',
-            $title
-        ) === 1 || (
-            preg_match('/\b(?:training|competence)\b/iu', $title) === 1
-            && preg_match('/\b(?:safety|sms|occurrence)\b/iu', $functionalTitle) === 1
-        )) {
-            return true;
-        }
-        return (
-            preg_match('/\b(?:occurrence|safety report)\b/iu', $text) === 1
-            && preg_match(
-                '/\b(?:reportability|authority deadline|investigat\w*|corrective action|effectiveness|controlled closure)\b/iu',
-                $text
-            ) === 1
+        $targetText = $this->normalize($this->json(array(
+            'components' => $target['components'] ?? array(),
+            'affected_roles' => $intent['affected_roles'] ?? array(),
+            'affected_processes' => $intent['affected_processes'] ?? array(),
+        )));
+        $demonstratedFunctions = array(
+            preg_match('/\b(?:responsible for|duties|focal point|administer\w*|approv\w*|authoriz\w*|assign\w*)\b/iu', $text) === 1
+                && preg_match('/\b(?:role|human decision|approval|safety manager|action owner)\b/iu', $targetText) === 1,
+            preg_match('/\b(?:record|retain|retention|stored|access|evidence)\w*\b/iu', $text) === 1
+                && preg_match('/\b(?:record evidence|retained evidence|submission evidence|closure authorization)\w*\b/iu', $targetText) === 1,
+            preg_match('/\b(?:submit\w*.{0,60}\boccurrence|reportability|authority deadline|ecca?irs|investigat\w*|corrective action|controlled closure)\b/iu', $text) === 1
+                && preg_match('/\b(?:occurrence|reportability|ecca?irs|investigation|corrective|closure)\w*\b/iu', $targetText) === 1,
+            preg_match('/\b(?:monitor\w*.{0,60}\b(?:trend|occurrence|action)|overdue action|performance indicator|review meeting|escalat)\w*\b/iu', $text) === 1
+                && preg_match('/\b(?:monitoring|reconciliation|overdue|performance|escalation)\w*\b/iu', $targetText) === 1,
+            preg_match('/\b(?:training|trained|course|competence|induction|recurrent)\w*\b/iu', $text) === 1
+                && preg_match('/\b(?:training|competence|operational enablement)\w*\b/iu', $targetText) === 1,
         );
+        return in_array(true, $demonstratedFunctions, true);
     }
 
     /** @param array<string,mixed> $section */

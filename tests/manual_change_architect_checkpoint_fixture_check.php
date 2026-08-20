@@ -140,12 +140,22 @@ architect_fixture_assert(
 );
 architect_fixture_assert(
     architect_fixture_numbers($presentation['areas']) === $expectedMustChange,
-    'Step 2 did not present the complete five-card SMS/ECCAIRS review.'
+    'Step 2 did not present the complete five-card SMS/ECCAIRS review: '
+        . json_encode(architect_fixture_numbers($presentation['areas']))
 );
 architect_fixture_assert(
     $presentation['quality_gate']['reviewable'] === true,
     'The gold-standard five-card review did not pass the deterministic quality gate: '
         . json_encode($presentation['quality_gate']['failures'])
+        . ' areas=' . json_encode(array_map(
+            static fn(array $area): array => array(
+                $area['section_number'],
+                $area['primary_function'],
+                $area['secondary_functions'],
+                $area['why_affected'],
+            ),
+            $presentation['areas']
+        ))
 );
 foreach ($presentation['areas'] as $area) {
     foreach (array(
@@ -159,6 +169,63 @@ foreach ($presentation['areas'] as $area) {
         );
     }
 }
+$expectedFunctions = array(
+    '3.3' => 'RESPONSIBILITIES',
+    '4.2' => 'RECORDS_CONTROL',
+    '5.6' => 'OCCURRENCE_LIFECYCLE',
+    '5.7' => 'MONITORING_ASSURANCE',
+    '8.1' => 'COMPETENCE_TRAINING',
+);
+foreach ($presentation['areas'] as $area) {
+    $number = (string)$area['section_number'];
+    architect_fixture_assert(
+        (string)$area['primary_function'] === $expectedFunctions[$number],
+        "Section {$number} received the wrong primary functional classification."
+    );
+}
+$safetyManagerArea = array_values(array_filter(
+    $presentation['areas'],
+    static fn(array $area): bool => (string)$area['section_number'] === '3.3'
+))[0] ?? array();
+architect_fixture_assert(
+    in_array('QUALIFICATION', (array)($safetyManagerArea['secondary_functions'] ?? array()), true)
+        && in_array('COMPETENCE_TRAINING', (array)($safetyManagerArea['secondary_functions'] ?? array()), true),
+    'Safety Manager must retain demonstrated qualification and competence-training functions.'
+);
+$safetyManagerPreserved = implode(' ', (array)($safetyManagerArea['must_preserve'] ?? array()));
+foreach (array('qualification', 'SMS', 'training') as $preservedConcept) {
+    architect_fixture_assert(
+        stripos($safetyManagerPreserved, $preservedConcept) !== false,
+        "Safety Manager preservation omitted {$preservedConcept}."
+    );
+}
+architect_fixture_assert(
+    str_contains((string)$safetyManagerArea['why_affected'], 'accountable decisions')
+        && str_contains((string)$safetyManagerArea['proposed_amendment_summary'], 'Amend only'),
+    'Safety Manager projection is not limited to the demonstrated lifecycle responsibility and competence delta.'
+);
+$lexicalOnlyClassification = $service->classifySectionFunctions(array(
+    'section_title' => 'Safety Training Reporting Management',
+    'current_manual' => array(
+        'section_title' => 'Safety Training Reporting Management',
+        'hierarchy_path' => array(array('title' => 'General Information')),
+        'subsections' => array(array(
+            'number' => 'X.1',
+            'title' => 'Overview',
+            'paragraphs' => array('This section introduces the organization and lists general contact information.'),
+        )),
+    ),
+    'target_components' => $presentationComponents,
+    'coverage_decisions' => array(),
+    'preservation_boundaries' => array(),
+    'impact_dependencies' => array(),
+    'structure_nodes' => array(),
+));
+architect_fixture_assert(
+    $lexicalOnlyClassification['primary_function'] === 'OTHER'
+        && $lexicalOnlyClassification['secondary_functions'] === array(),
+    'Generic title similarity must not establish a governed section function.'
+);
 $presentationPrimary = array_values(array_filter(
     $presentation['areas'],
     static fn(array $area): bool => !empty($area['is_primary_change'])
@@ -191,6 +258,11 @@ if (getenv('IPCA_SHOW_STEP2_REVIEW') === '1') {
     echo "\nSTEP 2 REVIEW OUTPUT\n";
     foreach ($presentation['areas'] as $area) {
         echo "\n{$area['section_number']} {$area['section_title']} — {$area['treatment']}\n";
+        echo "FUNCTIONS: {$area['primary_function']}"
+            . ((array)$area['secondary_functions'] === array()
+                ? ''
+                : ' + ' . implode(', ', $area['secondary_functions']))
+            . "\n";
         echo "WHY: {$area['why_affected']}\n";
         echo "PROPOSED: {$area['proposed_amendment_summary']}\n";
         if ((array)$area['proposed_structure_items'] !== array()) {
@@ -236,6 +308,14 @@ $structuralFixture['manual']['sections'] = array_merge(
             'parent_title' => 'Safety Management System',
             'text' => 'Safety risk management includes occurrence review, investigation, corrective action and monitoring.',
         ),
+        array(
+            'id' => 204,
+            'number' => '2.2',
+            'title' => 'Safety Training Reporting Management',
+            'parent_number' => '2',
+            'parent_title' => 'General Information',
+            'text' => 'This section introduces the organization and lists general contact information.',
+        ),
     ),
     $fixture['manual']['sections']
 );
@@ -246,7 +326,7 @@ architect_fixture_assert(
     'System-managed, scope and chapter-container surfaces must not displace procedural amendment homes.'
 );
 $structuralAmendments = architect_fixture_numbers($structuralReport['what_should_actually_be_amended']);
-foreach (array('0.4', '2.0', '5') as $forbiddenStructuralArea) {
+foreach (array('0.4', '2.0', '2.2', '5') as $forbiddenStructuralArea) {
     architect_fixture_assert(
         !in_array($forbiddenStructuralArea, $structuralAmendments, true),
         "Structural surface {$forbiddenStructuralArea} became a false amendment."

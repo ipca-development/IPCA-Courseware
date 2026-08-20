@@ -35,10 +35,23 @@ return array(
             array(
                 'id' => 103,
                 'number' => '3.3',
-                'title' => 'Safety Manager Responsibilities',
+                'title' => 'Safety Manager',
                 'parent_number' => '3',
                 'parent_title' => 'Organization and Responsibilities',
-                'text' => 'The Safety Manager administers Pipedrive for safety reports, reviews occurrences, assigns actions, and reports significant safety matters to the Accountable Manager.',
+                'children' => array(
+                    array(
+                        'title' => 'Requirements',
+                        'text' => 'The Safety Manager requires suitable aviation knowledge, management-system experience, managerial skills, English-language ability and the qualifications appropriate to the role.',
+                    ),
+                    array(
+                        'title' => 'Duties and Responsibilities',
+                        'text' => 'The Safety Manager is the focal point responsible for development, administration and maintenance of the SMS. The Safety Manager administers Pipedrive for safety reports, reviews occurrences, assigns actions, and reports significant safety matters to the Accountable Manager.',
+                    ),
+                    array(
+                        'title' => 'Safety Manager Training',
+                        'text' => 'The Safety Manager completes initial and recurrent SMS training, including practical safety-management, evaluation and reporting courses.',
+                    ),
+                ),
             ),
             array(
                 'id' => 104,
