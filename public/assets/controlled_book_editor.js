@@ -4474,6 +4474,11 @@
     [cellImageWidthInput, cellImageHeightInput, cellImageLockRatioInput].forEach(function (control) {
       if (control) control.disabled = !active;
     });
+    if (tableToolbarEl) {
+      tableToolbarEl.querySelectorAll('[data-cell-image-step]').forEach(function (control) {
+        control.disabled = !active;
+      });
+    }
     if (!figure) return;
     var width = Math.max(15, Math.min(100, parseInt(
       figure.getAttribute('data-width-pct') || '50',
@@ -4519,6 +4524,24 @@
     syncTableCellImageSizeControls(figure);
     scheduleSave(blockEl);
     flushSave(blockEl);
+  }
+
+  function stepTableCellImageSize(dimension, delta) {
+    var blockEl = state.activeTableToolsBlock;
+    var cell = blockEl ? resolveSelectedTableCell(blockEl) : null;
+    var figure = tableCellImage(cell);
+    if (!figure) return;
+    var input = dimension === 'height' ? cellImageHeightInput : cellImageWidthInput;
+    if (!input) return;
+    var current = parseInt(input.value || '0', 10) || 0;
+    if (dimension === 'height' && current <= 0) {
+      var image = figure.querySelector('img');
+      current = image ? Math.max(1, Math.round(image.getBoundingClientRect().height)) : 1;
+    }
+    var min = dimension === 'height' ? 1 : 15;
+    var max = dimension === 'height' ? 1600 : 100;
+    input.value = String(Math.max(min, Math.min(max, current + delta)));
+    updateTableCellImageSize(dimension);
   }
 
   function setTableCellImageAlignment(blockEl, align) {
@@ -12020,6 +12043,18 @@
   if (cellImageWidthInput) {
     cellImageWidthInput.addEventListener('change', function () {
       updateTableCellImageSize('width');
+    });
+  }
+
+  if (tableToolbarEl) {
+    tableToolbarEl.addEventListener('click', function (event) {
+      var stepButton = event.target.closest('[data-cell-image-step]');
+      if (!stepButton || stepButton.disabled) return;
+      event.preventDefault();
+      stepTableCellImageSize(
+        stepButton.getAttribute('data-cell-image-step') || 'width',
+        parseInt(stepButton.getAttribute('data-delta') || '0', 10) || 0
+      );
     });
   }
 

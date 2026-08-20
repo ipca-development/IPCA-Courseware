@@ -36,6 +36,7 @@ const functionNames = [
   'tableCellImageRatio',
   'syncTableCellImageSizeControls',
   'updateTableCellImageSize',
+  'stepTableCellImageSize',
   'wireTableCellImages',
 ];
 const sources = Object.fromEntries(functionNames.map((name) => [name, extractFunction(name)]));
@@ -82,6 +83,7 @@ try {
     window.cellImageWidthInput = document.getElementById('width');
     window.cellImageHeightInput = document.getElementById('height');
     window.cellImageLockRatioInput = document.getElementById('lock');
+    window.tableToolbarEl = document.body;
     window.pushUndo = () => {};
     window.scheduleSave = () => {};
     window.flushSave = () => Promise.resolve();
@@ -107,6 +109,7 @@ try {
     window.cellImageHeightInput.value = '120';
     window.cellImageLockRatioInput.checked = false;
     window.updateTableCellImageSize('height');
+    window.stepTableCellImageSize('width', 1);
     return {
       leftRight: window.extractCellBorders(left).right,
       rightLeft: window.extractCellBorders(right).left,
@@ -125,14 +128,14 @@ try {
   if (result.leftRight?.style !== 'none' || result.rightLeft?.style !== 'none') {
     throw new Error('Adjacent cell boundary was not synchronized.');
   }
-  if (result.figureWidth !== '60%'
+  if (result.figureWidth !== '61%'
       || result.figureHeight !== '120px'
       || result.ratioLocked !== '0'
       || result.figureEditable !== 'false'
       || result.resizeHandles !== 1
       || result.lockedHeight < 40
       || result.lockedHeight > 70
-      || result.independentWidth !== '60'
+      || result.independentWidth !== '61'
       || result.independentHeight !== '120'
       || result.independentLock !== '0') {
     throw new Error(`Cell image editor wiring failed: ${JSON.stringify(result)}`);

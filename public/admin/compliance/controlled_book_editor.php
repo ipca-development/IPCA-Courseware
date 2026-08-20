@@ -247,15 +247,27 @@ compliance_page_open(array(
           <div class="cpb-toolbar-group" aria-label="Cell image">
             <span class="cpb-toolbar-table-label">Cell image</span>
             <button type="button" class="cpb-tool-btn" data-table-action="cell-image-insert" title="Insert or replace an image in the selected cell" disabled>Insert</button>
-            <label class="cpb-table-image-size">W <input type="number" id="cpbCellImageWidth" min="15" max="100" step="1" value="50" title="Image width as percentage of cell" disabled>%</label>
-            <label class="cpb-table-image-size">H <input type="number" id="cpbCellImageHeight" min="1" max="1600" step="1" placeholder="Auto" title="Image height in pixels" disabled>px</label>
+            <button type="button" class="cpb-tool-btn cpb-tool-btn--danger" data-table-action="cell-image-remove" title="Remove the selected cell image" disabled>Remove image</button>
+            <span class="cpb-table-image-size">
+              <span>W</span>
+              <button type="button" class="cpb-tool-btn cpb-table-image-step" data-cell-image-step="width" data-delta="-1" title="Decrease image width" disabled>−</button>
+              <input type="number" id="cpbCellImageWidth" min="15" max="100" step="1" value="50" title="Image width as percentage of cell" aria-label="Cell image width percentage" disabled>
+              <button type="button" class="cpb-tool-btn cpb-table-image-step" data-cell-image-step="width" data-delta="1" title="Increase image width" disabled>+</button>
+              <span>%</span>
+            </span>
+            <span class="cpb-table-image-size">
+              <span>H</span>
+              <button type="button" class="cpb-tool-btn cpb-table-image-step" data-cell-image-step="height" data-delta="-1" title="Decrease image height" disabled>−</button>
+              <input type="number" id="cpbCellImageHeight" min="1" max="1600" step="1" placeholder="Auto" title="Image height in pixels" aria-label="Cell image height in pixels" disabled>
+              <button type="button" class="cpb-tool-btn cpb-table-image-step" data-cell-image-step="height" data-delta="1" title="Increase image height" disabled>+</button>
+              <span>px</span>
+            </span>
             <label class="cpb-table-image-lock" title="Keep the image width and height ratio">
               <input type="checkbox" id="cpbCellImageLockRatio" checked disabled> Lock ratio
             </label>
             <button type="button" class="cpb-tool-btn" data-table-action="cell-image-left" title="Align cell image left" disabled>Left</button>
             <button type="button" class="cpb-tool-btn" data-table-action="cell-image-center" title="Align cell image center" disabled>Center</button>
             <button type="button" class="cpb-tool-btn" data-table-action="cell-image-right" title="Align cell image right" disabled>Right</button>
-            <button type="button" class="cpb-tool-btn cpb-tool-btn--danger" data-table-action="cell-image-remove" title="Remove the selected cell image" disabled>Remove</button>
           </div>
           <div class="cpb-toolbar-group" aria-label="Cell borders">
             <span class="cpb-toolbar-table-label">Cell borders</span>
