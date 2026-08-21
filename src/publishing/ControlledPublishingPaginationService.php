@@ -261,7 +261,7 @@ final class ControlledPublishingPaginationService
         } elseif ($isAnnexSection) {
             $isMajorSectionStart = true;
         }
-        $pageBreakBefore = $isCover || $isAnnexCover || $isPart0 || $isAnnexSection
+        $pageBreakBefore = $isCover || $isAnnexCover || $isPart0 || $isAnnexRegister || $isAnnexSection
             || $isPartStart || $isFirstChapterInPart;
 
         return array(
@@ -546,9 +546,10 @@ final class ControlledPublishingPaginationService
         $bodyWithoutPart0Headings = trim(
             preg_replace($part0HeadingPattern, '', $bodyHtml) ?? $bodyHtml
         );
-        if (preg_match_all('/<article class="cpb-block[^"]*"[^>]*>.*?<\/article>/s', $bodyHtml, $matches) >= 1) {
+        $renderedArticles = $this->extractRenderedBlockArticles($bodyHtml);
+        if ($renderedArticles !== array()) {
             $idx = 0;
-            foreach ($matches[0] as $articleHtml) {
+            foreach ($renderedArticles as $articleHtml) {
                 $articleText = mb_strtolower(trim(preg_replace(
                     '/\s+/u',
                     ' ',
@@ -638,6 +639,45 @@ final class ControlledPublishingPaginationService
         );
 
         return $units;
+    }
+
+    /**
+     * Preserve exact renderer markup without PCRE's backtrack-size ceiling.
+     * Imported tables can make one block exceed one megabyte; a dot-star regex
+     * then fails and previously collapsed the entire chapter into one atomic
+     * fallback fragment.
+     *
+     * Renderer block articles are siblings and are never nested.
+     *
+     * @return list<string>
+     */
+    private function extractRenderedBlockArticles(string $bodyHtml): array
+    {
+        $articles = array();
+        $offset = 0;
+        $length = strlen($bodyHtml);
+        while ($offset < $length) {
+            $start = stripos($bodyHtml, '<article', $offset);
+            if ($start === false) {
+                break;
+            }
+            $tagEnd = strpos($bodyHtml, '>', $start);
+            if ($tagEnd === false) {
+                break;
+            }
+            $openTag = substr($bodyHtml, $start, $tagEnd - $start + 1);
+            $end = stripos($bodyHtml, '</article>', $tagEnd + 1);
+            if ($end === false) {
+                break;
+            }
+            $nextOffset = $end + strlen('</article>');
+            if (preg_match('/\bclass="[^"]*\bcpb-block\b[^"]*"/i', $openTag) === 1) {
+                $articles[] = substr($bodyHtml, $start, $nextOffset - $start);
+            }
+            $offset = $nextOffset;
+        }
+
+        return $articles;
     }
 
     /**

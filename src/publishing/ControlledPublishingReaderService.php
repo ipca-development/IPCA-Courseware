@@ -1457,6 +1457,27 @@ final class ControlledPublishingReaderService
         return $this->livePageMapService()->retry($bookVersionId, $requestedByUserId, null, $mutationHint);
     }
 
+    /**
+     * Reader clients may consume a preview only after its first complete map
+     * has been promoted. They must never launch ephemeral Chromium pagination.
+     *
+     * @param array<string,mixed> $version
+     */
+    public function hasReaderPageMapForVersion(array $version): bool
+    {
+        $versionId = (int)($version['id'] ?? 0);
+        if ($versionId <= 0) {
+            return false;
+        }
+        $profile = ControlledPublishingReaderLayoutProfile::profileKey();
+        if ($this->pageMapStore()->pageCount($versionId, $profile) <= 0) {
+            return false;
+        }
+
+        return (string)($version['lifecycle_status'] ?? '') !== 'released'
+            || $this->pageMapStore()->isApproved($versionId, $profile);
+    }
+
     private function livePageMapService(): ControlledPublishingLivePageMapService
     {
         require_once __DIR__ . '/ControlledPublishingLivePageMapService.php';
@@ -1518,7 +1539,11 @@ final class ControlledPublishingReaderService
         }
 
         if (!$allowEphemeral) {
-            throw new RuntimeException('No approved page map for this manual. Contact compliance.');
+            throw new RuntimeException(
+                $isPreview
+                    ? 'The iOS preview is still being prepared. Check pagination in the Editor and try again.'
+                    : 'No approved page map for this manual. Contact compliance.'
+            );
         }
 
         $summary = $this->buildEphemeralPageMapSummary($version);
@@ -1568,7 +1593,11 @@ final class ControlledPublishingReaderService
         }
 
         if (!$allowEphemeral) {
-            throw new RuntimeException('No approved page map for this manual.');
+            throw new RuntimeException(
+                $isPreview
+                    ? 'The iOS preview is still being prepared. Check pagination in the Editor and try again.'
+                    : 'No approved page map for this manual.'
+            );
         }
 
         $pages = $this->getEphemeralPageMapPages($version);
@@ -1620,7 +1649,11 @@ final class ControlledPublishingReaderService
         }
 
         if (!$allowEphemeral) {
-            throw new RuntimeException('No approved page map for this manual.');
+            throw new RuntimeException(
+                $isPreview
+                    ? 'The iOS preview is still being prepared. Check pagination in the Editor and try again.'
+                    : 'No approved page map for this manual.'
+            );
         }
 
         $summary = $this->buildEphemeralPageMapSummary($version);

@@ -261,8 +261,9 @@ try {
                 'lifecycle_status' => (string)($version['lifecycle_status'] ?? ''),
                 'is_preview' => $ctx['is_preview'],
                 'nav' => $reader->buildReaderNavTree($bookKey, $version),
-                'has_page_map' => $ctx['is_preview']
-                    || (method_exists($reader, 'hasApprovedFrozenPageMapForVersion')
+                'has_page_map' => method_exists($reader, 'hasReaderPageMapForVersion')
+                    ? $reader->hasReaderPageMapForVersion($version)
+                    : (method_exists($reader, 'hasApprovedFrozenPageMapForVersion')
                         ? $reader->hasApprovedFrozenPageMapForVersion($version)
                         : $reader->hasApprovedFrozenPageMap($bookKey)),
             ));
@@ -271,7 +272,7 @@ try {
             $bookKey = mr_validate_book_key((string)($_GET['book'] ?? ''));
             $ctx = mr_reader_context($reader, $access, $user, $bookKey);
             if (method_exists($reader, 'loadReaderPageMap')) {
-                mr_json(200, $reader->loadReaderPageMap($ctx['version'], $ctx['is_preview']));
+                mr_json(200, $reader->loadReaderPageMap($ctx['version'], false));
             }
             mr_json(200, $reader->loadFrozenPageMap($bookKey));
 
@@ -334,7 +335,7 @@ try {
                 $pages[] = $reader->loadReaderPage(
                     $ctx['version'],
                     $pageNumber,
-                    $ctx['is_preview']
+                    false
                 );
             }
             mr_json(200, array(
@@ -352,7 +353,7 @@ try {
                 mr_json(200, $reader->loadReaderPage(
                     $ctx['version'],
                     $pageNumber,
-                    $ctx['is_preview']
+                    false
                 ));
             }
             mr_json(200, $reader->loadFrozenPage($bookKey, $pageNumber));
@@ -363,7 +364,7 @@ try {
             if (method_exists($reader, 'loadReaderTocWithPages')) {
                 mr_json(200, $reader->loadReaderTocWithPages(
                     $ctx['version'],
-                    $ctx['is_preview']
+                    false
                 ));
             }
             mr_json(200, $reader->loadTocWithPages($bookKey));

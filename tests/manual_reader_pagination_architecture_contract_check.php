@@ -307,13 +307,17 @@ if (str_contains($readerApi, 'cw_require_login();')) {
 }
 foreach (array(
     "mr_json(401, array('ok' => false, 'error' => 'Login required'))",
-    "loadReaderPageMap(\$ctx['version'], \$ctx['is_preview'])",
-    "loadReaderPage(\n                    \$ctx['version'],\n                    \$pageNumber,\n                    \$ctx['is_preview']",
-    "loadReaderTocWithPages(\n                    \$ctx['version'],\n                    \$ctx['is_preview']",
+    'hasReaderPageMapForVersion($version)',
+    "loadReaderPageMap(\$ctx['version'], false)",
+    "loadReaderPage(\n                    \$ctx['version'],\n                    \$pageNumber,\n                    false",
+    "loadReaderTocWithPages(\n                    \$ctx['version'],\n                    false",
 ) as $readerApiMarker) {
     if (!str_contains($readerApi, $readerApiMarker)) {
         $failures[] = "Manual Reader API missing stored-map/auth marker: {$readerApiMarker}";
     }
+}
+if (str_contains($readerApi, "loadReaderPageMap(\$ctx['version'], \$ctx['is_preview'])")) {
+    $failures[] = 'Manual Reader API may not launch ephemeral preview pagination.';
 }
 
 $iosSwiftFiles = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(

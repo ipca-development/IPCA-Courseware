@@ -46,6 +46,35 @@ if ((string)($units[1]['block_type'] ?? '') !== 'paragraph') {
     throw new RuntimeException('Part 0 governed body block was not preserved after its title.');
 }
 
+$largeTableRows = str_repeat('<tr><td>Imported training scenario</td><td>1.0</td></tr>', 22000);
+$largeBody = '<article class="cpb-block cpb-block--paragraph" data-block-id="801"'
+    . ' data-stable-anchor="TM-PPL-INTRO"><p>Course structure</p></article>'
+    . '<article class="cpb-block cpb-block--table" data-block-id="802"'
+    . ' data-stable-anchor="TM-PPL-SCENARIOS"><table><tbody>'
+    . $largeTableRows
+    . '</tbody></table></article>';
+$largeUnits = $unitsMethod->invoke(
+    $service,
+    $largeBody,
+    array(
+        'id' => 80,
+        'section_key' => 'part_2_chapter_2',
+        'stable_anchor' => 'TM-PPL-CHAPTER-2',
+        'is_generated' => 0,
+        'is_system_managed' => 0,
+    ),
+    array('is_part0' => false, 'pagination_authority' => 'author')
+);
+if (
+    count($largeUnits) !== 2
+    || (string)($largeUnits[1]['block_type'] ?? '') !== 'table'
+    || (string)($largeUnits[1]['unit_key'] ?? '') !== 'TM-PPL-SCENARIOS'
+) {
+    throw new RuntimeException(
+        'Megabyte-scale imported tables collapsed into an atomic chapter fragment.'
+    );
+}
+
 $classifyMethod = new ReflectionMethod($service, 'classifySection');
 $classified = $classifyMethod->invoke($service, $section, array(70 => $section));
 if (empty($classified['force_page_break_before']) || empty($classified['is_part0'])) {
