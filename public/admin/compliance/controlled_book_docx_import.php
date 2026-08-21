@@ -83,7 +83,7 @@ compliance_page_open(array(
 
       <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:#334155;">
         <input type="checkbox" name="force" value="1" checked>
-        Replace existing author blocks in imported sections (recommended)
+        Don't Import Duplicate Content
       </label>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">

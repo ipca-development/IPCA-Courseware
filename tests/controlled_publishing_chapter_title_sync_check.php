@@ -32,6 +32,28 @@ $assert(
     ControlledPublishingDocxReader::isHeadingParagraphStyle('Titel', 'Titel'),
     'Pages Titel style must count as a chapter heading style.'
 );
+$assert(
+    ControlledPublishingDocxReader::isPlausibleManualSectionRef(
+        '6',
+        'BASIC USE OF VOR AND DME',
+        1
+    ),
+    'Aviation navigation terms must remain valid MAIN chapter titles.'
+);
+$assert(
+    !ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt(
+        '6',
+        'BASIC USE OF VOR AND DME'
+    ),
+    'VOR and DME in a chapter title must not be classified as a measurement row.'
+);
+$assert(
+    ControlledPublishingDocxReader::isLikelyTableOrMeasurementExcerpt(
+        '51',
+        'FT – 100 FT | 400 M'
+    ),
+    'Actual measurement rows must still be excluded from the manual outline.'
+);
 
 $promoted = ControlledPublishingDocxReader::promoteMissingChapterHeadings(array(
     array(
@@ -345,6 +367,11 @@ if (!is_string($structure) || !str_contains($structure, 'promoteGenericWrapperCh
 }
 if (!is_string($structure) || !str_contains($structure, 'Keep chapters that already contain imported blocks')) {
     $failures[] = 'Structure prune must not delete MAIN chapters that still contain imported blocks.';
+}
+if (!is_string($structure)
+    || !str_contains($structure, "if (!empty(\$meta['outline_locked']))")
+    || !str_contains($structure, 'A locked outline row is an explicit author decision')) {
+    $failures[] = 'Explicitly locked MAIN chapters must remain visible in Edit Outline.';
 }
 
 if ($failures !== array()) {

@@ -9,7 +9,7 @@
 
 .bm-library-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
   gap: 18px;
 }
 
@@ -167,7 +167,8 @@
   margin: 0;
   color: #263d5b;
   font-weight: 650;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .bm-actions {

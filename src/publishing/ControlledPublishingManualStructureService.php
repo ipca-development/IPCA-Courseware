@@ -2076,6 +2076,11 @@ final class ControlledPublishingManualStructureService
         if ($chapterNumber <= 0 || $chapterNumber > ControlledPublishingDocxReader::MAX_CHAPTER_NUMBER) {
             return false;
         }
+        // A locked outline row is an explicit author decision. Do not hide it
+        // because its title contains an aviation acronym also seen in tables.
+        if (!empty($meta['outline_locked'])) {
+            return true;
+        }
 
         $title = ControlledPublishingDocxReader::sanitizeSectionTitle(trim((string)($sectionRow['title'] ?? '')));
         $navLabel = trim((string)($meta['nav_label'] ?? ''));

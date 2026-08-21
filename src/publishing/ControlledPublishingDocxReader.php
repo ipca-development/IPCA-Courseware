@@ -1048,7 +1048,10 @@ final class ControlledPublishingDocxReader
         if (str_contains($title, '|')) {
             return true;
         }
-        if (preg_match('/\b(MHz|kHz|ft|KG|Kg|kg|NM|kt|VOR|ILS|DME|NOTAM|DEGREES|FEATHERED)\b/iu', $combined)) {
+        // Navigation topics such as VOR, ILS, DME, and NOTAM are legitimate
+        // chapter titles. Only units and table-state values indicate a
+        // measurement row here.
+        if (preg_match('/\b(MHz|kHz|ft|KG|Kg|kg|NM|kt|DEGREES|FEATHERED)\b/iu', $combined)) {
             return true;
         }
         if (preg_match('/\(\s*\d+\s*M\b/i', $title)) {
