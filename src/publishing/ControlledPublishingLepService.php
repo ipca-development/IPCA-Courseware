@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingAnnexService.php';
+require_once __DIR__ . '/ControlledPublishingOutlineService.php';
 require_once __DIR__ . '/ControlledPublishingPart0PageService.php';
 
 /**
@@ -221,13 +222,25 @@ final class ControlledPublishingLepService
         }
 
         $foundPartSections = false;
-        foreach (array('part_1', 'part_2', 'part_3', 'part_4') as $partKey) {
-            $sectionId = $this->sectionIdByKey($versionId, $partKey);
-            if ($sectionId <= 0) {
+        $partStmt = $this->pdo->prepare(
+            "SELECT id, section_key, title, metadata_json
+             FROM ipca_publishing_book_sections
+             WHERE book_version_id = :version_id
+               AND section_key LIKE 'part_%'
+             ORDER BY sort_order, id"
+        );
+        $partStmt->execute(array(':version_id' => $versionId));
+        foreach ($partStmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $partRow) {
+            if (preg_match('/^part_[1-9][0-9]*$/', (string)($partRow['section_key'] ?? '')) !== 1) {
                 continue;
             }
+            if (ControlledPublishingOutlineService::isPartHidden($partRow)) {
+                continue;
+            }
+            $partKey = (string)($partRow['section_key'] ?? '');
+            $sectionId = (int)($partRow['id'] ?? 0);
             $foundPartSections = true;
-            $title = $this->sectionTitleById($sectionId);
+            $title = trim((string)($partRow['title'] ?? ''));
             $partNum = $this->extractPartNumberFromKey($partKey);
             $parts[] = array(
                 'part' => (string)$partNum,

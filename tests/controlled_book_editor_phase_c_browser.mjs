@@ -182,7 +182,24 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
         title: 'TECHNICAL',
         nav_label: 'PART 2 – TECHNICAL',
         chapters: [],
+      }, {
+        section_id: 23,
+        chapter_parent_id: 23,
+        section_key: 'part_3',
+        part_number: 3,
+        title: 'ROUTE',
+        nav_label: 'PART 3 – ROUTE',
+        chapters: [],
+      }, {
+        section_id: 24,
+        chapter_parent_id: 24,
+        section_key: 'part_4',
+        part_number: 4,
+        title: 'TRAINING',
+        nav_label: 'PART 4 – TRAINING',
+        chapters: [],
       }],
+      hiddenOutlineParts: [],
       queuePreview(plan) { this.previewPlans.push(plan); },
       resolvePreview(index, payload) { this.pendingPreviews[index].deferred.resolve(payload); },
       queueLoad(plan) { this.loadPlans.push(plan); },
@@ -286,6 +303,10 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
         });
       }
       if (action === 'delete_outline_part') {
+        const deleted = window.__phaseC.outlineParts.find(
+          (part) => Number(part.section_id) === Number(payload.section_id),
+        );
+        if (deleted) window.__phaseC.hiddenOutlineParts.push(deleted);
         window.__phaseC.outlineParts = window.__phaseC.outlineParts.filter(
           (part) => Number(part.section_id) !== Number(payload.section_id),
         );
@@ -299,15 +320,19 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
         });
       }
       if (action === 'add_outline_part') {
-        const created = {
-          section_id: 23,
-          chapter_parent_id: 23,
-          section_key: 'part_3',
-          part_number: 3,
+        const restored = window.__phaseC.hiddenOutlineParts.shift();
+        const partNumber = restored
+          ? Number(restored.part_number)
+          : Math.max(...window.__phaseC.outlineParts.map((part) => Number(part.part_number))) + 1;
+        const created = Object.assign({}, restored || {}, {
+          section_id: restored ? Number(restored.section_id) : 20 + partNumber,
+          chapter_parent_id: restored ? Number(restored.chapter_parent_id) : 20 + partNumber,
+          section_key: `part_${partNumber}`,
+          part_number: partNumber,
           title: String(payload.title || 'NEW PART'),
-          nav_label: `PART 3 – ${String(payload.title || 'NEW PART').toUpperCase()}`,
+          nav_label: `PART ${partNumber} – ${String(payload.title || 'NEW PART').toUpperCase()}`,
           chapters: [],
-        };
+        });
         window.__phaseC.outlineParts.push(created);
         return jsonResponse({
           ok: true,
@@ -426,18 +451,18 @@ test('disabled by default makes no stored_preview call', async (browser) => {
   }
 });
 
-test('Edit Outline deletes an empty PART and restores a PART slot', async (browser) => {
+test('Edit Outline safely restores a deleted PART and adds PART 5', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
     await page.locator('#cpbEditOutline').click();
     await page.waitForFunction(() =>
-      document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 2
+      document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 4
     );
 
     await page.locator('[aria-label="Delete PART 1"]').click();
     await page.waitForFunction(() =>
       window.__phaseC.requests.some((request) => request.action === 'delete_outline_part')
-      && document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 1
+      && document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 3
     );
 
     await page.evaluate(() => { window.prompt = () => 'Operations'; });
@@ -446,12 +471,26 @@ test('Edit Outline deletes an empty PART and restores a PART slot', async (brows
       window.__phaseC.requests.some((request) =>
         request.action === 'add_outline_part' && request.payload.title === 'Operations'
       )
-      && document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 2
+      && document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 4
     );
-    assert.match(await page.locator('#cpbOutlineBody').innerText(), /PART 3/i);
     assert.equal(
-      await page.locator('#cpbOutlineBody .cpb-struct-part').last().locator('input').inputValue(),
+      await page.locator('[data-part-id="21"] input').inputValue(),
       'Operations',
+    );
+
+    await page.evaluate(() => { window.prompt = () => 'Supplemental procedures'; });
+    await page.getByRole('button', { name: '+ Add PART' }).click();
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'add_outline_part'
+        && request.payload.title === 'Supplemental procedures'
+      )
+      && document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 5
+    );
+    assert.match(await page.locator('#cpbOutlineBody').innerText(), /PART 5/i);
+    assert.equal(
+      await page.locator('[data-part-id="25"] input').inputValue(),
+      'Supplemental procedures',
     );
   } finally {
     assert.deepEqual(browserErrors, []);

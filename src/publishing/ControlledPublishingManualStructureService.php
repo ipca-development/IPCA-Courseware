@@ -2194,7 +2194,7 @@ final class ControlledPublishingManualStructureService
     public function resolvePartTitleForSection(array $section, array $flatSections): string
     {
         $key = (string)($section['section_key'] ?? '');
-        if (isset(self::PART_TITLES[$key])) {
+        if ($this->isManualPartKey($key)) {
             return $this->resolvedPartTitleRow($section, $flatSections);
         }
         if (in_array($key, self::PART0_SECTION_KEYS, true)) {
@@ -2213,7 +2213,7 @@ final class ControlledPublishingManualStructureService
                 break;
             }
             $parentKey = (string)($parent['section_key'] ?? '');
-            if (isset(self::PART_TITLES[$parentKey])) {
+            if ($this->isManualPartKey($parentKey)) {
                 return $this->resolvedPartTitleRow($parent, $flatSections);
             }
             if (in_array($parentKey, self::PART0_SECTION_KEYS, true)) {
@@ -2234,7 +2234,10 @@ final class ControlledPublishingManualStructureService
     private function resolvedPartTitleRow(array $row, array $flatSections): string
     {
         $key = (string)($row['section_key'] ?? '');
-        $fallback = self::PART_TITLES[$key] ?? '';
+        $partNumber = preg_match('/^part_([1-9][0-9]*)$/', $key, $match) === 1
+            ? (int)$match[1]
+            : 0;
+        $fallback = self::PART_TITLES[$key] ?? ($partNumber > 0 ? 'PART ' . $partNumber : '');
         if ($key !== 'main_content') {
             return ControlledPublishingOutlineService::partNavTitle($row, $fallback);
         }
@@ -2252,6 +2255,11 @@ final class ControlledPublishingManualStructureService
         return $legacyTitle === 'PART 1 – MAIN CONTENT'
             ? ControlledPublishingOutlineService::formatPartNavTitle(1, 'General')
             : $legacyTitle;
+    }
+
+    private function isManualPartKey(string $key): bool
+    {
+        return $key === 'main_content' || preg_match('/^part_[1-9][0-9]*$/', $key) === 1;
     }
 
     /**

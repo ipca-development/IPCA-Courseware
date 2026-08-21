@@ -115,6 +115,28 @@ $dynamicPart = $summariesMethod->invoke(
 if ((string)($dynamicPart[0]['part'] ?? '') !== 'Part 2 — Compliance Monitoring Manual') {
     throw new RuntimeException('Revision summaries do not use the persisted manual part title.');
 }
+$dynamicPart5 = $summariesMethod->invoke($service, array(
+    array(
+        'block_key' => 'part_5_change',
+        'section_key' => 'part_5_chapter_1',
+        'section_sort_order' => 50,
+        'section_title' => 'Supplemental',
+        'change_status' => 'new',
+        'payload_json' => json_encode(array('html' => '<p>Part 5 update.</p>'), JSON_THROW_ON_ERROR),
+        'change_context' => array(),
+    ),
+), array('part_5' => 'Part 5 — Supplemental Procedures'));
+if ((string)($dynamicPart5[0]['part'] ?? '') !== 'Part 5 — Supplemental Procedures') {
+    throw new RuntimeException('Revision summaries do not support dynamically added PART labels.');
+}
+$partSortOrder = new ReflectionMethod($service, 'partSortOrder');
+if (
+    $partSortOrder->invoke($service, 'Part 5 — Supplemental Procedures') !== 5
+    || $partSortOrder->invoke($service, 'Part 10 — Additional Material') !== 10
+    || $partSortOrder->invoke($service, 'Annexes') <= 10
+) {
+    throw new RuntimeException('Dynamic PART revision groups are not sorted by their full numeric value.');
+}
 
 $ordered = $summariesMethod->invoke($service, array(
     array(

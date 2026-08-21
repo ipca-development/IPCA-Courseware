@@ -162,6 +162,7 @@
     focusedTableCell: null,
     pendingScrollRef: null,
     canvasEventsWired: false,
+    wizardToggleEventsWired: false,
     resizeHintEl: null,
     tableClipboard: '',
     tableBlockClipboard: null,
@@ -3550,6 +3551,100 @@
     }
   }
 
+  function renderWizardParagraphButtons(changes) {
+    (Array.isArray(changes) ? changes : []).forEach(function (change) {
+      var blockId = parseInt(change.block_id || '0', 10);
+      var operationId = parseInt(change.operation_id || '0', 10);
+      if (!blockId || !operationId) return;
+      var blockEl = canvasEl.querySelector('.cpb-block[data-block-id="' + blockId + '"]');
+      var chrome = blockEl ? blockEl.querySelector(':scope > .cpb-block-chrome') : null;
+      if (!chrome || chrome.querySelector('[data-action="toggle-wizard-paragraph"]')) return;
+
+      var stateName = String(change.state || 'conflict');
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'cpb-block-btn cpb-block-btn--wizard-toggle'
+        + (stateName === 'original' ? ' is-original' : '');
+      button.setAttribute('data-action', 'toggle-wizard-paragraph');
+      button.setAttribute('data-operation-id', String(operationId));
+      button.setAttribute('data-wizard-state', stateName);
+      button.setAttribute('aria-label', stateName === 'original'
+        ? 'Show the Wizard version of this paragraph'
+        : 'Show the pre-Wizard version of this paragraph');
+      button.title = stateName === 'original'
+        ? 'Show Wizard paragraph again'
+        : 'Show pre-Wizard paragraph';
+      button.disabled = change.can_toggle === false || stateName === 'conflict';
+      if (button.disabled) {
+        button.title = String(change.unavailable_reason || (
+          stateName === 'conflict'
+            ? 'This paragraph was edited later, so the Wizard comparison is unavailable'
+            : 'This paragraph cannot be toggled independently'
+        ));
+      }
+      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">'
+        + '<path d="M5 17.5h14l-2.2-3.2-2.5-9.2-3.1 5.1-2.8 1.9z"></path>'
+        + '<path d="M3.8 18.2c3.2 1.5 13.2 1.5 16.4 0"></path>'
+        + '<path d="M8.2 12.2l7.9 2.4"></path>'
+        + '</svg><span aria-hidden="true">'
+        + (stateName === 'original' ? '↷' : '↶')
+        + '</span>';
+      chrome.insertBefore(button, chrome.firstChild);
+    });
+  }
+
+  function toggleWizardParagraphFromButton(btn) {
+    var blockEl = btn.closest('.cpb-block');
+    if (!blockEl) return;
+    var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
+    var operationId = parseInt(btn.getAttribute('data-operation-id') || '0', 10);
+    if (!blockId || !operationId || btn.disabled) return;
+    btn.disabled = true;
+    setStatus('Switching paragraph…', 'saving');
+    var pendingBlock = state.pending[blockId];
+    var pendingSave = pendingBlock
+      ? flushSave(pendingBlock, false, true)
+      : Promise.resolve();
+    Promise.resolve(pendingSave).then(function () {
+      return apiPost('toggle_wizard_paragraph', {
+        version_id: state.versionId,
+        operation_id: operationId,
+        block_id: blockId,
+      });
+    }).then(function (res) {
+      if (!res.ok) throw new Error(res.error || 'Wizard paragraph switch failed');
+      setStatus(
+        res.result && res.result.displayed_state === 'original'
+          ? 'Showing pre-Wizard paragraph'
+          : 'Showing Wizard paragraph',
+        'saved'
+      );
+      window.location.reload();
+      return null;
+    }).catch(function (error) {
+      btn.disabled = false;
+      showError(error);
+    });
+  }
+
+  function wireWizardToggleDelegation() {
+    if (state.wizardToggleEventsWired) return;
+    state.wizardToggleEventsWired = true;
+    canvasEl.addEventListener('mousedown', function (event) {
+      var button = event.target.closest('[data-action="toggle-wizard-paragraph"]');
+      if (!button || !canvasEl.contains(button)) return;
+      // Keep focus in the source paragraph until its explicit save completes.
+      event.preventDefault();
+    });
+    canvasEl.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-action="toggle-wizard-paragraph"]');
+      if (!button || !canvasEl.contains(button)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleWizardParagraphFromButton(button);
+    });
+  }
+
   function loadSection(sectionId, scrollRef) {
     var loadSequence = ++state.sectionLoadSequence;
     state.sectionAssemblyProgress = 0;
@@ -3611,6 +3706,7 @@
       updateToolbarMode();
       renderTree(state.sectionsTree, state.sectionId);
       canvasEl.innerHTML = res.page_html || '';
+      renderWizardParagraphButtons(res.wizard_paragraph_changes || []);
       wireCanvas();
       loadReviewThreadMarkers();
       applyLayoutToDom(state.pageLayout);
@@ -3721,7 +3817,8 @@
   function updateAddSubsection(section) {
     if (!addSubBtn || !section) return;
     var key = section.section_key || '';
-    var isNestable = ['part_1', 'part_2', 'part_3', 'part_4', 'main_content', 'annexes'].indexOf(key) >= 0
+    var isNestable = ['main_content', 'annexes'].indexOf(key) >= 0
+      || /^part_[1-9][0-9]*$/.test(key)
       || !!section.parent_section_id
       || documentType === 'form';
     addSubBtn.style.display = state.editable && isNestable ? 'block' : 'none';
@@ -4074,10 +4171,6 @@
     addPart.type = 'button';
     addPart.className = 'cpb-struct-add cpb-struct-add--part';
     addPart.textContent = '+ Add PART';
-    addPart.disabled = data.can_add_part === false;
-    if (addPart.disabled) {
-      addPart.title = 'This manual already uses the maximum of four PARTs.';
-    }
     addPart.addEventListener('click', function () {
       var title = window.prompt('PART title');
       if (!title || !title.trim()) return;
@@ -5255,6 +5348,7 @@
 
   function wireCanvas() {
     initCanvasEvents();
+    wireWizardToggleDelegation();
 
     canvasEl.querySelectorAll('.cpb-paragraph-row').forEach(function (row) {
       ensureParagraphStack(row);
@@ -5294,6 +5388,9 @@
     canvasEl.querySelectorAll('.cpb-block-chrome [data-action]').forEach(function (btn) {
       if (btn.getAttribute('data-chrome-wired') === '1') return;
       btn.setAttribute('data-chrome-wired', '1');
+      if (btn.getAttribute('data-action') === 'toggle-wizard-paragraph') {
+        return;
+      }
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         var blockEl = btn.closest('.cpb-block');
@@ -5697,7 +5794,7 @@
     scheduleUnifiedPrintLayout(0);
   }
 
-  function flushSave(blockEl, refreshNumbering) {
+  function flushSave(blockEl, refreshNumbering, rejectOnError) {
     if (!state.editable || !blockEl || !isConnectedEl(blockEl)) return;
     var blockId = parseInt(blockEl.getAttribute('data-block-id') || '0', 10);
     var blockType = blockEl.getAttribute('data-block-type') || '';
@@ -5723,7 +5820,10 @@
       if (refreshNumbering) {
         return recomputeSectionNumbers().catch(showError);
       }
-    }).catch(showError);
+    }).catch(function (error) {
+      showError(error);
+      if (rejectOnError) throw error;
+    });
   }
 
   function defaultBookStyles() {

@@ -184,6 +184,10 @@ $page = file_get_contents($root . '/public/admin/compliance/controlled_book_edit
 $js = file_get_contents($root . '/public/assets/controlled_book_editor.js');
 $structure = file_get_contents($root . '/src/publishing/ControlledPublishingManualStructureService.php');
 $toc = file_get_contents($root . '/src/publishing/ControlledPublishingTocService.php');
+$sections = file_get_contents($root . '/src/publishing/ControlledPublishingSectionService.php');
+$pagination = file_get_contents($root . '/src/publishing/ControlledPublishingPaginationService.php');
+$lep = file_get_contents($root . '/src/publishing/ControlledPublishingLepService.php');
+$revision = file_get_contents($root . '/src/publishing/ControlledPublishingRevisionService.php');
 
 if (!is_string($outline) || !str_contains($outline, 'Cover, Part 0, and Annexes cannot be edited in the outline.')) {
     $failures[] = 'Outline service must refuse edits to Cover, Part 0, and Annexes.';
@@ -294,10 +298,30 @@ if (!is_string($outline) || !str_contains($outline, 'function demoteChapter(')) 
 if (!is_string($outline)
     || !str_contains($outline, 'function addPart(')
     || !str_contains($outline, 'function deletePart(')
+    || !str_contains($outline, "'part_' . \$partNumber")
+    || str_contains($outline, 'maximum of four PARTs')
     || !str_contains($outline, "'outline_hidden' => true")
     || !str_contains($outline, 'Move or delete every chapter before deleting this PART.')
     || !str_contains($outline, 'Remove all PART content before deleting this PART.')) {
     $failures[] = 'PART add/delete must preserve identity and refuse deletion while content remains.';
+}
+if (!is_string($sections)
+    || !str_contains($sections, "preg_match('/^part_[1-9][0-9]*$/'")) {
+    $failures[] = 'Dynamic PARTs must accept author-created MAIN chapters and subsections.';
+}
+if (!is_string($pagination)
+    || !str_contains($pagination, 'function isPartSectionKey(')
+    || !str_contains($pagination, "/^part_[1-9][0-9]*$/")) {
+    $failures[] = 'Authoritative pagination must classify PART 5 and later as PART starts.';
+}
+if (!is_string($lep)
+    || !str_contains($lep, "section_key LIKE 'part_%'")
+    || !str_contains($lep, "preg_match('/^part_[1-9][0-9]*$/'")) {
+    $failures[] = 'The List of Effective Parts must include dynamically created PARTs.';
+}
+if (!is_string($revision)
+    || !str_contains($revision, "preg_match('/part_([1-9][0-9]*)/'")) {
+    $failures[] = 'Revision highlights must resolve labels for dynamically created PARTs.';
 }
 if (!is_string($nav)
     || !str_contains($nav, 'ControlledPublishingOutlineService::isPartHidden($partRow)')) {

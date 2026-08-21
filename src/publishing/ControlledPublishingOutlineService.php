@@ -12,9 +12,6 @@ require_once __DIR__ . '/ControlledPublishingSectionService.php';
 final class ControlledPublishingOutlineService
 {
     /** @var list<string> */
-    public const PART_KEYS = array('part_1', 'part_2', 'part_3', 'part_4');
-
-    /** @var list<string> */
     public const LOCKED_NAV_LABELS = array(
         'Cover Page',
         ControlledPublishingPart0PageService::PART_TITLE,
@@ -142,8 +139,7 @@ final class ControlledPublishingOutlineService
         $sectionNumberDisplay = $this->manualStructure->computeSectionNumberDisplay($versionId, $manualCode);
 
         $parts = array();
-        $hiddenPartCount = 0;
-        foreach (self::PART_KEYS as $partKey) {
+        foreach (self::partKeysFromRows($byKey) as $partKey) {
             $row = $byKey[$partKey] ?? null;
             if (
                 $partKey === 'part_1'
@@ -157,7 +153,6 @@ final class ControlledPublishingOutlineService
                 continue;
             }
             if (self::isPartHidden($row)) {
-                $hiddenPartCount++;
                 continue;
             }
             $partNumber = self::partNumberFromRow($row);
@@ -222,7 +217,7 @@ final class ControlledPublishingOutlineService
                 array('kind' => 'annexes', 'title' => 'ANNEXES'),
             ),
             'parts' => $parts,
-            'can_add_part' => $hiddenPartCount > 0,
+            'can_add_part' => true,
         );
     }
 
@@ -246,14 +241,20 @@ final class ControlledPublishingOutlineService
         if ((string)($version['lifecycle_status'] ?? '') === 'released') {
             throw new RuntimeException('Released versions cannot be restructured.');
         }
+        $name = self::stripPartNumberPrefix($title);
+        if ($name === '') {
+            throw new RuntimeException('Enter a title for the new PART.');
+        }
         $byKey = array();
-        foreach ($this->sections->listFlatSections($versionId) as $row) {
+        $flat = $this->sections->listFlatSections($versionId);
+        foreach ($flat as $row) {
             if (is_array($row)) {
                 $byKey[(string)($row['section_key'] ?? '')] = $row;
             }
         }
 
-        foreach (self::PART_KEYS as $partKey) {
+        $partKeys = self::partKeysFromRows($byKey);
+        foreach ($partKeys as $partKey) {
             $candidateRows = array();
             if (isset($byKey[$partKey])) {
                 $candidateRows[] = $byKey[$partKey];
@@ -273,10 +274,6 @@ final class ControlledPublishingOutlineService
             }
 
             $partNumber = (int)substr($partKey, strlen('part_'));
-            $name = self::stripPartNumberPrefix($title);
-            if ($name === '') {
-                $name = 'Part ' . $partNumber;
-            }
             $navLabel = self::formatPartNavTitle($partNumber, $name);
             $startedTransaction = !$this->pdo->inTransaction();
             if ($startedTransaction) {
@@ -307,7 +304,76 @@ final class ControlledPublishingOutlineService
             return (int)($candidateRows[0]['id'] ?? 0);
         }
 
-        throw new RuntimeException('This manual already uses the maximum of four PARTs.');
+        $usedNumbers = array();
+        foreach ($partKeys as $partKey) {
+            $usedNumbers[(int)substr($partKey, strlen('part_'))] = true;
+        }
+        $partNumber = 1;
+        while (isset($usedNumbers[$partNumber])) {
+            $partNumber++;
+        }
+        $partKey = 'part_' . $partNumber;
+        $navLabel = self::formatPartNavTitle($partNumber, $name);
+        $sortOrder = 90 + ($partNumber * 10);
+        $bookKey = strtoupper(trim((string)($version['book_key'] ?? 'MANUAL')));
+        $versionLabel = str_replace('.', '_', trim((string)($version['version_label'] ?? 'DRAFT')));
+        $stableAnchor = $bookKey . '-' . $versionLabel . '-PART-' . $partNumber;
+        $metadata = array(
+            'manual_part' => $partNumber,
+            'nav_label' => $navLabel,
+            'outline_locked' => true,
+            'synced_from_canonical' => true,
+        );
+
+        $startedTransaction = !$this->pdo->inTransaction();
+        if ($startedTransaction) {
+            $this->pdo->beginTransaction();
+        }
+        try {
+            $shiftAnnexes = $this->pdo->prepare(
+                'UPDATE ipca_publishing_book_sections
+                 SET sort_order = :annex_sort, updated_at = CURRENT_TIMESTAMP
+                 WHERE book_version_id = :version_id
+                   AND section_key = \'annexes\'
+                   AND sort_order <= :part_sort'
+            );
+            $shiftAnnexes->execute(array(
+                ':annex_sort' => $sortOrder + 10,
+                ':version_id' => $versionId,
+                ':part_sort' => $sortOrder,
+            ));
+            $insert = $this->pdo->prepare(
+                'INSERT INTO ipca_publishing_book_sections
+                    (book_version_id, parent_section_id, section_key, stable_anchor, title,
+                     section_type, metadata_json, is_system_managed, is_generated, sort_order, created_by)
+                 VALUES
+                    (:version_id, NULL, :section_key, :stable_anchor, :title,
+                     \'content\', :metadata_json, 0, 0, :sort_order, :created_by)'
+            );
+            $insert->execute(array(
+                ':version_id' => $versionId,
+                ':section_key' => $partKey,
+                ':stable_anchor' => $stableAnchor,
+                ':title' => $navLabel,
+                ':metadata_json' => json_encode(
+                    $metadata,
+                    JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR
+                ),
+                ':sort_order' => $sortOrder,
+                ':created_by' => $actorUserId,
+            ));
+            $sectionId = (int)$this->pdo->lastInsertId();
+            if ($startedTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($startedTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $sectionId;
     }
 
     public function deletePart(int $versionId, int $sectionId, ?int $actorUserId = null): void
@@ -809,7 +875,27 @@ final class ControlledPublishingOutlineService
     {
         $key = (string)($row['section_key'] ?? '');
 
-        return in_array($key, self::PART_KEYS, true) || $key === 'main_content';
+        return $key === 'main_content' || preg_match('/^part_[1-9][0-9]*$/', $key) === 1;
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $byKey
+     * @return list<string>
+     */
+    private static function partKeysFromRows(array $byKey): array
+    {
+        $numbered = array();
+        foreach (array_keys($byKey) as $key) {
+            if (preg_match('/^part_([1-9][0-9]*)$/', (string)$key, $match) === 1) {
+                $numbered[(int)$match[1]] = (string)$key;
+            }
+        }
+        if (isset($byKey['main_content']) && !isset($numbered[1])) {
+            $numbered[1] = 'part_1';
+        }
+        ksort($numbered, SORT_NUMERIC);
+
+        return array_values($numbered);
     }
 
     /**

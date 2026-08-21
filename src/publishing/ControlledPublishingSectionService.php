@@ -8,9 +8,6 @@ require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
  */
 final class ControlledPublishingSectionService
 {
-    /** Section types that may contain author-created subsections. */
-    private const NESTABLE_SECTION_KEYS = array('part_1', 'part_2', 'part_3', 'part_4', 'main_content', 'annexes');
-
     public function __construct(private PDO $pdo)
     {
     }
@@ -138,7 +135,10 @@ final class ControlledPublishingSectionService
     private function parentAllowsSubsections(array $parent): bool
     {
         $key = (string)($parent['section_key'] ?? '');
-        if (in_array($key, self::NESTABLE_SECTION_KEYS, true)) {
+        if (
+            in_array($key, array('main_content', 'annexes'), true)
+            || preg_match('/^part_[1-9][0-9]*$/', $key) === 1
+        ) {
             return true;
         }
         if (!empty($parent['parent_section_id'])) {

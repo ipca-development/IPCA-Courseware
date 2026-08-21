@@ -203,7 +203,7 @@ final class ControlledPublishingTocService
             SELECT id, section_key, title, stable_anchor, sort_order
             FROM ipca_publishing_book_sections
             WHERE book_version_id = :version_id
-              AND section_key REGEXP '^part_[0-9]+_chapter_[0-9]+$'
+              AND section_key LIKE 'part_%_chapter_%'
             ORDER BY sort_order, id
         ");
         $stmt->execute(array(':version_id' => $versionId));
@@ -213,7 +213,7 @@ final class ControlledPublishingTocService
                 continue;
             }
             $sectionKey = (string)($row['section_key'] ?? '');
-            if (preg_match('/^part_(\d+)_chapter_/', $sectionKey, $match)) {
+            if (preg_match('/^part_(\d+)_chapter_[0-9]+$/', $sectionKey, $match)) {
                 $partKey = 'part_' . $match[1];
                 if (!isset($grouped[$partKey])) {
                     $grouped[$partKey] = array();
@@ -222,12 +222,15 @@ final class ControlledPublishingTocService
             }
         }
 
-        foreach (array('part_1', 'part_2', 'part_3', 'part_4') as $partKey) {
-            if (!isset($grouped[$partKey])) {
-                continue;
-            }
+        foreach (array_keys($grouped) as $partKey) {
             usort($grouped[$partKey], array(self::class, 'compareChapterRows'));
         }
+        uksort($grouped, static function (string $a, string $b): int {
+            preg_match('/^part_(\d+)$/', $a, $matchA);
+            preg_match('/^part_(\d+)$/', $b, $matchB);
+            return ((int)($matchA[1] ?? PHP_INT_MAX))
+                <=> ((int)($matchB[1] ?? PHP_INT_MAX));
+        });
 
         return $grouped;
     }

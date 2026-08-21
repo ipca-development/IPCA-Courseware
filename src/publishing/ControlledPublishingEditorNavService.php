@@ -105,7 +105,7 @@ final class ControlledPublishingEditorNavService
 
         $tree[] = $this->separatorNode('after_part0');
 
-        foreach (self::BOOK_PARTS[$bookKey] ?? self::BOOK_PARTS['OM'] as $partDef) {
+        foreach ($this->partDefinitions($byKey, $bookKey) as $partDef) {
             $partKey = (string)$partDef['section_key'];
             if (!isset($byKey[$partKey]) && !($partKey === 'part_1' && isset($byKey['main_content']))) {
                 continue;
@@ -167,6 +167,39 @@ final class ControlledPublishingEditorNavService
         }
 
         return $tree;
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $byKey
+     * @return list<array{section_key:string,title:string,sort_order:int}>
+     */
+    private function partDefinitions(array $byKey, string $bookKey): array
+    {
+        $defaults = array();
+        foreach (self::BOOK_PARTS[$bookKey] ?? self::BOOK_PARTS['OM'] as $definition) {
+            $defaults[(string)$definition['section_key']] = $definition;
+        }
+        $numbered = array();
+        foreach ($byKey as $key => $row) {
+            if (preg_match('/^part_([1-9][0-9]*)$/', (string)$key, $match) !== 1) {
+                continue;
+            }
+            $numbered[(int)$match[1]] = array(
+                'section_key' => (string)$key,
+                'title' => (string)($defaults[$key]['title'] ?? ('PART ' . (int)$match[1])),
+                'sort_order' => (int)($row['sort_order'] ?? (90 + ((int)$match[1] * 10))),
+            );
+        }
+        if (isset($byKey['main_content']) && !isset($numbered[1])) {
+            $numbered[1] = $defaults['part_1'] ?? array(
+                'section_key' => 'part_1',
+                'title' => 'PART 1 – General',
+                'sort_order' => 100,
+            );
+        }
+        ksort($numbered, SORT_NUMERIC);
+
+        return array_values($numbered);
     }
 
     /**

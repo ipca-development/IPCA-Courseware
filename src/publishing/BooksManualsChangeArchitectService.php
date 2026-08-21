@@ -3507,11 +3507,15 @@ final class BooksManualsChangeArchitectService
             'section_type' => (string)($section['section_type'] ?? 'content'),
             'is_system_managed' => !empty($section['is_system_managed'])
                 || !empty($section['is_generated'])
+                || preg_match(
+                    '/^part_[1-9][0-9]*$/',
+                    (string)$section['section_key']
+                ) === 1
                 || in_array((string)$section['section_key'], array(
                     'cover', 'annexes_register', 'toc', 'annexes_highlights', 'lep',
                     'revision_system', 'amendment_list', 'distribution_list',
                     'abbreviations', 'definitions', 'highlights', 'main_content',
-                    'part_1', 'part_2', 'part_3', 'part_4', 'annexes',
+                    'annexes',
                 ), true),
             'path' => $path,
             'blocks' => $blocks,

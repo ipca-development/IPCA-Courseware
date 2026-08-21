@@ -520,19 +520,19 @@ final class ControlledPublishingRevisionService
      */
     private function partLabel(string $sectionKey, array $partLabels = array()): string
     {
-        if (str_contains($sectionKey, 'part_2')) {
-            return $partLabels['part_2'] ?? 'Part 2 — Technical';
+        if (preg_match('/part_([1-9][0-9]*)/', $sectionKey, $match) === 1) {
+            $partNumber = (int)$match[1];
+            $defaults = array(
+                1 => 'Part 1 — General',
+                2 => 'Part 2 — Technical',
+                3 => 'Part 3 — Route',
+                4 => 'Part 4 — Training',
+            );
+            return $partLabels['part_' . $partNumber]
+                ?? ($defaults[$partNumber] ?? ('Part ' . $partNumber));
         }
-        if (str_contains($sectionKey, 'part_3')) {
-            return $partLabels['part_3'] ?? 'Part 3 — Route';
-        }
-        if (str_contains($sectionKey, 'part_4')) {
-            return $partLabels['part_4'] ?? 'Part 4 — Training';
-        }
-        if (str_contains($sectionKey, 'part_1') || str_contains($sectionKey, 'main_content')) {
-            return $partLabels['part_1']
-                ?? $partLabels['main_content']
-                ?? 'Part 1 — General';
+        if (str_contains($sectionKey, 'main_content')) {
+            return $partLabels['part_1'] ?? $partLabels['main_content'] ?? 'Part 1 — General';
         }
         if (str_contains($sectionKey, 'part0')) return 'Part 0 — Manual Administration';
         if (str_contains($sectionKey, 'annex')) {
@@ -550,12 +550,21 @@ final class ControlledPublishingRevisionService
             "SELECT section_key, title, metadata_json
              FROM ipca_publishing_book_sections
              WHERE book_version_id = :version_id
-               AND section_key IN ('main_content','part_1','part_2','part_3','part_4','annexes')"
+               AND (
+                    section_key IN ('main_content','annexes')
+                    OR section_key LIKE 'part_%'
+               )"
         );
         $stmt->execute(array(':version_id' => $versionId));
         $labels = array();
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
             $key = (string)($row['section_key'] ?? '');
+            if (
+                str_starts_with($key, 'part_')
+                && preg_match('/^part_[1-9][0-9]*$/', $key) !== 1
+            ) {
+                continue;
+            }
             $metadata = $this->decodePayload($row['metadata_json'] ?? null);
             $raw = trim((string)($metadata['nav_label'] ?? ''));
             if ($raw === '') {
@@ -583,15 +592,14 @@ final class ControlledPublishingRevisionService
 
     private function partSortOrder(string $part): int
     {
-        return match (true) {
-            str_starts_with($part, 'Part 0') => 0,
-            str_starts_with($part, 'Part 1') => 1,
-            str_starts_with($part, 'Part 2') => 2,
-            str_starts_with($part, 'Part 3') => 3,
-            str_starts_with($part, 'Part 4') => 4,
-            $part === 'Annexes' => 5,
-            default => 6,
-        };
+        if (preg_match('/^Part\s+([0-9]+)(?:\s|$)/i', trim($part), $match) === 1) {
+            return (int)$match[1];
+        }
+        if ($part === 'Annexes') {
+            return PHP_INT_MAX - 1;
+        }
+
+        return PHP_INT_MAX;
     }
 
     /** @return array<string,mixed> */

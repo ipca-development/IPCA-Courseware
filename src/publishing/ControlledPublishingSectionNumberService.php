@@ -206,6 +206,7 @@ final class ControlledPublishingSectionNumberService
         $stmt = $this->pdo->prepare("
             SELECT
               b.*,
+              s.section_key,
               s.metadata_json AS section_metadata
             FROM ipca_publishing_book_blocks b
             INNER JOIN ipca_publishing_book_sections s ON s.id = b.section_id
@@ -224,7 +225,12 @@ final class ControlledPublishingSectionNumberService
               b.id
         ");
         $stmt->execute(array(':version_id' => $versionId));
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        return array_values(array_filter(
+            $rows,
+            static fn(array $row): bool =>
+                preg_match('/^part_[1-9][0-9]*$/', (string)($row['section_key'] ?? '')) !== 1
+        ));
     }
 
     /**

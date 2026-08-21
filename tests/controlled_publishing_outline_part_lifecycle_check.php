@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__);
 require_once $root . '/src/publishing/ControlledPublishingOutlineService.php';
+require_once $root . '/src/publishing/ControlledPublishingLepService.php';
+require_once $root . '/src/publishing/ControlledPublishingEditorNavService.php';
+require_once $root . '/src/publishing/ControlledPublishingPaginationService.php';
+require_once $root . '/src/publishing/ControlledPublishingTocService.php';
 
 $pdo = new PDO('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -76,6 +80,14 @@ foreach (range(1, 4) as $partNumber) {
         90 + ($partNumber * 10),
     ));
 }
+$insertPart->execute(array(
+    10,
+    'annexes',
+    'OM-1_0-ANNEXES',
+    'Annexes',
+    '{}',
+    140,
+));
 $pdo->exec("INSERT INTO ipca_publishing_book_sections (
     id, book_version_id, template_section_id, parent_section_id, section_key,
     stable_anchor, title, section_type, metadata_json, is_system_managed,
@@ -121,6 +133,97 @@ $restoredMeta = json_decode((string)($restored['metadata_json'] ?? '{}'), true);
 if (!empty($restoredMeta['outline_hidden'])
     || (string)($restored['title'] ?? '') !== 'PART 1 – RESTORED OPERATIONS') {
     throw new RuntimeException('Restored PART visibility or title is incorrect.');
+}
+
+$part5Id = $outline->addPart(1, 'Additional procedures', 1);
+$part5 = $sections->getSection(1, $part5Id);
+if ((string)($part5['section_key'] ?? '') !== 'part_5'
+    || (string)($part5['title'] ?? '') !== 'PART 5 – ADDITIONAL PROCEDURES'
+    || (int)($part5['sort_order'] ?? 0) !== 140) {
+    throw new RuntimeException('Adding beyond the original four PARTs did not create PART 5 correctly.');
+}
+$annexSort = (int)$pdo->query(
+    "SELECT sort_order FROM ipca_publishing_book_sections WHERE section_key = 'annexes'"
+)->fetchColumn();
+if ($annexSort !== 150) {
+    throw new RuntimeException('Adding PART 5 did not keep Annexes after all manual PARTs.');
+}
+$chapter5Id = $outline->addChapter(1, $part5Id, 'Supplemental chapter', 1);
+if ($chapter5Id <= 0) {
+    throw new RuntimeException('A MAIN chapter could not be added under dynamic PART 5.');
+}
+$afterPart5 = $outline->getOutline(1);
+$part5Outline = array_values(array_filter(
+    $afterPart5['parts'],
+    static fn(array $part): bool => (int)($part['part_number'] ?? 0) === 5
+));
+if (count($afterPart5['parts']) !== 5
+    || count($part5Outline) !== 1
+    || count($part5Outline[0]['chapters'] ?? array()) !== 1) {
+    throw new RuntimeException('Dynamic PART 5 or its MAIN chapter is missing from Edit Outline.');
+}
+$lep = new ControlledPublishingLepService($pdo);
+$effectiveParts = $lep->computeEffectiveParts(1, array('version_label' => '1.0'));
+$part5Lep = array_values(array_filter(
+    $effectiveParts,
+    static fn(array $part): bool => (string)($part['part'] ?? '') === '5'
+));
+if (count($part5Lep) !== 1
+    || (string)($part5Lep[0]['label'] ?? '') !== 'PART 5 – ADDITIONAL PROCEDURES') {
+    throw new RuntimeException('Dynamic PART 5 is missing from the List of Effective Parts.');
+}
+$toc = new ControlledPublishingTocService($pdo, new ControlledPublishingBlockService($pdo));
+$tocReflection = new ReflectionClass($toc);
+$loadChapters = $tocReflection->getMethod('loadChaptersGroupedByPart');
+$tocGroups = $loadChapters->invoke($toc, 1);
+if (!isset($tocGroups['part_5']) || count($tocGroups['part_5']) !== 1) {
+    throw new RuntimeException('Dynamic PART 5 is missing from the generated Table of Contents.');
+}
+$navReflection = new ReflectionClass(ControlledPublishingEditorNavService::class);
+$nav = $navReflection->newInstanceWithoutConstructor();
+$partDefinitions = $navReflection->getMethod('partDefinitions');
+$rowsByKey = array();
+foreach ($sections->listFlatSections(1) as $row) {
+    $rowsByKey[(string)$row['section_key']] = $row;
+}
+$navParts = $partDefinitions->invoke($nav, $rowsByKey, 'OM');
+if ((string)($navParts[count($navParts) - 1]['section_key'] ?? '') !== 'part_5') {
+    throw new RuntimeException('Dynamic PART 5 is missing from the editor navigation model.');
+}
+
+$paginationReflection = new ReflectionClass(ControlledPublishingPaginationService::class);
+$pagination = $paginationReflection->newInstanceWithoutConstructor();
+$classifySection = $paginationReflection->getMethod('classifySection');
+$part5Classification = $classifySection->invoke($pagination, array(
+    'id' => $part5Id,
+    'section_key' => 'part_5',
+    'parent_section_id' => null,
+), array());
+if (empty($part5Classification['is_major_section_start'])
+    || ($part5Classification['manual_part'] ?? null) !== 'part_5') {
+    throw new RuntimeException('Authoritative pagination did not classify dynamic PART 5 as a PART start.');
+}
+
+$part6Id = $outline->addPart(1, 'Additional material', 1);
+$part6 = $sections->getSection(1, $part6Id);
+$annexSortAfterPart6 = (int)$pdo->query(
+    "SELECT sort_order FROM ipca_publishing_book_sections WHERE section_key = 'annexes'"
+)->fetchColumn();
+if ((string)($part6['section_key'] ?? '') !== 'part_6'
+    || (int)($part6['sort_order'] ?? 0) !== 150
+    || $annexSortAfterPart6 !== 160) {
+    throw new RuntimeException('Consecutive dynamic PART creation did not keep Annexes last.');
+}
+$outline->deletePart(1, $part6Id, 1);
+$restoredPart6Id = $outline->addPart(1, 'Restored additional material', 1);
+if ($restoredPart6Id !== $part6Id) {
+    throw new RuntimeException('A hidden dynamic PART was not restored before creating another PART.');
+}
+$part6Count = (int)$pdo->query(
+    "SELECT COUNT(*) FROM ipca_publishing_book_sections WHERE section_key IN ('part_6', 'part_7')"
+)->fetchColumn();
+if ($part6Count !== 1) {
+    throw new RuntimeException('Restoring dynamic PART 6 unexpectedly created PART 7.');
 }
 
 $pdo->exec("INSERT INTO ipca_publishing_book_blocks

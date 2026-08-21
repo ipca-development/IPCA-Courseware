@@ -19,9 +19,6 @@ final class ControlledPublishingPaginationService
     private array $lastGeneration = array();
 
     /** @var list<string> */
-    private const PART_KEYS = array('part_1', 'part_2', 'part_3', 'part_4', 'main_content');
-
-    /** @var list<string> */
     private const PART0_SECTION_KEYS = array(
         'toc',
         'lep',
@@ -235,7 +232,7 @@ final class ControlledPublishingPaginationService
         $isPart0 = in_array($key, self::PART0_SECTION_KEYS, true);
         $isAnnexRegister = $key === 'annexes_register';
         $isAnnexSection = $parentKey === 'annexes';
-        $isPartStart = in_array($key, self::PART_KEYS, true);
+        $isPartStart = self::isPartSectionKey($key);
         $isChapterStart = false;
         $isMajorSectionStart = false;
         $manualPart = null;
@@ -244,14 +241,14 @@ final class ControlledPublishingPaginationService
             $manualPart = $key === 'main_content' ? 'part_1' : $key;
             $isMajorSectionStart = true;
         } elseif ($parent !== null) {
-            if (in_array($parentKey, self::PART_KEYS, true)) {
+            if (self::isPartSectionKey($parentKey)) {
                 $isChapterStart = true;
                 $isMajorSectionStart = true;
                 $manualPart = $parentKey === 'main_content' ? 'part_1' : $parentKey;
             } elseif ($parentKey !== '' && $parent['parent_section_id'] !== null) {
                 $grandParent = $byId[(int)$parent['parent_section_id']] ?? null;
                 $grandKey = is_array($grandParent) ? (string)($grandParent['section_key'] ?? '') : '';
-                if (in_array($grandKey, self::PART_KEYS, true)) {
+                if (self::isPartSectionKey($grandKey)) {
                     $manualPart = $grandKey === 'main_content' ? 'part_1' : $grandKey;
                 }
             }
@@ -280,6 +277,11 @@ final class ControlledPublishingPaginationService
             'is_system_managed' => !empty($section['is_system_managed']),
             'allow_author_blocks' => !empty($section['allow_author_blocks']),
         );
+    }
+
+    private static function isPartSectionKey(string $key): bool
+    {
+        return $key === 'main_content' || preg_match('/^part_[1-9][0-9]*$/', $key) === 1;
     }
 
     /**

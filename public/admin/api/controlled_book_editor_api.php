@@ -201,6 +201,25 @@ try {
                 'result' => $wizardApplySvc->undo($versionId, $operationId, $uid),
             ));
             break;
+        case 'toggle_wizard_paragraph':
+            $versionId = (int)($_POST['version_id'] ?? 0);
+            $operationId = (int)($_POST['operation_id'] ?? 0);
+            $blockId = (int)($_POST['block_id'] ?? 0);
+            if ($versionId <= 0 || $operationId <= 0 || $blockId <= 0) {
+                throw new InvalidArgumentException(
+                    'version_id, operation_id, and block_id are required.'
+                );
+            }
+            cp_editor_json(200, array(
+                'ok' => true,
+                'result' => $wizardApplySvc->toggleParagraph(
+                    $versionId,
+                    $operationId,
+                    $blockId,
+                    $uid
+                ),
+            ));
+            break;
         case 'review_threads':
             $versionId = (int)($_GET['version_id'] ?? 0);
             if ($versionId <= 0) {
@@ -253,7 +272,7 @@ try {
             ));
             break;
         case 'load':
-            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $editorNavSvc, $manualStructureSvc, $annexSvc, $uid);
+            cp_editor_handle_load($foundation, $sections, $blocks, $renderer, $revision, $layoutSvc, $styleSvc, $numberSvc, $pageHeaderSvc, $coverPageSvc, $tocSvc, $lepPageSvc, $approvalSvc, $part0PageSvc, $editorNavSvc, $manualStructureSvc, $annexSvc, $wizardApplySvc, $uid);
             break;
         case 'recompute_section_numbers':
             cp_editor_handle_recompute_section_numbers($foundation, $blocks, $renderer, $styleSvc, $numberSvc, $sections, $revision, $layoutSvc, $pageHeaderSvc, $coverPageSvc, $lepPageSvc, $approvalSvc, $part0PageSvc);
@@ -831,6 +850,7 @@ function cp_editor_handle_load(
     ControlledPublishingEditorNavService $editorNavSvc,
     ControlledPublishingManualStructureService $manualStructureSvc,
     ControlledPublishingAnnexService $annexSvc,
+    BooksManualsChangeApplyService $wizardApplySvc,
     int $uid
 ): void {
     $versionId = (int)($_GET['version_id'] ?? 0);
@@ -1013,6 +1033,9 @@ function cp_editor_handle_load(
         'sections_tree' => $tree,
         'blocks' => $sectionBlocks,
         'page_html' => $pageHtml,
+        'wizard_paragraph_changes' => $editable
+            ? $wizardApplySvc->paragraphChanges($versionId, $sectionId)
+            : array(),
         'page_layout' => $pageLayout,
         'editable' => $editable,
         'is_cover_section' => cp_editor_is_cover_section($section),
