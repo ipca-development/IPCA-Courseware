@@ -77,7 +77,17 @@ if ($protected) {
     </aside>
     <section class="ts-workspace">
       <?php if ($protected && $active && trim((string)($active['image_path'] ?? '')) !== ''): ?>
-        <img src="<?= h(theory_studio_cover_url((string)$active['image_path'])) ?>" alt="">
+        <div class="ts-slide-viewport" aria-label="Slide <?= (int)$active['page_number'] ?> preview">
+          <div class="ts-slide-stage">
+            <img
+              class="ts-slide-content"
+              src="<?= h(theory_studio_cover_url((string)$active['image_path'])) ?>"
+              alt="Slide <?= (int)$active['page_number'] ?>"
+            >
+            <img class="ts-slide-header" src="/assets/overlay/header.png" alt="">
+            <img class="ts-slide-footer" src="/assets/overlay/footer.png" alt="">
+          </div>
+        </div>
       <?php elseif ($protected): ?>
         <div class="ts-workspace-copy">This Live lesson has no screenshot for the selected slide.</div>
       <?php else: ?>

@@ -75,6 +75,15 @@
     });
   });
 
+  var slideRail = document.querySelector('.ts-rail');
+  var activeSlide = slideRail && slideRail.querySelector('.ts-rail-item.is-active');
+  if (slideRail && activeSlide) {
+    slideRail.scrollTop = Math.max(
+      0,
+      activeSlide.offsetTop - slideRail.offsetTop - ((slideRail.clientHeight - activeSlide.offsetHeight) / 2)
+    );
+  }
+
   var dragRoot = document.querySelector('[data-ts-reorder]');
   if (!dragRoot) return;
   var dragged = null;

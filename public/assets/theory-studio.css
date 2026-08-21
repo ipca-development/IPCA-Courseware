@@ -170,6 +170,7 @@
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 18px;
   min-height: 62vh;
+  align-items: start;
 }
 
 .ts-rail {
@@ -177,7 +178,11 @@
   border: 1px solid rgba(15, 23, 42, .06);
   border-radius: 18px;
   padding: 12px;
-  overflow: auto;
+  max-height: min(70vh, 720px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .ts-rail-item {
@@ -205,16 +210,54 @@
   background: #fff;
   border: 1px solid rgba(15, 23, 42, .06);
   border-radius: 22px;
-  min-height: 420px;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
 
-.ts-workspace img {
-  max-width: 100%;
-  max-height: 70vh;
+.ts-slide-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #fff;
+}
+
+.ts-slide-stage {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+}
+
+.ts-slide-content {
+  position: absolute;
+  width: 82.1875%;
+  height: 100%;
+  left: 8.90625%;
+  top: 0;
+  object-fit: contain;
+  background: #fff;
+}
+
+.ts-slide-header,
+.ts-slide-footer {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.ts-slide-header {
+  top: 0;
+  height: 13.8889%;
+}
+
+.ts-slide-footer {
+  bottom: 0;
+  height: 10%;
 }
 
 .ts-workspace-copy {
@@ -313,5 +356,9 @@ dialog.ts-modal[open] {
   .ts-row,
   .ts-row.is-readonly {
     grid-template-columns: 1fr;
+  }
+
+  .ts-rail {
+    max-height: 42vh;
   }
 }
