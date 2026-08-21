@@ -234,6 +234,7 @@ final class ControlledPublishingPaginationService
         $isAnnexSection = $parentKey === 'annexes';
         $isPartStart = self::isPartSectionKey($key);
         $isChapterStart = false;
+        $isFirstChapterInPart = false;
         $isMajorSectionStart = false;
         $manualPart = null;
 
@@ -243,6 +244,7 @@ final class ControlledPublishingPaginationService
         } elseif ($parent !== null) {
             if (self::isPartSectionKey($parentKey)) {
                 $isChapterStart = true;
+                $isFirstChapterInPart = $this->isFirstChildSection($section, $byId);
                 $isMajorSectionStart = true;
                 $manualPart = $parentKey === 'main_content' ? 'part_1' : $parentKey;
             } elseif ($parentKey !== '' && $parent['parent_section_id'] !== null) {
@@ -259,7 +261,8 @@ final class ControlledPublishingPaginationService
         } elseif ($isAnnexSection) {
             $isMajorSectionStart = true;
         }
-        $pageBreakBefore = $isCover || $isAnnexCover || $isPart0 || $isAnnexSection;
+        $pageBreakBefore = $isCover || $isAnnexCover || $isPart0 || $isAnnexSection
+            || $isPartStart || $isFirstChapterInPart;
 
         return array(
             'is_cover' => $isCover,
@@ -282,6 +285,41 @@ final class ControlledPublishingPaginationService
     private static function isPartSectionKey(string $key): bool
     {
         return $key === 'main_content' || preg_match('/^part_[1-9][0-9]*$/', $key) === 1;
+    }
+
+    /**
+     * Empty PART containers have no unit on which to carry a page break. In
+     * that common case, the first direct chapter must carry the PART break.
+     *
+     * @param array<string,mixed> $section
+     * @param array<int,array<string,mixed>> $byId
+     */
+    private function isFirstChildSection(array $section, array $byId): bool
+    {
+        $parentId = (int)($section['parent_section_id'] ?? 0);
+        if ($parentId <= 0) {
+            return false;
+        }
+        $sectionSort = (int)($section['sort_order'] ?? 0);
+        $sectionId = (int)($section['id'] ?? 0);
+        foreach ($byId as $candidate) {
+            if ((int)($candidate['parent_section_id'] ?? 0) !== $parentId) {
+                continue;
+            }
+            $candidateId = (int)($candidate['id'] ?? 0);
+            if ($candidateId === $sectionId) {
+                continue;
+            }
+            $candidateSort = (int)($candidate['sort_order'] ?? 0);
+            if (
+                $candidateSort < $sectionSort
+                || ($candidateSort === $sectionSort && $candidateId < $sectionId)
+            ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

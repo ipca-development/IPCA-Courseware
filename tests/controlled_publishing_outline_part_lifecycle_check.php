@@ -200,8 +200,29 @@ $part5Classification = $classifySection->invoke($pagination, array(
     'parent_section_id' => null,
 ), array());
 if (empty($part5Classification['is_major_section_start'])
+    || empty($part5Classification['force_page_break_before'])
     || ($part5Classification['manual_part'] ?? null) !== 'part_5') {
     throw new RuntimeException('Authoritative pagination did not classify dynamic PART 5 as a PART start.');
+}
+$chapter5 = $sections->getSection(1, $chapter5Id);
+$laterChapter5 = array(
+    'id' => $chapter5Id + 1000,
+    'section_key' => 'part_5_chapter_2',
+    'parent_section_id' => $part5Id,
+    'sort_order' => (int)($chapter5['sort_order'] ?? 10) + 10,
+);
+$chapterRows = array(
+    $part5Id => $part5,
+    $chapter5Id => $chapter5,
+    (int)$laterChapter5['id'] => $laterChapter5,
+);
+$firstChapterClassification = $classifySection->invoke($pagination, $chapter5, $chapterRows);
+$laterChapterClassification = $classifySection->invoke($pagination, $laterChapter5, $chapterRows);
+if (empty($firstChapterClassification['force_page_break_before'])
+    || !empty($laterChapterClassification['force_page_break_before'])) {
+    throw new RuntimeException(
+        'Only the first chapter under an empty PART container must carry the PART page break.'
+    );
 }
 
 $part6Id = $outline->addPart(1, 'Additional material', 1);

@@ -391,17 +391,21 @@ cases.push(["D. chapter heading without manual break does not start a page", () 
   assert.ok(result.pages[0].page_html.includes("Chapter heading stays"));
 }]);
 
-cases.push(["E. part boundary without manual break does not start a page", () => {
+cases.push(["E. each manual part starts on a new authoritative page", () => {
   const { execution, result } = runWorker(sourceWith([
     section(1, "part_1", "Part 1", { is_part_start: true, is_major_section_start: true }, [
       unit("block-one", "paragraph", '<article data-block-id="1" data-stable-anchor="block-one"><p>End of part one copy.</p></article>')
     ]),
     section(2, "part_2", "Part 2", { is_part_start: true, is_major_section_start: true }, [
-      unit("block-two", "heading", '<article data-block-id="2" data-stable-anchor="block-two"><h2>Part 2 heading shares the intended page</h2></article>')
+      unit("block-two", "heading", '<article data-block-id="2" data-stable-anchor="block-two"><h2>Part 2 starts its own page</h2></article>', {
+        force_break_before: true
+      })
     ])
   ]));
   assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
-  assert.strictEqual(result.pages.length, 1, "part boundary must not auto-paginate");
+  assert.strictEqual(result.pages.length, 2, "each PART must start on a new page");
+  assert.ok(result.pages[0].page_html.includes("End of part one copy"));
+  assert.ok(result.pages[1].page_html.includes("Part 2 starts its own page"));
 }]);
 
 cases.push(["F. section boundary without manual break does not start a page", () => {
