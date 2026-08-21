@@ -179,9 +179,10 @@ final class ControlledPublishingTocService
                 continue;
             }
             $partTitle = $this->resolvePartTitle($versionId, $partKey);
-            if ($partTitle !== '') {
-                $entries[] = $this->partContainerEntry($partKey, $partTitle, $chapters);
+            if ($partTitle === '') {
+                continue;
             }
+            $entries[] = $this->partContainerEntry($partKey, $partTitle, $chapters);
             foreach ($chapters as $chapter) {
                 $entries = array_merge(
                     $entries,
@@ -287,7 +288,19 @@ final class ControlledPublishingTocService
         );
         $fallback = $defaults[$partKey] ?? '';
         $row = $rows[$partKey] ?? ($partKey === 'part_1' ? ($rows['main_content'] ?? null) : null);
+        if (
+            $partKey === 'part_1'
+            && is_array($row)
+            && ControlledPublishingOutlineService::isPartHidden($row)
+            && isset($rows['main_content'])
+            && !ControlledPublishingOutlineService::isPartHidden($rows['main_content'])
+        ) {
+            $row = $rows['main_content'];
+        }
         if (is_array($row)) {
+            if (ControlledPublishingOutlineService::isPartHidden($row)) {
+                return '';
+            }
             return ControlledPublishingOutlineService::partNavTitle($row, $fallback);
         }
 

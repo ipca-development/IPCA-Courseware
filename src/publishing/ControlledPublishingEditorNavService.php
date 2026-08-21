@@ -111,6 +111,17 @@ final class ControlledPublishingEditorNavService
                 continue;
             }
             $partRow = $byKey[$partKey] ?? $byKey['main_content'];
+            if (
+                $partKey === 'part_1'
+                && ControlledPublishingOutlineService::isPartHidden($partRow)
+                && isset($byKey['main_content'])
+                && !ControlledPublishingOutlineService::isPartHidden($byKey['main_content'])
+            ) {
+                $partRow = $byKey['main_content'];
+            }
+            if (ControlledPublishingOutlineService::isPartHidden($partRow)) {
+                continue;
+            }
             $partId = $this->resolvePartParentId($partKey, $byKey, $childrenByParent);
             $manualPart = $this->manualPartIndexFromKey($partKey);
             $partTitle = ControlledPublishingOutlineService::partNavTitle(

@@ -604,6 +604,8 @@
     save_section_layout: 'suffix',
     create_subsection: 'global',
     rename_outline_part: 'global',
+    add_outline_part: 'global',
+    delete_outline_part: 'global',
     rename_outline_chapter: 'global',
     add_outline_chapter: 'global',
     delete_outline_chapter: 'global',
@@ -644,6 +646,8 @@
     upload_image: true,
     create_subsection: true,
     rename_outline_part: true,
+    add_outline_part: true,
+    delete_outline_part: true,
     rename_outline_chapter: true,
     add_outline_chapter: true,
     delete_outline_chapter: true,
@@ -3940,6 +3944,23 @@
       });
       head.appendChild(num);
       head.appendChild(partInput);
+      var partActions = document.createElement('div');
+      partActions.className = 'cpb-struct-actions';
+      var deletePart = outlineSmallBtn('×', 'cpb-outline-btn--danger', false, function () {
+        if (!window.confirm(
+          'Delete “' + (part.nav_label || ('PART ' + part.part_number))
+            + '”? Only an empty PART can be deleted.'
+        )) return;
+        outlinePost('delete_outline_part', { section_id: part.section_id }).then(function (res) {
+          if (state.sectionId === part.section_id && res.parts && res.parts.length) {
+            loadSection(res.parts[0].section_id);
+          }
+        }).catch(showError);
+      });
+      deletePart.title = 'Delete empty PART';
+      deletePart.setAttribute('aria-label', 'Delete PART ' + part.part_number);
+      partActions.appendChild(deletePart);
+      head.appendChild(partActions);
       box.appendChild(head);
 
       (part.chapters || []).forEach(function (chapter, index) {
@@ -4048,6 +4069,23 @@
 
       outlineBodyEl.appendChild(box);
     });
+
+    var addPart = document.createElement('button');
+    addPart.type = 'button';
+    addPart.className = 'cpb-struct-add cpb-struct-add--part';
+    addPart.textContent = '+ Add PART';
+    addPart.disabled = data.can_add_part === false;
+    if (addPart.disabled) {
+      addPart.title = 'This manual already uses the maximum of four PARTs.';
+    }
+    addPart.addEventListener('click', function () {
+      var title = window.prompt('PART title');
+      if (!title || !title.trim()) return;
+      outlinePost('add_outline_part', { title: title.trim() }).then(function (res) {
+        if (res.section_id) loadSection(res.section_id);
+      }).catch(showError);
+    });
+    outlineBodyEl.appendChild(addPart);
 
     if (outlineBodyEl) {
       outlineBodyEl.querySelectorAll('.cpb-struct-heading[draggable="true"]').forEach(wireOutlineDrag);

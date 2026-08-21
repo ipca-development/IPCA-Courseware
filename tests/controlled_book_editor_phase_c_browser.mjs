@@ -166,6 +166,23 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
       pendingPageRules: [],
       rendered: [],
       activated: [],
+      outlineParts: [{
+        section_id: 21,
+        chapter_parent_id: 21,
+        section_key: 'part_1',
+        part_number: 1,
+        title: 'GENERAL',
+        nav_label: 'PART 1 – GENERAL',
+        chapters: [],
+      }, {
+        section_id: 22,
+        chapter_parent_id: 22,
+        section_key: 'part_2',
+        part_number: 2,
+        title: 'TECHNICAL',
+        nav_label: 'PART 2 – TECHNICAL',
+        chapters: [],
+      }],
       queuePreview(plan) { this.previewPlans.push(plan); },
       resolvePreview(index, payload) { this.pendingPreviews[index].deferred.resolve(payload); },
       queueLoad(plan) { this.loadPlans.push(plan); },
@@ -259,6 +276,48 @@ async function installMock(page, initialPreview = previewResult(), blocksHtml = 
       }
       if (action === 'section_index') {
         return jsonResponse({ ok: true, section_page_index: {}, page_count: 1 });
+      }
+      if (action === 'get_outline') {
+        return jsonResponse({
+          ok: true,
+          locked: [],
+          parts: structuredClone(window.__phaseC.outlineParts),
+          can_add_part: true,
+        });
+      }
+      if (action === 'delete_outline_part') {
+        window.__phaseC.outlineParts = window.__phaseC.outlineParts.filter(
+          (part) => Number(part.section_id) !== Number(payload.section_id),
+        );
+        return jsonResponse({
+          ok: true,
+          locked: [],
+          parts: structuredClone(window.__phaseC.outlineParts),
+          can_add_part: true,
+          sections_tree: [],
+          toc_refreshed: true,
+        });
+      }
+      if (action === 'add_outline_part') {
+        const created = {
+          section_id: 23,
+          chapter_parent_id: 23,
+          section_key: 'part_3',
+          part_number: 3,
+          title: String(payload.title || 'NEW PART'),
+          nav_label: `PART 3 – ${String(payload.title || 'NEW PART').toUpperCase()}`,
+          chapters: [],
+        };
+        window.__phaseC.outlineParts.push(created);
+        return jsonResponse({
+          ok: true,
+          locked: [],
+          parts: structuredClone(window.__phaseC.outlineParts),
+          can_add_part: true,
+          section_id: created.section_id,
+          sections_tree: [],
+          toc_refreshed: true,
+        });
       }
       if (action === 'update_block') return jsonResponse({ ok: true });
       if (action === 'create_block' && payload.block_type === 'table') {
@@ -361,6 +420,39 @@ test('disabled by default makes no stored_preview call', async (browser) => {
     assert.equal(await page.evaluate(() =>
       document.querySelector('#cpbEditorRoot').__cpbPhaseC.enabled
     ), false);
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
+test('Edit Outline deletes an empty PART and restores a PART slot', async (browser) => {
+  const { page, browserErrors } = await newEditorPage(browser, '');
+  try {
+    await page.locator('#cpbEditOutline').click();
+    await page.waitForFunction(() =>
+      document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 2
+    );
+
+    await page.locator('[aria-label="Delete PART 1"]').click();
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) => request.action === 'delete_outline_part')
+      && document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 1
+    );
+
+    await page.evaluate(() => { window.prompt = () => 'Operations'; });
+    await page.getByRole('button', { name: '+ Add PART' }).click();
+    await page.waitForFunction(() =>
+      window.__phaseC.requests.some((request) =>
+        request.action === 'add_outline_part' && request.payload.title === 'Operations'
+      )
+      && document.querySelectorAll('#cpbOutlineBody .cpb-struct-part').length === 2
+    );
+    assert.match(await page.locator('#cpbOutlineBody').innerText(), /PART 3/i);
+    assert.equal(
+      await page.locator('#cpbOutlineBody .cpb-struct-part').last().locator('input').inputValue(),
+      'Operations',
+    );
   } finally {
     assert.deepEqual(browserErrors, []);
     await page.close();

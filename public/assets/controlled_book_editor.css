@@ -910,6 +910,25 @@
   text-decoration: underline;
 }
 
+.cmp-page .cpb-struct-card button.cpb-struct-add--part,
+.cpb-struct-card button.cpb-struct-add--part {
+  appearance: none;
+  width: auto !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.cpb-struct-add--part:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
 .cpb-workspace {
   display: flex;
   flex-direction: column;

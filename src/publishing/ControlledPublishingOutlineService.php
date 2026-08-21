@@ -66,6 +66,13 @@ final class ControlledPublishingOutlineService
         return !empty($meta['outline_locked']);
     }
 
+    public static function isPartHidden(array $row): bool
+    {
+        $meta = self::decodeMeta($row);
+
+        return !empty($meta['outline_hidden']);
+    }
+
     /**
      * Sidebar / TOC / header label for a PART row.
      */
@@ -110,7 +117,8 @@ final class ControlledPublishingOutlineService
     /**
      * @return array{
      *   locked:list<array{kind:string,title:string}>,
-     *   parts:list<array<string,mixed>>
+     *   parts:list<array<string,mixed>>,
+     *   can_add_part:bool
      * }
      */
     public function getOutline(int $versionId): array
@@ -134,12 +142,22 @@ final class ControlledPublishingOutlineService
         $sectionNumberDisplay = $this->manualStructure->computeSectionNumberDisplay($versionId, $manualCode);
 
         $parts = array();
+        $hiddenPartCount = 0;
         foreach (self::PART_KEYS as $partKey) {
             $row = $byKey[$partKey] ?? null;
-            if ($partKey === 'part_1' && $row === null) {
-                $row = $byKey['main_content'] ?? null;
+            if (
+                $partKey === 'part_1'
+                && (!is_array($row) || self::isPartHidden($row))
+                && isset($byKey['main_content'])
+                && !self::isPartHidden($byKey['main_content'])
+            ) {
+                $row = $byKey['main_content'];
             }
             if (!is_array($row)) {
+                continue;
+            }
+            if (self::isPartHidden($row)) {
+                $hiddenPartCount++;
                 continue;
             }
             $partNumber = self::partNumberFromRow($row);
@@ -204,6 +222,7 @@ final class ControlledPublishingOutlineService
                 array('kind' => 'annexes', 'title' => 'ANNEXES'),
             ),
             'parts' => $parts,
+            'can_add_part' => $hiddenPartCount > 0,
         );
     }
 
@@ -218,6 +237,148 @@ final class ControlledPublishingOutlineService
         $this->updateOutlineSection($sectionId, $navLabel, $navLabel, $this->lockedMeta($row, array(
             'manual_part' => $partNumber,
         )));
+        unset($actorUserId);
+    }
+
+    public function addPart(int $versionId, string $title, ?int $actorUserId = null): int
+    {
+        $version = $this->requireVersion($versionId);
+        if ((string)($version['lifecycle_status'] ?? '') === 'released') {
+            throw new RuntimeException('Released versions cannot be restructured.');
+        }
+        $byKey = array();
+        foreach ($this->sections->listFlatSections($versionId) as $row) {
+            if (is_array($row)) {
+                $byKey[(string)($row['section_key'] ?? '')] = $row;
+            }
+        }
+
+        foreach (self::PART_KEYS as $partKey) {
+            $candidateRows = array();
+            if (isset($byKey[$partKey])) {
+                $candidateRows[] = $byKey[$partKey];
+            }
+            if ($partKey === 'part_1' && isset($byKey['main_content'])) {
+                $candidateRows[] = $byKey['main_content'];
+            }
+            if ($candidateRows === array()) {
+                continue;
+            }
+            $visible = array_filter(
+                $candidateRows,
+                static fn(array $row): bool => !self::isPartHidden($row)
+            );
+            if ($visible !== array()) {
+                continue;
+            }
+
+            $partNumber = (int)substr($partKey, strlen('part_'));
+            $name = self::stripPartNumberPrefix($title);
+            if ($name === '') {
+                $name = 'Part ' . $partNumber;
+            }
+            $navLabel = self::formatPartNavTitle($partNumber, $name);
+            $startedTransaction = !$this->pdo->inTransaction();
+            if ($startedTransaction) {
+                $this->pdo->beginTransaction();
+            }
+            try {
+                foreach ($candidateRows as $row) {
+                    $meta = $this->lockedMeta($row, array('manual_part' => $partNumber));
+                    unset($meta['outline_hidden']);
+                    $this->updateOutlineSection(
+                        (int)$row['id'],
+                        $navLabel,
+                        $navLabel,
+                        $meta
+                    );
+                }
+                if ($startedTransaction) {
+                    $this->pdo->commit();
+                }
+            } catch (Throwable $e) {
+                if ($startedTransaction && $this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+                throw $e;
+            }
+            unset($actorUserId);
+
+            return (int)($candidateRows[0]['id'] ?? 0);
+        }
+
+        throw new RuntimeException('This manual already uses the maximum of four PARTs.');
+    }
+
+    public function deletePart(int $versionId, int $sectionId, ?int $actorUserId = null): void
+    {
+        $row = $this->requireEditableOutlineSection($versionId, $sectionId);
+        if (!$this->isPartRow($row)) {
+            throw new RuntimeException('Only PARTs can be removed here.');
+        }
+        $partNumber = self::partNumberFromRow($row);
+        $partRows = array();
+        foreach ($this->sections->listFlatSections($versionId) as $candidate) {
+            if (
+                is_array($candidate)
+                && $this->isPartRow($candidate)
+                && self::partNumberFromRow($candidate) === $partNumber
+            ) {
+                $partRows[] = $candidate;
+            }
+        }
+        $partIds = array_values(array_filter(array_map(
+            static fn(array $partRow): int => (int)($partRow['id'] ?? 0),
+            $partRows
+        )));
+        if ($partIds === array()) {
+            throw new RuntimeException('PART not found.');
+        }
+
+        foreach ($this->sections->listFlatSections($versionId) as $candidate) {
+            if (
+                is_array($candidate)
+                && in_array((int)($candidate['parent_section_id'] ?? 0), $partIds, true)
+            ) {
+                throw new RuntimeException('Move or delete every chapter before deleting this PART.');
+            }
+        }
+        $placeholders = implode(',', array_fill(0, count($partIds), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT COUNT(*) FROM ipca_publishing_book_blocks WHERE section_id IN ({$placeholders})"
+        );
+        $stmt->execute($partIds);
+        if ((int)$stmt->fetchColumn() > 0) {
+            throw new RuntimeException('Remove all PART content before deleting this PART.');
+        }
+
+        $startedTransaction = !$this->pdo->inTransaction();
+        if ($startedTransaction) {
+            $this->pdo->beginTransaction();
+        }
+        try {
+            foreach ($partRows as $partRow) {
+                $meta = $this->lockedMeta($partRow, array(
+                    'manual_part' => $partNumber,
+                    'outline_hidden' => true,
+                ));
+                $navLabel = self::partNavTitle($partRow, 'PART ' . $partNumber);
+                $this->updateOutlineSection(
+                    (int)$partRow['id'],
+                    $navLabel,
+                    $navLabel,
+                    $meta
+                );
+            }
+            if ($startedTransaction) {
+                $this->pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($startedTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
         unset($actorUserId);
     }
 

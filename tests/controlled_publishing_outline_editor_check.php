@@ -40,6 +40,18 @@ $assert(
     !ControlledPublishingOutlineService::isProtectedSectionKey('part_2_chapter_1'),
     'MAIN chapters must be editable in the outline editor.'
 );
+$assert(
+    ControlledPublishingOutlineService::isPartHidden(array(
+        'metadata_json' => '{"outline_hidden":true}',
+    )),
+    'Deleted empty PARTs must be hidden without deleting their stable section identity.'
+);
+$assert(
+    !ControlledPublishingOutlineService::isPartHidden(array(
+        'metadata_json' => '{"outline_hidden":false}',
+    )),
+    'Active PARTs must remain visible.'
+);
 
 $assert(
     ControlledPublishingOutlineService::formatPartNavTitle(1, 'THE TRAINING PLAN') === 'PART 1 – THE TRAINING PLAN',
@@ -206,6 +218,8 @@ foreach (array(
 foreach (array(
     'get_outline',
     'rename_outline_part',
+    'add_outline_part',
+    'delete_outline_part',
     'rename_outline_chapter',
     'add_outline_chapter',
     'delete_outline_chapter',
@@ -231,6 +245,10 @@ foreach (array(
 foreach (array(
     'openOutlinePanel(',
     'rename_outline_part',
+    'add_outline_part',
+    'delete_outline_part',
+    '+ Add PART',
+    'Only an empty PART can be deleted.',
     '+ Add MAIN chapter',
     'promote_outline_heading',
     'Make this a MAIN chapter',
@@ -273,9 +291,22 @@ if (!is_string($structure) || !str_contains($structure, 'function demoteMainChap
 if (!is_string($outline) || !str_contains($outline, 'function demoteChapter(')) {
     $failures[] = 'Outline service must expose MAIN chapter demotion.';
 }
+if (!is_string($outline)
+    || !str_contains($outline, 'function addPart(')
+    || !str_contains($outline, 'function deletePart(')
+    || !str_contains($outline, "'outline_hidden' => true")
+    || !str_contains($outline, 'Move or delete every chapter before deleting this PART.')
+    || !str_contains($outline, 'Remove all PART content before deleting this PART.')) {
+    $failures[] = 'PART add/delete must preserve identity and refuse deletion while content remains.';
+}
+if (!is_string($nav)
+    || !str_contains($nav, 'ControlledPublishingOutlineService::isPartHidden($partRow)')) {
+    $failures[] = 'Deleted empty PARTs must disappear from editor navigation.';
+}
 if (!is_string($toc)
     || !str_contains($toc, "array('part_1', 'main_content')")
-    || !str_contains($toc, 'ControlledPublishingOutlineService::partNavTitle(')) {
+    || !str_contains($toc, 'ControlledPublishingOutlineService::partNavTitle(')
+    || !str_contains($toc, 'ControlledPublishingOutlineService::isPartHidden($row)')) {
     $failures[] = 'Generated TOC PART labels must use the same resolver as editor/iOS navigation.';
 }
 if (!is_string($api) || !str_contains($api, "\$tocSvc->regenerateTocSection(\$versionId, \$uid)")) {

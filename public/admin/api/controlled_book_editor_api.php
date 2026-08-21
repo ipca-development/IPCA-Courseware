@@ -386,6 +386,12 @@ try {
         case 'rename_outline_part':
             cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'rename_part');
             break;
+        case 'add_outline_part':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'add_part');
+            break;
+        case 'delete_outline_part':
+            cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'delete_part');
+            break;
         case 'rename_outline_chapter':
             cp_editor_handle_outline_mutate($foundation, $outlineSvc, $editorNavSvc, $tocSvc, $uid, 'rename_chapter');
             break;
@@ -3078,6 +3084,14 @@ function cp_editor_handle_outline_mutate(
     try {
         if ($op === 'rename_part') {
             $outlineSvc->renamePart($versionId, $sectionId, (string)($in['title'] ?? ''), $uid);
+        } elseif ($op === 'add_part') {
+            $createdId = $outlineSvc->addPart(
+                $versionId,
+                (string)($in['title'] ?? ''),
+                $uid
+            );
+        } elseif ($op === 'delete_part') {
+            $outlineSvc->deletePart($versionId, $sectionId, $uid);
         } elseif ($op === 'rename_chapter') {
             $outlineSvc->renameChapter($versionId, $sectionId, (string)($in['title'] ?? ''), $uid);
         } elseif ($op === 'add_chapter') {
