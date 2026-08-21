@@ -266,7 +266,7 @@ private extension LibraryBook {
     var searchableMetadata: String {
         [
             displayTitle,
-            manualCode,
+            displayManualCode,
             bookKey,
             versionLabel,
             category.title,
@@ -1239,7 +1239,7 @@ private struct BookmarksByManualSection: View {
                                 Text(book.displayTitle)
                                     .font(.headline)
                                     .foregroundStyle(Color.black)
-                                Text("\(book.manualCode) · \(bookmarks.count) bookmark\(bookmarks.count == 1 ? "" : "s")")
+                                Text("\(book.displayManualCode) · \(bookmarks.count) bookmark\(bookmarks.count == 1 ? "" : "s")")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

@@ -31,6 +31,12 @@ $libraryPage = (string)file_get_contents(
 $controlledBooksPage = (string)file_get_contents(
     dirname(__DIR__) . '/public/admin/compliance/controlled_books.php'
 );
+$iosModels = (string)file_get_contents(
+    dirname(__DIR__) . '/ipca-manual-reader-ios/IPCAManualReader/Models/ManualReaderModels.swift'
+);
+$iosLibrary = (string)file_get_contents(
+    dirname(__DIR__) . '/ipca-manual-reader-ios/IPCAManualReader/Views/LibraryView.swift'
+);
 identity_settings_assert(
     'Manual Settings exposes the editable Manual / Book Name',
     str_contains($libraryPage, 'name="book_title"')
@@ -40,6 +46,12 @@ identity_settings_assert(
     'Manual Settings exposes an editable reader-facing code',
     str_contains($libraryPage, 'name="manual_code"')
         && str_contains($libraryPage, 'The internal book identity and existing links remain unchanged.')
+);
+identity_settings_assert(
+    'iOS normalizes legacy cached underscore codes for display',
+    str_contains($iosModels, 'var displayManualCode: String')
+        && str_contains($iosModels, 'replacingOccurrences(of: "_", with: " ")')
+        && str_contains($iosLibrary, 'book.displayManualCode')
 );
 identity_settings_assert(
     'manual creation accepts readable spaced codes',

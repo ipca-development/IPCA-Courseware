@@ -100,6 +100,10 @@ struct LibraryBook: Codable, Identifiable, Hashable {
         return bookTitle
     }
 
+    var displayManualCode: String {
+        manualCode.replacingOccurrences(of: "_", with: " ")
+    }
+
     var isAnnexBook: Bool {
         if isAnnexBookFlag == true {
             return true
