@@ -184,7 +184,7 @@ struct OfflineBanner: View {
 
     private var message: String {
         guard let lastUpdated else { return "Offline · Showing saved schedule" }
-        let time = lastUpdated.formatted(date: .omitted, time: .shortened)
+        let time = SchedulerClock(timezoneIdentifier: "America/Los_Angeles").time(lastUpdated)
         return "\(isOffline ? "Offline" : "Saved schedule") · Last updated \(time)"
     }
 }

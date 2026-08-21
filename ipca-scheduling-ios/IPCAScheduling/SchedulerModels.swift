@@ -94,11 +94,56 @@ struct SchedulerBootstrapResponse: Codable {
     let organization: SchedulerOrganization
     let capabilities: SchedulerCapabilities
     let operationalTimezone: String
+    let operationalHomeBase: SchedulerOperationalHomeBase?
     let scheduler: SchedulerConfiguration
 
     enum CodingKeys: String, CodingKey {
         case ok, user, organization, capabilities, scheduler
         case operationalTimezone = "operational_timezone"
+        case operationalHomeBase = "operational_home_base"
+    }
+}
+
+struct SchedulerOperationalHomeBase: Codable, Hashable {
+    let id: Int?
+    let organizationID: Int
+    let displayName: String
+    let airportIdentifier: String
+    let latitude: Double
+    let longitude: Double
+    let operationalTimezone: String
+    let source: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, latitude, longitude, source
+        case organizationID = "organization_id"
+        case displayName = "display_name"
+        case airportIdentifier = "airport_identifier"
+        case operationalTimezone = "operational_timezone"
+    }
+}
+
+struct SchedulerAstronomyDay: Codable, Hashable, Identifiable {
+    let date: String
+    let morningCivilTwilightBegin: String?
+    let sunrise: String?
+    let sunset: String?
+    let eveningCivilTwilightEnd: String?
+    let operationalTimezone: String
+    let locationID: Int?
+    let airportIdentifier: String
+    let calculationMethod: String
+
+    var id: String { date }
+
+    enum CodingKeys: String, CodingKey {
+        case date, sunrise, sunset
+        case morningCivilTwilightBegin = "morning_civil_twilight_begin"
+        case eveningCivilTwilightEnd = "evening_civil_twilight_end"
+        case operationalTimezone = "operational_timezone"
+        case locationID = "location_id"
+        case airportIdentifier = "airport_identifier"
+        case calculationMethod = "calculation_method"
     }
 }
 
@@ -231,6 +276,7 @@ struct SchedulerReservation: Codable, Hashable, Identifiable {
     let evidence: ReservationEvidence?
     let updatedAt: String
     let authorizedActions: AuthorizedActions
+    var validation: SchedulerValidation? = nil
 
     var id: String { reservationUUID }
     var localDateKey: String { String(startLocal.prefix(10)) }
@@ -255,7 +301,7 @@ struct SchedulerReservation: Codable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case status, lock, aircraft, mission, cohort, crew, route, notes, evidence
+        case status, lock, aircraft, mission, cohort, crew, route, notes, evidence, validation
         case reservationUUID = "reservation_uuid"
         case schedulerRecordID = "scheduler_record_id"
         case reservationType = "reservation_type"
@@ -274,11 +320,50 @@ struct ScheduleRangeResponse: Codable {
     let operationalTimezone: String
     let reservations: [SchedulerReservation]
     let refreshedAt: String?
+    var operationalHomeBase: SchedulerOperationalHomeBase?
+    var astronomyDays: [SchedulerAstronomyDay]
 
     enum CodingKeys: String, CodingKey {
         case ok, range, reservations
         case operationalTimezone = "operational_timezone"
         case refreshedAt = "refreshed_at"
+        case operationalHomeBase = "operational_home_base"
+        case astronomyDays = "astronomy_days"
+    }
+
+    init(
+        ok: Bool,
+        range: ScheduleRange,
+        operationalTimezone: String,
+        reservations: [SchedulerReservation],
+        refreshedAt: String?,
+        operationalHomeBase: SchedulerOperationalHomeBase? = nil,
+        astronomyDays: [SchedulerAstronomyDay] = []
+    ) {
+        self.ok = ok
+        self.range = range
+        self.operationalTimezone = operationalTimezone
+        self.reservations = reservations
+        self.refreshedAt = refreshedAt
+        self.operationalHomeBase = operationalHomeBase
+        self.astronomyDays = astronomyDays
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        range = try container.decode(ScheduleRange.self, forKey: .range)
+        operationalTimezone = try container.decode(String.self, forKey: .operationalTimezone)
+        reservations = try container.decode([SchedulerReservation].self, forKey: .reservations)
+        refreshedAt = try container.decodeIfPresent(String.self, forKey: .refreshedAt)
+        operationalHomeBase = try container.decodeIfPresent(
+            SchedulerOperationalHomeBase.self,
+            forKey: .operationalHomeBase
+        )
+        astronomyDays = try container.decodeIfPresent(
+            [SchedulerAstronomyDay].self,
+            forKey: .astronomyDays
+        ) ?? []
     }
 }
 
@@ -349,9 +434,35 @@ struct SchedulerResourcesResponse: Codable {
     }
 }
 
+struct SchedulerSearchResults: Codable {
+    let aircraft: [SchedulerResourceItem]
+    let person: [SchedulerResourceItem]
+    let mission: [SchedulerResourceItem]
+}
+
+struct SchedulerSearchResponse: Codable {
+    let ok: Bool
+    let query: String
+    let results: SchedulerSearchResults
+}
+
 struct CachedSchedule: Codable {
     let response: ScheduleRangeResponse
     let savedAt: Date
+    let aircraftResources: [SchedulerResourceItem]?
+    let personResources: [SchedulerResourceItem]?
+
+    init(
+        response: ScheduleRangeResponse,
+        savedAt: Date,
+        aircraftResources: [SchedulerResourceItem]? = nil,
+        personResources: [SchedulerResourceItem]? = nil
+    ) {
+        self.response = response
+        self.savedAt = savedAt
+        self.aircraftResources = aircraftResources
+        self.personResources = personResources
+    }
 }
 
 struct ScheduleFilters: Codable, Equatable {

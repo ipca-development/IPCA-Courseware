@@ -256,6 +256,6 @@ struct MoreView: View {
     }
 
     private var updatedLabel: String {
-        session.lastUpdated?.formatted(date: .abbreviated, time: .shortened) ?? "Not yet"
+        session.lastUpdated.map(session.clock.dateTime) ?? "Not yet"
     }
 }

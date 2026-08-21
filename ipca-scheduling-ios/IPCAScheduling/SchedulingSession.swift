@@ -13,6 +13,10 @@ final class SchedulingSession: ObservableObject {
     @Published private(set) var bootstrap: SchedulerBootstrapResponse?
     @Published private(set) var reservations: [SchedulerReservation] = []
     @Published private(set) var detailWarnings: [String: [SchedulerWarning]] = [:]
+    @Published private(set) var aircraftResources: [SchedulerResourceItem] = []
+    @Published private(set) var personResources: [SchedulerResourceItem] = []
+    @Published private(set) var operationalHomeBase: SchedulerOperationalHomeBase?
+    @Published private(set) var astronomyDays: [SchedulerAstronomyDay] = []
     @Published private(set) var isRefreshing = false
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var isShowingCachedData = false
@@ -182,7 +186,7 @@ final class SchedulingSession: ObservableObject {
         if reservations.isEmpty { await loadCachedSchedule(range: range) }
         guard previewScreen == nil else {
             lastUpdated = now
-            isShowingCachedData = false
+            isShowingCachedData = previewScreen == .workstationOffline
             return
         }
         do {
@@ -192,16 +196,28 @@ final class SchedulingSession: ObservableObject {
                 filters: filters
             )
             reservations = response.reservations
+            operationalHomeBase = response.operationalHomeBase ?? bootstrap?.operationalHomeBase
+            astronomyDays = response.astronomyDays
+            for reservation in response.reservations {
+                if let validation = reservation.validation {
+                    detailWarnings[reservation.id] = validation.warnings
+                }
+            }
             let refreshed = response.refreshedAt.flatMap(ISO8601DateFormatter().date) ?? Date()
             lastUpdated = refreshed
             isShowingCachedData = false
             lastForegroundRefresh = Date()
+            if isStaffExperience && (aircraftResources.isEmpty || personResources.isEmpty || force) {
+                await refreshResourceCatalogs()
+            }
             await cache.save(
                 response,
                 userID: userID,
                 start: range.start,
                 end: range.end,
                 filters: filters,
+                aircraftResources: aircraftResources,
+                personResources: personResources,
                 savedAt: refreshed
             )
         } catch {
@@ -227,6 +243,12 @@ final class SchedulingSession: ObservableObject {
         }
     }
 
+    func moveDay(by value: Int) {
+        if let date = clock.calendar.date(byAdding: .day, value: value, to: selectedDate) {
+            selectDate(date)
+        }
+    }
+
     func goToToday() {
         selectDate(clock.date(fromDayKey: todayKey) ?? now)
     }
@@ -248,7 +270,13 @@ final class SchedulingSession: ObservableObject {
                     ok: true,
                     operationalTimezone: operationalTimezone,
                     reservation: reservation,
-                    validation: SchedulerValidation(result: "allowed", warnings: [])
+                    validation: reservation.validation
+                        ?? SchedulerValidation(
+                            result: (detailWarnings[reservation.id] ?? []).isEmpty
+                                ? "allowed"
+                                : "allowed_with_warning",
+                            warnings: detailWarnings[reservation.id] ?? []
+                        )
                 )
         }
         do {
@@ -284,15 +312,9 @@ final class SchedulingSession: ObservableObject {
         guard previewScreen == nil else {
             switch type {
             case "aircraft":
-                return [
-                    SchedulerResourceItem(id: 42, registration: "N428EA", displayName: "Alpha Trainer", aircraftType: "Pipistrel Alpha", homeAirport: "KTRM", role: nil, code: nil, name: nil),
-                    SchedulerResourceItem(id: 28, registration: "N397EA", displayName: "Alpha Trainer", aircraftType: "Pipistrel Alpha", homeAirport: "KTRM", role: nil, code: nil, name: nil)
-                ]
+                return SchedulerFixtures.workstationAircraft
             case "person":
-                return [
-                    SchedulerResourceItem(id: 102, registration: nil, displayName: "Jarne Deruyck", aircraftType: nil, homeAirport: nil, role: "student", code: nil, name: nil),
-                    SchedulerResourceItem(id: 101, registration: nil, displayName: "Tasha Welvis", aircraftType: nil, homeAirport: nil, role: "student", code: nil, name: nil)
-                ]
+                return SchedulerFixtures.workstationPeople
             default:
                 return []
             }
@@ -305,14 +327,68 @@ final class SchedulingSession: ObservableObject {
         }
     }
 
+    func searchResources(query: String) async -> SchedulerSearchResults? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if previewScreen != nil {
+            let needle = trimmed.lowercased()
+            return SchedulerSearchResults(
+                aircraft: aircraftResources.filter { $0.label.lowercased().contains(needle) },
+                person: personResources.filter { $0.label.lowercased().contains(needle) },
+                mission: []
+            )
+        }
+        do {
+            return try await api.search(query: trimmed, limit: 50).results
+        } catch {
+            if handleAuthentication(error) { return nil }
+            errorMessage = friendly(error)
+            return nil
+        }
+    }
+
     private func installFixtures(for screen: PreviewScreen) {
         bootstrap = SchedulerFixtures.bootstrap
-        reservations = SchedulerFixtures.schedule.reservations
-        detailWarnings[SchedulerFixtures.featuredReservation.id] = [SchedulerFixtures.warning]
+        aircraftResources = SchedulerFixtures.workstationAircraft
+        personResources = SchedulerFixtures.workstationPeople
+        if screen.isWorkstation {
+            let response = screen == .workstationSparse || screen == .workstationWeekSparse
+                ? SchedulerFixtures.sparseSchedule
+                : screen == .workstationStress
+                    ? SchedulerFixtures.stressSchedule
+                    : screen == .workstationTwilightMorning
+                        || screen == .workstationTwilightEvening
+                        || screen == .workstationTwilightFullDay
+                        || screen == .workstationTwilightMorningSelected
+                        || screen == .workstationTwilightEveningSelected
+                        ? SchedulerFixtures.twilightSchedule
+                    : SchedulerFixtures.workstationSchedule
+            reservations = response.reservations
+            operationalHomeBase = response.operationalHomeBase ?? bootstrap?.operationalHomeBase
+            astronomyDays = response.astronomyDays
+            detailWarnings = SchedulerFixtures.workstationWarnings
+        } else {
+            reservations = SchedulerFixtures.schedule.reservations
+            detailWarnings[SchedulerFixtures.featuredReservation.id] = [SchedulerFixtures.warning]
+        }
         selectedDate = clock.date(fromDayKey: "2026-08-19") ?? now
         lastUpdated = now.addingTimeInterval(-60)
+        isShowingCachedData = screen == .workstationOffline
         launchState = .signedIn
         if screen == .schedule || screen == .filters { selectedTab = 1 }
+    }
+
+    private func refreshResourceCatalogs() async {
+        async let aircraft = api.resources(type: "aircraft", query: "", limit: 100)
+        async let people = api.resources(type: "person", query: "", limit: 100)
+        do {
+            let (aircraftResponse, peopleResponse) = try await (aircraft, people)
+            aircraftResources = aircraftResponse.items
+            personResources = peopleResponse.items
+        } catch {
+            if handleAuthentication(error) { return }
+            // The schedule remains useful when the optional resource catalog is unavailable.
+        }
     }
 
     private func fetchRange(containing date: Date) -> ScheduleRange {
@@ -332,6 +408,15 @@ final class SchedulingSession: ObservableObject {
             filters: filters
         ) else { return }
         reservations = cached.response.reservations
+        operationalHomeBase = cached.response.operationalHomeBase ?? bootstrap?.operationalHomeBase
+        astronomyDays = cached.response.astronomyDays
+        aircraftResources = cached.aircraftResources ?? aircraftResources
+        personResources = cached.personResources ?? personResources
+        for reservation in cached.response.reservations {
+            if let validation = reservation.validation {
+                detailWarnings[reservation.id] = validation.warnings
+            }
+        }
         lastUpdated = cached.savedAt
         isShowingCachedData = true
     }
@@ -363,7 +448,11 @@ final class SchedulingSession: ObservableObject {
         Task { await api.setBearerToken(nil) }
         bootstrap = nil
         reservations = []
+        operationalHomeBase = nil
+        astronomyDays = []
         detailWarnings = [:]
+        aircraftResources = []
+        personResources = []
         lastUpdated = nil
         isShowingCachedData = false
         launchState = .signedOut

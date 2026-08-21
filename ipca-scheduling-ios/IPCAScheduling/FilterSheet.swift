@@ -90,11 +90,6 @@ struct FilterSheet: View {
                     }
                 }
 
-                Section {
-                    Text("Filters change this schedule view only. Your access remains controlled by IPCA.")
-                        .font(.footnote)
-                        .foregroundStyle(IPCAColors.textSecondary)
-                }
             }
             .navigationTitle("Filters")
             .navigationBarTitleDisplayMode(.inline)

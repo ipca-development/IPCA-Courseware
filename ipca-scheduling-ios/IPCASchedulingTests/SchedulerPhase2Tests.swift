@@ -278,15 +278,15 @@ final class SchedulerPhase2Tests: XCTestCase {
     }
 
     func testPSTAndPDTLocalTimesDoNotShift() {
-        XCTAssertEqual(clock.time("2026-01-15T10:00:00.000"), "10:00 AM")
-        XCTAssertEqual(clock.time("2026-07-15T10:00:00.000"), "10:00 AM")
+        XCTAssertEqual(clock.time("2026-01-15T10:00:00.000"), "10:00")
+        XCTAssertEqual(clock.time("2026-07-15T10:00:00.000"), "10:00")
         XCTAssertEqual(clock.dayKey(for: clock.date(fromLocal: "2026-01-15T10:00:00.000")!), "2026-01-15")
         XCTAssertEqual(clock.dayKey(for: clock.date(fromLocal: "2026-07-15T10:00:00.000")!), "2026-07-15")
     }
 
     func testDSTBoundaryFixturesPreserveWallClockPresentation() {
-        XCTAssertEqual(clock.time("2026-03-08T02:30:00.000"), "2:30 AM")
-        XCTAssertEqual(clock.time("2026-11-01T01:30:00.000"), "1:30 AM")
+        XCTAssertEqual(clock.time("2026-03-08T02:30:00.000"), "02:30")
+        XCTAssertEqual(clock.time("2026-11-01T01:30:00.000"), "01:30")
         XCTAssertNil(clock.date(fromLocal: "2026-03-08T02:30:00.000"))
         XCTAssertNotNil(clock.date(fromLocal: "2026-11-01T01:30:00.000"))
     }
@@ -299,6 +299,8 @@ final class SchedulerPhase2Tests: XCTestCase {
             start: "2026-08-12",
             end: "2026-09-09",
             filters: .empty,
+            aircraftResources: SchedulerFixtures.workstationAircraft,
+            personResources: SchedulerFixtures.workstationPeople,
             savedAt: SchedulerFixtures.now
         )
         let loaded = await cache.load(
@@ -309,6 +311,8 @@ final class SchedulerPhase2Tests: XCTestCase {
         )
         XCTAssertEqual(loaded?.response.reservations.count, 4)
         XCTAssertEqual(loaded?.savedAt, SchedulerFixtures.now)
+        XCTAssertEqual(loaded?.aircraftResources?.count, SchedulerFixtures.workstationAircraft.count)
+        XCTAssertEqual(loaded?.personResources?.count, SchedulerFixtures.workstationPeople.count)
     }
 
     func testOfflineRestartUsesCache() async throws {
@@ -321,6 +325,8 @@ final class SchedulerPhase2Tests: XCTestCase {
             start: "2026-08-12",
             end: "2026-09-09",
             filters: .empty,
+            aircraftResources: SchedulerFixtures.workstationAircraft,
+            personResources: SchedulerFixtures.workstationPeople,
             savedAt: SchedulerFixtures.now
         )
         SchedulerURLProtocol.handler = { _ in throw URLError(.notConnectedToInternet) }
@@ -328,6 +334,7 @@ final class SchedulerPhase2Tests: XCTestCase {
         await session.start()
         XCTAssertEqual(session.launchState, .signedIn)
         XCTAssertEqual(session.reservations.count, 4)
+        XCTAssertEqual(session.aircraftResources.count, SchedulerFixtures.workstationAircraft.count)
         XCTAssertTrue(session.isShowingCachedData)
         XCTAssertNotNil(session.errorMessage)
     }

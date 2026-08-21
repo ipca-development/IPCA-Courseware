@@ -149,6 +149,18 @@ actor SchedulerAPIClient {
         )
     }
 
+    func search(query: String, limit: Int = 30) async throws -> SchedulerSearchResponse {
+        try await send(
+            path: "api/scheduler/search.php",
+            method: "GET",
+            queryItems: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "limit", value: String(limit))
+            ],
+            authorized: true
+        )
+    }
+
     private func send<Response: Decodable>(
         path: String,
         method: String,

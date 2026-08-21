@@ -134,11 +134,20 @@ actor ScheduleDiskCache {
         start: String,
         end: String,
         filters: ScheduleFilters,
+        aircraftResources: [SchedulerResourceItem]? = nil,
+        personResources: [SchedulerResourceItem]? = nil,
         savedAt: Date = Date()
     ) {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let data = try encoder.encode(CachedSchedule(response: response, savedAt: savedAt))
+            let data = try encoder.encode(
+                CachedSchedule(
+                    response: response,
+                    savedAt: savedAt,
+                    aircraftResources: aircraftResources,
+                    personResources: personResources
+                )
+            )
             try data.write(
                 to: fileURL(userID: userID, start: start, end: end, filters: filters),
                 options: .atomic
@@ -227,11 +236,15 @@ struct SchedulerClock {
 
     func time(_ local: String) -> String {
         guard local.count >= 16 else { return local }
-        let hour = Int(local.dropFirst(11).prefix(2)) ?? 0
-        let minute = String(local.dropFirst(14).prefix(2))
-        let suffix = hour >= 12 ? "PM" : "AM"
-        let twelveHour = hour % 12 == 0 ? 12 : hour % 12
-        return "\(twelveHour):\(minute) \(suffix)"
+        return String(local.dropFirst(11).prefix(5))
+    }
+
+    func time(_ date: Date) -> String {
+        formatted(date, format: "HH:mm")
+    }
+
+    func dateTime(_ date: Date) -> String {
+        formatted(date, format: "MMM d · HH:mm")
     }
 
     func longDate(_ date: Date) -> String {

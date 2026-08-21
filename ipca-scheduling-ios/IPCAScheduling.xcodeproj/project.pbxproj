@@ -23,6 +23,22 @@
 		B1000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000E /* Assets.xcassets */; };
 		B1000000000000000000000F /* SchedulerPhase2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000F /* SchedulerPhase2Tests.swift */; };
 		B10000000000000000000010 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* XCTest.framework */; };
+		B10000000000000000000011 /* OperationsProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000014 /* OperationsProjection.swift */; };
+		B10000000000000000000012 /* TimelineGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000015 /* TimelineGeometry.swift */; };
+		B10000000000000000000013 /* OverlapLaneLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000016 /* OverlapLaneLayout.swift */; };
+		B10000000000000000000014 /* TimelineAccessibilityFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000017 /* TimelineAccessibilityFormatter.swift */; };
+		B10000000000000000000015 /* OperationsReservationInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000018 /* OperationsReservationInspector.swift */; };
+		B10000000000000000000016 /* OperationsSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000019 /* OperationsSearchView.swift */; };
+		B10000000000000000000017 /* OperationsWeekView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001A /* OperationsWeekView.swift */; };
+		B10000000000000000000018 /* OperationsTimelineCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001B /* OperationsTimelineCanvas.swift */; };
+		B10000000000000000000019 /* OperationsWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001C /* OperationsWorkspaceView.swift */; };
+		B1000000000000000000001A /* OperationsProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001D /* OperationsProjectionTests.swift */; };
+		B1000000000000000000001B /* TimelineGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001E /* TimelineGeometryTests.swift */; };
+		B1000000000000000000001C /* OverlapLaneLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000001F /* OverlapLaneLayoutTests.swift */; };
+		B1000000000000000000001D /* TimelineAccessibilityFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000020 /* TimelineAccessibilityFormatterTests.swift */; };
+		B1000000000000000000001E /* WorkstationFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000021 /* WorkstationFixtureTests.swift */; };
+		B1000000000000000000001F /* OperationsNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000022 /* OperationsNavigation.swift */; };
+		B10000000000000000000020 /* OperationsNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000023 /* OperationsNavigationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +71,22 @@
 		B20000000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000000000000000000012 /* IPCAScheduling.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IPCAScheduling.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000000000000000000013 /* IPCASchedulingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = IPCASchedulingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000000000000000000014 /* OperationsProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsProjection.swift; sourceTree = "<group>"; };
+		B20000000000000000000015 /* TimelineGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineGeometry.swift; sourceTree = "<group>"; };
+		B20000000000000000000016 /* OverlapLaneLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlapLaneLayout.swift; sourceTree = "<group>"; };
+		B20000000000000000000017 /* TimelineAccessibilityFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineAccessibilityFormatter.swift; sourceTree = "<group>"; };
+		B20000000000000000000018 /* OperationsReservationInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsReservationInspector.swift; sourceTree = "<group>"; };
+		B20000000000000000000019 /* OperationsSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsSearchView.swift; sourceTree = "<group>"; };
+		B2000000000000000000001A /* OperationsWeekView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsWeekView.swift; sourceTree = "<group>"; };
+		B2000000000000000000001B /* OperationsTimelineCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsTimelineCanvas.swift; sourceTree = "<group>"; };
+		B2000000000000000000001C /* OperationsWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsWorkspaceView.swift; sourceTree = "<group>"; };
+		B2000000000000000000001D /* OperationsProjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsProjectionTests.swift; sourceTree = "<group>"; };
+		B2000000000000000000001E /* TimelineGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineGeometryTests.swift; sourceTree = "<group>"; };
+		B2000000000000000000001F /* OverlapLaneLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlapLaneLayoutTests.swift; sourceTree = "<group>"; };
+		B20000000000000000000020 /* TimelineAccessibilityFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineAccessibilityFormatterTests.swift; sourceTree = "<group>"; };
+		B20000000000000000000021 /* WorkstationFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkstationFixtureTests.swift; sourceTree = "<group>"; };
+		B20000000000000000000022 /* OperationsNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsNavigation.swift; sourceTree = "<group>"; };
+		B20000000000000000000023 /* OperationsNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationsNavigationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -102,6 +134,16 @@
 				B2000000000000000000000B /* ScheduleView.swift */,
 				B2000000000000000000000C /* FilterSheet.swift */,
 				B2000000000000000000000D /* DetailMoreViews.swift */,
+				B20000000000000000000014 /* OperationsProjection.swift */,
+				B20000000000000000000015 /* TimelineGeometry.swift */,
+				B20000000000000000000016 /* OverlapLaneLayout.swift */,
+				B20000000000000000000017 /* TimelineAccessibilityFormatter.swift */,
+				B20000000000000000000018 /* OperationsReservationInspector.swift */,
+				B20000000000000000000019 /* OperationsSearchView.swift */,
+				B2000000000000000000001A /* OperationsWeekView.swift */,
+				B2000000000000000000001B /* OperationsTimelineCanvas.swift */,
+				B2000000000000000000001C /* OperationsWorkspaceView.swift */,
+				B20000000000000000000022 /* OperationsNavigation.swift */,
 				B2000000000000000000000E /* Assets.xcassets */,
 				B20000000000000000000011 /* Info.plist */,
 			);
@@ -112,6 +154,12 @@
 			isa = PBXGroup;
 			children = (
 				B2000000000000000000000F /* SchedulerPhase2Tests.swift */,
+				B2000000000000000000001D /* OperationsProjectionTests.swift */,
+				B2000000000000000000001E /* TimelineGeometryTests.swift */,
+				B2000000000000000000001F /* OverlapLaneLayoutTests.swift */,
+				B20000000000000000000020 /* TimelineAccessibilityFormatterTests.swift */,
+				B20000000000000000000021 /* WorkstationFixtureTests.swift */,
+				B20000000000000000000023 /* OperationsNavigationTests.swift */,
 			);
 			path = IPCASchedulingTests;
 			sourceTree = "<group>";
@@ -245,6 +293,16 @@
 				B1000000000000000000000B /* ScheduleView.swift in Sources */,
 				B1000000000000000000000C /* FilterSheet.swift in Sources */,
 				B1000000000000000000000D /* DetailMoreViews.swift in Sources */,
+				B10000000000000000000011 /* OperationsProjection.swift in Sources */,
+				B10000000000000000000012 /* TimelineGeometry.swift in Sources */,
+				B10000000000000000000013 /* OverlapLaneLayout.swift in Sources */,
+				B10000000000000000000014 /* TimelineAccessibilityFormatter.swift in Sources */,
+				B10000000000000000000015 /* OperationsReservationInspector.swift in Sources */,
+				B10000000000000000000016 /* OperationsSearchView.swift in Sources */,
+				B10000000000000000000017 /* OperationsWeekView.swift in Sources */,
+				B10000000000000000000018 /* OperationsTimelineCanvas.swift in Sources */,
+				B10000000000000000000019 /* OperationsWorkspaceView.swift in Sources */,
+				B1000000000000000000001F /* OperationsNavigation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -253,6 +311,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				B1000000000000000000000F /* SchedulerPhase2Tests.swift in Sources */,
+				B1000000000000000000001A /* OperationsProjectionTests.swift in Sources */,
+				B1000000000000000000001B /* TimelineGeometryTests.swift in Sources */,
+				B1000000000000000000001C /* OverlapLaneLayoutTests.swift in Sources */,
+				B1000000000000000000001D /* TimelineAccessibilityFormatterTests.swift in Sources */,
+				B1000000000000000000001E /* WorkstationFixtureTests.swift in Sources */,
+				B10000000000000000000020 /* OperationsNavigationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

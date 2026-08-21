@@ -12,7 +12,11 @@ struct RootView: View {
             case .signedOut:
                 LoginView()
             case .signedIn:
-                MainTabView()
+                if UIDevice.current.userInterfaceIdiom == .pad && session.isStaffExperience {
+                    OperationsWorkspaceView()
+                } else {
+                    MainTabView()
+                }
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: session.launchState)
