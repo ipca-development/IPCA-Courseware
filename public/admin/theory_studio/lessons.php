@@ -18,7 +18,12 @@ try {
     exit;
 }
 $lessons = $svc->listLessons($courseId);
-$chips = $statusSvc->forLessons(array_map(static fn(array $row): int => (int)$row['id'], $lessons));
+$chips = array();
+try {
+    $chips = $statusSvc->forLessons(array_map(static fn(array $row): int => (int)$row['id'], $lessons));
+} catch (Throwable $e) {
+    error_log('Theory Studio lesson chips failed: ' . $e->getMessage());
+}
 $protected = !empty($program['protected']);
 $csrf = theory_studio_csrf_token();
 

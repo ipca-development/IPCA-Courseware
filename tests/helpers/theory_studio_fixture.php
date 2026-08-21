@@ -54,14 +54,14 @@ function theory_studio_install_schema(PDO $pdo): void
     $pdo->exec("CREATE TABLE slide_content (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         slide_id INTEGER NOT NULL,
-        locale TEXT NOT NULL,
+        lang TEXT NOT NULL,
         plain_text TEXT NOT NULL DEFAULT ''
     )");
     $pdo->exec("CREATE TABLE slide_enrichment (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         slide_id INTEGER NOT NULL,
-        locale TEXT NOT NULL,
-        narration_text TEXT NOT NULL DEFAULT ''
+        narration_en TEXT NOT NULL DEFAULT '',
+        narration_es TEXT NOT NULL DEFAULT ''
     )");
     $pdo->exec("CREATE TABLE slide_references (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,12 +140,11 @@ function theory_studio_seed_live(PDO $pdo): array
                 VALUES (100, 10, 501, 'Aerodynamics', 10, 1)");
     $pdo->exec("INSERT INTO slides (id, lesson_id, page_number, image_path, is_deleted)
                 VALUES (1000, 100, 1, 'ks_images/Private/501/1.jpg', 0)");
-    $pdo->exec("INSERT INTO slide_content (slide_id, locale, plain_text)
+    $pdo->exec("INSERT INTO slide_content (slide_id, lang, plain_text)
                 VALUES (1000, 'en', 'English content that is long enough for coverage'),
                        (1000, 'es', 'Texto en espanol suficiente')");
-    $pdo->exec("INSERT INTO slide_enrichment (slide_id, locale, narration_text)
-                VALUES (1000, 'en', 'Narration english text that is definitely long enough here'),
-                       (1000, 'es', 'Narracion en espanol')");
+    $pdo->exec("INSERT INTO slide_enrichment (slide_id, narration_en, narration_es)
+                VALUES (1000, 'Narration english text that is definitely long enough here', 'Narracion en espanol')");
     $pdo->exec("INSERT INTO slide_references (slide_id, ref_type) VALUES (1000, 'PHAK')");
     $pdo->exec("INSERT INTO slide_hotspots (slide_id, is_deleted) VALUES (1000, 0)");
     $pdo->exec("INSERT INTO progress_test_lesson_banks (lesson_id, content_fingerprint, status)

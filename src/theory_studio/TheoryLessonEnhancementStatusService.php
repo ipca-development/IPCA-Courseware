@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 /**
  * Read-only enhancement chip rollup. Never writes banks, blueprints, or enrichment.
+ * Uses live column names (`lang`, `narration_en`/`narration_es`) with SQLite-test fallbacks.
  */
 final class TheoryLessonEnhancementStatusService
 {
@@ -10,6 +11,11 @@ final class TheoryLessonEnhancementStatusService
     public const CONTENT_ES_MIN = 12;
     public const NARRATION_EN_MIN = 32;
     public const NARRATION_ES_MIN = 12;
+
+    /** @var array<string,bool> */
+    private array $tableCache = array();
+    /** @var array<string,bool> */
+    private array $columnCache = array();
 
     public function __construct(private PDO $pdo)
     {
@@ -23,12 +29,48 @@ final class TheoryLessonEnhancementStatusService
      */
     public function forLessons(array $lessonIds): array
     {
-        $out = array();
+        $ids = array();
         foreach ($lessonIds as $id) {
             $id = (int)$id;
             if ($id > 0) {
-                $out[$id] = $this->forLesson($id);
+                $ids[$id] = $id;
             }
+        }
+        $ids = array_values($ids);
+        if ($ids === array()) {
+            return array();
+        }
+
+        $slidesByLesson = $this->activeSlidesByLesson($ids);
+        $slideIds = array();
+        foreach ($slidesByLesson as $list) {
+            foreach ($list as $sid) {
+                $slideIds[] = $sid;
+            }
+        }
+
+        $contentBySlide = $this->contentBySlide($slideIds);
+        $narrationBySlide = $this->narrationBySlide($slideIds);
+        $refCounts = $this->referenceCounts($slideIds);
+        $hotspotCounts = $this->hotspotCounts($slideIds);
+        $banks = $this->banksByLesson($ids);
+        $maya = $this->mayaByLesson($ids);
+        $externals = $this->externalIdsByLesson($ids);
+
+        $out = array();
+        foreach ($ids as $lessonId) {
+            $slides = $slidesByLesson[$lessonId] ?? array();
+            $out[$lessonId] = $this->assemble(
+                $lessonId,
+                $slides,
+                $contentBySlide,
+                $narrationBySlide,
+                $refCounts,
+                $hotspotCounts,
+                $banks[$lessonId] ?? null,
+                $maya[$lessonId] ?? '',
+                $externals[$lessonId] ?? null
+            );
         }
         return $out;
     }
@@ -38,18 +80,41 @@ final class TheoryLessonEnhancementStatusService
      */
     public function forLesson(int $lessonId): array
     {
-        $slides = $this->activeSlideIds($lessonId);
-        $slideCount = count($slides);
-        $content = $this->contentCoverage($slides);
-        $narration = $this->narrationCoverage($slides);
-        $references = $this->referenceCoverage($slides);
-        $video = $this->videoCoverage($lessonId, $slides);
-        $questions = $this->questionCoverage($lessonId);
-        $maya = $this->mayaCoverage($lessonId);
+        $all = $this->forLessons(array($lessonId));
+        return $all[$lessonId] ?? $this->emptyStatus($lessonId);
+    }
+
+    /**
+     * @param list<int> $slides
+     * @param array<int, array{en:string,es:string}> $contentBySlide
+     * @param array<int, array{en:string,es:string}> $narrationBySlide
+     * @param array<int,int> $refCounts
+     * @param array<int,int> $hotspotCounts
+     * @param array<string,mixed>|null $bank
+     * @return array<string,mixed>
+     */
+    private function assemble(
+        int $lessonId,
+        array $slides,
+        array $contentBySlide,
+        array $narrationBySlide,
+        array $refCounts,
+        array $hotspotCounts,
+        ?array $bank,
+        string $mayaStatus,
+        mixed $externalId
+    ): array {
+        $total = count($slides);
+        $content = $this->contentCoverage($slides, $contentBySlide);
+        $narration = $this->narrationCoverage($slides, $narrationBySlide);
+        $references = $this->referenceCoverage($slides, $refCounts);
+        $video = $this->videoCoverage($slides, $hotspotCounts, $externalId);
+        $questions = $this->questionCoverage($bank);
+        $maya = $this->mayaCoverage($mayaStatus);
 
         return array(
             'lesson_id' => $lessonId,
-            'slide_count' => $slideCount,
+            'slide_count' => $total,
             'chips' => array(
                 $this->chip('content', 'Content', $content),
                 $this->chip('translation', 'Translation', $content['translation']),
@@ -63,52 +128,244 @@ final class TheoryLessonEnhancementStatusService
     }
 
     /**
-     * @return list<int>
+     * @param list<int> $lessonIds
+     * @return array<int, list<int>>
      */
-    private function activeSlideIds(int $lessonId): array
+    private function activeSlidesByLesson(array $lessonIds): array
     {
+        $placeholders = implode(',', array_fill(0, count($lessonIds), '?'));
         $stmt = $this->pdo->prepare(
-            'SELECT id FROM slides WHERE lesson_id = ? AND COALESCE(is_deleted, 0) = 0 ORDER BY page_number, id'
+            "SELECT id, lesson_id FROM slides
+             WHERE lesson_id IN ({$placeholders}) AND COALESCE(is_deleted, 0) = 0
+             ORDER BY lesson_id, page_number, id"
         );
-        $stmt->execute(array($lessonId));
-        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: array());
+        $stmt->execute($lessonIds);
+        $out = array();
+        foreach ($stmt->fetchAll() ?: array() as $row) {
+            $lid = (int)$row['lesson_id'];
+            $out[$lid][] = (int)$row['id'];
+        }
+        return $out;
     }
 
     /**
      * @param list<int> $slideIds
+     * @return array<int, array{en:string,es:string}>
+     */
+    private function contentBySlide(array $slideIds): array
+    {
+        $out = array();
+        if ($slideIds === array() || !$this->tableExists('slide_content')) {
+            return $out;
+        }
+        $langCol = $this->firstExistingColumn('slide_content', array('lang', 'locale'));
+        if ($langCol === null) {
+            return $out;
+        }
+        $placeholders = implode(',', array_fill(0, count($slideIds), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT slide_id, {$langCol} AS loc, plain_text FROM slide_content WHERE slide_id IN ({$placeholders})"
+        );
+        $stmt->execute($slideIds);
+        foreach ($stmt->fetchAll() ?: array() as $row) {
+            $sid = (int)$row['slide_id'];
+            if (!isset($out[$sid])) {
+                $out[$sid] = array('en' => '', 'es' => '');
+            }
+            $loc = strtolower((string)($row['loc'] ?? ''));
+            if ($loc === 'en' || $loc === 'es') {
+                $out[$sid][$loc] = (string)($row['plain_text'] ?? '');
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $slideIds
+     * @return array<int, array{en:string,es:string}>
+     */
+    private function narrationBySlide(array $slideIds): array
+    {
+        $out = array();
+        if ($slideIds === array() || !$this->tableExists('slide_enrichment')) {
+            return $out;
+        }
+        $placeholders = implode(',', array_fill(0, count($slideIds), '?'));
+        if ($this->columnExists('slide_enrichment', 'narration_en')) {
+            $stmt = $this->pdo->prepare(
+                "SELECT slide_id, narration_en, narration_es FROM slide_enrichment WHERE slide_id IN ({$placeholders})"
+            );
+            $stmt->execute($slideIds);
+            foreach ($stmt->fetchAll() ?: array() as $row) {
+                $out[(int)$row['slide_id']] = array(
+                    'en' => (string)($row['narration_en'] ?? ''),
+                    'es' => (string)($row['narration_es'] ?? ''),
+                );
+            }
+            return $out;
+        }
+        $langCol = $this->firstExistingColumn('slide_enrichment', array('lang', 'locale'));
+        $textCol = $this->firstExistingColumn('slide_enrichment', array('narration_text', 'narration'));
+        if ($langCol === null || $textCol === null) {
+            return $out;
+        }
+        $stmt = $this->pdo->prepare(
+            "SELECT slide_id, {$langCol} AS loc, {$textCol} AS narration_text
+             FROM slide_enrichment WHERE slide_id IN ({$placeholders})"
+        );
+        $stmt->execute($slideIds);
+        foreach ($stmt->fetchAll() ?: array() as $row) {
+            $sid = (int)$row['slide_id'];
+            if (!isset($out[$sid])) {
+                $out[$sid] = array('en' => '', 'es' => '');
+            }
+            $loc = strtolower((string)($row['loc'] ?? ''));
+            if ($loc === 'en' || $loc === 'es') {
+                $out[$sid][$loc] = (string)($row['narration_text'] ?? '');
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $slideIds
+     * @return array<int,int>
+     */
+    private function referenceCounts(array $slideIds): array
+    {
+        return $this->countBySlide('slide_references', $slideIds, '1=1');
+    }
+
+    /**
+     * @param list<int> $slideIds
+     * @return array<int,int>
+     */
+    private function hotspotCounts(array $slideIds): array
+    {
+        return $this->countBySlide('slide_hotspots', $slideIds, 'COALESCE(is_deleted, 0) = 0');
+    }
+
+    /**
+     * @param list<int> $slideIds
+     * @return array<int,int>
+     */
+    private function countBySlide(string $table, array $slideIds, string $extraWhere): array
+    {
+        $out = array();
+        if ($slideIds === array() || !$this->tableExists($table)) {
+            return $out;
+        }
+        $placeholders = implode(',', array_fill(0, count($slideIds), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT slide_id, COUNT(*) AS n FROM {$table}
+             WHERE slide_id IN ({$placeholders}) AND {$extraWhere}
+             GROUP BY slide_id"
+        );
+        $stmt->execute($slideIds);
+        foreach ($stmt->fetchAll() ?: array() as $row) {
+            $out[(int)$row['slide_id']] = (int)$row['n'];
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $lessonIds
+     * @return array<int, array<string,mixed>>
+     */
+    private function banksByLesson(array $lessonIds): array
+    {
+        $out = array();
+        if (!$this->tableExists('progress_test_lesson_banks')) {
+            return $out;
+        }
+        $placeholders = implode(',', array_fill(0, count($lessonIds), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT lesson_id, status, content_fingerprint FROM progress_test_lesson_banks
+             WHERE lesson_id IN ({$placeholders})"
+        );
+        $stmt->execute($lessonIds);
+        foreach ($stmt->fetchAll() ?: array() as $row) {
+            $out[(int)$row['lesson_id']] = $row;
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $lessonIds
+     * @return array<int,string>
+     */
+    private function mayaByLesson(array $lessonIds): array
+    {
+        $out = array();
+        if (!$this->tableExists('lesson_summary_blueprints')) {
+            return $out;
+        }
+        $placeholders = implode(',', array_fill(0, count($lessonIds), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT lesson_id, current_status FROM lesson_summary_blueprints
+             WHERE lesson_id IN ({$placeholders})"
+        );
+        $stmt->execute($lessonIds);
+        foreach ($stmt->fetchAll() ?: array() as $row) {
+            $out[(int)$row['lesson_id']] = strtolower(trim((string)($row['current_status'] ?? '')));
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $lessonIds
+     * @return array<int, mixed>
+     */
+    private function externalIdsByLesson(array $lessonIds): array
+    {
+        $placeholders = implode(',', array_fill(0, count($lessonIds), '?'));
+        $stmt = $this->pdo->prepare(
+            "SELECT id, external_lesson_id FROM lessons WHERE id IN ({$placeholders})"
+        );
+        $stmt->execute($lessonIds);
+        $out = array();
+        foreach ($stmt->fetchAll() ?: array() as $row) {
+            $out[(int)$row['id']] = $row['external_lesson_id'] ?? null;
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<int> $slides
+     * @param array<int, array{en:string,es:string}> $contentBySlide
      * @return array<string,mixed>
      */
-    private function contentCoverage(array $slideIds): array
+    private function contentCoverage(array $slides, array $contentBySlide): array
     {
-        $total = count($slideIds);
+        $total = count($slides);
         if ($total === 0) {
-            return array('tone' => 'muted', 'label' => 'N/A', 'ok' => 0, 'total' => 0, 'translation' => array('tone' => 'muted', 'label' => 'N/A', 'ok' => 0, 'total' => 0));
+            return array(
+                'tone' => 'muted',
+                'label' => 'N/A',
+                'ok' => 0,
+                'total' => 0,
+                'translation' => array('tone' => 'muted', 'label' => 'N/A', 'ok' => 0, 'total' => 0),
+            );
         }
         $enOk = 0;
         $esOk = 0;
-        $enReady = array();
-        foreach ($slideIds as $sid) {
-            $row = $this->slideContentRow($sid);
-            $en = strlen(trim((string)($row['en'] ?? '')));
-            $es = strlen(trim((string)($row['es'] ?? '')));
-            $enPass = $en >= self::CONTENT_EN_MIN;
+        foreach ($slides as $sid) {
+            $row = $contentBySlide[$sid] ?? array('en' => '', 'es' => '');
+            $enPass = strlen(trim((string)$row['en'])) >= self::CONTENT_EN_MIN;
             if ($enPass) {
                 $enOk++;
-                $enReady[$sid] = true;
             }
-            if ($enPass && $es >= self::CONTENT_ES_MIN) {
+            if ($enPass && strlen(trim((string)$row['es'])) >= self::CONTENT_ES_MIN) {
                 $esOk++;
             }
         }
-        $enTone = $enOk === $total ? 'ok' : ($enOk > 0 ? 'warn' : 'bad');
-        $esTone = $esOk === $total ? 'ok' : ($esOk > 0 ? 'warn' : 'bad');
         return array(
-            'tone' => $enTone,
+            'tone' => $enOk === $total ? 'ok' : ($enOk > 0 ? 'warn' : 'bad'),
             'label' => $enOk . '/' . $total,
             'ok' => $enOk,
             'total' => $total,
             'translation' => array(
-                'tone' => $esTone,
+                'tone' => $esOk === $total ? 'ok' : ($esOk > 0 ? 'warn' : 'bad'),
                 'label' => $esOk . '/' . $total,
                 'ok' => $esOk,
                 'total' => $total,
@@ -117,21 +374,21 @@ final class TheoryLessonEnhancementStatusService
     }
 
     /**
-     * @param list<int> $slideIds
+     * @param list<int> $slides
+     * @param array<int, array{en:string,es:string}> $narrationBySlide
      * @return array<string,mixed>
      */
-    private function narrationCoverage(array $slideIds): array
+    private function narrationCoverage(array $slides, array $narrationBySlide): array
     {
-        $total = count($slideIds);
+        $total = count($slides);
         if ($total === 0) {
             return array('tone' => 'muted', 'label' => 'N/A', 'ok' => 0, 'total' => 0);
         }
         $ok = 0;
-        foreach ($slideIds as $sid) {
-            $row = $this->enrichmentRow($sid);
-            $en = strlen(trim((string)($row['en'] ?? '')));
-            $es = strlen(trim((string)($row['es'] ?? '')));
-            if ($en >= self::NARRATION_EN_MIN && $es >= self::NARRATION_ES_MIN) {
+        foreach ($slides as $sid) {
+            $row = $narrationBySlide[$sid] ?? array('en' => '', 'es' => '');
+            if (strlen(trim((string)$row['en'])) >= self::NARRATION_EN_MIN
+                && strlen(trim((string)$row['es'])) >= self::NARRATION_ES_MIN) {
                 $ok++;
             }
         }
@@ -144,20 +401,19 @@ final class TheoryLessonEnhancementStatusService
     }
 
     /**
-     * @param list<int> $slideIds
+     * @param list<int> $slides
+     * @param array<int,int> $refCounts
      * @return array<string,mixed>
      */
-    private function referenceCoverage(array $slideIds): array
+    private function referenceCoverage(array $slides, array $refCounts): array
     {
-        $total = count($slideIds);
-        if ($total === 0 || !$this->tableExists('slide_references')) {
-            return array('tone' => 'muted', 'label' => $total === 0 ? 'N/A' : '0/' . $total, 'ok' => 0, 'total' => $total);
+        $total = count($slides);
+        if ($total === 0) {
+            return array('tone' => 'muted', 'label' => 'N/A', 'ok' => 0, 'total' => 0);
         }
         $ok = 0;
-        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM slide_references WHERE slide_id = ?');
-        foreach ($slideIds as $sid) {
-            $stmt->execute(array($sid));
-            if ((int)$stmt->fetchColumn() > 0) {
+        foreach ($slides as $sid) {
+            if ((int)($refCounts[$sid] ?? 0) > 0) {
                 $ok++;
             }
         }
@@ -170,28 +426,22 @@ final class TheoryLessonEnhancementStatusService
     }
 
     /**
-     * @param list<int> $slideIds
+     * @param list<int> $slides
+     * @param array<int,int> $hotspotCounts
      * @return array<string,mixed>
      */
-    private function videoCoverage(int $lessonId, array $slideIds): array
+    private function videoCoverage(array $slides, array $hotspotCounts, mixed $externalId): array
     {
-        $ext = $this->pdo->prepare('SELECT external_lesson_id FROM lessons WHERE id = ? LIMIT 1');
-        $ext->execute(array($lessonId));
-        $externalId = $ext->fetchColumn();
         if ($externalId === null || $externalId === false || trim((string)$externalId) === '') {
             return array('tone' => 'muted', 'label' => 'N/A', 'ok' => 0, 'total' => 0);
         }
-        $total = count($slideIds);
-        if ($total === 0 || !$this->tableExists('slide_hotspots')) {
-            return array('tone' => 'muted', 'label' => 'N/A', 'ok' => 0, 'total' => $total);
+        $total = count($slides);
+        if ($total === 0) {
+            return array('tone' => 'muted', 'label' => 'N/A', 'ok' => 0, 'total' => 0);
         }
         $ok = 0;
-        $stmt = $this->pdo->prepare(
-            'SELECT COUNT(*) FROM slide_hotspots WHERE slide_id = ? AND COALESCE(is_deleted, 0) = 0'
-        );
-        foreach ($slideIds as $sid) {
-            $stmt->execute(array($sid));
-            if ((int)$stmt->fetchColumn() > 0) {
+        foreach ($slides as $sid) {
+            if ((int)($hotspotCounts[$sid] ?? 0) > 0) {
                 $ok++;
             }
         }
@@ -207,19 +457,12 @@ final class TheoryLessonEnhancementStatusService
     }
 
     /**
+     * @param array<string,mixed>|null $row
      * @return array<string,mixed>
      */
-    private function questionCoverage(int $lessonId): array
+    private function questionCoverage(?array $row): array
     {
-        if (!$this->tableExists('progress_test_lesson_banks')) {
-            return array('tone' => 'muted', 'label' => 'Missing');
-        }
-        $stmt = $this->pdo->prepare(
-            'SELECT status, content_fingerprint FROM progress_test_lesson_banks WHERE lesson_id = ? LIMIT 1'
-        );
-        $stmt->execute(array($lessonId));
-        $row = $stmt->fetch();
-        if (!is_array($row)) {
+        if ($row === null) {
             return array('tone' => 'muted', 'label' => 'Missing');
         }
         $status = (string)($row['status'] ?? '');
@@ -235,16 +478,8 @@ final class TheoryLessonEnhancementStatusService
     /**
      * @return array<string,mixed>
      */
-    private function mayaCoverage(int $lessonId): array
+    private function mayaCoverage(string $status): array
     {
-        if (!$this->tableExists('lesson_summary_blueprints')) {
-            return array('tone' => 'muted', 'label' => 'Missing');
-        }
-        $stmt = $this->pdo->prepare(
-            'SELECT current_status FROM lesson_summary_blueprints WHERE lesson_id = ? LIMIT 1'
-        );
-        $stmt->execute(array($lessonId));
-        $status = strtolower(trim((string)$stmt->fetchColumn()));
         if ($status === '') {
             return array('tone' => 'muted', 'label' => 'Missing');
         }
@@ -261,65 +496,24 @@ final class TheoryLessonEnhancementStatusService
     }
 
     /**
-     * @return array{en:string,es:string}
+     * @return array<string,mixed>
      */
-    private function slideContentRow(int $slideId): array
+    private function emptyStatus(int $lessonId): array
     {
-        if (!$this->tableExists('slide_content')) {
-            return array('en' => '', 'es' => '');
-        }
-        $stmt = $this->pdo->prepare(
-            'SELECT locale, plain_text FROM slide_content WHERE slide_id = ?'
+        $muted = array('tone' => 'muted', 'label' => 'N/A');
+        return array(
+            'lesson_id' => $lessonId,
+            'slide_count' => 0,
+            'chips' => array(
+                $this->chip('content', 'Content', $muted + array('translation' => $muted)),
+                $this->chip('translation', 'Translation', $muted),
+                $this->chip('narration', 'Narration', $muted),
+                $this->chip('references', 'References', $muted),
+                $this->chip('video', 'Video', $muted),
+                $this->chip('questions', 'Questions', array('tone' => 'muted', 'label' => 'Missing')),
+                $this->chip('maya', 'Maya', array('tone' => 'muted', 'label' => 'Missing')),
+            ),
         );
-        $stmt->execute(array($slideId));
-        $en = '';
-        $es = '';
-        foreach ($stmt->fetchAll() ?: array() as $row) {
-            $loc = strtolower((string)($row['locale'] ?? ''));
-            if ($loc === 'en') {
-                $en = (string)($row['plain_text'] ?? '');
-            }
-            if ($loc === 'es') {
-                $es = (string)($row['plain_text'] ?? '');
-            }
-        }
-        return array('en' => $en, 'es' => $es);
-    }
-
-    /**
-     * @return array{en:string,es:string}
-     */
-    private function enrichmentRow(int $slideId): array
-    {
-        if (!$this->tableExists('slide_enrichment')) {
-            return array('en' => '', 'es' => '');
-        }
-        $stmt = $this->pdo->prepare(
-            'SELECT locale, narration_text FROM slide_enrichment WHERE slide_id = ?'
-        );
-        $stmt->execute(array($slideId));
-        $en = '';
-        $es = '';
-        foreach ($stmt->fetchAll() ?: array() as $row) {
-            $loc = strtolower((string)($row['locale'] ?? ''));
-            $text = (string)($row['narration_text'] ?? '');
-            if ($loc === 'en') {
-                $en = $text;
-            }
-            if ($loc === 'es') {
-                $es = $text;
-            }
-        }
-        if ($en === '' && $es === '') {
-            $stmt = $this->pdo->prepare('SELECT * FROM slide_enrichment WHERE slide_id = ? LIMIT 1');
-            $stmt->execute(array($slideId));
-            $row = $stmt->fetch();
-            if (is_array($row)) {
-                $en = (string)($row['narration_en'] ?? $row['en_narration'] ?? '');
-                $es = (string)($row['narration_es'] ?? $row['es_narration'] ?? '');
-            }
-        }
-        return array('en' => $en, 'es' => $es);
     }
 
     /**
@@ -339,11 +533,23 @@ final class TheoryLessonEnhancementStatusService
         );
     }
 
+    /**
+     * @param list<string> $candidates
+     */
+    private function firstExistingColumn(string $table, array $candidates): ?string
+    {
+        foreach ($candidates as $column) {
+            if ($this->columnExists($table, $column)) {
+                return $column;
+            }
+        }
+        return null;
+    }
+
     private function tableExists(string $table): bool
     {
-        static $cache = array();
-        if (array_key_exists($table, $cache)) {
-            return $cache[$table];
+        if (array_key_exists($table, $this->tableCache)) {
+            return $this->tableCache[$table];
         }
         try {
             $driver = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
@@ -352,18 +558,51 @@ final class TheoryLessonEnhancementStatusService
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1"
                 );
                 $stmt->execute(array($table));
-                $cache[$table] = (bool)$stmt->fetchColumn();
-                return $cache[$table];
+                $this->tableCache[$table] = (bool)$stmt->fetchColumn();
+                return $this->tableCache[$table];
             }
             $stmt = $this->pdo->prepare(
                 'SELECT 1 FROM information_schema.TABLES
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1'
             );
             $stmt->execute(array($table));
-            $cache[$table] = (bool)$stmt->fetchColumn();
-            return $cache[$table];
+            $this->tableCache[$table] = (bool)$stmt->fetchColumn();
+            return $this->tableCache[$table];
         } catch (Throwable) {
-            $cache[$table] = false;
+            $this->tableCache[$table] = false;
+            return false;
+        }
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        $key = $table . '.' . $column;
+        if (array_key_exists($key, $this->columnCache)) {
+            return $this->columnCache[$key];
+        }
+        try {
+            $driver = (string)$this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+            if ($driver === 'sqlite') {
+                $stmt = $this->pdo->query('PRAGMA table_info(' . $table . ')');
+                $found = false;
+                foreach ($stmt ? $stmt->fetchAll() : array() as $row) {
+                    if ((string)($row['name'] ?? '') === $column) {
+                        $found = true;
+                        break;
+                    }
+                }
+                $this->columnCache[$key] = $found;
+                return $found;
+            }
+            $stmt = $this->pdo->prepare(
+                'SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1'
+            );
+            $stmt->execute(array($table, $column));
+            $this->columnCache[$key] = (bool)$stmt->fetchColumn();
+            return $this->columnCache[$key];
+        } catch (Throwable) {
+            $this->columnCache[$key] = false;
             return false;
         }
     }

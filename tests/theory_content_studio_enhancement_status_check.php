@@ -39,4 +39,14 @@ if (($labels['video']['tone'] ?? '') === '') {
     exit(1);
 }
 
+$src = (string)file_get_contents($root . '/src/theory_studio/TheoryLessonEnhancementStatusService.php');
+if (!str_contains($src, "'lang'") || !str_contains($src, 'narration_en')) {
+    fwrite(STDERR, "FAIL: enhancement status must read live lang / narration_en columns\n");
+    exit(1);
+}
+if (preg_match("/SELECT locale, plain_text FROM slide_content/", $src)) {
+    fwrite(STDERR, "FAIL: slide_content query still requires locale (production column is lang)\n");
+    exit(1);
+}
+
 echo "Theory Content Studio enhancement status: PASS\n";

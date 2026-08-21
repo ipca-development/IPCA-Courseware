@@ -15,23 +15,36 @@ if ($programId <= 0 && $programs) {
 $rows = array();
 if ($programId > 0) {
     $program = $svc->getProgram($programId);
+    $pending = array();
+    $lessonIds = array();
     foreach ($svc->listCourses($programId) as $course) {
         foreach ($svc->listLessons((int)$course['id']) as $lesson) {
-            $status = $statusSvc->forLesson((int)$lesson['id']);
-            $question = array('tone' => 'muted', 'label' => 'Missing');
-            foreach ($status['chips'] as $chip) {
-                if (($chip['key'] ?? '') === 'questions') {
-                    $question = $chip;
-                    break;
-                }
-            }
-            $rows[] = array(
-                'program' => $program,
-                'course' => $course,
-                'lesson' => $lesson,
-                'question' => $question,
-            );
+            $pending[] = array($course, $lesson);
+            $lessonIds[] = (int)$lesson['id'];
         }
+    }
+    $chips = array();
+    try {
+        $chips = $statusSvc->forLessons($lessonIds);
+    } catch (Throwable $e) {
+        error_log('Theory Studio question chips failed: ' . $e->getMessage());
+    }
+    foreach ($pending as $item) {
+        [$course, $lesson] = $item;
+        $status = $chips[(int)$lesson['id']] ?? array('chips' => array());
+        $question = array('tone' => 'muted', 'label' => 'Missing');
+        foreach (($status['chips'] ?? array()) as $chip) {
+            if (($chip['key'] ?? '') === 'questions') {
+                $question = $chip;
+                break;
+            }
+        }
+        $rows[] = array(
+            'program' => $program,
+            'course' => $course,
+            'lesson' => $lesson,
+            'question' => $question,
+        );
     }
 }
 
