@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/ControlledPublishingCoverPageService.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
+require_once __DIR__ . '/ControlledPublishingManualCode.php';
 
 /**
  * Resolves cover imagery for the manual bookshelf and reader.
@@ -62,6 +63,7 @@ final class ControlledPublishingReaderCoverService
         if ($manualCode === '') {
             $manualCode = $bookKey;
         }
+        $manualCode = ControlledPublishingManualCode::display($manualCode);
 
         $title = trim((string)($coverPage['manual_title'] ?? ''));
         if ($title === '') {

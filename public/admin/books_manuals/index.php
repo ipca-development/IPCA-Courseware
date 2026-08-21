@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsUi.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsWorkflowService.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualCode.php';
 
 cw_require_admin();
 $user = cw_current_user($pdo);
@@ -87,6 +88,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($detail === null) {
                 throw new RuntimeException('Manual version not found.');
             }
+            $workflow->renameBook(
+                (int)$detail['book_id'],
+                (string)($_POST['book_title'] ?? ''),
+                $actorId
+            );
             $workflow->saveProfile(
                 (int)$detail['book_id'],
                 (string)($_POST['manual_type'] ?? ''),
@@ -103,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $reviewerIds,
                 $actorId
             );
-            bm_library_flash('success', 'Manual settings and reviewer policy saved.');
+            bm_library_flash('success', 'Manual name, settings, and reviewer policy saved.');
             redirect('/admin/books_manuals/index.php?open=' . $versionId);
         }
         throw new RuntimeException('Unknown Books & Manuals action.');
@@ -171,7 +177,8 @@ books_manuals_page_open(array(
       <input type="hidden" name="action" value="create_manual">
       <label class="bm-form-field">
         <span>Manual code</span>
-        <input name="book_key" required maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,31}" placeholder="SMS">
+        <input name="book_key" required maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9 _-]{1,31}" placeholder="TM PPL">
+        <small>Spaces are allowed and handled automatically.</small>
       </label>
       <label class="bm-form-field">
         <span>Title</span>
@@ -241,11 +248,14 @@ books_manuals_page_open(array(
       $settingsModalId = 'bm-manual-settings-' . $versionId;
       $overrideModalId = 'bm-compliance-override-' . $versionId;
       $versionsModalId = 'bm-previous-versions-' . $versionId;
+      $displayManualCode = ControlledPublishingManualCode::display(
+          (string)($row['manual_code'] ?? $row['book_key'] ?? '')
+      );
     ?>
     <article class="cmp-card bm-book-card" data-bm-reader-url="<?= h($previewUrl) ?>">
       <a class="bm-cover bm-cover--thumbnail" href="<?= h($editorUrl) ?>" aria-label="Edit <?= h((string)$row['book_title']) ?>">
         <img src="<?= h($coverUrl) ?>" alt="<?= h((string)$row['book_title']) ?> front page">
-        <span class="bm-cover__fallback"><?= h((string)$row['book_key']) ?></span>
+        <span class="bm-cover__fallback"><?= h($displayManualCode) ?></span>
       </a>
       <div class="bm-book-card__body">
         <?= books_manuals_phase_pill((string)$row['phase_label'], (string)$row['phase_tone']) ?>
@@ -253,6 +263,7 @@ books_manuals_page_open(array(
           <a href="<?= h($previewUrl) ?>" data-bm-reader-open><?= h((string)$row['book_title']) ?></a>
         </h2>
         <dl class="bm-meta">
+          <dt>Manual code</dt><dd><?= h($displayManualCode) ?></dd>
           <dt>Revision</dt><dd><?= h((string)($row['version_label'] ?? '—')) ?></dd>
           <dt>Update</dt><dd><?= h(books_manuals_update_label($row['update_code'] ?? null)) ?></dd>
           <dt>Approval</dt><dd><?= h(books_manuals_approval_label((string)($row['approval_route'] ?? 'internal'), $row['authority_code'] ?? null)) ?></dd>
@@ -305,7 +316,7 @@ books_manuals_page_open(array(
       <div class="compliance-modal__panel bm-manual-modal__panel">
         <header class="bm-modal-hero">
           <div>
-            <div class="hero-overline">Books &amp; Manuals · <?= h((string)$row['book_key']) ?></div>
+            <div class="hero-overline">Books &amp; Manuals · <?= h($displayManualCode) ?></div>
             <h2><?= h((string)$row['book_title']) ?></h2>
             <p>Revision <?= h((string)$row['version_label']) ?> · <?= h((string)$row['update_code']) ?></p>
           </div>
@@ -377,6 +388,10 @@ books_manuals_page_open(array(
               <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
               <input type="hidden" name="action" value="save_manual_settings">
               <input type="hidden" name="version_id" value="<?= $versionId ?>">
+              <label class="bm-form-field">
+                <span>Manual / Book Name</span>
+                <input name="book_title" required maxlength="255" value="<?= h((string)$row['book_title']) ?>">
+              </label>
               <label class="bm-form-field">
                 <span>Manual type</span>
                 <select name="manual_type">

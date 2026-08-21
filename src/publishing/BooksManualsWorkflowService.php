@@ -551,6 +551,69 @@ final class BooksManualsWorkflowService
         ));
     }
 
+    public function renameBook(int $bookId, string $title, int $actorUserId): void
+    {
+        $title = trim($title);
+        if ($bookId <= 0) {
+            throw new InvalidArgumentException('Manual is required.');
+        }
+        if ($title === '' || mb_strlen($title) > 255) {
+            throw new InvalidArgumentException(
+                'Manual / Book Name is required and must not exceed 255 characters.'
+            );
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT title FROM ipca_publishing_books WHERE id = ? LIMIT 1'
+        );
+        $stmt->execute(array($bookId));
+        $currentTitle = $stmt->fetchColumn();
+        if ($currentTitle === false) {
+            throw new RuntimeException('Manual not found.');
+        }
+        if ((string)$currentTitle === $title) {
+            return;
+        }
+
+        $versionStmt = $this->pdo->prepare(
+            'SELECT id, lifecycle_status
+               FROM ipca_publishing_book_versions
+              WHERE book_id = ?
+              ORDER BY id DESC
+              LIMIT 1'
+        );
+        $versionStmt->execute(array($bookId));
+        $version = $versionStmt->fetch(PDO::FETCH_ASSOC);
+
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ipca_publishing_books
+                    SET title = ?, updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?'
+            )->execute(array($title, $bookId));
+            if (is_array($version)) {
+                $status = (string)($version['lifecycle_status'] ?? '');
+                $this->recordEvent(
+                    (int)$version['id'],
+                    $status,
+                    $status,
+                    'rename_book',
+                    json_encode(array(
+                        'before' => (string)$currentTitle,
+                        'after' => $title,
+                    ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    $actorUserId
+                );
+            }
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
     /**
      * @return list<array{id:int,name:string,email:string,role:string}>
      */

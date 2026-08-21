@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
+require_once __DIR__ . '/ControlledPublishingManualCode.php';
 require_once __DIR__ . '/ControlledPublishingSectionService.php';
 require_once __DIR__ . '/ControlledPublishingBlockService.php';
 require_once __DIR__ . '/ControlledPublishingBookRenderer.php';
@@ -206,7 +207,9 @@ final class ControlledPublishingReaderService
             'book_key' => $bookKey,
             'book_title' => (string)($book['title'] ?? ''),
             'book_type' => $bookType,
-            'manual_code' => (string)($book['manual_code'] ?? ''),
+            'manual_code' => ControlledPublishingManualCode::display(
+                (string)($book['manual_code'] ?? '')
+            ),
             'version_id' => (int)($version['id'] ?? 0),
             'version_label' => (string)($version['version_label'] ?? ''),
             'effective_date' => $version['effective_date'] ?? null,

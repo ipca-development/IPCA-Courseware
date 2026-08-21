@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingReaderService.php';
+require_once __DIR__ . '/ControlledPublishingManualCode.php';
 
 /**
  * Controlled Publishing foundation: book registry, Statement of Compliance Source
@@ -901,14 +902,9 @@ final class ControlledPublishingFoundationService
             throw new RuntimeException('Template manual version not found.');
         }
 
-        $bookKey = strtoupper(trim($bookKey));
+        $bookKey = ControlledPublishingManualCode::normalizeIdentity($bookKey);
         $title = trim($title);
         $versionLabel = trim($versionLabel);
-        if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,31}$/', $bookKey)) {
-            throw new RuntimeException(
-                'Manual code must be 2–32 uppercase letters, numbers, underscores, or hyphens.'
-            );
-        }
         if ($title === '' || mb_strlen($title) > 255) {
             throw new RuntimeException('Manual title is required and must not exceed 255 characters.');
         }
