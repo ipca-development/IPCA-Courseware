@@ -24,6 +24,9 @@ identity_settings_assert(
 $libraryPage = (string)file_get_contents(
     dirname(__DIR__) . '/public/admin/books_manuals/index.php'
 );
+$controlledBooksPage = (string)file_get_contents(
+    dirname(__DIR__) . '/public/admin/compliance/controlled_books.php'
+);
 identity_settings_assert(
     'Manual Settings exposes the editable Manual / Book Name',
     str_contains($libraryPage, 'name="book_title"')
@@ -33,6 +36,10 @@ identity_settings_assert(
     'manual creation accepts readable spaced codes',
     str_contains($libraryPage, 'pattern="[A-Za-z0-9][A-Za-z0-9 _-]{1,31}"')
         && str_contains($libraryPage, 'Spaces are allowed and handled automatically.')
+        && str_contains(
+            $controlledBooksPage,
+            'pattern="[A-Za-z0-9][A-Za-z0-9 _-]{1,31}"'
+        )
 );
 
 $pdo = new PDO('sqlite::memory:');

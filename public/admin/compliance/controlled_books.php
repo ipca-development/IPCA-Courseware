@@ -90,7 +90,8 @@ compliance_page_open(array(
     <input type="hidden" name="action" value="create_manual">
     <label style="display:grid;gap:6px;font-size:13px;">
       <span>Manual code</span>
-      <input type="text" name="book_key" required maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,31}" placeholder="SMS">
+      <input type="text" name="book_key" required maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9 _-]{1,31}" placeholder="TM PPL">
+      <small>Spaces are allowed and handled automatically.</small>
     </label>
     <label style="display:grid;gap:6px;font-size:13px;">
       <span>Manual title</span>
