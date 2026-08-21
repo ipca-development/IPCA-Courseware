@@ -7,6 +7,12 @@ declare(strict_types=1);
  */
 final class ControlledPublishingTableFormula
 {
+    private const MAX_FORMULA_LENGTH = 2048;
+    private const MAX_DEPENDENCY_DEPTH = 64;
+    private const MAX_EVALUATION_STEPS = 10000;
+    private const MAX_RANGE_CELLS = 10000;
+    private const MAX_MATH_TOKENS = 1024;
+
     /**
      * @param list<list<string>> $bodyRows
      */
@@ -25,6 +31,11 @@ final class ControlledPublishingTableFormula
                 return rtrim(rtrim(sprintf('%.4f', (float)$value), '0'), '.');
             }
             return (string)$value;
+        } catch (RuntimeException $error) {
+            if (str_starts_with($error->getMessage(), 'Circular formula reference')) {
+                return '#CYCLE';
+            }
+            return '#ERR';
         } catch (Throwable) {
             return '#ERR';
         }
@@ -35,14 +46,38 @@ final class ControlledPublishingTableFormula
      */
     public static function evaluate(string $formula, array $bodyRows): float|string
     {
+        $context = array(
+            'active' => array(),
+            'memo' => array(),
+            'depth' => 0,
+            'steps' => 0,
+        );
+        return self::evaluateFormula($formula, $bodyRows, $context);
+    }
+
+    /**
+     * @param list<list<string>> $bodyRows
+     * @param array{active:array<string,bool>,memo:array<string,float>,depth:int,steps:int} $context
+     */
+    private static function evaluateFormula(
+        string $formula,
+        array $bodyRows,
+        array &$context
+    ): float|string
+    {
+        self::consumeStep($context);
+        if (strlen($formula) > self::MAX_FORMULA_LENGTH) {
+            throw new RuntimeException('Formula is too long');
+        }
         $expr = trim(substr(trim($formula), 1));
         if ($expr === '') {
             throw new RuntimeException('Empty formula');
         }
+        self::assertExpressionNesting($expr);
 
         if (preg_match('/^(SUM|AVG|AVERAGE|MIN|MAX|COUNT)\((.+)\)$/i', $expr, $m) === 1) {
             $fn = strtoupper($m[1]);
-            $args = self::parseArgs($m[2], $bodyRows);
+            $args = self::parseArgs($m[2], $bodyRows, $context);
             return match ($fn) {
                 'SUM' => array_sum($args),
                 'AVG', 'AVERAGE' => $args === array() ? 0.0 : array_sum($args) / count($args),
@@ -53,14 +88,14 @@ final class ControlledPublishingTableFormula
             };
         }
 
-        return self::evaluateExpression($expr, $bodyRows);
+        return self::evaluateExpression($expr, $bodyRows, $context);
     }
 
     /**
      * @param list<list<string>> $bodyRows
      * @return list<float>
      */
-    private static function parseArgs(string $raw, array $bodyRows): array
+    private static function parseArgs(string $raw, array $bodyRows, array &$context): array
     {
         $parts = preg_split('/\s*,\s*/', trim($raw)) ?: array();
         $values = array();
@@ -70,12 +105,12 @@ final class ControlledPublishingTableFormula
                 continue;
             }
             if (str_contains($part, ':')) {
-                foreach (self::expandRange($part, $bodyRows) as $v) {
+                foreach (self::expandRange($part, $bodyRows, $context) as $v) {
                     $values[] = $v;
                 }
                 continue;
             }
-            $values[] = self::resolveValue($part, $bodyRows);
+            $values[] = self::resolveValue($part, $bodyRows, $context);
         }
         return $values;
     }
@@ -84,7 +119,7 @@ final class ControlledPublishingTableFormula
      * @param list<list<string>> $bodyRows
      * @return list<float>
      */
-    private static function expandRange(string $range, array $bodyRows): array
+    private static function expandRange(string $range, array $bodyRows, array &$context): array
     {
         $bits = explode(':', $range, 2);
         if (count($bits) !== 2) {
@@ -97,9 +132,13 @@ final class ControlledPublishingTableFormula
         $r1 = max($start['row'], $end['row']);
         $c0 = min($start['col'], $end['col']);
         $c1 = max($start['col'], $end['col']);
+        $cellCount = ($r1 - $r0 + 1) * ($c1 - $c0 + 1);
+        if ($cellCount > self::MAX_RANGE_CELLS) {
+            throw new RuntimeException('Formula range is too large');
+        }
         for ($r = $r0; $r <= $r1; $r++) {
             for ($c = $c0; $c <= $c1; $c++) {
-                $values[] = self::cellNumber($bodyRows, $r, $c);
+                $values[] = self::cellNumber($bodyRows, $r, $c, $context);
             }
         }
         return $values;
@@ -108,13 +147,18 @@ final class ControlledPublishingTableFormula
     /**
      * @param list<list<string>> $bodyRows
      */
-    private static function evaluateExpression(string $expr, array $bodyRows): float
+    private static function evaluateExpression(string $expr, array $bodyRows, array &$context): float
     {
         $expr = preg_replace_callback(
             '/([A-Z]+[0-9]+)/i',
-            static function (array $m) use ($bodyRows): string {
+            static function (array $m) use ($bodyRows, &$context): string {
                 $ref = self::parseRef($m[1]);
-                return (string)self::cellNumber($bodyRows, $ref['row'], $ref['col']);
+                return (string)self::cellNumber(
+                    $bodyRows,
+                    $ref['row'],
+                    $ref['col'],
+                    $context
+                );
             },
             strtoupper($expr)
         ) ?? $expr;
@@ -143,6 +187,9 @@ final class ControlledPublishingTableFormula
         }
         if ($tokens === array()) {
             throw new RuntimeException('Empty math');
+        }
+        if (count($tokens) > self::MAX_MATH_TOKENS) {
+            throw new RuntimeException('Formula has too many operations');
         }
         $pos = 0;
         $value = self::parseAddSub($tokens, $pos);
@@ -217,11 +264,11 @@ final class ControlledPublishingTableFormula
     /**
      * @param list<list<string>> $bodyRows
      */
-    private static function resolveValue(string $token, array $bodyRows): float
+    private static function resolveValue(string $token, array $bodyRows, array &$context): float
     {
         if (preg_match('/^[A-Z]+[0-9]+$/i', $token) === 1) {
             $ref = self::parseRef($token);
-            return self::cellNumber($bodyRows, $ref['row'], $ref['col']);
+            return self::cellNumber($bodyRows, $ref['row'], $ref['col'], $context);
         }
         if (is_numeric($token)) {
             return (float)$token;
@@ -247,16 +294,86 @@ final class ControlledPublishingTableFormula
     /**
      * @param list<list<string>> $bodyRows
      */
-    private static function cellNumber(array $bodyRows, int $row, int $col): float
+    private static function cellNumber(
+        array $bodyRows,
+        int $row,
+        int $col,
+        array &$context
+    ): float
     {
+        self::consumeStep($context);
+        $key = $row . ':' . $col;
+        if (array_key_exists($key, $context['memo'])) {
+            return $context['memo'][$key];
+        }
+        if (isset($context['active'][$key])) {
+            throw new RuntimeException(
+                'Circular formula reference detected at ' . self::formatRef($row, $col)
+            );
+        }
+        if ($context['depth'] >= self::MAX_DEPENDENCY_DEPTH) {
+            throw new RuntimeException('Formula dependency depth exceeded');
+        }
         $raw = (string)($bodyRows[$row][$col] ?? '');
         if ($raw === '') {
             return 0.0;
         }
         if (str_starts_with($raw, '=')) {
-            $v = self::evaluate($raw, $bodyRows);
-            return is_numeric($v) ? (float)$v : 0.0;
+            $context['active'][$key] = true;
+            $context['depth']++;
+            try {
+                $value = self::evaluateFormula($raw, $bodyRows, $context);
+                $number = is_numeric($value) ? (float)$value : 0.0;
+                $context['memo'][$key] = $number;
+                return $number;
+            } finally {
+                $context['depth']--;
+                unset($context['active'][$key]);
+            }
         }
-        return is_numeric($raw) ? (float)$raw : 0.0;
+        $number = is_numeric($raw) ? (float)$raw : 0.0;
+        $context['memo'][$key] = $number;
+        return $number;
+    }
+
+    /**
+     * @param array{active:array<string,bool>,memo:array<string,float>,depth:int,steps:int} $context
+     */
+    private static function consumeStep(array &$context): void
+    {
+        $context['steps']++;
+        if ($context['steps'] > self::MAX_EVALUATION_STEPS) {
+            throw new RuntimeException('Formula evaluation work limit exceeded');
+        }
+    }
+
+    private static function assertExpressionNesting(string $expr): void
+    {
+        $depth = 0;
+        foreach (str_split($expr) as $character) {
+            if ($character === '(') {
+                $depth++;
+                if ($depth > self::MAX_DEPENDENCY_DEPTH) {
+                    throw new RuntimeException('Formula nesting depth exceeded');
+                }
+            } elseif ($character === ')') {
+                $depth--;
+                if ($depth < 0) {
+                    throw new RuntimeException('Invalid formula parentheses');
+                }
+            }
+        }
+        if ($depth !== 0) {
+            throw new RuntimeException('Invalid formula parentheses');
+        }
+    }
+
+    private static function formatRef(int $row, int $col): string
+    {
+        $column = '';
+        for ($number = $col + 1; $number > 0; $number = intdiv($number - 1, 26)) {
+            $column = chr(65 + (($number - 1) % 26)) . $column;
+        }
+        return $column . ($row + 1);
     }
 }

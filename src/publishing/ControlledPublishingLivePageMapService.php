@@ -595,6 +595,28 @@ final class ControlledPublishingLivePageMapService
             if (
                 !$force
                 && is_array($existing)
+                && in_array(
+                    (string)$existing['status'],
+                    array(self::STATUS_FAILED, self::STATUS_RETRY_AVAILABLE),
+                    true
+                )
+                && $this->storedFingerprintMatches(
+                    (string)$existing['requested_fingerprint_hash'],
+                    (string)$existing['requested_fingerprint_json'],
+                    $fingerprintHash,
+                    $fingerprintJson
+                )
+            ) {
+                // A deterministic failure requires an explicit retry or a new
+                // source fingerprint. Polling/ensure calls must not create an
+                // unbounded generation loop.
+                $this->pdo->commit();
+                return array('row' => $existing, 'spawn' => false);
+            }
+
+            if (
+                !$force
+                && is_array($existing)
                 && (string)$existing['status'] === self::STATUS_PENDING
                 && $this->storedFingerprintMatches(
                     (string)$existing['requested_fingerprint_hash'],
@@ -1132,10 +1154,13 @@ final class ControlledPublishingLivePageMapService
             if (!is_executable($cliPhp)) {
                 $cliPhp = PHP_BINARY;
             }
-            $command = escapeshellarg($cliPhp)
-                . ' ' . escapeshellarg($root . '/scripts/controlled_publishing_page_map_worker.php')
+            $command = 'nice -n 10 timeout 900s '
+                . escapeshellarg($cliPhp)
+                . ' -d memory_limit=384M '
+                . escapeshellarg($root . '/scripts/controlled_publishing_page_map_worker.php')
                 . ' --drain'
                 . ' --version-id=' . $versionId
+                . ' --max-jobs=8'
                 . ' > /dev/null 2>&1 &';
             exec($command);
         };

@@ -256,6 +256,17 @@ $assert(
     ($store->loadPage(1, ControlledPublishingReaderLayoutProfile::profileKey(), 1)['page_html'] ?? '') === '<article>a</article>',
     'failed generation replaced/deleted the last valid map.'
 );
+$spawnCountAfterFailure = count($spawned);
+$sameFailedFingerprint = $service->ensure(1, 7);
+$assert(
+    ($sameFailedFingerprint['generation_seq'] ?? 0) === 3
+        && ($sameFailedFingerprint['status'] ?? '') === 'retry_available',
+    'same failed fingerprint allocated another automatic generation.'
+);
+$assert(
+    count($spawned) === $spawnCountAfterFailure,
+    'same failed fingerprint spawned an automatic retry loop.'
+);
 
 $mode = 'success';
 $retry = $service->retry(1, 7);

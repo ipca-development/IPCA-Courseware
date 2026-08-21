@@ -6,6 +6,31 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
+const IPCA_PAGE_MAP_WORKER_MEMORY_LIMIT = '384M';
+const IPCA_PAGE_MAP_WORKER_MEMORY_BYTES = 384 * 1024 * 1024;
+
+if (@ini_set('memory_limit', IPCA_PAGE_MAP_WORKER_MEMORY_LIMIT) === false) {
+    fwrite(STDERR, "Unable to enforce page-map worker memory limit.\n");
+    exit(70);
+}
+$effectiveMemoryLimit = trim((string)ini_get('memory_limit'));
+if ($effectiveMemoryLimit === '-1' || $effectiveMemoryLimit === '') {
+    fwrite(STDERR, "Page-map worker refuses to run with unlimited memory.\n");
+    exit(70);
+}
+$unit = strtolower(substr($effectiveMemoryLimit, -1));
+$numeric = (float)$effectiveMemoryLimit;
+$effectiveBytes = match ($unit) {
+    'g' => (int)($numeric * 1024 * 1024 * 1024),
+    'm' => (int)($numeric * 1024 * 1024),
+    'k' => (int)($numeric * 1024),
+    default => (int)$numeric,
+};
+if ($effectiveBytes <= 0 || $effectiveBytes > IPCA_PAGE_MAP_WORKER_MEMORY_BYTES) {
+    fwrite(STDERR, "Page-map worker memory limit exceeds the hard safety cap.\n");
+    exit(70);
+}
+
 require_once __DIR__ . '/../src/RuntimeSecrets.php';
 RuntimeSecrets::ensureCliEnvLoaded();
 require_once __DIR__ . '/../src/helpers.php';
