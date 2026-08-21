@@ -678,6 +678,8 @@ cw_header('Dashboard');
       </div>
 
       <div class="mini-actions">
+        <a class="mini-action" href="/admin/theory_studio/programs.php">Programs</a>
+        <a class="mini-action" href="/admin/question_manager.php">Questions</a>
         <a class="mini-action" href="/admin/courses.php">Courses</a>
         <a class="mini-action" href="/admin/lessons.php">Lessons</a>
         <a class="mini-action" href="/admin/slides.php">Slides</a>

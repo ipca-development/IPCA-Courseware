@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/schedule.php';
+require_once __DIR__ . '/../../src/theory_studio/TheoryStudioIsolation.php';
  
 cw_require_login();
 
@@ -33,6 +34,7 @@ function cohort_programs(PDO $pdo): array
     return $pdo->query("
         SELECT id, program_key, sort_order
         FROM programs
+        WHERE " . theory_studio_operational_program_sql_for($pdo, 'programs') . "
         ORDER BY sort_order, id
     ")->fetchAll(PDO::FETCH_ASSOC);
 }
@@ -529,6 +531,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($programId <= 0 || $name === '' || $start === '' || $end === '') {
             $msg = 'Missing required fields.';
         } else {
+            try {
+                theory_studio_require_operational_program($pdo, $programId);
+            } catch (TheoryStudioException $e) {
+                $msg = $e->getMessage();
+            }
+            if ($msg === '') {
             $firstCourse = $pdo->prepare("
                 SELECT id
                 FROM courses
@@ -552,6 +560,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: /admin/cohort.php?cohort_id=' . $cohortId);
                 exit;
             }
+            }
         }
     }
 
@@ -573,6 +582,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($programId <= 0) {
             $msg = 'Missing program.';
         } else {
+            try {
+                theory_studio_require_operational_program($pdo, $programId);
+            } catch (TheoryStudioException $e) {
+                $msg = $e->getMessage();
+            }
+            if ($msg === '') {
             cohort_save_course_selection($pdo, $cohortId, $programId, $courseIds);
             cohort_save_lesson_scope($pdo, $cohortId, $programId, $courseIds, $lessonIds);
 
@@ -593,6 +608,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             header('Location: /admin/cohort.php?cohort_id=' . $cohortId . '#courses');
             exit;
+            }
         }
     }
 

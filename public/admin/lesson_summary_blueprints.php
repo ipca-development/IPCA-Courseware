@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/lesson_summary_blueprint_service.php';
+require_once __DIR__ . '/../../src/theory_studio/TheoryStudioIsolation.php';
 
 cw_require_admin();
 
@@ -49,11 +50,13 @@ if (isset($_GET['action'])) {
     try {
         if ($action === 'lessons') {
             $courseId = (int)($_GET['course_id'] ?? 0);
+            theory_studio_require_operational_course($pdo, $courseId);
             lsb_json(['ok' => true, 'lessons' => $svc->listLessonsForCourse($courseId)]);
         }
 
         if ($action === 'lesson_detail') {
             $lessonId = (int)($_GET['lesson_id'] ?? 0);
+            theory_studio_require_operational_lesson($pdo, $lessonId);
             lsb_json(['ok' => true, 'detail' => $svc->lessonDetail($lessonId)]);
         }
 
@@ -92,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($action === 'generate_lesson') {
             $lessonId = (int)($payload['lesson_id'] ?? 0);
+            theory_studio_require_operational_lesson($pdo, $lessonId);
             $reason = (string)($payload['generation_reason'] ?? 'manual_regenerate');
             $verified = lsb_int_list($payload['verified_resource_ids'] ?? []);
             $unverified = lsb_string_list($payload['unverified_resource_ids'] ?? []);
@@ -105,6 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'activate_lessons') {
             $lessonIds = lsb_int_list($payload['lesson_ids'] ?? []);
+            foreach ($lessonIds as $lessonId) {
+                theory_studio_require_operational_lesson($pdo, $lessonId);
+            }
             lsb_json(['ok' => true] + $svc->activateLatestVersionsForLessons($lessonIds));
         }
 
@@ -114,11 +121,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$programs = $pdo->query('SELECT id, program_key, name FROM programs ORDER BY sort_order, id')->fetchAll(PDO::FETCH_ASSOC);
+$programs = $pdo->query(
+    'SELECT id, program_key, name FROM programs WHERE ' . theory_studio_operational_program_sql_for($pdo, 'programs') . ' ORDER BY sort_order, id'
+)->fetchAll(PDO::FETCH_ASSOC);
 $courses = $pdo->query("
     SELECT c.id, c.title, c.program_id, p.program_key
     FROM courses c
     INNER JOIN programs p ON p.id = c.program_id
+    WHERE " . theory_studio_operational_program_sql_for($pdo, 'p') . "
     ORDER BY p.sort_order, c.sort_order, c.id
 ")->fetchAll(PDO::FETCH_ASSOC);
 

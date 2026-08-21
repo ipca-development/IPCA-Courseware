@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/bulk_enrich_video_manifest.php';
+require_once __DIR__ . '/../../../src/theory_studio/TheoryStudioIsolation.php';
 
 cw_require_admin();
 
@@ -31,6 +32,17 @@ $listLimit = min(500, max(25, $listLimit));
 
 if ($programId <= 0 && $courseId <= 0) {
     echo json_encode(['ok' => false, 'error' => 'course_id or program_id required']);
+    exit;
+}
+
+try {
+    if ($courseId > 0) {
+        theory_studio_require_operational_course($pdo, $courseId);
+    } elseif ($programId > 0) {
+        theory_studio_require_operational_program($pdo, $programId);
+    }
+} catch (TheoryStudioException $e) {
+    echo json_encode(['ok' => false, 'error_code' => $e->errorCode, 'error' => $e->getMessage()]);
     exit;
 }
 

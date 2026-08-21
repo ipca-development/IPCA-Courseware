@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/written_test/bootstrap.php';
+require_once __DIR__ . '/../../src/theory_studio/TheoryStudioIsolation.php';
 
 cw_require_login();
 
@@ -108,6 +109,7 @@ $courses = $pdo->query("
     SELECT c.id, c.title, p.program_key
     FROM courses c
     LEFT JOIN programs p ON p.id = c.program_id
+    WHERE p.id IS NULL OR " . theory_studio_operational_program_sql_for($pdo, 'p') . "
     ORDER BY p.sort_order ASC, c.sort_order ASC, c.title ASC
 ")->fetchAll(PDO::FETCH_ASSOC) ?: [];
 

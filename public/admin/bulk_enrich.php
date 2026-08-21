@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/theory_studio/TheoryStudioIsolation.php';
 
 cw_require_admin();
 
@@ -10,15 +11,20 @@ $courses = $pdo->query("
   SELECT c.id, c.title, c.program_id, p.program_key
   FROM courses c
   JOIN programs p ON p.id = c.program_id
+  WHERE " . theory_studio_operational_program_sql_for($pdo, 'p') . "
   ORDER BY p.sort_order, c.sort_order, c.id
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$programs = $pdo->query('SELECT id, program_key, name FROM programs ORDER BY sort_order, id')->fetchAll(PDO::FETCH_ASSOC);
+$programs = $pdo->query(
+    'SELECT id, program_key, name FROM programs WHERE ' . theory_studio_operational_program_sql_for($pdo, 'programs') . ' ORDER BY sort_order, id'
+)->fetchAll(PDO::FETCH_ASSOC);
 
 $lessonsFlat = $pdo->query("
   SELECT l.id, l.course_id, l.external_lesson_id, l.title, c.program_id, c.title AS course_title
   FROM lessons l
   INNER JOIN courses c ON c.id = l.course_id
+  INNER JOIN programs p ON p.id = c.program_id
+  WHERE " . theory_studio_operational_program_sql_for($pdo, 'p') . "
   ORDER BY c.program_id, c.sort_order, c.id, l.sort_order, l.external_lesson_id
 ")->fetchAll(PDO::FETCH_ASSOC);
 

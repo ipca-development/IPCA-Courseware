@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/openai.php';
+require_once __DIR__ . '/../../src/theory_studio/TheoryStudioIsolation.php';
 
 cw_require_admin();
 
@@ -309,6 +310,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($programId <= 0) {
         progress("ERROR: program_key not found in DB: {$programKey}");
+        echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
+        exit;
+    }
+
+    try {
+        theory_studio_require_operational_program($pdo, $programId);
+    } catch (TheoryStudioException $e) {
+        progress('ERROR: ' . $e->getMessage());
         echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
         exit;
     }

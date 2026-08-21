@@ -7,6 +7,7 @@ require_once __DIR__ . '/CommunicationSupport.php';
 require_once __DIR__ . '/CommunicationTrainingMediaLibraryService.php';
 require_once __DIR__ . '/CommunicationTrainingThumbnailRenderer.php';
 require_once __DIR__ . '/CommunicationTrainingVideoAnalyzer.php';
+require_once __DIR__ . '/../theory_studio/TheoryStudioIsolation.php';
 
 /**
  * Private training-video library. Isolated from messages, Community CDN media,
@@ -1331,7 +1332,8 @@ final class CommunicationTrainingVideoService
         $programs = array();
         if ($this->tableExists('programs')) {
             try {
-                $rows = $this->pdo->query('SELECT id, program_key FROM programs ORDER BY id ASC LIMIT 200');
+                $sql = 'SELECT id, program_key FROM programs WHERE ' . theory_studio_operational_program_sql_for($this->pdo, 'programs') . ' ORDER BY id ASC LIMIT 200';
+                $rows = $this->pdo->query($sql);
                 foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $key = (string)$row['program_key'];
                     $programs[] = array(
