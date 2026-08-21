@@ -1166,7 +1166,9 @@ final class ControlledPublishingBookRenderer
         }
 
         $coverImageHtml = '';
+        $coverImageClass = 'cpb-cover-image';
         if ($coverImageUrl !== '') {
+            $coverImageClass .= ' cpb-cover-image--styled';
             $coverImageHtml = '<img class="cpb-cover-image-img" src="' . h($coverImageUrl) . '" alt="' . h((string)($cover['cover_image_alt'] ?? '')) . '">';
         } elseif ($editable) {
             $coverImageHtml = '<span class="cpb-cover-image-placeholder">Drop cover image here</span>';
@@ -1203,7 +1205,7 @@ final class ControlledPublishingBookRenderer
             . '</header>'
             . '<div class="cpb-cover-hero">'
             . '<div class="cpb-cover-bar" aria-hidden="true"></div>'
-            . '<div class="cpb-cover-image"' . $imageDropAttr . '>' . $coverImageHtml . '</div>'
+            . '<div class="' . $coverImageClass . '"' . $imageDropAttr . '>' . $coverImageHtml . '</div>'
             . '<div class="cpb-cover-bar" aria-hidden="true"></div>'
             . '</div>'
             . '<div class="cpb-cover-details">'

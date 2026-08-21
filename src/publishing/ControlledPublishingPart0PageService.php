@@ -656,9 +656,7 @@ final class ControlledPublishingPart0PageService
         $existing = $this->resolveAbbreviationsPageFromVersion($this->requireVersion($versionId));
 
         $canonicalEntries = $this->loadAbbreviationsFromCanonical($versionId);
-        if ($canonicalEntries === array()) {
-            throw new RuntimeException('No abbreviations found in the linked manual source set.');
-        }
+        $source = $canonicalEntries === array() ? 'manual_content' : 'canonical_and_manual';
 
         $merged = array();
         foreach ($canonicalEntries as $entry) {
@@ -676,7 +674,7 @@ final class ControlledPublishingPart0PageService
         $pageData = $this->normalizeAbbreviationsPage(array(
             'entries' => array_values($merged),
             'empty_rows' => 0,
-            'synced_from' => 'canonical',
+            'synced_from' => $source,
             'excluded' => is_array($existing['excluded'] ?? null) ? $existing['excluded'] : array(),
         ));
         $pageData = $this->completeAbbreviationDefinitions($versionId, $pageData, $actorUserId);
@@ -687,7 +685,7 @@ final class ControlledPublishingPart0PageService
         return array(
             'section_id' => $this->sectionIdByKey($versionId, 'abbreviations'),
             'entries_count' => count($pageData['entries']),
-            'source' => 'canonical',
+            'source' => $source,
             'needs_review_count' => $this->countAbbreviationsNeedingReview($pageData),
         );
     }
@@ -1401,7 +1399,11 @@ final class ControlledPublishingPart0PageService
             }
         }
 
-        return trim((string)($page['synced_from'] ?? '')) !== 'canonical';
+        return !in_array(
+            trim((string)($page['synced_from'] ?? '')),
+            array('canonical', 'canonical_and_manual', 'manual_content'),
+            true
+        );
     }
 
     /**
