@@ -95,6 +95,76 @@ final class ControlledPublishingReaderAnnotationService
     }
 
     /**
+     * Page numbers on reviewer threads are creation-time snapshots. Reconcile
+     * them whenever authoritative pages change so installed readers that still
+     * use the snapshot gate place historical notes on the current page.
+     *
+     * @param list<array<string,mixed>> $pages
+     */
+    public function reconcileReviewThreadPageSnapshots(int $versionId, array $pages): int
+    {
+        if ($versionId <= 0 || $pages === array()) {
+            return 0;
+        }
+        try {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, page_number_snapshot, selected_text,
+                        source_fragment_id, stable_anchor
+                   FROM ipca_manual_reader_review_threads
+                  WHERE book_version_id = ?'
+            );
+            $stmt->execute(array($versionId));
+            $threads = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        } catch (PDOException $e) {
+            // Annotation tables are optional in older/test schemas.
+            if (str_contains(strtolower($e->getMessage()), 'no such table')
+                || str_contains(strtolower($e->getMessage()), "doesn't exist")) {
+                return 0;
+            }
+            throw $e;
+        }
+        if ($threads === array()) {
+            return 0;
+        }
+
+        $pageIndex = array_values(array_filter(array_map(
+            function (array $page): ?array {
+                $pageNumber = (int)($page['page_number'] ?? 0);
+                if ($pageNumber <= 0) {
+                    return null;
+                }
+                $html = (string)($page['page_html'] ?? '');
+                return array(
+                    'page_number' => $pageNumber,
+                    'html' => $html,
+                    'text' => $this->canonicalPageText($html),
+                );
+            },
+            $pages
+        )));
+        if ($pageIndex === array()) {
+            return 0;
+        }
+
+        $update = $this->pdo->prepare(
+            'UPDATE ipca_manual_reader_review_threads
+                SET page_number_snapshot = ?
+              WHERE id = ? AND page_number_snapshot <> ?'
+        );
+        $updated = 0;
+        foreach ($threads as $thread) {
+            $pageNumber = $this->resolveReviewThreadPage($thread, $pageIndex);
+            if ($pageNumber === null || $pageNumber === (int)$thread['page_number_snapshot']) {
+                continue;
+            }
+            $update->execute(array($pageNumber, (int)$thread['id'], $pageNumber));
+            $updated += $update->rowCount();
+        }
+
+        return $updated;
+    }
+
+    /**
      * @param array<string,mixed> $anchor
      * @return array<string,mixed>
      */
@@ -369,6 +439,44 @@ final class ControlledPublishingReaderAnnotationService
             'deleted_at_utc' => $row['deleted_at_utc'],
             'created_at_utc' => (string)$row['created_at_utc'],
         );
+    }
+
+    /**
+     * @param array<string,mixed> $thread
+     * @param list<array{page_number:int,html:string,text:string}> $pages
+     */
+    private function resolveReviewThreadPage(array $thread, array $pages): ?int
+    {
+        foreach (array('source_fragment_id', 'stable_anchor') as $key) {
+            $needle = trim((string)($thread[$key] ?? ''));
+            if ($needle === '') {
+                continue;
+            }
+            $matches = array_values(array_filter(
+                $pages,
+                static fn(array $page): bool => str_contains($page['html'], $needle)
+            ));
+            if (count($matches) === 1) {
+                return $matches[0]['page_number'];
+            }
+        }
+
+        $selectedText = $this->canonicalPageText((string)($thread['selected_text'] ?? ''));
+        if ($selectedText === '') {
+            return null;
+        }
+        $matches = array_values(array_filter(
+            $pages,
+            static fn(array $page): bool => str_contains($page['text'], $selectedText)
+        ));
+
+        return count($matches) === 1 ? $matches[0]['page_number'] : null;
+    }
+
+    private function canonicalPageText(string $html): string
+    {
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return preg_replace('/\s+/u', ' ', trim($text)) ?? '';
     }
 
     /**

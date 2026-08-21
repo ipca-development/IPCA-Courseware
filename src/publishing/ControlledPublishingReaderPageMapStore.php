@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
+require_once __DIR__ . '/ControlledPublishingReaderAnnotationService.php';
 
 /**
  * Persistence and approval workflow for frozen reader page maps.
@@ -119,6 +120,8 @@ final class ControlledPublishingReaderPageMapStore
                 ));
             }
 
+            (new ControlledPublishingReaderAnnotationService($this->pdo))
+                ->reconcileReviewThreadPageSnapshots($bookVersionId, $pages);
             $this->setDraftMeta(
                 $bookVersionId,
                 $layoutProfile,
@@ -199,6 +202,8 @@ final class ControlledPublishingReaderPageMapStore
                 ));
             }
 
+            (new ControlledPublishingReaderAnnotationService($this->pdo))
+                ->reconcileReviewThreadPageSnapshots($bookVersionId, $pages);
             $meta = $this->loadVersionMetadata($bookVersionId);
             $meta[self::META_KEY] = array_merge($approval, array(
                 'status' => 'approved',
@@ -707,6 +712,11 @@ final class ControlledPublishingReaderPageMapStore
                     AND generation_seq = ? AND lease_token = ?
                   ORDER BY page_number'
             )->execute(array($bookVersionId, $layoutProfile, $generationSeq, $leaseToken));
+            (new ControlledPublishingReaderAnnotationService($this->pdo))
+                ->reconcileReviewThreadPageSnapshots(
+                    $bookVersionId,
+                    $this->loadStoredPages($bookVersionId, $layoutProfile)
+                );
             $this->setDraftMeta(
                 $bookVersionId,
                 $layoutProfile,
