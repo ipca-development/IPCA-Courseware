@@ -77,6 +77,23 @@ $jsVer = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
 
 cw_header('Compliance · ' . (string)$version['book_key'] . ' Editor');
 
+$editorActions = array();
+if (
+    !$isAnnexBook
+    && (string)($version['lifecycle_status'] ?? '') !== 'released'
+) {
+    $editorActions[] = array(
+        'label' => 'Import Document',
+        'href' => '/admin/compliance/controlled_book_docx_import.php?version_id=' . $versionId,
+        'variant' => 'primary',
+    );
+}
+$editorActions[] = array(
+    'label' => 'Manage annexes',
+    'href' => '/admin/compliance/controlled_book_annexes.php?version_id=' . $versionId,
+    'variant' => 'secondary',
+);
+
 compliance_page_open(array(
     'overline' => 'Compliance · Controlled publishing',
     'title' => (string)$version['book_key'] . ' ' . (string)$version['version_label'] . ' — Editor',
@@ -85,13 +102,7 @@ compliance_page_open(array(
         'href' => '/admin/books_manuals/index.php?open=' . $versionId,
         'label' => 'IPCA Library',
     ),
-    'actions' => array(
-        array(
-            'label' => 'Manage annexes',
-            'href' => '/admin/compliance/controlled_book_annexes.php?version_id=' . $versionId,
-            'variant' => 'secondary',
-        ),
-    ),
+    'actions' => $editorActions,
 ));
 
 ?>

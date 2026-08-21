@@ -51,6 +51,9 @@ $overrideMigration = (string)file_get_contents(
 $readerApi = (string)file_get_contents($root . '/public/student/api/manual_reader_api.php');
 $editorApi = (string)file_get_contents($root . '/public/admin/api/controlled_book_editor_api.php');
 $editorJs = (string)file_get_contents($root . '/public/assets/controlled_book_editor.js');
+$editorPage = (string)file_get_contents(
+    $root . '/public/admin/compliance/controlled_book_editor.php'
+);
 $legacyVersionPage = (string)file_get_contents(
     $root . '/public/admin/compliance/controlled_book_version.php'
 );
@@ -106,6 +109,13 @@ bm_contract_assert(
     'legacy revision action uses the governed workflow',
     str_contains($legacyVersionPage, '$workflowSvc->createRevision(')
         && !str_contains($legacyVersionPage, '$svc->createNextDraftVersion(')
+);
+bm_contract_assert(
+    'draft manual editor hero exposes the existing DOCX importer',
+    str_contains($editorPage, "'label' => 'Import Document'")
+        && str_contains($editorPage, 'controlled_book_docx_import.php?version_id=')
+        && str_contains($editorPage, '!$isAnnexBook')
+        && str_contains($editorPage, "!== 'released'")
 );
 bm_contract_assert(
     'Manual Change Architect apply utility is permanently read-only',
