@@ -44,6 +44,7 @@ annotation_require(
         "case 'review_thread_create':",
         "case 'review_comment_add':",
         'Reviewer approval required.',
+        "header('Cache-Control: no-store, no-cache, must-revalidate')",
     ),
     $failures
 );
@@ -130,6 +131,7 @@ annotation_require(
         'width: 21px',
         'const reviewMarkerSize = 21',
         'reviewThreads.forEach',
+        '("sync", UUID().uuidString)',
         'if (!fragmentScope) return',
         'if (!anchorScope || !root.contains(anchorScope)) return',
         'wrapTextPiece',

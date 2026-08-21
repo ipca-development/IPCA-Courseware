@@ -369,6 +369,7 @@ struct ManualReaderAPIClient {
                 ("action", "review_threads"),
                 ("book", bookKey),
                 ("version_id", String(versionId)),
+                ("sync", UUID().uuidString),
             ]
         )
     }

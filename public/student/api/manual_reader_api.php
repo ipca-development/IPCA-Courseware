@@ -9,6 +9,8 @@ require_once __DIR__ . '/../../../src/publishing/ControlledPublishingBookStyleMa
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderAnnotationService.php';
 
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate');
+header('Pragma: no-cache');
 
 function mr_json(int $code, array $payload): void
 {
