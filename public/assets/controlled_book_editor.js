@@ -33,6 +33,7 @@
   var outlineBodyEl = document.getElementById('cpbOutlineBody');
   var structCloseBtn = document.getElementById('cpbStructClose');
   var structDoneBtn = document.getElementById('cpbStructDone');
+  var structAddPartBtn = document.getElementById('cpbStructAddPart');
   var structStatusEl = document.getElementById('cpbStructStatus');
   var treeHeadTitleEl = document.getElementById('cpbTreeHeadTitle');
   var imageInput = document.getElementById('cpbImageInput');
@@ -4079,22 +4080,17 @@
       outlineBodyEl.appendChild(box);
     });
 
-    var addPart = document.createElement('button');
-    addPart.type = 'button';
-    addPart.className = 'cpb-struct-add cpb-struct-add--part';
-    addPart.textContent = '+ Add PART';
-    addPart.addEventListener('click', function () {
-      var title = window.prompt('PART title');
-      if (!title || !title.trim()) return;
-      outlinePost('add_outline_part', { title: title.trim() }).then(function (res) {
-        if (res.section_id) loadSection(res.section_id);
-      }).catch(showError);
-    });
-    outlineBodyEl.appendChild(addPart);
-
     if (outlineBodyEl) {
       outlineBodyEl.querySelectorAll('.cpb-struct-heading[draggable="true"]').forEach(wireOutlineDrag);
     }
+  }
+
+  function addOutlinePart() {
+    var title = window.prompt('PART title');
+    if (!title || !title.trim()) return;
+    outlinePost('add_outline_part', { title: title.trim() }).then(function (res) {
+      if (res.section_id) loadSection(res.section_id);
+    }).catch(showError);
   }
 
   function parseOutlineDrag(event) {
@@ -12169,6 +12165,7 @@
   }
   if (structCloseBtn) structCloseBtn.addEventListener('click', closeOutlinePanel);
   if (structDoneBtn) structDoneBtn.addEventListener('click', closeOutlinePanel);
+  if (structAddPartBtn) structAddPartBtn.addEventListener('click', addOutlinePart);
   if (outlinePanelEl) {
     outlinePanelEl.addEventListener('click', function (event) {
       if (event.target === outlinePanelEl) closeOutlinePanel();

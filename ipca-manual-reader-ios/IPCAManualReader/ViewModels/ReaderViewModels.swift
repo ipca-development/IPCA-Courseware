@@ -807,7 +807,9 @@ final class ReaderViewModel: ObservableObject {
                 for: book.bookKey,
                 pageNumber: pageNumber
             ),
-            reviewThreads: reviewThreads.filter { $0.pageNumber == pageNumber },
+            // A thread's page number is only a creation-time snapshot. Let its
+            // durable fragment/anchor locate it after authoritative repagination.
+            reviewThreads: reviewThreads,
             searchTerm: activeSearchTerm
         )
     }

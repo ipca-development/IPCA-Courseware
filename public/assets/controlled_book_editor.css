@@ -343,6 +343,7 @@
 .cpb-tree-actions {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
   padding: 10px 14px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -350,47 +351,51 @@
 }
 
 .cpb-tree-outline-btn {
-  display: block;
-  width: 100%;
+  display: inline-flex;
+  width: auto;
+  align-items: center;
+  justify-content: center;
   box-sizing: border-box;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #0f2744;
-  background: #e2e8f0;
-  border: 0;
-  border-radius: 8px;
-  padding: 9px 12px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #fff;
+  background: #1d4f89;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 5px 11px;
   cursor: pointer;
   text-align: center;
 }
 
 .cpb-tree-outline-btn:hover {
-  background: #fff;
+  background: #2867aa;
 }
 
 .cmp-page .cpb-editor-root .cpb-tree-panel button.cpb-tree-outline-btn {
-  display: block;
-  width: 100%;
+  display: inline-flex;
+  width: auto;
+  align-items: center;
+  justify-content: center;
   box-sizing: border-box;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif !important;
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.04em !important;
-  text-transform: uppercase !important;
-  color: #0f2744 !important;
-  background: #e2e8f0 !important;
-  border: 0 !important;
-  border-radius: 8px !important;
-  padding: 9px 12px !important;
+  font-size: 10px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: #fff !important;
+  background: #1d4f89 !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 999px !important;
+  padding: 5px 11px !important;
   cursor: pointer !important;
   text-align: center !important;
 }
 
 .cmp-page .cpb-editor-root .cpb-tree-panel button.cpb-tree-outline-btn:hover {
-  background: #fff !important;
+  background: #2867aa !important;
 }
 
 .cpb-tree-add {
@@ -688,8 +693,27 @@
   padding: 14px 18px;
   border-top: 1px solid rgba(15, 23, 42, 0.08);
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 12px;
   background: #fff;
+}
+
+.cmp-page .cpb-struct-add-part,
+.cpb-struct-add-part {
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 0;
+  background: #1d4f89;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.cmp-page .cpb-struct-add-part:hover,
+.cpb-struct-add-part:hover {
+  background: #12355f;
 }
 
 .cmp-page .cpb-struct-done,

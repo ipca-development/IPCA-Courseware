@@ -38,6 +38,11 @@ const annotationHelpers = extract(
   "          function textNodes(scope) {",
   "          function highlightExact(item, className) {"
 );
+const annotationFunctions = extract(
+  annotationSource,
+  "          function textNodes(scope) {",
+  "          highlights.forEach(item => highlightExact(item, 'mr-user-highlight'));"
+);
 const selectionHelpers = extract(
   selectionSource,
   "      function annotationTextNodes(scope) {",
@@ -71,6 +76,8 @@ assert(!annotationHelpers.includes("extractContents"));
         <p id="inline"><span>Hello </span><strong>brave</strong><a> new world</a></p>
         <p id="first">Alpha</p><p id="second">Beta</p>
         <p id="capture"><span>Select </span><strong>several</strong><a> words here</a></p>
+        <p data-source-fragment-id="moved-fragment">Durable note text</p>
+        <p id="wrong-page">Fallback note text</p>
       </div>
     `);
 
@@ -142,12 +149,59 @@ assert(!annotationHelpers.includes("extractContents"));
     }, { helpers: annotationHelpers });
 
     assert.strictEqual(structural.ok, true);
-    assert.strictEqual(structural.paragraphCount, 4);
+    assert.strictEqual(structural.paragraphCount, 6);
     assert.strictEqual(structural.firstParent, "first");
     assert.strictEqual(structural.secondParent, "second");
     assert.strictEqual(structural.firstFragments, 1);
     assert.strictEqual(structural.lastFragments, 1);
     assert.strictEqual(structural.text, "AlphaBeta");
+
+    const repaginatedReviewNotes = await page.evaluate(({ helpers }) => {
+      window.blocked = new Set(["SCRIPT", "STYLE", "BUTTON"]);
+      window.root = document.getElementById("root");
+      eval(helpers);
+      highlightExact(
+        {
+          id: "moved-review",
+          fragment: "moved-fragment",
+          anchor: "",
+          text: "Durable note text",
+          start: 0,
+          prefix: "",
+          suffix: ""
+        },
+        "mr-review-highlight"
+      );
+      highlightExact(
+        {
+          id: "missing-review",
+          fragment: "fragment-on-another-page",
+          anchor: "",
+          text: "Fallback note text",
+          start: 0,
+          prefix: "",
+          suffix: ""
+        },
+        "mr-review-highlight"
+      );
+      return {
+        moved: document.querySelectorAll(
+          '[data-source-fragment-id="moved-fragment"] mark.mr-review-highlight'
+        ).length,
+        wrongPage: document.querySelectorAll("#wrong-page mark.mr-review-highlight").length
+      };
+    }, { helpers: annotationFunctions });
+
+    assert.strictEqual(
+      repaginatedReviewNotes.moved,
+      1,
+      "Durably anchored review note must follow content to its repaginated page"
+    );
+    assert.strictEqual(
+      repaginatedReviewNotes.wrongPage,
+      0,
+      "Missing durable anchor must not fall back to matching text on the wrong page"
+    );
 
     const offsets = await page.evaluate(({ helpers }) => {
       eval(helpers);

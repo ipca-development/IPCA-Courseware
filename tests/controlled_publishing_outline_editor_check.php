@@ -240,6 +240,9 @@ foreach (array(
     'id="cpbEditOutline"',
     'class="cpb-tree-outline-btn"',
     'id="cpbStructModal"',
+    'id="cpbStructAddPart"',
+    'class="cpb-struct-add-part"',
+    '+ Add PART',
     'Make this a MAIN chapter',
 ) as $marker) {
     if (!is_string($page) || !str_contains($page, $marker)) {
@@ -251,7 +254,8 @@ foreach (array(
     'rename_outline_part',
     'add_outline_part',
     'delete_outline_part',
-    '+ Add PART',
+    'structAddPartBtn',
+    'addOutlinePart',
     'Only an empty PART can be deleted.',
     '+ Add MAIN chapter',
     'promote_outline_heading',
@@ -268,6 +272,13 @@ foreach (array(
 $css = file_get_contents($root . '/public/assets/controlled_book_editor.css');
 if (!is_string($css) || !str_contains($css, '.cpb-tree-outline-btn')) {
     $failures[] = 'Missing editor CSS marker: .cpb-tree-outline-btn';
+}
+if (!is_string($css)
+    || !str_contains($css, '.cpb-struct-add-part')
+    || !str_contains($css, 'background: #1d4f89')
+    || !str_contains($css, 'font-size: 10px !important')
+    || !str_contains($css, 'border-radius: 999px !important')) {
+    $failures[] = 'Outline actions must expose visible Add PART and compact blue Edit outline controls.';
 }
 if (!is_string($css) || !str_contains($css, '.cpb-struct-overlay')) {
     $failures[] = 'Missing structure modal CSS.';

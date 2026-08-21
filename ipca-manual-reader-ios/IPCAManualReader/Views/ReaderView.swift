@@ -67,11 +67,19 @@ struct ReaderView: View {
                 readerBackground.ignoresSafeArea()
 
                 if let error = viewModel.errorMessage, viewModel.pages.isEmpty {
-                    ContentUnavailableView(
-                        "Unable to Open Manual",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text(error)
-                    )
+                    ContentUnavailableView {
+                        Label("Unable to Open Manual", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Try Again") {
+                            Task { await viewModel.load() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(IPCAReaderTheme.navy)
+                        Button("Back to Library", action: exitReader)
+                            .buttonStyle(.bordered)
+                    }
                 } else if !viewModel.pages.isEmpty {
                     physicalBookReader(size: safeSize)
                         .frame(width: safeSize.width, height: safeSize.height)

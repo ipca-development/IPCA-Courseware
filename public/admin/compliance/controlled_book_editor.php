@@ -400,6 +400,7 @@ compliance_page_open(array(
     <p class="cpb-struct-status" id="cpbStructStatus" hidden></p>
     <div class="cpb-struct-body" id="cpbOutlineBody"></div>
     <div class="cpb-struct-foot">
+      <button type="button" class="cpb-struct-add-part" id="cpbStructAddPart">+ Add PART</button>
       <button type="button" class="cpb-struct-done" id="cpbStructDone">Done</button>
     </div>
   </div>

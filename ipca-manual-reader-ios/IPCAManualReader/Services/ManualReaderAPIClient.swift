@@ -830,13 +830,16 @@ enum ReaderHTMLAnnotationService {
             let scope = root;
             if (item.fragment) {
               const escaped = CSS.escape(item.fragment);
-              scope = root.querySelector('[data-source-fragment-id="' + escaped + '"],'
+              const fragmentScope = root.querySelector('[data-source-fragment-id="' + escaped + '"],'
                 + '[data-fragment-id="' + escaped + '"],'
-                + '[data-source-fragment="' + escaped + '"]') || scope;
+                + '[data-source-fragment="' + escaped + '"]');
+              if (!fragmentScope) return;
+              scope = fragmentScope;
             } else if (item.anchor) {
-              scope = document.getElementById(item.anchor)
-                || root.querySelector('[data-stable-anchor="' + CSS.escape(item.anchor) + '"]')
-                || scope;
+              const anchorScope = document.getElementById(item.anchor)
+                || root.querySelector('[data-stable-anchor="' + CSS.escape(item.anchor) + '"]');
+              if (!anchorScope || !root.contains(anchorScope)) return;
+              scope = anchorScope;
             }
             const nodes = textNodes(scope);
             const fullText = nodes.map(node => node.nodeValue).join('');

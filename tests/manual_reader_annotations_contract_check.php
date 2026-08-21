@@ -59,6 +59,8 @@ annotation_require(
         '"Add Reviewer Note"',
         '"Confirm you want to delete your personal note?"',
         'shareAnnexPDF',
+        '"Try Again"',
+        '"Back to Library"',
     ),
     $failures
 );
@@ -75,6 +77,8 @@ annotation_require(
         'selectedItem = item',
         'ReviewerConversationSheet(',
         'onOpenInBook:',
+        '"Download All"',
+        'downloadAllLatestBooks',
     ),
     $failures
 );
@@ -86,6 +90,7 @@ annotation_require(
         'showLoading: Bool = true',
         'reportErrors: Bool = true',
         'let projectionChanged = existingProjection != incomingProjection',
+        'reviewThreads: reviewThreads,',
     ),
     $failures
 );
@@ -124,6 +129,8 @@ annotation_require(
         'width: 21px',
         'const reviewMarkerSize = 21',
         'reviewThreads.forEach',
+        'if (!fragmentScope) return',
+        'if (!anchorScope || !root.contains(anchorScope)) return',
         'wrapTextPiece',
         'mark.dataset.annotationFragment',
     ),

@@ -53,7 +53,7 @@ $contracts = array(
         'before_block_anchor',
         'force_break_before',
         'assertEditableVersion',
-        'invalidatePageMap',
+        'retain the last valid page map',
     ),
     'public/assets/controlled_book_editor.js' => array(
         'authoritative_editor_page_starts_enabled',

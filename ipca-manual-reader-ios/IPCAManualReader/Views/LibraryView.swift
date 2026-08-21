@@ -420,6 +420,10 @@ private struct UserProfileCard: View {
 
 private struct LibraryContentView: View {
     @ObservedObject private var downloads = ManualDownloadManager.shared
+    @State private var isDownloadingAll = false
+    @State private var downloadAllCompleted = 0
+    @State private var downloadAllTotal = 0
+    @State private var downloadAllError: String?
 
     let books: [LibraryBook]
     let isLoading: Bool
@@ -477,6 +481,17 @@ private struct LibraryContentView: View {
         }
     }
 
+    private var latestBooks: [LibraryBook] {
+        Dictionary(grouping: books, by: \.bookId)
+            .values
+            .compactMap { versions in
+                versions.max { lhs, rhs in lhs.versionId < rhs.versionId }
+            }
+            .sorted {
+                $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending
+            }
+    }
+
     private var visibleBooks: [LibraryBook] {
         destinationBooks.filter { book in
             if destination == .downloads && !downloads.status(for: book).isAvailableOffline {
@@ -530,6 +545,9 @@ private struct LibraryContentView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: isPhone ? 28 : 34) {
                 LibraryHeader(title: title, subtitle: subtitle, user: user, isPhone: isPhone)
+                if destination == .downloads {
+                    downloadAllControl
+                }
                 searchAndFilters
 
                 if isLoading && books.isEmpty {
@@ -620,6 +638,68 @@ private struct LibraryContentView: View {
         .background(IPCAReaderTheme.shelfBackground)
         .refreshable { onRetry() }
         .toolbar(.hidden, for: .navigationBar)
+        .alert(
+            "Some Books Could Not Be Downloaded",
+            isPresented: Binding(
+                get: { downloadAllError != nil },
+                set: { if !$0 { downloadAllError = nil } }
+            )
+        ) {
+            Button("OK") { downloadAllError = nil }
+        } message: {
+            Text(downloadAllError ?? "")
+        }
+    }
+
+    private var downloadAllControl: some View {
+        Button {
+            Task { await downloadAllLatestBooks() }
+        } label: {
+            HStack(spacing: 8) {
+                if isDownloadingAll {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                    Text("Downloading \(downloadAllCompleted) of \(downloadAllTotal)…")
+                } else {
+                    Image(systemName: "icloud.and.arrow.down")
+                    Text("Download All")
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .frame(height: 38)
+            .background(IPCAReaderTheme.navy, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDownloadingAll || latestBooks.isEmpty)
+        .accessibilityLabel("Download all latest book revisions")
+    }
+
+    private func downloadAllLatestBooks() async {
+        guard !isDownloadingAll,
+              let client = ManualReaderSessionStore.shared.client else { return }
+        let targets = latestBooks
+        guard !targets.isEmpty else { return }
+        isDownloadingAll = true
+        downloadAllCompleted = 0
+        downloadAllTotal = targets.count
+        downloadAllError = nil
+        var failures: [String] = []
+        for book in targets {
+            if Task.isCancelled { break }
+            do {
+                _ = try await downloads.ensureDownloaded(book: book, client: client)
+            } catch {
+                failures.append("\(book.displayTitle): \(error.localizedDescription)")
+            }
+            downloadAllCompleted += 1
+        }
+        isDownloadingAll = false
+        if !failures.isEmpty {
+            downloadAllError = failures.joined(separator: "\n")
+        }
     }
 
     private var searchAndFilters: some View {

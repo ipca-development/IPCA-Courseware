@@ -1,12 +1,13 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/ControlledPublishingReaderLayoutProfile.php';
-require_once __DIR__ . '/ControlledPublishingReaderPageMapStore.php';
 require_once __DIR__ . '/BooksManualsVersionEditPolicy.php';
 
 /**
  * Additive manual page-break instructions anchored before stable source blocks.
+ *
+ * Mutations intentionally retain the last valid page map. Its fingerprint
+ * becomes stale immediately, while live pagination replaces it atomically.
  */
 final class ControlledPublishingManualPageBreakService
 {
@@ -112,7 +113,6 @@ final class ControlledPublishingManualPageBreakService
                 updated_at = CURRENT_TIMESTAMP'
         );
         $stmt->execute(array($bookVersionId, $anchor, $createdByUserId > 0 ? $createdByUserId : null));
-        $this->invalidatePageMap($bookVersionId);
 
         return $this->findByAnchor($bookVersionId, $anchor);
     }
@@ -128,7 +128,6 @@ final class ControlledPublishingManualPageBreakService
         if ($stmt->rowCount() === 0) {
             throw new RuntimeException('Manual page break not found.');
         }
-        $this->invalidatePageMap($bookVersionId);
     }
 
     /**
@@ -157,7 +156,6 @@ final class ControlledPublishingManualPageBreakService
         if ($stmt->rowCount() === 0) {
             throw new RuntimeException('Manual page break not found or unchanged.');
         }
-        $this->invalidatePageMap($bookVersionId);
 
         return $this->findByAnchor($bookVersionId, $anchor);
     }
@@ -270,11 +268,4 @@ final class ControlledPublishingManualPageBreakService
         throw new RuntimeException('Released pagination is immutable. Create or reopen a draft revision.');
     }
 
-    private function invalidatePageMap(int $bookVersionId): void
-    {
-        (new ControlledPublishingReaderPageMapStore($this->pdo))->invalidate(
-            $bookVersionId,
-            ControlledPublishingReaderLayoutProfile::profileKey()
-        );
-    }
 }

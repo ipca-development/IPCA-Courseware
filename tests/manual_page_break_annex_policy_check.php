@@ -66,4 +66,14 @@ try {
 }
 page_break_policy_assert('draft Books/Manuals page-break behavior is unchanged', $draftManualAllowed);
 
+$source = (string)file_get_contents(
+    dirname(__DIR__) . '/src/publishing/ControlledPublishingManualPageBreakService.php'
+);
+page_break_policy_assert(
+    'page-break mutation preserves the last valid reader map during regeneration',
+    str_contains($source, 'retain the last valid page map')
+        && !str_contains($source, 'ControlledPublishingReaderPageMapStore')
+        && !str_contains($source, 'invalidatePageMap')
+);
+
 echo "Manual page-break Annex policy: PASS\n";
