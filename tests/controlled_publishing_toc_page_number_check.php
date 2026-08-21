@@ -4,6 +4,14 @@ declare(strict_types=1);
 $root = dirname(__DIR__);
 require_once $root . '/src/publishing/ControlledPublishingAuthoritativePaginationService.php';
 require_once $root . '/src/publishing/ControlledPublishingTocService.php';
+require_once $root . '/src/publishing/ControlledPublishingBookRenderer.php';
+
+if (!function_exists('h')) {
+    function h(mixed $value): string
+    {
+        return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+}
 
 $reflection = new ReflectionClass(ControlledPublishingAuthoritativePaginationService::class);
 $service = $reflection->newInstanceWithoutConstructor();
@@ -89,6 +97,25 @@ usort(
 );
 if ((string)$outlineRows[0]['section_key'] !== 'part_1_chapter_10') {
     throw new RuntimeException('TOC chapter ordering did not preserve explicit outline sort order.');
+}
+
+$renderer = new ControlledPublishingBookRenderer();
+$rendererReflection = new ReflectionClass(ControlledPublishingBookRenderer::class);
+$renderToc = $rendererReflection->getMethod('renderToc');
+$renderedToc = $renderToc->invoke($renderer, array('entries' => array(
+    array('label' => 'PART 0', 'style' => 'title', 'entry_type' => 'part0_container'),
+    array('label' => 'PART 1', 'style' => 'title', 'entry_type' => 'part_container'),
+    array('label' => '1.1 General', 'style' => 'subtitle_1', 'entry_type' => 'block'),
+    array('label' => 'PART 2', 'style' => 'title', 'entry_type' => 'part_container'),
+)), ControlledPublishingBookRenderer::MODE_READ);
+if (substr_count($renderedToc, 'data-toc-force-page-break-before="1"') !== 2) {
+    throw new RuntimeException('Each TOC PART after the first must request a new authoritative page.');
+}
+if (preg_match(
+    '/data-toc-force-page-break-before="1"[^>]*>.*?PART 0/s',
+    $renderedToc
+) === 1) {
+    throw new RuntimeException('The first TOC PART must not force an empty leading page.');
 }
 
 echo "Controlled publishing TOC page numbers: PASS\n";

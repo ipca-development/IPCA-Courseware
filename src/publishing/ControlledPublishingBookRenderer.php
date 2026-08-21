@@ -1688,11 +1688,13 @@ final class ControlledPublishingBookRenderer
 
         $tocTextColor = '#000000';
         $rows = '';
+        $seenPartContainer = false;
         foreach ($entries as $entry) {
             if (!is_array($entry)) {
                 continue;
             }
             $style = (string)($entry['style'] ?? 'body');
+            $entryType = trim((string)($entry['entry_type'] ?? ''));
             $depth = max(0, min(4, (int)($entry['depth'] ?? 0)));
             $label = (string)($entry['label'] ?? '');
             if ($label === '') {
@@ -1716,6 +1718,11 @@ final class ControlledPublishingBookRenderer
             $styleClass = $this->styleClass($typoPayload);
             $styleAttr = $this->styleAttr($typoPayload, false);
             $titleClass = $style === 'title' ? ' cpb-toc-row--title' : '';
+            $isPartContainer = in_array($entryType, array('part0_container', 'part_container'), true);
+            $forcePartPageBreak = $isPartContainer && $seenPartContainer;
+            if ($isPartContainer) {
+                $seenPartContainer = true;
+            }
 
             $labelInner = h($label);
             if ($anchor !== '') {
@@ -1728,6 +1735,7 @@ final class ControlledPublishingBookRenderer
 
             $rows .= '<div class="cpb-toc-row cpb-toc-depth-' . $depth . $titleClass
                 . $styleClass . '" data-toc-depth="' . $depth . '" data-toc-style="' . h($style) . '"'
+                . ($forcePartPageBreak ? ' data-toc-force-page-break-before="1"' : '')
                 . $styleAttr . '>'
                 . '<span class="cpb-toc-label">' . $labelInner . '</span>'
                 . '<span class="cpb-toc-leader" aria-hidden="true"></span>'

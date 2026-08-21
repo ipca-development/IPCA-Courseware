@@ -435,6 +435,35 @@ cases.push(["G. generated TOC continues automatically", () => {
   assertContentFragmentGeometry(result.pages, "/toc-row-");
 }]);
 
+cases.push(["G1. each generated TOC part starts on a new page", () => {
+  const tocRows = [
+    '<div class="cpb-toc-row" data-stable-anchor="part-0"><span>PART 0</span><span>1</span></div>',
+    '<div class="cpb-toc-row" data-stable-anchor="part-0-section"><span>0.1 Administration</span><span>2</span></div>',
+    '<div class="cpb-toc-row" data-stable-anchor="part-1" data-toc-force-page-break-before="1"><span>PART 1</span><span>10</span></div>',
+    '<div class="cpb-toc-row" data-stable-anchor="part-1-section"><span>1.1 General</span><span>11</span></div>',
+    '<div class="cpb-toc-row" data-stable-anchor="part-2" data-toc-force-page-break-before="1"><span>PART 2</span><span>20</span></div>'
+  ].join("");
+  const { execution, result } = runWorker(sourceWith([
+    section(2, "toc", "Table of Contents", {
+      pagination_authority: "generated",
+      is_generated: true,
+      allow_author_blocks: false
+    }, [
+      unit("toc-part-pages", "toc", publicationSheet(
+        `<section><h1>Table of Contents</h1><nav class="cpb-toc">${tocRows}</nav></section>`
+      ), { block_id: 21 })
+    ])
+  ]));
+  assert.strictEqual(execution.status, 0, execution.stderr || execution.stdout);
+  assert.strictEqual(result.pages.length, 3, "PART 0, PART 1, and PART 2 must occupy separate TOC pages");
+  assert.ok(result.pages[0].page_html.includes("PART 0"));
+  assert.ok(!result.pages[0].page_html.includes("PART 1"));
+  assert.ok(result.pages[1].page_html.includes("PART 1"));
+  assert.ok(!result.pages[1].page_html.includes("PART 2"));
+  assert.ok(result.pages[2].page_html.includes("PART 2"));
+  assertHeaderFooter(result.pages);
+}]);
+
 cases.push(["H/I. long table row-paginates with presentation-only headers", () => {
   const tableRows = Array.from({ length: 18 }, (_, index) =>
     `<tr><td>Row ${index + 1}</td><td>Controlled table row content</td></tr>`

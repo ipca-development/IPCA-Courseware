@@ -621,7 +621,8 @@
         anchor: row.getAttribute("data-stable-anchor") || section.stable_anchor,
         atomic: true,
         splittable: false,
-        forceBreakBefore: forceBreakBefore && index === 0
+        forceBreakBefore: (forceBreakBefore && index === 0)
+          || row.getAttribute("data-toc-force-page-break-before") === "1"
       });
     });
     const normalizedTocText = canonicalContent(output.map((item) => item.text));
