@@ -80,8 +80,24 @@ final class ControlledPublishingDocxImportService
      * @param array<int,string> $partFiles manual_part => absolute path
      * @return array<string,mixed>
      */
-    public function apply(int $versionId, array $partFiles, bool $force = true, ?int $actorUserId = null): array
+    public function apply(
+        int $versionId,
+        array $partFiles,
+        bool $force = true,
+        ?int $actorUserId = null,
+        ?callable $progress = null
+    ): array
     {
+        $report = static function (
+            int $percent,
+            string $phase,
+            string $message
+        ) use ($progress): void {
+            if ($progress !== null) {
+                $progress(max(0, min(100, $percent)), $phase, $message);
+            }
+        };
+        $report(10, 'validating', 'Validating the selected manual and DOCX files…');
         $version = $this->requireDraftVersion($versionId);
         $bookKey = strtolower((string)$version['book_key']);
         $manualCode = strtoupper(trim((string)($version['manual_code'] ?? $version['book_key'] ?? 'OM')));
@@ -99,6 +115,7 @@ final class ControlledPublishingDocxImportService
 
         $this->foundation->ensureTemplates($actorUserId);
         $this->foundation->scaffoldVersionSections($versionId, $actorUserId);
+        $report(15, 'scaffolding', 'TM_GEN manual structure is ready.');
 
         $this->consolidateDuplicateCanonicalExcerpts($sourceSetId, $manualCode);
 
@@ -112,8 +129,15 @@ final class ControlledPublishingDocxImportService
         );
 
         ksort($partFiles);
+        $partCount = max(1, count($partFiles));
+        $parsedPartCount = 0;
         foreach ($partFiles as $manualPart => $path) {
             $manualPart = (int)$manualPart;
+            $report(
+                15 + (int)floor(25 * $parsedPartCount / $partCount),
+                'parsing',
+                'Parsing Part ' . $manualPart . ' and mapping detected sections…'
+            );
             $parsed = $this->parsePartFile($path, $manualPart, $version);
             $stats['warnings'] = array_merge($stats['warnings'], $parsed['warnings']);
 
@@ -146,15 +170,33 @@ final class ControlledPublishingDocxImportService
                 $stats['canonical_excerpts'] += $excerptCount;
             }
             $stats['parts_imported']++;
+            $parsedPartCount++;
+            $report(
+                15 + (int)floor(25 * $parsedPartCount / $partCount),
+                'parsing',
+                'Part ' . $manualPart . ' parsed and mapped.'
+            );
         }
 
+        $report(45, 'structure', 'Synchronizing detected chapters with the manual outline…');
         $this->manualStructure->syncVersionStructure($versionId, $actorUserId, false);
 
+        $contentParts = array_values(array_filter(
+            array_map('intval', array_keys($partFiles)),
+            static fn(int $part): bool => $part > 0
+        ));
+        $contentPartCount = max(1, count($contentParts));
+        $importedContentParts = 0;
         foreach ($partFiles as $manualPart => $path) {
             $manualPart = (int)$manualPart;
             if ($manualPart <= 0) {
                 continue;
             }
+            $report(
+                45 + (int)floor(45 * $importedContentParts / $contentPartCount),
+                'importing',
+                'Writing Part ' . $manualPart . ' content, tables and images…'
+            );
             $parsed = $this->parsePartFile($path, $manualPart, $version);
             $result = $this->importContentPartBlocks(
                 $versionId,
@@ -171,10 +213,18 @@ final class ControlledPublishingDocxImportService
             $stats['blocks_created'] += $result['blocks_created'];
             $stats['images_uploaded'] += $result['images_uploaded'];
             $stats['warnings'] = array_merge($stats['warnings'], $result['warnings']);
+            $importedContentParts++;
+            $report(
+                45 + (int)floor(45 * $importedContentParts / $contentPartCount),
+                'importing',
+                'Part ' . $manualPart . ' content has been written.'
+            );
         }
 
         // Re-sync after blocks import so chapter nav labels pick up depth-1 canonical titles.
+        $report(95, 'finalizing', 'Finalizing chapter labels and editor navigation…');
         $this->manualStructure->syncVersionStructure($versionId, $actorUserId, true);
+        $report(100, 'completed', 'Import complete. The manual is ready in the editor.');
 
         return $stats;
     }
