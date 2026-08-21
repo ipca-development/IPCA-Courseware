@@ -79,6 +79,7 @@ annotation_require(
         'onOpenInBook:',
         '"Download All"',
         'downloadAllLatestBooks',
+        'books.filter { !$0.isDraftPreview }',
     ),
     $failures
 );

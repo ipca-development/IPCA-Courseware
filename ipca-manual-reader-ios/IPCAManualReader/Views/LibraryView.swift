@@ -482,7 +482,7 @@ private struct LibraryContentView: View {
     }
 
     private var latestBooks: [LibraryBook] {
-        Dictionary(grouping: books, by: \.bookId)
+        Dictionary(grouping: books.filter { !$0.isDraftPreview }, by: \.bookId)
             .values
             .compactMap { versions in
                 versions.max { lhs, rhs in lhs.versionId < rhs.versionId }
