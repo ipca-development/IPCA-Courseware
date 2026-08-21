@@ -260,7 +260,7 @@ private struct ManualCategory: Identifiable, Hashable {
 
 private extension LibraryBook {
     var category: ManualCategory {
-        ManualCategory(id: bookKey.uppercased())
+        ManualCategory(id: displayManualCode.uppercased())
     }
 
     var searchableMetadata: String {

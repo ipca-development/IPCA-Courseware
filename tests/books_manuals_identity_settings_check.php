@@ -52,6 +52,7 @@ identity_settings_assert(
     str_contains($iosModels, 'var displayManualCode: String')
         && str_contains($iosModels, 'replacingOccurrences(of: "_", with: " ")')
         && str_contains($iosLibrary, 'book.displayManualCode')
+        && str_contains($iosLibrary, 'ManualCategory(id: displayManualCode.uppercased())')
 );
 identity_settings_assert(
     'manual creation accepts readable spaced codes',
