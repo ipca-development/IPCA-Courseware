@@ -178,6 +178,7 @@ final class ControlledPublishingFoundationService
               b.book_key,
               b.title AS book_title,
               b.manual_code,
+              b.display_manual_code,
               b.status AS book_status,
               bv.id AS version_id,
               bv.version_label,
@@ -191,7 +192,7 @@ final class ControlledPublishingFoundationService
             LEFT JOIN ipca_publishing_source_baselines sb ON sb.id = bv.source_baseline_id
             LEFT JOIN ipca_publishing_book_version_source_sets vss ON vss.book_version_id = bv.id
             GROUP BY
-              b.id, b.book_key, b.title, b.manual_code, b.status,
+              b.id, b.book_key, b.title, b.manual_code, b.display_manual_code, b.status,
               bv.id, bv.version_label, bv.lifecycle_status, bv.source_baseline_id,
               sb.baseline_status, sb.baseline_hash
             ORDER BY b.book_key, bv.version_label
@@ -208,6 +209,7 @@ final class ControlledPublishingFoundationService
               b.title AS book_title,
               b.book_type,
               b.manual_code,
+              b.display_manual_code,
               sb.baseline_key,
               sb.baseline_status,
               sb.baseline_hash,

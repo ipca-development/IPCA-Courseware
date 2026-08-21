@@ -59,7 +59,9 @@ final class ControlledPublishingReaderCoverService
     private function buildFallbackMeta(array $version, array $coverPage): array
     {
         $bookKey = strtoupper(trim((string)($version['book_key'] ?? '')));
-        $manualCode = trim((string)($version['manual_code'] ?? ''));
+        $manualCode = trim((string)(
+            $version['display_manual_code'] ?? $version['manual_code'] ?? ''
+        ));
         if ($manualCode === '') {
             $manualCode = $bookKey;
         }

@@ -25,4 +25,17 @@ final class ControlledPublishingManualCode
         $value = trim($value);
         return preg_replace('/_+/u', ' ', $value) ?? $value;
     }
+
+    public static function normalizeDisplay(string $value): string
+    {
+        $value = strtoupper(trim($value));
+        $value = preg_replace('/[_\s]+/u', ' ', $value) ?? '';
+        if (!preg_match('/^[A-Z0-9][A-Z0-9 -]{1,31}$/', $value)) {
+            throw new RuntimeException(
+                'Manual code must be 2–32 letters or numbers; spaces and hyphens are allowed.'
+            );
+        }
+
+        return $value;
+    }
 }

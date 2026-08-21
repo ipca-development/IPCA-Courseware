@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ControlledPublishingFoundationService.php';
 require_once __DIR__ . '/BooksManualsAnnexBookService.php';
+require_once __DIR__ . '/ControlledPublishingManualCode.php';
 
 final class BooksManualsWorkflowService
 {
@@ -68,6 +69,7 @@ final class BooksManualsWorkflowService
               b.title AS book_title,
               b.book_type,
               b.manual_code,
+              COALESCE(NULLIF(b.display_manual_code, ''), b.manual_code) AS display_manual_code,
               b.status AS book_status,
               bv.id AS version_id,
               bv.version_label,
@@ -612,6 +614,74 @@ final class BooksManualsWorkflowService
             }
             throw $e;
         }
+    }
+
+    public function renameManualCode(int $bookId, string $manualCode, int $actorUserId): bool
+    {
+        if ($bookId <= 0) {
+            throw new InvalidArgumentException('Manual is required.');
+        }
+        $manualCode = ControlledPublishingManualCode::normalizeDisplay($manualCode);
+        $stmt = $this->pdo->prepare(
+            'SELECT manual_code, display_manual_code
+               FROM ipca_publishing_books
+              WHERE id = ?
+              LIMIT 1'
+        );
+        $stmt->execute(array($bookId));
+        $book = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($book)) {
+            throw new RuntimeException('Manual not found.');
+        }
+        $current = trim((string)($book['display_manual_code'] ?? ''));
+        if ($current === '') {
+            $current = ControlledPublishingManualCode::display((string)$book['manual_code']);
+        }
+        if ($current === $manualCode) {
+            return false;
+        }
+
+        $versionStmt = $this->pdo->prepare(
+            'SELECT id, lifecycle_status
+               FROM ipca_publishing_book_versions
+              WHERE book_id = ?
+              ORDER BY id DESC
+              LIMIT 1'
+        );
+        $versionStmt->execute(array($bookId));
+        $version = $versionStmt->fetch(PDO::FETCH_ASSOC);
+
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare(
+                'UPDATE ipca_publishing_books
+                    SET display_manual_code = ?, updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?'
+            )->execute(array($manualCode, $bookId));
+            if (is_array($version)) {
+                $status = (string)($version['lifecycle_status'] ?? '');
+                $this->recordEvent(
+                    (int)$version['id'],
+                    $status,
+                    $status,
+                    'rename_manual_code',
+                    json_encode(array(
+                        'before' => $current,
+                        'after' => $manualCode,
+                        'book_key_unchanged' => true,
+                    ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    $actorUserId
+                );
+            }
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return true;
     }
 
     /**

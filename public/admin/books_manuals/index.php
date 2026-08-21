@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsUi.php';
 require_once __DIR__ . '/../../../src/publishing/BooksManualsWorkflowService.php';
 require_once __DIR__ . '/../../../src/publishing/ControlledPublishingManualCode.php';
+require_once __DIR__ . '/../../../src/publishing/ControlledPublishingReaderService.php';
 
 cw_require_admin();
 $user = cw_current_user($pdo);
@@ -93,6 +94,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 (string)($_POST['book_title'] ?? ''),
                 $actorId
             );
+            $manualCodeChanged = $workflow->renameManualCode(
+                (int)$detail['book_id'],
+                (string)($_POST['manual_code'] ?? ''),
+                $actorId
+            );
             $workflow->saveProfile(
                 (int)$detail['book_id'],
                 (string)($_POST['manual_type'] ?? ''),
@@ -109,7 +115,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $reviewerIds,
                 $actorId
             );
-            bm_library_flash('success', 'Manual name, settings, and reviewer policy saved.');
+            if (
+                $manualCodeChanged
+                && (string)($detail['lifecycle_status'] ?? '') !== 'released'
+            ) {
+                (new ControlledPublishingReaderService($pdo))->ensureLivePageMap(
+                    $versionId,
+                    $actorId,
+                    array(
+                        'mutation_kind' => 'rename_manual_code',
+                        'layout_impact' => 'global',
+                        'section_id' => 0,
+                        'block_id' => 0,
+                        'stable_anchor' => '',
+                        'client_mutation_revision' => 0,
+                    )
+                );
+            }
+            bm_library_flash('success', 'Manual name, code, settings, and reviewer policy saved.');
             redirect('/admin/books_manuals/index.php?open=' . $versionId);
         }
         throw new RuntimeException('Unknown Books & Manuals action.');
@@ -249,7 +272,7 @@ books_manuals_page_open(array(
       $overrideModalId = 'bm-compliance-override-' . $versionId;
       $versionsModalId = 'bm-previous-versions-' . $versionId;
       $displayManualCode = ControlledPublishingManualCode::display(
-          (string)($row['manual_code'] ?? $row['book_key'] ?? '')
+          (string)($row['display_manual_code'] ?? $row['manual_code'] ?? $row['book_key'] ?? '')
       );
     ?>
     <article class="cmp-card bm-book-card" data-bm-reader-url="<?= h($previewUrl) ?>">
@@ -391,6 +414,13 @@ books_manuals_page_open(array(
               <label class="bm-form-field">
                 <span>Manual / Book Name</span>
                 <input name="book_title" required maxlength="255" value="<?= h((string)$row['book_title']) ?>">
+              </label>
+              <label class="bm-form-field">
+                <span>Manual Code</span>
+                <input name="manual_code" required maxlength="32"
+                  pattern="[A-Za-z0-9][A-Za-z0-9 _-]{1,31}"
+                  value="<?= h($displayManualCode) ?>">
+                <small>The internal book identity and existing links remain unchanged.</small>
               </label>
               <label class="bm-form-field">
                 <span>Manual type</span>

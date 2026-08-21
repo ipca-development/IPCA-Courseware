@@ -348,7 +348,9 @@ final class ControlledPublishingPageHeaderService
         $isAnnexContent = $this->isAnnexContentSection($section);
 
         $bookKey = (string)($version['book_key'] ?? '');
-        $manualCode = trim((string)($version['manual_code'] ?? ''));
+        $manualCode = trim((string)(
+            $version['display_manual_code'] ?? $version['manual_code'] ?? ''
+        ));
         if ($manualCode === '') {
             $manualCode = $bookKey;
         }

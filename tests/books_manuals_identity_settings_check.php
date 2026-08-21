@@ -21,6 +21,10 @@ identity_settings_assert(
     'stored underscore codes display naturally',
     ControlledPublishingManualCode::display('TM_GEN') === 'TM GEN'
 );
+identity_settings_assert(
+    'editable display codes normalize without changing machine identity',
+    ControlledPublishingManualCode::normalizeDisplay('tm ppl-easa') === 'TM PPL-EASA'
+);
 $libraryPage = (string)file_get_contents(
     dirname(__DIR__) . '/public/admin/books_manuals/index.php'
 );
@@ -31,6 +35,11 @@ identity_settings_assert(
     'Manual Settings exposes the editable Manual / Book Name',
     str_contains($libraryPage, 'name="book_title"')
         && str_contains($libraryPage, 'Manual / Book Name')
+);
+identity_settings_assert(
+    'Manual Settings exposes an editable reader-facing code',
+    str_contains($libraryPage, 'name="manual_code"')
+        && str_contains($libraryPage, 'The internal book identity and existing links remain unchanged.')
 );
 identity_settings_assert(
     'manual creation accepts readable spaced codes',
@@ -48,6 +57,8 @@ $pdo->exec(
     'CREATE TABLE ipca_publishing_books (
         id INTEGER PRIMARY KEY,
         title TEXT NOT NULL,
+        manual_code TEXT NOT NULL,
+        display_manual_code TEXT NULL,
         updated_at TEXT NULL
     )'
 );
@@ -77,14 +88,25 @@ $pdo->exec(
     )'
 );
 $pdo->exec(
-    "INSERT INTO ipca_publishing_books (id, title) VALUES (5, 'Incorrect Name')"
+    "INSERT INTO ipca_publishing_books (id, title, manual_code)
+     VALUES (5, 'Incorrect Name', 'TM_PPL')"
 );
-(new BooksManualsWorkflowService($pdo))->renameBook(5, 'Training Manual General', 42);
+$workflow = new BooksManualsWorkflowService($pdo);
+$workflow->renameBook(5, 'Training Manual General', 42);
+$workflow->renameManualCode(5, 'PPL EASA', 42);
 
 identity_settings_assert(
     'Manual Settings renames the shared IPCA Library book',
     $pdo->query('SELECT title FROM ipca_publishing_books WHERE id = 5')->fetchColumn()
         === 'Training Manual General'
+);
+identity_settings_assert(
+    'Manual Settings changes only the reader-facing code',
+    $pdo->query(
+        'SELECT manual_code || "|" || display_manual_code
+           FROM ipca_publishing_books
+          WHERE id = 5'
+    )->fetchColumn() === 'TM_PPL|PPL EASA'
 );
 $workflowSource = (string)file_get_contents(
     dirname(__DIR__) . '/src/publishing/BooksManualsWorkflowService.php'
@@ -92,6 +114,8 @@ $workflowSource = (string)file_get_contents(
 identity_settings_assert(
     'book rename records an audited same-lifecycle event when a version exists',
     str_contains($workflowSource, "'rename_book'")
+        && str_contains($workflowSource, "'rename_manual_code'")
+        && str_contains($workflowSource, "'book_key_unchanged' => true")
         && str_contains($workflowSource, '$status,')
 );
 

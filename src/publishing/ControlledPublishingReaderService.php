@@ -73,7 +73,7 @@ final class ControlledPublishingReaderService
     public function listActiveLibrary(?int $userId, bool $includeDraftPreview): array
     {
         $stmt = $this->pdo->query("
-            SELECT id, book_key, title, book_type, manual_code, status
+            SELECT id, book_key, title, book_type, manual_code, display_manual_code, status
             FROM ipca_publishing_books
             WHERE status = 'active'
             ORDER BY book_key
@@ -208,7 +208,7 @@ final class ControlledPublishingReaderService
             'book_title' => (string)($book['title'] ?? ''),
             'book_type' => $bookType,
             'manual_code' => ControlledPublishingManualCode::display(
-                (string)($book['manual_code'] ?? '')
+                (string)($book['display_manual_code'] ?? $book['manual_code'] ?? '')
             ),
             'version_id' => (int)($version['id'] ?? 0),
             'version_label' => (string)($version['version_label'] ?? ''),
@@ -268,7 +268,8 @@ final class ControlledPublishingReaderService
               bv.*,
               b.book_key,
               b.title AS book_title,
-              b.manual_code
+              b.manual_code,
+              b.display_manual_code
             FROM ipca_publishing_book_versions bv
             INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
             WHERE b.book_key = :book_key
@@ -298,7 +299,8 @@ final class ControlledPublishingReaderService
               bv.*,
               b.book_key,
               b.title AS book_title,
-              b.manual_code
+              b.manual_code,
+              b.display_manual_code
             FROM ipca_publishing_book_versions bv
             INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
             WHERE b.book_key = :book_key
@@ -328,6 +330,7 @@ final class ControlledPublishingReaderService
               b.book_key,
               b.title AS book_title,
               b.manual_code,
+              b.display_manual_code,
               b.book_type,
               b.status AS book_status
             FROM ipca_publishing_book_versions bv
@@ -1886,7 +1889,8 @@ final class ControlledPublishingReaderService
     public function requireReleasedVersionById(int $bookVersionId): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT bv.*, b.book_key, b.title AS book_title, b.manual_code
+            'SELECT bv.*, b.book_key, b.title AS book_title, b.manual_code,
+                    b.display_manual_code
                FROM ipca_publishing_book_versions bv
                INNER JOIN ipca_publishing_books b ON b.id = bv.book_id
               WHERE bv.id = ?
