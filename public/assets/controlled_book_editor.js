@@ -1283,7 +1283,9 @@
   function insertTocRowPageBreak(block, sheet) {
     var toc = block.querySelector('.cpb-toc');
     if (!toc) return false;
-    var rows = Array.prototype.slice.call(toc.querySelectorAll(':scope > .cpb-toc-row'));
+    var rows = Array.prototype.slice.call(toc.querySelectorAll('.cpb-toc-row')).filter(function (row) {
+      return row.closest('.cpb-toc') === toc;
+    });
     var stride = PRINT_PAGE.height + PRINT_PAGE.gap;
     var rowGap = parseFloat(window.getComputedStyle(toc).rowGap || '0') || 0;
     for (var index = 0; index < rows.length; index++) {
@@ -1295,7 +1297,12 @@
       var contentTop = pageIndex * stride + PRINT_PAGE.contentTop;
       var contentBottom = contentTop + PRINT_PAGE.contentHeight;
       var target = 0;
-      if (pageIndex > 0 && top < contentTop - 1) {
+      var forcePartPage = row.getAttribute('data-toc-force-page-break-before') === '1';
+      if (forcePartPage && top < contentTop - 1) {
+        target = contentTop;
+      } else if (forcePartPage && top > contentTop + 1) {
+        target = (pageIndex + 1) * stride + PRINT_PAGE.contentTop;
+      } else if (pageIndex > 0 && top < contentTop - 1) {
         target = contentTop;
       } else if (top > contentBottom - 1 || bottom > contentBottom + 0.5) {
         target = (pageIndex + 1) * stride + PRINT_PAGE.contentTop;
@@ -1306,6 +1313,7 @@
       spacer.setAttribute('data-auto-page-break', '1');
       spacer.setAttribute('data-editor-only', '1');
       spacer.setAttribute('contenteditable', 'false');
+      if (forcePartPage) spacer.setAttribute('data-toc-part-page-break', '1');
       spacer.style.height = Math.max(1, target - top - rowGap) + 'px';
       toc.insertBefore(spacer, row);
       return true;

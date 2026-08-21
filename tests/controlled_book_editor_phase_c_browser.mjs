@@ -977,6 +977,82 @@ test('generated TOC rows flow across editor pages without crossing page furnitur
   }
 });
 
+test('marked TOC PART rows start on new editor pages', async (browser) => {
+  const tocBlocks = `
+    <div class="cpb-block cpb-block--paragraph" data-block-id="10"
+      data-block-type="paragraph" data-stable-anchor="toc-title">
+      <div class="cpb-paragraph" contenteditable="true" data-field="html"
+        data-paragraph-style="subtitle_1">Table of Contents</div>
+    </div>
+    <div class="cpb-block cpb-block--toc" data-block-id="11"
+      data-block-type="toc" data-stable-anchor="generated-toc">
+      <nav class="cpb-toc" aria-label="Table of contents">
+        <div class="cpb-toc-row" data-toc-style="title">
+          <span class="cpb-toc-label">PART 0</span><span class="cpb-toc-page">1</span>
+        </div>
+        <div class="cpb-toc-row" data-toc-style="title"
+          data-toc-force-page-break-before="1">
+          <span class="cpb-toc-label">PART 1</span><span class="cpb-toc-page">10</span>
+        </div>
+        <div class="cpb-toc-row" data-toc-style="subtitle_1">
+          <span class="cpb-toc-label">1.1 General</span><span class="cpb-toc-page">11</span>
+        </div>
+        <div class="cpb-toc-row" data-toc-style="title"
+          data-toc-force-page-break-before="1">
+          <span class="cpb-toc-label">PART 2</span><span class="cpb-toc-page">20</span>
+        </div>
+      </nav>
+    </div>`;
+  const { page, browserErrors } = await newEditorPage(
+    browser,
+    '',
+    previewResult(),
+    null,
+    tocBlocks,
+  );
+  try {
+    await page.waitForFunction(() =>
+      document.querySelectorAll(
+        '#cpbCanvas .cpb-toc-page-spacer[data-toc-part-page-break="1"]'
+      ).length === 2
+    );
+    const observed = await page.evaluate(() => {
+      const sheet = document.querySelector('#cpbCanvas .cpb-sheet');
+      const sheetTop = sheet.getBoundingClientRect().top;
+      const stride = 1056 + 28;
+      const rows = Array.from(document.querySelectorAll(
+        '#cpbCanvas .cpb-toc-row[data-toc-force-page-break-before="1"]'
+      )).map((row) => {
+        const top = row.getBoundingClientRect().top - sheetTop;
+        const pageIndex = Math.max(0, Math.floor(top / stride));
+        return {
+          pageIndex,
+          localTop: top - pageIndex * stride,
+        };
+      });
+      return {
+        rows,
+        spacers: document.querySelectorAll(
+          '#cpbCanvas .cpb-toc-page-spacer[data-toc-part-page-break="1"]'
+        ).length,
+      };
+    });
+    assert.equal(observed.spacers, 2, JSON.stringify(observed));
+    assert.deepEqual(observed.rows.map((row) => row.pageIndex), [1, 2], JSON.stringify(observed));
+    assert.ok(
+      Math.abs(observed.rows[0].localTop - observed.rows[1].localTop) <= 1,
+      JSON.stringify(observed),
+    );
+    assert.ok(
+      observed.rows[0].localTop >= 140 && observed.rows[0].localTop <= 160,
+      JSON.stringify(observed),
+    );
+  } finally {
+    assert.deepEqual(browserErrors, []);
+    await page.close();
+  }
+});
+
 test('enabled creates #cpbProjection alongside unchanged #cpbCanvas and source stays editable', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser);
   try {
