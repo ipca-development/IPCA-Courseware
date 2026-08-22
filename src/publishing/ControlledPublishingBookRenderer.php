@@ -2447,6 +2447,12 @@ final class ControlledPublishingBookRenderer
             return ControlledPublishingHtmlSanitizer::sanitizeTableCell($raw);
         }
         $raw = html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (!$edit && trim($raw) === '') {
+            // A read-only empty <td> collapses to padding height, while its
+            // contenteditable editor counterpart retains a one-line box.
+            // Keep publication geometry identical without changing source data.
+            return '&nbsp;';
+        }
 
         return h($raw);
     }

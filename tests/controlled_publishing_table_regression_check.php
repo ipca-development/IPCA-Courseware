@@ -104,6 +104,37 @@ if (!str_contains($verticalReadHtml, 'rowspan="2"')
     || str_contains($verticalReadHtml, 'data-rowspan-covered="1"')) {
     $failures[] = 'Published rendering does not emit a valid vertical rowspan.';
 }
+
+$emptyPayload = table_payload(2);
+$emptyPayload['rows'] = array(
+    array('', ''),
+    array('Visible value', ''),
+);
+$emptyPayload['row_colspans'] = array(array(1, 1), array(1, 1));
+$emptyBlock = array(
+    'id' => 4,
+    'block_type' => 'table',
+    'stable_anchor' => 'empty-table-row',
+    'payload_json' => json_encode($emptyPayload, JSON_THROW_ON_ERROR),
+);
+$emptyEditHtml = $renderer->renderBlock(
+    $emptyBlock,
+    ControlledPublishingBookRenderer::MODE_EDIT
+);
+$emptyReadHtml = $renderer->renderBlock(
+    $emptyBlock,
+    ControlledPublishingBookRenderer::MODE_READ
+);
+if (substr_count($emptyReadHtml, '<td') < 4
+    || substr_count($emptyReadHtml, '&nbsp;</td>') !== 3) {
+    $failures[] = 'Published empty table cells do not retain a one-line height sentinel.';
+}
+if (str_contains($emptyEditHtml, '&nbsp;</td>')) {
+    $failures[] = 'Editable empty table cells were changed from genuine empty source values.';
+}
+if ($emptyPayload['rows'][0][0] !== '' || $emptyPayload['rows'][1][1] !== '') {
+    $failures[] = 'Empty-cell rendering changed the stored table payload.';
+}
 if (str_contains($verticalEditHtml, 'cpb-table-tools')) {
     $failures[] = 'Floating table tools still render inside the source table.';
 }
