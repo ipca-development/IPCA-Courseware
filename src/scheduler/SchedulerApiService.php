@@ -42,10 +42,20 @@ final class SchedulerApiService
             'operational_home_base' => $this->operationalContext->homeBase($organizationId),
             'scheduler' => array(
                 'max_range_days' => self::MAX_RANGE_DAYS,
+                'snap_minutes' => 15,
                 'overlap_policy' => 'warning',
                 'schedule_time_semantics' => 'timezone_free_operational_local',
                 'recurring_reservations_supported' => false,
                 'comprehensive_availability_supported' => false,
+                'reservation_types' => array_map(
+                    static fn(string $value, string $label): array => array(
+                        'value' => $value,
+                        'label' => $label,
+                        'requires_mission' => MissionCatalogService::reservationTypeRequiresMission($value),
+                    ),
+                    array_keys($this->schedule->reservationTypes()),
+                    array_values($this->schedule->reservationTypes())
+                ),
             ),
         );
     }
@@ -395,8 +405,33 @@ final class SchedulerApiService
             $like = '%' . $query . '%';
             $stmt->execute(array($this->organizationId($session), $query, $like, $like));
             $items = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            foreach ($items as &$item) {
+                $item['schedule_category'] = MissionCatalogService::scheduleCategoryForMission(
+                    (string)($item['code'] ?? ''),
+                    (string)($item['name'] ?? '')
+                );
+            }
+            unset($item);
+        } elseif ($type === 'cohort') {
+            $stmt = $this->pdo->prepare(
+                "SELECT id, name
+                   FROM cohorts
+                  WHERE (end_date IS NULL OR end_date >= CURRENT_DATE)
+                    AND (? = '' OR name LIKE ?)
+                  ORDER BY name ASC
+                  LIMIT $limit"
+            );
+            $like = '%' . $query . '%';
+            $stmt->execute(array($query, $like));
+            $items = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
         } else {
-            throw new SchedulerApiException('invalid_request', 'resource type must be aircraft, person, or mission.', 400, false, true);
+            throw new SchedulerApiException(
+                'invalid_request',
+                'resource type must be aircraft, person, mission, or cohort.',
+                400,
+                false,
+                true
+            );
         }
         return array('ok' => true, 'resource_type' => $type, 'items' => $items);
     }

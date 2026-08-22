@@ -89,7 +89,7 @@ $pdo->exec("CREATE TABLE ipca_aircraft_devices (
 $pdo->exec("CREATE TABLE ipca_missions (
  id INTEGER PRIMARY KEY, organization_id INTEGER, code TEXT, name TEXT DEFAULT ''
 )");
-$pdo->exec("CREATE TABLE cohorts (id INTEGER PRIMARY KEY, name TEXT)");
+$pdo->exec("CREATE TABLE cohorts (id INTEGER PRIMARY KEY, name TEXT, end_date TEXT NULL)");
 $pdo->exec("CREATE TABLE ipca_cvr_dispatches (
  id INTEGER PRIMARY KEY, dispatch_uuid TEXT, workflow_flight_record_uuid TEXT,
  operational_session_uuid TEXT NULL, current_version INTEGER DEFAULT 1, last_received_at TEXT NULL,
@@ -455,6 +455,23 @@ $checks['timezone contract is explicit and never appends UTC Z'] =
     $timeOk
     && $bootstrap['operational_timezone'] === 'America/Los_Angeles'
     && $bootstrap['scheduler']['schedule_time_semantics'] === 'timezone_free_operational_local';
+$reservationTypes = array_column(
+    (array)($bootstrap['scheduler']['reservation_types'] ?? array()),
+    'label',
+    'value'
+);
+$cohortResources = $api->resources(
+    array(
+        'user' => array('id' => 1, 'role' => 'admin'),
+        'device' => array('organization_id' => 1),
+    ),
+    'cohort',
+    ''
+);
+$checks['mutation bootstrap and resource catalogs reuse web scheduler configuration'] =
+    (int)($bootstrap['scheduler']['snap_minutes'] ?? 0) === 15
+    && ($reservationTypes['flight_training'] ?? '') === 'Flight Training'
+    && in_array('Overlap Cohort', array_column($cohortResources['items'], 'name'), true);
 
 $canonicalContext = new SchedulerOperationalContextService(
     $pdo,
@@ -533,6 +550,9 @@ $adminSession = array(
     'user' => array('id' => 1, 'uuid' => '', 'email' => 'admin@example.test', 'name' => 'Admin', 'role' => 'admin'),
     'device' => array('organization_id' => 1),
 );
+$missionResources = $api->resources($adminSession, 'mission', '');
+$checks['mission mutation resources expose canonical schedule categories'] =
+    array_key_exists('schedule_category', $missionResources['items'][0] ?? array());
 $createInput = array(
     'reservation_type' => 'other',
     'start_local' => '2026-09-02T10:00:00.000',
@@ -562,6 +582,15 @@ $checks['full API create is retry-safe and returns canonical schedule state'] =
         . $pdo->quote($createdUuid)
     )->fetchColumn() === 1;
 $originalUpdatedAt = (string)$created['reservation']['updated_at'];
+$pdo->exec("INSERT INTO ipca_operational_reservations
+ (reservation_uuid, organization_id, organization_timezone_iana, reservation_type, activity_domain, status, source)
+ VALUES ('$createdUuid', 1, 'America/Los_Angeles', 'other', 'administrative', 'scheduled', 'test')");
+$pdo->exec("INSERT INTO ipca_operational_reservation_legs
+ (leg_uuid, reservation_uuid, organization_id, sequence_number, origin_airport, destination_airport,
+  planned_start_local, planned_end_local, organization_timezone_iana, status, source)
+ VALUES
+ ('61000000-0000-4000-8000-000000000001', '$createdUuid', 1, 1, 'KPSP', 'KTRM',
+  '2026-09-02 10:00:00', '2026-09-02 11:00:00', 'America/Los_Angeles', 'scheduled', 'test')");
 $pdo->exec(
     "UPDATE ipca_flight_schedule_slots SET updated_at = '2026-09-02 09:59:00'"
     . ' WHERE scheduler_record_id = ' . $pdo->quote($createdUuid)
@@ -578,7 +607,11 @@ try {
 $updated = $api->updateReservation($adminSession, $createdUuid, array(
     'expected_updated_at' => '2026-09-02T09:59:00',
     'notes' => 'Changed safely',
+    'airport_chain' => array('KPSP', 'KUDD'),
 ));
+$updatedCanonicalLeg = $pdo->query(
+    "SELECT * FROM ipca_operational_reservation_legs WHERE reservation_uuid = '$createdUuid'"
+)->fetch(PDO::FETCH_ASSOC);
 $cancelled = $api->cancelReservation(
     $adminSession,
     $createdUuid,
@@ -587,6 +620,8 @@ $cancelled = $api->cancelReservation(
 $checks['API edit and cancel enforce optimistic version and return canonical state'] =
     $apiStaleRejected
     && $updated['reservation']['notes'] === 'Changed safely'
+    && ($updatedCanonicalLeg['destination_airport'] ?? '') === 'KUDD'
+    && ($updatedCanonicalLeg['planned_start_local'] ?? '') === '2026-09-02 10:00:00.000'
     && $cancelled['reservation']['status'] === 'cancelled';
 
 // Receipt behavior: same actor/key/request always resolves to one server UUID.

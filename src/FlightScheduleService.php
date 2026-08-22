@@ -382,6 +382,15 @@ final class FlightScheduleService
                     $departure, $destination, $status, substr(trim((string)($values['notes'] ?? '')), 0, 1000),
                     $actorUserId, $slotId,
                 ));
+                if ($this->canonicalReservationExists($recordId)) {
+                    $this->replaceInformativeReservationRoute(
+                        $recordId,
+                        (int)$dutyInput['organization_id'],
+                        $airportChain,
+                        $start,
+                        $end
+                    );
+                }
                 $this->pdo->prepare('DELETE FROM ipca_flight_schedule_crew WHERE schedule_slot_id = ?')->execute(array($slotId));
             } else {
                 $organizationId = $this->requireOrganizationIdForCreate($values, $missionId);
@@ -868,6 +877,47 @@ final class FlightScheduleService
         );
     }
 
+    private function canonicalReservationExists(string $reservationUuid): bool
+    {
+        try {
+            $statement = $this->pdo->prepare(
+                'SELECT reservation_uuid FROM ipca_operational_reservations'
+                . ' WHERE reservation_uuid = ? LIMIT 1'
+            );
+            $statement->execute(array($reservationUuid));
+            return $statement->fetchColumn() !== false;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /** @return list<string> */
+    private function canonicalReservationAirportChain(string $reservationUuid): array
+    {
+        try {
+            $legs = $this->identityWrite()->listLegsForReservation($reservationUuid);
+        } catch (Throwable) {
+            return array();
+        }
+        $chain = array();
+        foreach ($legs as $leg) {
+            if (strtolower((string)($leg['status'] ?? 'scheduled')) === 'cancelled') {
+                continue;
+            }
+            $origin = $this->airport($leg['origin_airport'] ?? '');
+            $destination = $this->airport($leg['destination_airport'] ?? '');
+            if ($origin === '' || $destination === ''
+                || ($chain !== array() && end($chain) !== $origin)) {
+                return array();
+            }
+            if ($chain === array()) {
+                $chain[] = $origin;
+            }
+            $chain[] = $destination;
+        }
+        return $chain;
+    }
+
     /**
      * Informative route is mutable planning context, not actual flown-leg evidence.
      *
@@ -1236,7 +1286,7 @@ final class FlightScheduleService
         $this->pdo->beginTransaction();
         try {
             $statement = $this->pdo->prepare(
-                'SELECT id, aircraft_id, cohort_id, status, claimed_dispatch_uuid, updated_at'
+                'SELECT id, organization_id, aircraft_id, cohort_id, status, claimed_dispatch_uuid, updated_at'
                 . ' FROM ipca_flight_schedule_slots'
                 . ' WHERE scheduler_record_id = ? LIMIT 1' . $this->lockClause()
             );
@@ -1307,6 +1357,18 @@ final class FlightScheduleService
                 $actorUserId,
                 (int)$slot['id'],
             ));
+            if ($this->canonicalReservationExists($schedulerRecordId)) {
+                $airportChain = $this->canonicalReservationAirportChain($schedulerRecordId);
+                if (count($airportChain) >= 2) {
+                    $this->replaceInformativeReservationRoute(
+                        $schedulerRecordId,
+                        max(1, (int)($slot['organization_id'] ?? 1)),
+                        $airportChain,
+                        $start,
+                        $end
+                    );
+                }
+            }
             $this->pdo->commit();
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
@@ -1472,7 +1534,9 @@ final class FlightScheduleService
         $statement->execute($slotIds);
         $result = array();
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
-            $result[(int)$row['schedule_slot_id']][] = array(
+            $slotId = (int)$row['schedule_slot_id'];
+            $isPrimaryCustomer = empty($result[$slotId]);
+            $result[$slotId][] = array(
                 'person_id' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
                 'person_name' => (string)$row['person_name_snapshot'],
                 'role' => (string)$row['crew_role'],
@@ -1480,6 +1544,7 @@ final class FlightScheduleService
                     (string)($row['pilot_function'] ?? 'NONE')
                 ),
                 'is_pic' => (bool)($row['is_pic'] ?? false),
+                'is_primary_customer' => $isPrimaryCustomer,
             );
         }
         return $result;

@@ -50,7 +50,7 @@ All paths follow the repository's `.php` endpoint convention.
 - `POST /api/scheduler/reservations.php`
 - `PATCH /api/scheduler/reservations.php?reservation_uuid=<uuid>`
 - `DELETE /api/scheduler/reservations.php?reservation_uuid=<uuid>`
-- `GET /api/scheduler/resources.php?type=aircraft|person|mission&q=`
+- `GET /api/scheduler/resources.php?type=aircraft|person|mission|cohort&q=`
 - `GET /api/scheduler/search.php?q=`
 - `POST /api/scheduler/validation.php`
 
@@ -89,10 +89,18 @@ Bootstrap is intentionally lightweight:
   },
   "scheduler": {
     "max_range_days": 31,
+    "snap_minutes": 15,
     "overlap_policy": "warning",
     "schedule_time_semantics": "timezone_free_operational_local",
     "recurring_reservations_supported": false,
-    "comprehensive_availability_supported": false
+    "comprehensive_availability_supported": false,
+    "reservation_types": [
+      {
+        "value": "flight_training",
+        "label": "Flight Training",
+        "requires_mission": true
+      }
+    ]
   }
 }
 ```
@@ -234,6 +242,11 @@ reservations return `reservation_locked`.
 Cancellation is a soft state change. It marks both the schedule slot and any
 matching canonical operational reservation/legs as `cancelled`. Crew,
 released dispatch links, and historical evidence are retained.
+
+Full edits keep the schedule slot and canonical informative route legs in the
+same transaction. Airport-chain and planning-window changes update
+`ipca_operational_reservation_legs` whenever canonical reservation identity
+exists. Actual flown-leg evidence remains immutable.
 
 ## Scheduling assessment
 
