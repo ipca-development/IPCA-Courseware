@@ -9,12 +9,15 @@ $api = (string)file_get_contents($root . '/public/admin/theory_studio/api.php');
 $banner = (string)file_get_contents($root . '/src/theory_studio/TheoryContentStudioService.php');
 
 $checks = array(
-    'Add Slide is disabled in the editor shell' =>
-        str_contains($editor, 'disabled>Add Slide</button>'),
-    'Import Slides is disabled' =>
-        str_contains($editor, 'disabled>Import Slides</button>'),
-    'Phase 2 copy is present' =>
-        str_contains($editor, 'Structured Slide Editor coming in Phase 2'),
+    'Draft lessons can create only Structured Slides from a Template' =>
+        str_contains($editor, 'data-ts-form="create_structured_slide"')
+        && str_contains($editor, 'name="template_version_id"')
+        && !str_contains($editor, 'Import Slides'),
+    'Live lessons remain inspect-only' =>
+        str_contains($editor, 'Live screenshot lessons are inspect-only in Studio'),
+    'Structured editor loads only for native structured Slides' =>
+        str_contains($editor, "source_category'] ?? '') === 'structured'")
+        && str_contains($editor, "TheoryStructuredEditorUi::editor('slide'"),
     'Live preview includes the fixed header and footer banners' =>
         str_contains($editor, '/assets/overlay/header.png')
         && str_contains($editor, '/assets/overlay/footer.png'),

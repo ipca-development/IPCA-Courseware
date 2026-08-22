@@ -48,14 +48,17 @@ function theory_studio_install_schema(PDO $pdo): void
         lesson_id INTEGER NOT NULL,
         page_number INTEGER NOT NULL,
         template_key TEXT NULL,
-        image_path TEXT NULL,
+        image_path TEXT NOT NULL DEFAULT '',
+        source_category TEXT NOT NULL DEFAULT 'legacy_screenshot',
         is_deleted INTEGER NOT NULL DEFAULT 0
     )");
     $pdo->exec("CREATE TABLE slide_content (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         slide_id INTEGER NOT NULL,
         lang TEXT NOT NULL,
-        plain_text TEXT NOT NULL DEFAULT ''
+        plain_text TEXT NOT NULL DEFAULT '',
+        content_json TEXT NOT NULL DEFAULT '{}',
+        UNIQUE (slide_id, lang)
     )");
     $pdo->exec("CREATE TABLE slide_enrichment (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,6 +125,125 @@ function theory_studio_install_schema(PDO $pdo): void
         status TEXT NOT NULL DEFAULT 'draft',
         origin TEXT NOT NULL DEFAULT 'studio',
         cover_image_path TEXT NULL
+    )");
+    theory_studio_install_structured_slide_schema($pdo);
+}
+
+function theory_studio_install_structured_slide_schema(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE ipca_training_media_library (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_uuid TEXT NOT NULL UNIQUE,
+        storage_key TEXT NOT NULL UNIQUE,
+        original_filename TEXT NOT NULL DEFAULT '',
+        mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+        byte_size INTEGER NOT NULL DEFAULT 0,
+        width INTEGER NOT NULL DEFAULT 0,
+        height INTEGER NOT NULL DEFAULT 0,
+        orientation TEXT NOT NULL DEFAULT 'landscape',
+        analysis_json TEXT NULL,
+        analysis_text TEXT NULL,
+        analysis_status TEXT NOT NULL DEFAULT 'pending',
+        created_by_user_id INTEGER NOT NULL DEFAULT 0,
+        created_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at_utc TEXT NULL
+    )");
+    $pdo->exec("CREATE TABLE theory_slide_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_key TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT NULL,
+        owning_program_id INTEGER NULL,
+        is_system INTEGER NOT NULL DEFAULT 0,
+        active_version_id INTEGER NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TEXT NULL
+    )");
+    $pdo->exec("CREATE TABLE theory_slide_template_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        version_number INTEGER NOT NULL,
+        canvas_width INTEGER NOT NULL DEFAULT 1600,
+        canvas_height INTEGER NOT NULL DEFAULT 900,
+        created_by_user_id INTEGER NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (template_id, version_number),
+        FOREIGN KEY (template_id) REFERENCES theory_slide_templates(id)
+    )");
+    $pdo->exec("CREATE TABLE theory_slide_template_placeholders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_version_id INTEGER NOT NULL,
+        placeholder_key TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        semantic_role TEXT NOT NULL,
+        x INTEGER NOT NULL,
+        y INTEGER NOT NULL,
+        w INTEGER NOT NULL,
+        h INTEGER NOT NULL,
+        reading_order INTEGER NOT NULL,
+        is_required INTEGER NOT NULL DEFAULT 0,
+        allowed_content_json TEXT NOT NULL DEFAULT '{}',
+        allowed_style_json TEXT NOT NULL DEFAULT '{}',
+        allowed_behavior_json TEXT NOT NULL DEFAULT '{}',
+        UNIQUE (template_version_id, placeholder_key),
+        UNIQUE (template_version_id, reading_order),
+        FOREIGN KEY (template_version_id) REFERENCES theory_slide_template_versions(id)
+    )");
+    $pdo->exec("CREATE TABLE theory_slide_template_guides (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_version_id INTEGER NOT NULL,
+        orientation TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        is_locked INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (template_version_id, orientation, position),
+        FOREIGN KEY (template_version_id) REFERENCES theory_slide_template_versions(id)
+    )");
+    $pdo->exec("CREATE TABLE theory_course_outline_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_id INTEGER NOT NULL,
+        parent_node_id INTEGER NULL,
+        node_type TEXT NOT NULL DEFAULT 'topic',
+        title TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (parent_node_id) REFERENCES theory_course_outline_nodes(id)
+    )");
+    $pdo->exec("CREATE TABLE theory_structured_slides (
+        slide_id INTEGER PRIMARY KEY,
+        template_version_id INTEGER NOT NULL,
+        outline_node_id INTEGER NULL,
+        content_revision INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (slide_id) REFERENCES slides(id),
+        FOREIGN KEY (template_version_id) REFERENCES theory_slide_template_versions(id),
+        FOREIGN KEY (outline_node_id) REFERENCES theory_course_outline_nodes(id)
+    )");
+    $pdo->exec("CREATE TABLE theory_structured_slide_text_values (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slide_id INTEGER NOT NULL,
+        placeholder_id INTEGER NOT NULL,
+        lang TEXT NOT NULL,
+        plain_text TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        UNIQUE (slide_id, placeholder_id, lang),
+        FOREIGN KEY (slide_id) REFERENCES theory_structured_slides(slide_id),
+        FOREIGN KEY (placeholder_id) REFERENCES theory_slide_template_placeholders(id)
+    )");
+    $pdo->exec("CREATE TABLE theory_structured_slide_media_values (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slide_id INTEGER NOT NULL,
+        placeholder_id INTEGER NOT NULL,
+        media_library_id INTEGER NOT NULL,
+        content_json TEXT NOT NULL,
+        UNIQUE (slide_id, placeholder_id),
+        FOREIGN KEY (slide_id) REFERENCES theory_structured_slides(slide_id),
+        FOREIGN KEY (placeholder_id) REFERENCES theory_slide_template_placeholders(id),
+        FOREIGN KEY (media_library_id) REFERENCES ipca_training_media_library(id)
     )");
 }
 

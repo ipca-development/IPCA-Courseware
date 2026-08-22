@@ -407,8 +407,12 @@ final class TheoryContentStudioService
      */
     public function listSlides(int $lessonId): array
     {
+        $sourceSelect = theory_studio_column_exists($this->pdo, 'slides', 'source_category')
+            ? 'source_category'
+            : "'legacy_screenshot' AS source_category";
         $stmt = $this->pdo->prepare("
-            SELECT id, lesson_id, page_number, image_path, template_key, COALESCE(is_deleted, 0) AS is_deleted
+            SELECT id, lesson_id, page_number, image_path, template_key,
+                   {$sourceSelect}, COALESCE(is_deleted, 0) AS is_deleted
             FROM slides
             WHERE lesson_id = ?
             ORDER BY page_number ASC, id ASC

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/theory_studio/TheoryStudioIsolation.php';
 
 cw_require_admin();
 
@@ -18,6 +19,13 @@ $slideId = (int)($_POST['slide_id'] ?? 0);
 $isDeleted = (int)($_POST['is_deleted'] ?? -1);
 if ($slideId <= 0 || ($isDeleted !== 0 && $isDeleted !== 1)) {
     echo json_encode(['ok' => false, 'error' => 'slide_id and is_deleted (0|1) required']);
+    exit;
+}
+try {
+    theory_studio_require_legacy_slide($pdo, $slideId);
+} catch (TheoryStudioException $e) {
+    http_response_code($e->httpStatus);
+    echo json_encode(['ok' => false, 'error_code' => $e->errorCode, 'error' => $e->getMessage()]);
     exit;
 }
 

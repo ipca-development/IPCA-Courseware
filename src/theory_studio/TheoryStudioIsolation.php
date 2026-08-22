@@ -115,3 +115,30 @@ function theory_studio_require_operational_lesson(PDO $pdo, int $lessonId): void
     $programId = (int)$stmt->fetchColumn();
     theory_studio_require_operational_program($pdo, $programId);
 }
+
+/**
+ * Legacy screenshot editors must never write native structured Studio slides.
+ *
+ * @throws TheoryStudioException
+ */
+function theory_studio_require_legacy_slide(PDO $pdo, int $slideId): void
+{
+    if ($slideId <= 0) {
+        throw new TheoryStudioException('VALIDATION', 'A valid slide is required.', 400);
+    }
+    if (!theory_studio_column_exists($pdo, 'slides', 'source_category')) {
+        return;
+    }
+    $stmt = $pdo->prepare(
+        'SELECT source_category FROM slides WHERE id = ? LIMIT 1'
+    );
+    $stmt->execute(array($slideId));
+    $category = strtolower(trim((string)$stmt->fetchColumn()));
+    if ($category === 'structured') {
+        throw new TheoryStudioException(
+            'STRUCTURED_SLIDE_REQUIRES_STUDIO',
+            'This native structured Slide must be edited in Theory Content Studio.',
+            409
+        );
+    }
+}

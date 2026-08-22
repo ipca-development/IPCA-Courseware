@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/theory_studio/TheoryStudioIsolation.php';
 cw_require_admin();
 header('Content-Type: application/json; charset=utf-8');
 
@@ -10,6 +11,7 @@ try {
 
   $slideId = (int)($data['slide_id'] ?? 0);
   if ($slideId <= 0) throw new RuntimeException("Missing slide_id");
+  theory_studio_require_legacy_slide($pdo, $slideId);
 
   $hotspots = $data['hotspots'] ?? [];
   if (!is_array($hotspots)) throw new RuntimeException("hotspots must be array");

@@ -112,9 +112,19 @@ Isolation column: `programs.authoring_origin ENUM('operational','studio') NOT NU
 
 Do not INSERT structured placeholder rows in Phase 1. OCR (`public/admin/api/ocr_slide.php`), bulk enrich, video manifests, and the screenshot player assume `image_path` and often `external_lesson_id`. `+ Add Slide` is visible and disabled.
 
+Phase 2 separates three authorities:
+
+1. **Theory Template Version** — immutable 1600×900 geometry, semantic Text/Image/Video placeholders, reading order, presentation defaults, and author permissions.
+2. **Structured Slide instance** — exact Template Version reference, machine-readable Course outline node, localized Text values, and language-neutral managed media values.
+3. **Canonical projection** — deterministic `slide_content` EN/ES rows derived from Text placeholders in Template reading order. `slide_content` is not the authority for visual geometry.
+
+Templates have stable identities and append-only versions. Editing a Template creates a newer version; existing Slides remain pinned to the version they were authored with. Slide authors edit values, not structural geometry, unless an individual placeholder explicitly permits it. Template authors use a fixed-canvas geometry mode. Both modes may reuse Manual/Annex toolbar, rich-text, table, callout, link, media, and undo/redo components through Theory-specific adapters; they do not share the Manual/Annex persistence model.
+
+Native structured media references managed Spaces assets. Structured JSON never contains blobs, base64, or arbitrary client-supplied storage paths. OCR and legacy screenshot mutation APIs reject `source_category='structured'`.
+
 ## Phase 2
 
-Create Draft from Live (copy-on-write, new IDs). Atomic publish. Cohort attachment to a published revision. Structured Slide Editor (text/image/video fields write `slide_content` directly, no OCR). Template Editor with free-positionable Text/Image/Video boxes and semantic roles. Keynote/PowerPoint reconstruction.
+Create Draft from Live (copy-on-write, new IDs). Atomic publish. Cohort attachment to a published revision. Version-safe structured Slide and Template Editors as defined above. Keynote/PowerPoint reconstruction.
 
 ## Completion answers (expected)
 

@@ -7,6 +7,10 @@ require_once __DIR__ . '/../../../src/theory_studio/TheoryContentStudioService.p
 require_once __DIR__ . '/../../../src/theory_studio/TheoryLessonEnhancementStatusService.php';
 require_once __DIR__ . '/../../../src/theory_studio/TheoryStudioUi.php';
 require_once __DIR__ . '/../../../src/theory_studio/TheoryStudioIsolation.php';
+require_once __DIR__ . '/../../../src/theory_studio/TheoryStructuredEditorUi.php';
+if (is_file(__DIR__ . '/../../../src/theory_studio/TheoryStructuredSlideService.php')) {
+    require_once __DIR__ . '/../../../src/theory_studio/TheoryStructuredSlideService.php';
+}
 
 cw_require_admin();
 
@@ -26,6 +30,16 @@ function theory_studio_emit_assets(): void
     $jsV = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     echo '<link rel="stylesheet" href="/assets/theory-studio.css?v=' . htmlspecialchars($cssV, ENT_QUOTES, 'UTF-8') . '">';
     echo '<script src="/assets/theory-studio.js?v=' . htmlspecialchars($jsV, ENT_QUOTES, 'UTF-8') . '" defer></script>';
+}
+
+function theory_structured_editor_emit_assets(): void
+{
+    $cssPath = __DIR__ . '/../../assets/theory-structured-editor.css';
+    $jsPath = __DIR__ . '/../../assets/theory-structured-editor.js';
+    echo '<link rel="stylesheet" href="/assets/theory-structured-editor.css?v='
+        . htmlspecialchars(is_file($cssPath) ? (string)filemtime($cssPath) : '1', ENT_QUOTES, 'UTF-8') . '">';
+    echo '<script src="/assets/theory-structured-editor.js?v='
+        . htmlspecialchars(is_file($jsPath) ? (string)filemtime($jsPath) : '1', ENT_QUOTES, 'UTF-8') . '" defer></script>';
 }
 
 function theory_studio_cover_url(?string $path): string
