@@ -7947,7 +7947,7 @@
     );
     var canDeleteSelectedRow = !!selectedRow
       && (!isBodyRow || bodyRows.length > 1);
-    setTableToolDisabled(blockEl, ['del-row'], hasVerticalMerge || !canDeleteSelectedRow);
+    setTableToolDisabled(blockEl, ['del-row'], !canDeleteSelectedRow);
     setTableToolDisabled(blockEl, ['del-col'], tableColCount(blockEl) <= 1);
     setTableToolDisabled(blockEl, ['paste-table'], !state.tableBlockClipboard);
     var titleButton = tableToolbarEl.querySelector('[data-table-action="toggle-title"]');
@@ -9136,6 +9136,53 @@
     return null;
   }
 
+  function tableRowspanOriginAbove(rows, targetRowIndex, logicalStart) {
+    for (var rowIndex = targetRowIndex - 1; rowIndex >= 0; rowIndex--) {
+      var candidate = tableCellAtLogicalStart(rows[rowIndex], logicalStart);
+      if (!candidate || candidate.getAttribute('data-rowspan-covered') === '1') continue;
+      var rowspan = Math.max(1, parseInt(candidate.getAttribute('rowspan') || '1', 10) || 1);
+      if (rowIndex + rowspan > targetRowIndex) return candidate;
+    }
+    return null;
+  }
+
+  function prepareVerticalMergesForRowDeletion(target, rows) {
+    var targetRowIndex = rows.indexOf(target);
+    if (targetRowIndex < 0) return;
+    var adjustedOrigins = [];
+    Array.prototype.slice.call(target.cells).forEach(function (cell) {
+      var logicalStart = tableCellLogicalStart(cell);
+      if (cell.getAttribute('data-rowspan-covered') === '1') {
+        var origin = tableRowspanOriginAbove(rows, targetRowIndex, logicalStart);
+        if (!origin || adjustedOrigins.indexOf(origin) >= 0) return;
+        adjustedOrigins.push(origin);
+        var originRowspan = Math.max(
+          1,
+          parseInt(origin.getAttribute('rowspan') || '1', 10) || 1
+        );
+        if (originRowspan <= 2) origin.removeAttribute('rowspan');
+        else origin.rowSpan = originRowspan - 1;
+        return;
+      }
+
+      var rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1);
+      if (rowspan <= 1) return;
+      var nextRow = rows[targetRowIndex + 1];
+      var covered = tableCellAtLogicalStart(nextRow, logicalStart);
+      if (!covered || covered.getAttribute('data-rowspan-covered') !== '1') return;
+      var promoted = cell.cloneNode(true);
+      promoted.removeAttribute('data-rowspan-covered');
+      promoted.removeAttribute('data-cell-focus-wired');
+      promoted.removeAttribute('data-cell-image-wired');
+      promoted.setAttribute('contenteditable', 'true');
+      promoted.hidden = false;
+      promoted.style.removeProperty('display');
+      if (rowspan <= 2) promoted.removeAttribute('rowspan');
+      else promoted.rowSpan = rowspan - 1;
+      covered.replaceWith(promoted);
+    });
+  }
+
   function tableDelRow(blockEl) {
     var tbody = tableBody(blockEl);
     if (!tbody) return false;
@@ -9202,9 +9249,13 @@
       return false;
     }
     var rowIndex = rows.indexOf(target);
-    var nextRow = rows[rowIndex + 1] || rows[rowIndex - 1] || null;
-    var nextCell = nextRow ? nextRow.querySelector('td, th') : null;
+    prepareVerticalMergesForRowDeletion(target, rows);
     target.remove();
+    var remainingRows = tableSourceRows(tbody);
+    var nextRow = remainingRows[rowIndex] || remainingRows[rowIndex - 1] || null;
+    var nextCell = nextRow
+      ? nextRow.querySelector('td:not([hidden]), th:not([hidden])')
+      : null;
     clearTableCellSelection();
     if (nextCell) {
       addTableCellToSelection(nextCell);
@@ -9214,6 +9265,7 @@
     } else {
       state.focusedTableCell = null;
     }
+    wireTableCellFocus(blockEl);
     setStatus('Row deleted', 'saved');
     return true;
   }

@@ -1266,6 +1266,102 @@ test('table controls stay in the second toolbar row and replace floating tools',
   }
 });
 
+test('table rows remain deletable when they participate in vertical merges', async (browser) => {
+  const deleteMergedOrigin = await newEditorPage(browser, '');
+  try {
+    const { page, browserErrors } = deleteMergedOrigin;
+    await page.evaluate(() => { window.confirm = () => true; });
+    await page.locator('#cpbCanvasPreloader').waitFor({ state: 'hidden' });
+    const toolbar = page.locator('#cpbTableToolbar');
+    const firstCell = page.locator(
+      '#cpbCanvas [data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
+    ).first().locator(
+      'td:first-child'
+    );
+    await firstCell.click();
+    await toolbar.locator('[data-table-action="merge-cells-down"]').click();
+    assert.equal(
+      await toolbar.locator('[data-table-action="del-row"]').isEnabled(),
+      true,
+      'a vertical merge must not disable row deletion'
+    );
+    await toolbar.locator('[data-table-action="del-row"]').click();
+    await page.waitForFunction(() =>
+      document.querySelectorAll(
+        '#cpbCanvas [data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
+      ).length === 1
+    );
+    const originResult = await page.evaluate(() => {
+      const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
+      const rows = block.querySelectorAll(
+        'tbody tr:not([data-auto-page-break="1"])'
+      );
+      const first = rows[0].querySelector('td:first-child');
+      const saves = window.__phaseC.requests.filter((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      );
+      return {
+        text: first.textContent.replace(/\s+/g, ' ').trim(),
+        rowspan: first.rowSpan,
+        covered: block.querySelectorAll('[data-rowspan-covered="1"]').length,
+        payload: saves.at(-1)?.payload.payload,
+      };
+    });
+    assert.match(originResult.text, /A1.*A2/, JSON.stringify(originResult));
+    assert.equal(originResult.rowspan, 1);
+    assert.equal(originResult.covered, 0);
+    assert.equal(originResult.payload.rows.length, 1);
+    assert.equal(originResult.payload.row_rowspans, undefined);
+    assert.deepEqual(browserErrors, []);
+  } finally {
+    await deleteMergedOrigin.page.close();
+  }
+
+  const deleteCoveredRow = await newEditorPage(browser, '');
+  try {
+    const { page, browserErrors } = deleteCoveredRow;
+    await page.evaluate(() => { window.confirm = () => true; });
+    await page.locator('#cpbCanvasPreloader').waitFor({ state: 'hidden' });
+    const toolbar = page.locator('#cpbTableToolbar');
+    await page.locator(
+      '#cpbCanvas [data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
+    ).first().locator('td:first-child').click();
+    await toolbar.locator('[data-table-action="merge-cells-down"]').click();
+    await page.locator(
+      '#cpbCanvas [data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
+    ).nth(1).locator('td:nth-child(2)').click();
+    await toolbar.locator('[data-table-action="del-row"]').click();
+    await page.waitForFunction(() =>
+      document.querySelectorAll(
+        '#cpbCanvas [data-block-id="3"] tbody tr:not([data-auto-page-break="1"])'
+      ).length === 1
+    );
+    const coveredResult = await page.evaluate(() => {
+      const block = document.querySelector('#cpbCanvas [data-block-id="3"]');
+      const first = block.querySelector(
+        'tbody tr:not([data-auto-page-break="1"]) td:first-child'
+      );
+      const saves = window.__phaseC.requests.filter((request) =>
+        request.action === 'update_block' && Number(request.payload.block_id) === 3
+      );
+      return {
+        text: first.textContent.replace(/\s+/g, ' ').trim(),
+        rowspan: first.rowSpan,
+        covered: block.querySelectorAll('[data-rowspan-covered="1"]').length,
+        payload: saves.at(-1)?.payload.payload,
+      };
+    });
+    assert.match(coveredResult.text, /A1.*A2/, JSON.stringify(coveredResult));
+    assert.equal(coveredResult.rowspan, 1);
+    assert.equal(coveredResult.covered, 0);
+    assert.equal(coveredResult.payload.rows.length, 1);
+    assert.equal(coveredResult.payload.row_rowspans, undefined);
+    assert.deepEqual(browserErrors, []);
+  } finally {
+    await deleteCoveredRow.page.close();
+  }
+});
+
 test('Enter caret stays on the new paragraph through layout and autosave', async (browser) => {
   const { page, browserErrors } = await newEditorPage(browser, '');
   try {
